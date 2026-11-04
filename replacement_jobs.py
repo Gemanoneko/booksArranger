@@ -236,17 +236,18 @@ class Replacements:
         relation=self.get(candidate=candidate)
         if relation and relation['state'] in {'published','retiring','completed'}:
             return next((j for j in jobs if j['job_id']==relation['replacement_job_id']),None),relation
-        matches=[j for j in jobs if j['manifest']['candidate_id']==candidate and not j['manifest'].get('replacement_id')]
+        matches=[j for j in jobs if j['manifest']['candidate_id']==candidate and not j['manifest'].get('replacement_id') and not __import__('publication_reuse').task(j['manifest'])]
         return (matches[-1] if matches else None),relation
 
     def projected(self,jobs,current_id=None):
         """Visible progress selects active replacement; durable completion counts candidates once."""
-        completed={j['manifest']['candidate_id'] for j in jobs if j['state']=='completed'}
+        completed={j['manifest']['candidate_id'] for j in jobs if j['state']=='completed' and not __import__('publication_reuse').task(j['manifest'])}
         result=[]
         for candidate in dict.fromkeys(j['manifest']['candidate_id'] for j in jobs):
             active=next((j for j in jobs if j['manifest']['candidate_id']==candidate and j['job_id']==current_id),None)
             representative,_=self.representative(jobs,candidate)
             pending=next((j for j in reversed(jobs) if j['manifest']['candidate_id']==candidate and j['state'] in {'pending','needs attention'}),None)
-            selected=active or pending or representative
+            history=next((j for j in reversed(jobs) if j['manifest']['candidate_id']==candidate and __import__('publication_reuse').task(j['manifest'])),None)
+            selected=active or pending or representative or history
             if selected:result.append(copy.deepcopy(selected))
         return result,len(completed)

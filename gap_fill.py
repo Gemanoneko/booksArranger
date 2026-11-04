@@ -131,6 +131,7 @@ class GapFill:
         result = []
         for row in self._rows("SELECT job_id,manifest FROM audio_jobs WHERE json_extract(manifest,'$.metadata_facts.gap_search.background') IS NOT NULL ORDER BY created,job_id"):
             manifest = json.loads(row['manifest'])
+            if __import__('publication_reuse').task(manifest):continue
             if newest.get(manifest.get('candidate_id')) != row['job_id'] or not background(manifest)[0]:
                 continue
             entry = entries.get(row['job_id'])
@@ -150,6 +151,7 @@ class GapFill:
             self.fill(job_id, manifest)
 
     def fill(self, job_id, manifest):
+        if __import__('publication_reuse').task(manifest):return
         """Ask the sources about one book's background gaps and record the outcome: found, none, or deferred."""
         gaps, ask = background(manifest)
         if not gaps:

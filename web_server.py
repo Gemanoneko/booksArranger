@@ -80,6 +80,7 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
         unit = {'encoding': 'seconds', 'originals': 'files', 'recovery copies': 'files'}.get(step)
         row = {'id': kind, 'kind': kind, 'subject': jobs['current_title'], 'step': step,
                'state': ACTIVITY_STATES.get(jobs.get('state'), 'running'), 'reason': progress.get('reason', '')} | _measure(progress, unit)
+        if jobs.get('current_task_kind')=='duplicate_source_cleanup':row['task_kind']='duplicate_source_cleanup'
         if kind == 'conversion':
             row.update(step_index=CONVERSION_STEPS.get(step, 1), step_count=4)
         if type(progress.get('started')) is int:
@@ -88,7 +89,7 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
     held = jobs.get('attention_row')
     if isinstance(held, dict) and not any(row['kind'] == 'cleanup' for row in rows):
         rows.append({'id': 'cleanup', 'kind': 'cleanup', 'subject': held.get('title') or '', 'step': held.get('phase') or 'originals',
-                     'state': 'attention', 'reason': held.get('reason') or ''} | _measure(held, 'files'))
+                     'state': 'attention', 'reason': held.get('reason') or '', 'task_kind':held.get('task_kind')} | _measure(held, 'files'))
     check = jobs.get('published_check')
     if isinstance(check, dict):
         row = {'id': 'identity', 'kind': 'identity', 'subject': '', 'step': 'identity', 'state': 'running'} | _measure(check, 'books')

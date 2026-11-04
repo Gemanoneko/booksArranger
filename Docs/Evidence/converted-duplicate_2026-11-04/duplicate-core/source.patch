@@ -1,0 +1,1309 @@
+--- a/audio_jobs.py
++++ b/audio_jobs.py
+@@ -16,7 +16,7 @@
+ import destination_admission
+ 
+ 
+-STAGES = {"checking sources", "creating", "checking", "copying", "publishing"}
++STAGES = {"checking sources", "creating", "checking", "copying", "publishing", "checking extra source", "verified existing audiobook"}
+ # Measured progress a running attempt may report, per journal stage: step -> unit. Not journaled.
+ MEASURED = {"checking sources": {"preparing": "files", "source copies": "bytes", "checking audio": "seconds",
+                                  "matching format": "seconds", "normalizing": "seconds", "joined audio": "seconds"},
+@@ -464,6 +464,11 @@
+             db.execute("UPDATE audio_jobs SET " + ",".join(key + "=?" for key in fields) + " WHERE job_id=?", (*fields.values(), job_id))
+ 
+     def _check_output(self, record, routine=False, stop=None, pace=None):
++        import publication_reuse
++        if publication_reuse.result(record):
++            validator=getattr(self,'reuse_validator',None)
++            if not callable(validator) or validator(copy.deepcopy(record),stop=stop,pace=pace) is not True:raise ValueError('Existing publication verification is unavailable')
++            return
+         self._validate_record(record)
+         if routine and self.output_current is not None:
+             valid = self.output_current(copy.deepcopy(record), stop, pace)
+@@ -530,10 +535,15 @@
+         an exact authorized former-output retirement as history. A stop is raised, never a verdict.
+         """
+         journal = json.loads(row["journal"])
+-        record = json.loads(row["output"]) if row["output"] else journal.get("publication_intent")
++        manifest=json.loads(row['manifest'])
++        import publication_reuse
++        reused=publication_reuse.task(manifest)
++        record = json.loads(row["output"]) if row["output"] else journal.get("duplicate_verification") if reused else journal.get("publication_intent")
+         try:
+             self._check_output(record, routine, stop, pace)
+-            if record["job_id"] != row["job_id"]:
++            if reused:
++                if not publication_reuse.result(record) or record['cleanup_job_id']!=row['job_id'] or record!=journal.get('duplicate_verification'):raise ValueError('Cleanup verification identity mismatch')
++            elif record["job_id"] != row["job_id"]:
+                 raise ValueError("Output job identity mismatch")
+             if row["state"] != 'completed' or json.loads(row['output'] or '{}') != record:
+                 return {"state": "completed", "stage": "completed", "output": json.dumps(record), "reason": ""}
+@@ -712,6 +722,8 @@
+                     context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(id,)).fetchone()
+                     if not group or not context or group[0]!=revision or context[0]!=revision or json.loads(context[1])!=expected:raise ValueError('Automatic approval checkpoint changed')
+                     db.execute('UPDATE candidate_context SET data=? WHERE id=? AND revision=?',(json.dumps(approved,ensure_ascii=False,allow_nan=False),id,revision))
++                import publication_reuse
++                if publication_reuse.task(frozen):publication_reuse.admit(db,frozen)
+                 db.execute("INSERT INTO audio_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (frozen["job_id"], encoded, digest, "pending", "queued", None, "{}", None, "", timestamp, timestamp))
+             return frozen["job_id"]
+ 
+@@ -1171,7 +1183,9 @@
+         current = None
+         for row in rows:
+             if row["state"] == "pending": counts["queued"] += 1
+-            elif row["state"] == "completed": counts["completed"] += 1
++            elif row["state"] == "completed":
++                import publication_reuse
++                if not publication_reuse.task(json.loads(row['manifest'])):counts["completed"] += 1
+             elif row["state"] == "needs attention": counts["failed"] += 1
+             elif row["state"] == "running": current = row
+         running = bool(self._thread and self._thread.is_alive())
+@@ -1312,16 +1326,18 @@
+         """Exactly one prior work-loop body, inside its retained admission capability."""
+         job_id = row["job_id"]
+         manifest = json.loads(row["manifest"])
++        import publication_reuse
++        reused=publication_reuse.task(manifest)
+         try:
+             import inplace_m4b
+-            inplace_m4b.clear(self.database, manifest)
++            if not reused:inplace_m4b.clear(self.database, manifest)
+         except Exception as error:
+             self._update(job_id, state='needs attention', reason=str(error) or type(error).__name__)
+             return True  # this source stays journaled; other books continue
+         try:
+             import reacquire_sources
+             with self._db() as db:reacquire_sources.require_admission(db,manifest['candidate_id'])
+-            if self.before_attempt:self.before_attempt(copy.deepcopy(row))
++            if self.before_attempt and not reused:self.before_attempt(copy.deepcopy(row))
+             self._archive_attempt(row)
+         except Exception as error:
+             self._update(job_id,state='needs attention',reason='Working cleanup requires attention: '+str(error))
+@@ -1360,7 +1376,12 @@
+                 self._progress[job_id]={'attempt_id':attempt,'phase':stage,'started':self._step_started(job_id,attempt,stage)}
+                 if isinstance(details,dict) and isinstance(details.get('chapter_check'),dict):self._progress[job_id]['chapter_check']=copy.deepcopy(details['chapter_check'])
+             entry = {"stage": stage, "at": _now(), "details": details}
++            if stage=='verified existing audiobook':
++                if not reused or not publication_reuse.result(details) or details.get('cleanup_job_id')!=job_id:raise ValueError('Invalid existing-publication verification result')
++                self._check_output(details)
++                journal['duplicate_verification']=copy.deepcopy(details)
+             if stage == "publishing":
++                if reused:raise ValueError('Duplicate cleanup cannot publish')
+                 if self._stop.is_set(): raise InterruptedError("Paused before publication")
+                 if self.revision_guard(copy.deepcopy(manifest)) is not True:
+                     raise ValueError(REVISION_GUARD_REFUSAL)
+@@ -1381,7 +1402,7 @@
+                 runner_manifest = copy.deepcopy(manifest)
+                 runner_manifest["attempt_id"] = attempt
+                 record = self.runner(runner_manifest, self._stop, checkpoint)
+-                intent = journal.get("publication_intent")
++                intent = journal.get("duplicate_verification") if reused else journal.get("publication_intent")
+                 if intent is None or record != intent:
+                     raise ValueError("Runner completion does not match durable publication intent")
+                 self._check_output(record)
+@@ -1408,7 +1429,7 @@
+                         return False # Preserve the rest of the queue without producing more attempts.
+         finally:
+             proofs.close()  # fingerprints never outlive the attempt (cleanup proofs always hash in full)
+-            if self.after_attempt:
++            if self.after_attempt and not reused:
+                 try:
+                     self.after_attempt(job_id,attempt)
+                     attempt_closed=True
+--- a/automatic_processing.py
++++ b/automatic_processing.py
+@@ -135,7 +135,7 @@
+     def _record(self,row,state,result=None,retry_at=None):
+         # Replay only this local candidate write. Each BEGIN IMMEDIATE retry
+         # rereads committed history; never mutate a prior attempt's input/result.
+-        supplied=dict(result or {},research_version=RESEARCH_VERSION)
++        supplied=dict(result or {},research_version=RESEARCH_VERSION,duplicate_cleanup_policy=1)
+         def persist(db):
+             recorded=dict(supplied)
+             old=db.execute('SELECT revision,fingerprint,state,result FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
+@@ -198,7 +198,7 @@
+         result=json.loads(r['result'])
+         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
+             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
+-        return {'state':r['state'],'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
++        return {'state':r['state'],'duplicate_cleanup_policy':result.get('duplicate_cleanup_policy'),'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
+                 'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
+                 'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0)}
+     def _rules_generation(self):
+@@ -215,6 +215,10 @@
+         if (record.get('rules_generation') or '')==generation:return False
+         return rules.changed_for(record) if rules is not None and hasattr(rules,'changed_for') else True
+     def _refresh_wait(self,row,previous):
++        if previous and previous['state']=='Held' and previous.get('duplicate_cleanup_policy')!=1:
++            reasons=previous.get('reasons') or []
++            duplicate=any(reason=='Identical verified recording already arranged — duplicate sources preserved' or reason.startswith('An audiobook already exists at this path') for reason in reasons if isinstance(reason,str))
++            if duplicate:return dict(previous,until_change=False,retry_at=None)
+         from source_identity import LOCAL_SOURCE_GATE_VERSION
+         if previous and previous['state']=='Held' and previous.get('reasons')==['Sources disagree on the title or author'] and (previous.get('metadata_facts') or {}).get('identity_basis')=='local_agreement' and previous.get('local_source_gate_version')!=LOCAL_SOURCE_GATE_VERSION:
+             # Narrow policy invalidation only. The normal worker still respects editing leases,
+--- a/current_audiobook.py
++++ b/current_audiobook.py
+@@ -80,6 +80,7 @@
+         return result
+ 
+     def publication(self,jobs,candidate):
++        jobs=[job for job in jobs if not __import__('publication_reuse').task(job['manifest'])]
+         parent,relation=self.replacements.representative(jobs,candidate)
+         if not parent:return None
+         if relation and relation['state'] in {'published','retiring','completed'}:
+--- a/gap_fill.py
++++ b/gap_fill.py
+@@ -131,6 +131,7 @@
+         result = []
+         for row in self._rows("SELECT job_id,manifest FROM audio_jobs WHERE json_extract(manifest,'$.metadata_facts.gap_search.background') IS NOT NULL ORDER BY created,job_id"):
+             manifest = json.loads(row['manifest'])
++            if __import__('publication_reuse').task(manifest):continue
+             if newest.get(manifest.get('candidate_id')) != row['job_id'] or not background(manifest)[0]:
+                 continue
+             entry = entries.get(row['job_id'])
+@@ -150,6 +151,7 @@
+             self.fill(job_id, manifest)
+ 
+     def fill(self, job_id, manifest):
++        if __import__('publication_reuse').task(manifest):return
+         """Ask the sources about one book's background gaps and record the outcome: found, none, or deferred."""
+         gaps, ask = background(manifest)
+         if not gaps:
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -221,6 +221,7 @@
+                                             verified=self._publication_current,remember=self._publication_verified,pace=self._pacer,bindings=self.publication_bindings)
+         self.retirement=ReplacementRetirement(self.replacements,self.cache_dir.parent/'replacement-recovery',inventory.roots['Audiobooks'],threading.Event(),self._replacement_guard,self.publications.protect_former,bindings=self.publication_bindings)
+         self.jobs = AudioJobs(inventory.database, self._run, self._guard, self._output_valid,self.retirement.historical_retired)
++        self.jobs.reuse_validator=self._reuse_output_valid
+         self.jobs.output_current=self._output_current;self.jobs.verify_pace=self._pacer
+         self.jobs.background_stop=_Flag(lambda:bool(self.__dict__.get('_maintenance_paused') or self.__dict__.get('_foreground_waiters',0) or self.__dict__.get('_closing') or self.draining or self.inventory.worker and self.inventory.worker.is_alive() or self._worker_active() or self.__dict__.get('_update_hold') is not None and self._update_hold.is_set()))
+         self.retirement.stop=self.jobs._stop
+@@ -234,6 +235,7 @@
+         self.cleanup.after_drain=None  # Each Merge resume supplies its own generation-bound handoff.
+         from storage_cleanup import StorageCleanup
+         self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard,output_location=self.publication_bindings.current,output_location_guard=self.publication_bindings.guard,repair_publication=self._repair_publication,repair_location_guard=self.publication_bindings.guard,source_roots=self._all_source_roots)
++        self.cleanup.restore_protector=self.storage_cleanup.protected_cleanup
+         from working_lifecycle import WorkingLifecycle
+         self.working=WorkingLifecycle(inventory.database,self.stage_root,self._working_guard)
+         from producer_recovery import ProducerRecovery,windows_boot
+@@ -285,7 +287,8 @@
+         # seed progress_books' cache (_lookups), so the first status does not resolve them again. progress(done, total)
+         # reports each book to the startup loader, which may stop the construction there (web_server.LoadAborted).
+         known=self._known_identities()
+-        completed=[job for job in self.jobs.status()['jobs'] if job['state']=='completed']
++        completed_tasks=[job for job in self.jobs.status()['jobs'] if job['state']=='completed']
++        completed=[job for job in completed_tasks if not __import__('publication_reuse').task(job['manifest'])]
+         with connect(inventory.database) as db:
+             db.executemany('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)',[(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size']) for job in completed])
+             enrolled={row[0] for row in db.execute('SELECT job_id FROM source_cleanup')}
+@@ -303,7 +306,7 @@
+                 except (ValueError,OSError,KeyError):pass  # Current-view reports the binding failure; catalog remains readable.
+         self._lookups=looked
+         if progress is not None:progress(len(completed),len(completed))
+-        for job in completed:
++        for job in completed_tasks:
+             if job['manifest'].get('cleanup_policy',{}).get('enabled') and job['job_id'] not in enrolled:
+                 # A crash after durable audio success but before enrollment does
+                 # not turn its explicit frozen policy into a historical sweep.
+@@ -406,6 +409,10 @@
+     def _attempt_boundary(self,row):
+         import destination_admission
+         manifest=json.loads(row['manifest'])
++        if __import__('publication_reuse').task(manifest):
++            if not self._guard(manifest):raise ValueError('Extra-source review or publication changed')
++            yield
++            return
+         if any(key in manifest for key in ('replacement_id','replacement_parent_job_id')):
+             relation=self.replacements.get(new_job=manifest['job_id'])
+             target=self._destination_policy()['output_root'] or manifest['root']
+@@ -427,7 +434,7 @@
+ 
+     def _enroll_completed_without_start(self,job):
+         try:
+-            self._dispose_retained(job['job_id'])
++            if not __import__('publication_reuse').task(job.get('manifest')):self._dispose_retained(job['job_id'])
+             self.enroll_cleanup(job['job_id'])
+         except (ValueError,OSError) as error:
+             # Senua 0.21.3 F1: a process started without a valid output folder enrols nothing and parks nothing;
+@@ -439,6 +446,11 @@
+     def _enrollment_attention(self,job,error):
+         with connect(self.inventory.database) as db:
+             id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':job['manifest'],'output':job['output'],'binding':{},'actor':'assistant'}
++            if __import__('publication_reuse').task(job['manifest']):
++                # Failure reporting must not require the proof whose refusal it
++                # reports. This inert receipt can never authorize disposition.
++                output=(job.get('output') or {}).get('parent_output') or {}
++                intent.update(output=output,cleanup_mode='duplicate_backup_removal',blocked_verification=True)
+             db.execute('INSERT OR IGNORE INTO source_cleanup VALUES(?,?,?,?,?,?,?)',(id,job['job_id'],packed(intent),'needs_attention',str(error),'',''))
+ 
+     def _register(self,path,job,kind,hash='',size=0):
+@@ -520,6 +532,7 @@
+                 looked=self.__dict__.get('_lookups') or {};kept={}
+                 for job,relation in representatives:
+                     if not job or job['manifest']['candidate_id'] not in catalog_approved:continue
++                    if __import__('publication_reuse').task(job['manifest']):continue
+                     record=job.get('output') or {};effective=None;location_envelope=None
+                     key=(token,packed(record)) if token is not None else None
+                     saved=looked.get(job['job_id'])
+@@ -788,7 +801,7 @@
+             # the active row between two books.
+             error=errors[0];held=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
+             phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
+-            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason','')}
++            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason',''),'task_kind':held['manifest'].get('task_kind') if held else None}
+             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
+         totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
+         self._converted_cache=(started,set(totals.get('converted_ids') or ()),token)
+@@ -807,6 +820,7 @@
+             'pause':pause,'start_admission':self._current_start_admission(),
+             'current_job_origin':job_origin(current['manifest']) if current else 'unknown',
+             'current_title':current['manifest']['metadata'].get('title','') if current else '',
++            'current_task_kind':current['manifest'].get('task_kind') if current else None,
+             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
+             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
+             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
+@@ -973,10 +987,17 @@
+     def _cleanup_guard(self,db,intent):
+         try:
+             self._no_scan();manifest=intent['manifest']
++            if intent.get('blocked_verification'):return False
+             from producer_recovery import protected_dependency
+             if protected_dependency(db,[item['path'] for item in manifest.get('sources',[])]):return False
+             row=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(intent['job_id'],)).fetchone()
+-            if not row or row['state']!='completed' or packed(json.loads(row['manifest']))!=packed(manifest) or packed(json.loads(row['output']))!=packed(intent['output']):return False
++            if not row or row['state']!='completed' or packed(json.loads(row['manifest']))!=packed(manifest):return False
++            import publication_reuse
++            if publication_reuse.task(manifest):
++                if intent.get('cleanup_mode')!='duplicate_backup_removal':return False
++                owners=publication_reuse.checked_result(db,manifest,json.loads(row['output']),intent['job_id'])
++                if owners['parent_output']!=intent['output']:return False
++            elif packed(json.loads(row['output']))!=packed(intent['output']):return False
+             if '_location_envelope' in intent and not self.publication_bindings.guard(db,intent['output'],intent['_location_envelope']):return False
+             return self._cleanup_binding(db,manifest)==intent['binding']
+         except (ValueError,KeyError,TypeError):return False
+@@ -1417,13 +1438,15 @@
+         finally:self._post_current=None
+ 
+     def _prune_completed(self,job_id,source_completed=False,stop=None):
+-        if source_completed:self.working.schedule_published(job_id)
++        with connect(self.inventory.database) as db:raw=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
++        duplicate=bool(raw and __import__('publication_reuse').task(json.loads(raw[0])))
++        if source_completed and not duplicate:self.working.schedule_published(job_id)
+         if hasattr(self,'replacements'):
+             relation=self.replacements.get(parent=job_id)
+             if relation and relation['state'] in {'retiring','completed'}:
+                 with connect(self.inventory.database) as db:parent=self.replacements.raw_job(db,job_id)
+                 if self.retirement.historical_retired(parent,stop=stop):return
+-        self._prune_working(job_id)
++        if not duplicate:self._prune_working(job_id)
+         self.recovery.sync()
+         # Between books (not during Start's re-check of every finished book, which the sweep covers).
+         if stop is None and (source_completed or (self.cleanup.status(job_id) or {}).get('state')=='completed'):self._purge_recovery_now(job_id)
+@@ -1445,6 +1468,8 @@
+         posting=self.__dict__.setdefault('_post_jobs',set());posting.add(job_id)
+         try:self._after_completed_work(job_id)
+         finally:posting.discard(job_id)
++        with connect(self.inventory.database) as db:raw=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
++        if raw and __import__('publication_reuse').task(json.loads(raw[0])):return
+         # Rulings 69 and 71h: a book whose chosen folder it was not converted into (outside Sorted, chosen while it ran)
+         # is moved there now, after its sources were handled; never converted again.
+         try:self._move_to_chosen(job_id)
+@@ -1453,9 +1478,11 @@
+     def _after_completed_work(self,job_id):
+         # Durable audio success already exists. Cleanup failure must not reset it.
+         row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
+-        self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
+-        try:self.working.discharge_published(job_id,self.storage_cleanup,revisit=True)
+-        except (OSError,ValueError):pass  # Exact held reason stays in the working ledger.
++        duplicate=__import__('publication_reuse').task(row['manifest'])
++        if not duplicate:
++            self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
++            try:self.working.discharge_published(job_id,self.storage_cleanup,revisit=True)
++            except (OSError,ValueError):pass  # Exact held reason stays in the working ledger.
+         # A boot-proved recovery child cleans up once its lease on the old files ends (_finish_recovery_child).
+         if (row['manifest'].get('retry_intent') or {}).get('retained_disposal') is True:return
+         if row['manifest'].get('cleanup_policy',{}).get('enabled'):
+@@ -1576,6 +1603,14 @@
+         from review_backend import job_destination
+         value={'job_id':job['job_id'],'job_origin':job_origin(job['manifest']),'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False}),
+                'destination':job_destination(job['manifest'])}
++        if __import__('publication_reuse').task(job['manifest']):
++            receipt=value['cleanup'] or {}
++            label='Checking extra source'
++            if job['state']=='needs attention' or receipt.get('state')=='needs_attention':label='Extra source kept'
++            elif receipt.get('state')=='completed':label='Extra source removed. Finished audiobook kept.'
++            elif receipt.get('state') in {'removing','checking','waiting','paused','pausing'}:label='Removing extra source'
++            value.update(task_kind='duplicate_source_cleanup',state=label)
++            return value
+         if (job.get('progress') or {}).get('chapter_check'):value['chapter_check']=copy.deepcopy(job['progress']['chapter_check'])
+         if job['state']=='needs attention':
+             with connect(self.inventory.database) as db:failure=db.execute('SELECT journal FROM audio_jobs WHERE job_id=?',(job['job_id'],)).fetchone()
+@@ -2102,6 +2137,7 @@
+         rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+         if not rows or not check(rows[0]):return None
+         manifest=json.loads(rows[0]['manifest'])
++        if __import__('publication_reuse').task(manifest):return None
+         with self.jobs._db() as db:
+             newest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND "+CURRENT+" ORDER BY created DESC, job_id DESC LIMIT 1",(manifest.get('candidate_id'),)).fetchone()
+         if manifest.get('candidate_id')!=identity or manifest.get('candidate_revision')!=revision or not newest or newest[0]!=job_id:
+@@ -3360,6 +3396,9 @@
+         (_names_replan): planned under other names than those now in force (Edit names), a job that converts only part of
+         one source folder (ruling 71d), a foreign author still in Cyrillic (ruling 71f) or a destination folder chosen
+         since it was planned (ruling 69). Each check reads only the catalog; an unreadable one never stops the queue."""
++        manifest=job.get('manifest') or {}
++        if isinstance(manifest,str):manifest=json.loads(manifest)
++        if __import__('publication_reuse').task(manifest):return False
+         for check in (self._names_changed,self._trilogy_stale,getattr(self,'_replan_needed',None),getattr(self,'_override_stale',None)):
+             if check is None:continue
+             try:
+@@ -3535,6 +3574,7 @@
+         import book_restart,entered_names
+         from sqlite_retry import transaction
+         manifest=json.loads(job['manifest']);identity=manifest['candidate_id']
++        if __import__('publication_reuse').task(manifest):raise ValueError('Extra-source cleanup cannot be replanned as a conversion')
+         try:
+             row=self.reviews._row('Audiobooks',identity)
+             approval=(self.reviews._context(row) or {}).get('user_approval')
+@@ -3907,7 +3947,7 @@
+         # left the to-do list until the next Start. The destination is checked before anything is written; the late check
+         # in build_manifest stays (and the publication itself never overwrites).
+         _relative,destination,_reason=self._approval_destination(row,result)
+-        if destination and os.path.lexists(destination):raise ValueError('An audiobook already exists at this path; nothing was overwritten')
++        if destination and os.path.lexists(destination) and not self._recording_review(row,result,threading.Event()):raise ValueError('An audiobook already exists at this path; nothing was overwritten')
+         approval=result['approval']
+         files=[m['path'] for m in sorted(row['members'],key=lambda m:m.get('order') or 0) if include is None or m['path'] in include]
+         ctx=self.reviews._context(row)
+@@ -4158,7 +4198,7 @@
+                                 context=self.reviews._context(fresh);context['cover_choices']=fresh['cover_choices']+[selected_cover]
+                                 fresh=self.reviews._write(fresh,context,bump=False)
+                                 result['metadata_facts']['cover']={'kind':'neutral'}
+-                            self._recording_review(gate_row,result,stop)  # the files being converted
++                            reuse_parent=self._recording_review(gate_row,result,stop)  # the files being converted
+                         else:
+                             covers=[c for c in fresh['cover_choices'] if c['source_label'].startswith('Embedded artwork:')]
+                             if len(covers)!=1:raise ValueError('Cover not verified')
+@@ -4207,7 +4247,7 @@
+                             # Pending metadata stays invisible to approval counts/public creation.
+                             fresh=self.reviews._write(fresh,context,bump=False)
+                             try:
+-                                manifest=self.reviews.build_manifest('Audiobooks',fresh['id'],fresh['revision'],allow_automatic_pending=True,stop=stop)
++                                manifest=self.reviews.build_manifest('Audiobooks',fresh['id'],fresh['revision'],allow_automatic_pending=True,stop=stop,**({'reuse_parent':reuse_parent} if standing and reuse_parent else {}))
+                                 approved=copy.deepcopy(context);approved.pop('automatic_pending',None)
+                                 approved['automatic_approval']={'matcher_version':VERSION,'work_id':result['work']['id'],'sources':result['sources'],'approved_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
+                                 # Queue insertion and final approval become durable together.
+@@ -4765,6 +4805,7 @@
+         candidate=entry(row['id'],facts['work_ids'],review,facts,tracks);existing=[];related=[]
+         for job in self.jobs.status()['jobs']:
+             manifest=job['manifest'];other_id=manifest['candidate_id']
++            if __import__('publication_reuse').task(manifest):continue
+             if other_id==row['id']:continue
+             try:other=self.reviews._row('Audiobooks',other_id);context=self.reviews._context(other)
+             except ValueError:continue
+@@ -4789,9 +4830,12 @@
+             self.reviews._write(row,context,bump=False)
+         if decision['hold']:raise ValueError('Possible duplicate recording — original sources preserved')
+         if decision.get('reuse_job_id'):
+-            # Proven existing publication may be skipped; do not manufacture a new
+-            # completed candidate/job or remove this duplicate's original bytes.
+-            raise ValueError('Identical verified recording already arranged — duplicate sources preserved')
++            eligible=[item for item in existing if item.get('approved') and item.get('completed_verified') and item.get('current_output_valid') and item['id'] in marker['related_ids']]
++            if len(eligible)!=1:raise ValueError('Extra source kept: existing publication is ambiguous')
++            parent=next(job for job in self.jobs.status()['jobs'] if job['job_id']==decision['reuse_job_id'])
++            current=self.publications.publication(self.jobs.status()['jobs'],parent['manifest']['candidate_id'])
++            if not current or current['kind']!='original' or current['id']!=parent['job_id']:raise ValueError('Extra source kept: current publication lineage needs review')
++            return decision['reuse_job_id']
+         if decision['classification']=='related_distinct':
+             facts['destination_suffix']=decision['destination_suffix']
+             facts['recording_chapter_policy']='joined-chapters-v1'
+@@ -4855,6 +4899,13 @@
+         try:
+             self._reacquire_admission(identity=manifest['candidate_id'])
+             self._no_scan()
++            import publication_reuse
++            if publication_reuse.task(manifest):
++                frozen={k:v for k,v in manifest.items() if k!='attempt_id'}
++                with connect(self.inventory.database) as db:
++                    publication_reuse.resolve(db,frozen)
++                    self._cleanup_binding(db,frozen)
++                return True
+             if manifest.get('replacement_id'):
+                 relation=self.replacements.get(new_job=manifest['job_id'])
+                 if not relation or relation['id']!=manifest['replacement_id'] or relation['state']!='queued':return False
+@@ -4876,9 +4927,48 @@
+         except (ValueError,OSError,KeyError):return False
+ 
+     def _run(self, manifest, stop, checkpoint):
++        if __import__('publication_reuse').task(manifest):return self._run_reuse(manifest,stop,checkpoint)
+         self._active_producer=(manifest['job_id'],manifest['attempt_id'])
+         try:return self._run_media(manifest,stop,checkpoint)
+         finally:self._active_producer=None
++
++    def _reuse_output_valid(self,record,stop=None,pace=None):
++        import publication_reuse
++        try:
++            with connect(self.inventory.database) as db:
++                row=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(record.get('cleanup_job_id'),)).fetchone()
++                if not row:return False
++                owners=publication_reuse.checked_result(db,json.loads(row[0]),record)
++            return self._output_valid(owners['parent_output'],stop,pace)
++        except (ValueError,OSError,KeyError,TypeError):return False
++
++    def _run_reuse(self,manifest,stop,checkpoint):
++        """Verify a parent publication and every extra source; never publish audio."""
++        import publication_reuse
++        from source_cleanup import single_stream
++        frozen={k:v for k,v in manifest.items() if k!='attempt_id'}
++        with connect(self.inventory.database) as db:owners=publication_reuse.resolve(db,frozen)
++        checkpoint('checking extra source')
++        with self.publication_bindings.protect(owners['parent_output']) as (output,envelope),contextlib.ExitStack() as held:
++            ancestry=held.enter_context(DirectoryBoundary(output['root'],ordinary(output['final_path']).parent))
++            parent=held.enter_context(VerifiedFile(output['final_path']))
++            if [list(i) for i in ancestry.identities]!=[list(i) for i in output['parent_identity']] or parent.facts()['size']!=output['size'] or parent.sha256()!=output['sha256']:raise ValueError('Extra source kept: finished audiobook changed')
++            if output.get('identity') is not None and parent.facts()['identity']!=output['identity']:raise ValueError('Extra source kept: finished audiobook identity changed')
++            override=(manifest.get('metadata_facts') or {}).get('destination_override') or {}
++            if override and ordinary(override['folder'])!=ordinary(output['final_path']).parent:raise ValueError('Extra source kept: chosen folder differs from the finished audiobook')
++            identities={tuple(parent.facts()['identity'])};facts=[]
++            for source in manifest['sources']:
++                if stop.is_set():raise InterruptedError()
++                path=ordinary(source['path']);held.enter_context(DirectoryBoundary(manifest['root'],path.parent))
++                handle=held.enter_context(VerifiedFile(path));single_stream(path);actual=handle.facts()
++                native_id=tuple(actual['identity'])
++                if actual['links']!=1 or native_id in identities or actual['size']!=source['size'] or str(actual['modified'])!=str(source['modified']) or handle.sha256()!=source['sha256']:raise ValueError('Extra source kept: reviewed source bytes or identity changed')
++                identities.add(native_id);facts.append(dict(actual,path=source['path'],sha256=source['sha256']))
++            if stop.is_set():raise InterruptedError()
++            if not self._guard(frozen):raise ValueError('Extra source kept: current review or publication changed')
++            verified=publication_reuse.verification(owners,facts,envelope)
++            checkpoint('verified existing audiobook',verified)
++            return verified
+ 
+     def _run_media(self, manifest, stop, checkpoint):
+         stages={'Checking sources':'checking sources','Checking source audio':'checking sources','Creating audio':'creating','Checking output':'checking'}
+@@ -5111,7 +5201,7 @@
+         return [{'id':str(uuid.uuid5(uuid.NAMESPACE_URL,library+'\x1f'+p)),'path':p} for p in directories]
+ 
+     def _completed_output(self,identity):
+-        jobs=[j for j in self.jobs.status()['jobs'] if j['manifest']['candidate_id']==identity and j['state']=='completed']
++        jobs=[j for j in self.jobs.status()['jobs'] if j['manifest']['candidate_id']==identity and j['state']=='completed' and not __import__('publication_reuse').task(j['manifest'])]
+         for job in reversed(jobs):
+             if self._output_valid(job['output']):return job
+         return None
+--- /dev/null
++++ b/publication_reuse.py
+@@ -0,0 +1,164 @@
++"""Typed verification/cleanup work referring to one immutable existing publication.
++
++The parent owns publication/location/output mutation. The child owns only its
++duplicate sources, verification result and cleanup/recovery receipts. This module
++does not open or delete files and never turns a pathname collision into proof.
++"""
++import copy
++import hashlib
++import json
++import re
++import uuid
++from pathlib import Path
++
++KIND='duplicate_source_cleanup'
++RELATION='books-publication-reuse-v1'
++RESULT='books-duplicate-verification-v1'
++
++
++def packed(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))
++def digest(value):return hashlib.sha256(packed(value).encode('utf-8')).hexdigest()
++def task(manifest):return isinstance(manifest,dict) and manifest.get('task_kind')==KIND
++def result(value):return isinstance(value,dict) and value.get('schema')==RESULT
++
++
++def setup(db):
++    db.execute('CREATE TABLE IF NOT EXISTS duplicate_cleanup_tasks(candidate_id TEXT,source_fingerprint TEXT,parent_output_sha256 TEXT,job_id TEXT UNIQUE NOT NULL,PRIMARY KEY(candidate_id,source_fingerprint,parent_output_sha256))')
++
++
++def _fail(reason):raise ValueError('Extra source kept: '+reason)
++
++
++def _uuid(value):
++    try:return isinstance(value,str) and str(uuid.UUID(value))==value
++    except (ValueError,TypeError,AttributeError):return False
++
++
++def _tracks(manifest):
++    sources=manifest.get('sources');parts=manifest.get('part_chapters') or []
++    if not isinstance(sources,list) or not sources:_fail('complete ordered sources are unavailable')
++    out=[]
++    for index,source in enumerate(sources):
++        if not isinstance(source,dict) or not isinstance(source.get('path'),str):_fail('source correspondence is unavailable')
++        sha=source.get('sha256');size=source.get('size')
++        if not isinstance(sha,str) or not re.fullmatch('[a-f0-9]{64}',sha) or type(size)is not int or size<=0:_fail('source byte evidence is unavailable')
++        chapters=[]
++        if len(sources)==1 and Path(source['path']).suffix.lower()=='.m4b':chapters=manifest.get('source_chapters') or []
++        elif len(parts)==len(sources):chapters=parts[index].get('chapters') or []
++        out.append({'sha256':sha,'size':size,'chapters_sha256':digest(chapters)})
++    return out
++
++
++def source_scope(manifest):
++    tracks=_tracks(manifest)
++    return {'candidate_id':manifest.get('candidate_id'),'candidate_revision':manifest.get('candidate_revision'),
++            'source_fingerprint':(manifest.get('metadata_facts') or {}).get('source_fingerprint'),
++            'sources':[dict(track,path=source['path'],modified=str(source.get('modified')))
++                       for source,track in zip(manifest['sources'],tracks)]}
++
++
++def same_recording(child,parent):
++    """Entire ordered byte/chapter scope plus accepted identity and known credits."""
++    current=child.get('metadata_facts') or {};prior=parent.get('metadata_facts') or {}
++    ids=current.get('work_ids');other=prior.get('work_ids')
++    if not isinstance(ids,list) or not ids or ids!=other or len(set(ids))!=len(ids):return False
++    if (current.get('collection') or {}).get('kind','single')!=(prior.get('collection') or {}).get('kind','single'):return False
++    if _tracks(child)!=_tracks(parent):return False
++    if child.get('chapters',[])!=parent.get('chapters',[]):return False
++    now=child.get('metadata') or {};old=parent.get('metadata') or {}
++    for key in ('narrator','number'):
++        a=str(now.get(key) or '').strip().casefold();b=str(old.get(key) or '').strip().casefold()
++        if a and b and a!=b:return False
++    for key in ('recording_language','edition'):
++        a=current.get(key) or {};b=prior.get(key) or {}
++        a=a.get('value') if isinstance(a,dict) else a;b=b.get('value') if isinstance(b,dict) else b
++        if a and b and str(a).casefold()!=str(b).casefold():return False
++    # An explicit different title/author/series/world/cover asks for new choices;
++    # silently deleting its sources would discard that request.
++    entered=set((current.get('entered_names') or {}).get('fields') or [])
++    for key in entered & {'title','author','series','number','universe'}:
++        field='canonical_author' if key=='author' else key
++        if now.get(field,'')!=old.get(field,''):return False
++    if (current.get('cover') or {}).get('kind')=='retained_choice' and (child.get('cover') or {}).get('sha256')!=(parent.get('cover') or {}).get('sha256'):return False
++    return True
++
++
++def _parent(db,parent_id):
++    if not _uuid(parent_id):_fail('the existing publication identity is invalid')
++    raw=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()
++    if not raw or raw['state']!='completed' or not raw['output']:_fail('the existing audiobook is not durably completed')
++    row=dict(raw);manifest=json.loads(row['manifest']);output=json.loads(row['output'])
++    if task(manifest) or result(output):_fail('a reuse chain is not publication proof')
++    if row['manifest_hash']!=digest(manifest) or output.get('job_id')!=parent_id or (output.get('validation') or {}).get('passed') is not True:_fail('the existing publication receipt changed')
++    from audio_jobs import AudioJobs
++    from source_cleanup import CleanupJobs
++    AudioJobs._validate_record(output);CleanupJobs._validation_contract(manifest,output)
++    exists=lambda table:db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone()
++    if exists('audiobook_replacements') and db.execute('SELECT 1 FROM audiobook_replacements WHERE parent_job_id=? OR replacement_job_id=?',(parent_id,parent_id)).fetchone():_fail('the existing audiobook has a replacement lineage requiring review')
++    return row,manifest,output
++
++
++def derive(db,manifest,parent_id):
++    """Backend-derived admission relation; no filesystem/proof flags are trusted."""
++    row,parent,output=_parent(db,parent_id)
++    if not same_recording(manifest,parent):_fail('the complete recording no longer matches the arranged sources')
++    eligible=[]
++    for other in db.execute("SELECT job_id,manifest FROM audio_jobs WHERE state='completed' AND output IS NOT NULL"):
++        candidate=json.loads(other['manifest'])
++        if task(candidate):continue
++        try:
++            if same_recording(manifest,candidate):
++                _parent(db,other['job_id']);eligible.append(other['job_id'])
++        except (ValueError,KeyError,TypeError):continue
++    if eligible!=[parent_id]:_fail('one unambiguous existing publication is required')
++    scope=source_scope(manifest)
++    if not _uuid(scope['candidate_id']) or type(scope['candidate_revision'])is not int or not scope['source_fingerprint']:_fail('the duplicate review binding is unavailable')
++    return {'schema':RELATION,'parent_job_id':parent_id,'parent_manifest_sha256':row['manifest_hash'],
++            'parent_output_sha256':digest(output),'source_scope':scope}
++
++
++def admit(db,manifest):
++    """Atomic queue admission; caller owns BEGIN IMMEDIATE and the queue lock."""
++    capability=resolve(db,manifest)
++    setup(db);relation=capability['relation'];scope=relation['source_scope']
++    slot=(scope['candidate_id'],scope['source_fingerprint'],relation['parent_output_sha256'])
++    prior=db.execute('SELECT job_id FROM duplicate_cleanup_tasks WHERE candidate_id=? AND source_fingerprint=? AND parent_output_sha256=?',slot).fetchone()
++    if prior:
++        if prior[0]!=manifest['job_id']:_fail('this source generation already has cleanup work')
++        return
++    db.execute('INSERT INTO duplicate_cleanup_tasks VALUES(?,?,?,?)',(*slot,manifest['job_id']))
++
++
++def resolve(db,manifest,owner_job_id=None):
++    """One capability with distinct immutable parent and child cleanup owners."""
++    if not task(manifest):_fail('this is not a duplicate cleanup task')
++    owner=owner_job_id or manifest.get('job_id')
++    if not _uuid(owner) or manifest.get('job_id')!=owner:_fail('the cleanup owner changed')
++    relation=manifest.get('publication_reuse')
++    if not isinstance(relation,dict) or relation.get('schema')!=RELATION:_fail('the existing publication relation is unavailable')
++    expected=derive(db,manifest,relation.get('parent_job_id'))
++    if expected!=relation:_fail('the duplicate or publication receipt changed')
++    row,parent,output=_parent(db,relation['parent_job_id'])
++    return {'schema':RELATION,'cleanup_job_id':owner,'manifest':copy.deepcopy(manifest),
++            'relation':copy.deepcopy(relation),'parent_job':row,'parent_manifest':parent,'parent_output':output}
++
++
++def verification(capability,source_facts,location):
++    """The worker's durable verification result; never an output/publication record."""
++    return {'schema':RESULT,'cleanup_job_id':capability['cleanup_job_id'],'publication_reuse':copy.deepcopy(capability['relation']),
++            'parent_output':copy.deepcopy(capability['parent_output']),'source_facts':copy.deepcopy(source_facts),
++            'parent_location':copy.deepcopy(location)}
++
++
++def checked_result(db,manifest,value,owner_job_id=None):
++    capability=resolve(db,manifest,owner_job_id)
++    if not result(value) or set(value)!={'schema','cleanup_job_id','publication_reuse','parent_output','source_facts','parent_location'}:_fail('the cleanup verification result is unavailable')
++    if value['cleanup_job_id']!=capability['cleanup_job_id'] or value['publication_reuse']!=capability['relation'] or value['parent_output']!=capability['parent_output']:_fail('the cleanup verification owner or parent changed')
++    facts=value['source_facts']
++    if not isinstance(facts,list) or len(facts)!=len(manifest['sources']):_fail('the verified source scope is incomplete')
++    for actual,source in zip(facts,manifest['sources']):
++        if not isinstance(actual,dict) or actual.get('path')!=source['path'] or actual.get('sha256')!=source['sha256'] or actual.get('size')!=source['size'] or not actual.get('identity'):_fail('the verified source correspondence changed')
++    child=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(capability['cleanup_job_id'],)).fetchone()
++    if child and child['state']=='completed':
++        if child['manifest_hash']!=digest(manifest) or json.loads(child['manifest'])!=manifest or json.loads(child['output'] or '{}')!=value or json.loads(child['journal']).get('duplicate_verification')!=value:_fail('the durable child verification receipt changed')
++    return capability
+--- a/recovery_retention.py
++++ b/recovery_retention.py
+@@ -144,7 +144,8 @@
+         # because a copy is already gone is purged too; a missing copy is recorded, never an error.
+         row=persisted[0]
+         try:
+-            with self.storage.protected_output(job_id,guard=self.guard) as (manifest,output),contextlib.ExitStack() as stack:
++            with self.storage.protected_cleanup(job_id,guard=self.guard) as owners,contextlib.ExitStack() as stack:
++                manifest=owners['manifest'];output=owners['parent_output']
+                 if output['sha256']!=row['output_hash']:raise BoundaryError('Retention output identity changed')
+                 events=self._rows('SELECT completed_at FROM recovery_completion WHERE cleanup_id=?',(row['cleanup_id'],))
+                 deadlines={(moment(row['completed_at'])+timedelta(hours=hours)).isoformat() for hours in (HOURS,LEGACY_HOURS)} if events else set()
+--- a/replacement_jobs.py
++++ b/replacement_jobs.py
+@@ -236,17 +236,18 @@
+         relation=self.get(candidate=candidate)
+         if relation and relation['state'] in {'published','retiring','completed'}:
+             return next((j for j in jobs if j['job_id']==relation['replacement_job_id']),None),relation
+-        matches=[j for j in jobs if j['manifest']['candidate_id']==candidate and not j['manifest'].get('replacement_id')]
++        matches=[j for j in jobs if j['manifest']['candidate_id']==candidate and not j['manifest'].get('replacement_id') and not __import__('publication_reuse').task(j['manifest'])]
+         return (matches[-1] if matches else None),relation
+ 
+     def projected(self,jobs,current_id=None):
+         """Visible progress selects active replacement; durable completion counts candidates once."""
+-        completed={j['manifest']['candidate_id'] for j in jobs if j['state']=='completed'}
++        completed={j['manifest']['candidate_id'] for j in jobs if j['state']=='completed' and not __import__('publication_reuse').task(j['manifest'])}
+         result=[]
+         for candidate in dict.fromkeys(j['manifest']['candidate_id'] for j in jobs):
+             active=next((j for j in jobs if j['manifest']['candidate_id']==candidate and j['job_id']==current_id),None)
+             representative,_=self.representative(jobs,candidate)
+             pending=next((j for j in reversed(jobs) if j['manifest']['candidate_id']==candidate and j['state'] in {'pending','needs attention'}),None)
+-            selected=active or pending or representative
++            history=next((j for j in reversed(jobs) if j['manifest']['candidate_id']==candidate and __import__('publication_reuse').task(j['manifest'])),None)
++            selected=active or pending or representative or history
+             if selected:result.append(copy.deepcopy(selected))
+         return result,len(completed)
+--- a/review_backend.py
++++ b/review_backend.py
+@@ -845,7 +845,7 @@
+             raise
+         finally:activity.pop(row['id'],None)
+ 
+-    def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None,held=None):
++    def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None,held=None,reuse_parent=None):
+         """held (0.21.0 in-place publication only): {normcase path: {'sha256','source_chapters'}} for a source the
+         converting job holds deny-writers after proving its reviewed bytes in full; its metadata edit changes size."""
+         import reacquire_sources,source_proofs
+@@ -854,7 +854,14 @@
+             held=held or {}
+             # ready=False: the converter's revision guard (_guard) runs this up to four times per book under group_lock (F31).
+             row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job,allow_automatic_pending=allow_automatic_pending,held=held,ready=False);ctx=self._context(row)
+-            if not row['creation']['can_create']:raise ValueError('; '.join(row['creation']['reasons']))
++            reasons=list(row['creation']['reasons'])
++            if reuse_parent:
++                # Internal typed admission only: this never authorizes publication
++                # at an occupied name. Complete byte/identity correspondence below
++                # must produce a cleanup-only manifest before it can be queued.
++                collision='An audiobook already exists at this path. Review it or choose a different reviewed destination.'
++                reasons=[reason for reason in reasons if reason!=collision]
++            if reasons:raise ValueError('; '.join(reasons))
+             members={m['member_key']:m for m in row['members']};sources=[]
+             for key in row['track_order']:
+                 if key not in row['included']:continue
+@@ -904,5 +911,10 @@
+                         for part in plan:
+                             if part.get('terminal_end_correction') is None:part.pop('terminal_end_correction',None)
+                         if any(part['chapters'] for part in plan):manifest['part_chapters']=plan
++            if reuse_parent:
++                import publication_reuse
++                with connect(self.inventory.database) as db:
++                    manifest['publication_reuse']=publication_reuse.derive(db,manifest,reuse_parent)
++                manifest['task_kind']=publication_reuse.KIND
+             with connect(self.inventory.database) as db:__import__('admission_diagnostics').clear(db,row)
+             return manifest
+--- a/series_backfill.py
++++ b/series_backfill.py
+@@ -182,6 +182,7 @@
+         result = []
+         for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY updated,job_id"):
+             manifest = json.loads(row['manifest'])
++            if __import__('publication_reuse').task(manifest):continue
+             review = manifest.get('metadata') or {}
+             entry = entries.get(row['job_id'])
+             record = json.loads(entry['record']) if entry else {}
+@@ -305,6 +306,7 @@
+         job_id = row['job_id']
+         manifest = json.loads(row['manifest'])
+         output = json.loads(row['output'])
++        if __import__('publication_reuse').task(manifest):return 'Extra-source cleanup does not own the finished audiobook'
+         if manifest.get('replacement_id') or manifest.get('replacement_parent_job_id'):
+             return 'Part of a replacement; left as it is'
+         with connect(self.database) as db:
+--- a/source_cleanup.py
++++ b/source_cleanup.py
+@@ -200,8 +200,14 @@
+     def enroll(self,job,binding,historical=False):
+         if job['state']!='completed':raise ValueError('Only a completed validated audiobook can remove its sources')
+         manifest=job['manifest'];output=job['output']
++        import publication_reuse
++        duplicate=publication_reuse.task(manifest)
++        if duplicate:
++            with connect(self.database) as db:owners=publication_reuse.checked_result(db,manifest,output,job['job_id'])
++            output=owners['parent_output']
++            self._validation_contract(owners['parent_manifest'],output)
+         if output['validation'].get('passed') is not True or not manifest['sources']:raise ValueError('Complete output validation is required')
+-        self._validation_contract(manifest,output)
++        if not duplicate:self._validation_contract(manifest,output)
+         root=ordinary(manifest['root']);paths=[]
+         for source in manifest['sources']:
+             path=ordinary(source['path'])
+@@ -215,6 +221,7 @@
+             setup(db);prior=db.execute('SELECT id FROM source_cleanup WHERE job_id=?',(job['job_id'],)).fetchone()
+         if not prior:self._sorted((self.output_location(output)[0] if self.output_location else output)['final_path'])
+         id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':manifest,'output':output,'binding':binding,'actor':'assistant','created':stamp(),'recovery_identity':self.root_identity,'historical':historical}
++        if duplicate:intent['cleanup_mode']='duplicate_backup_removal'
+         with connect(self.database) as db:
+             setup(db)
+             prior=db.execute('SELECT id FROM source_cleanup WHERE job_id=?',(job['job_id'],)).fetchone()
+@@ -433,8 +440,18 @@
+             except (BoundaryError,OSError,ValueError,KeyError):pass
+     def _run(self,id,marked):
+         row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))[0];intent=json.loads(row['intent']);manifest=intent['manifest'];out=intent['output']
++        import publication_reuse
++        duplicate=publication_reuse.task(manifest);publication_manifest=manifest
++        if duplicate:
++            if intent.get('cleanup_mode')!='duplicate_backup_removal':raise BoundaryError('Extra-source cleanup operation mode changed')
++            with connect(self.database) as db:
++                child=db.execute('SELECT state,output FROM audio_jobs WHERE job_id=?',(row['job_id'],)).fetchone()
++                if not child or child['state']!='completed':raise BoundaryError('Extra-source verification is not durably complete')
++                owners=publication_reuse.checked_result(db,manifest,json.loads(child['output']),row['job_id'])
++            if owners['parent_output']!=out:raise BoundaryError('Parent publication receipt changed')
++            publication_manifest=owners['parent_manifest']
+         source_root=ordinary(manifest['root'])
+-        frozen_root=ordinary(manifest.get('output_root',manifest['root']))
++        frozen_root=ordinary(publication_manifest.get('output_root',publication_manifest['root']))
+         if ordinary(out.get('root',str(frozen_root)))!=frozen_root:raise BoundaryError('Validated output root differs from frozen output policy')
+         if self.output_location:
+             out,envelope=self.output_location(out)
+@@ -454,7 +471,7 @@
+             if art.sha256()!=manifest['cover']['sha256']:raise BoundaryError('Reviewed cover bytes changed')
+             with connect(self.database) as db:
+                 if not self.guard(db,intent):raise BoundaryError('Completed book review changed')
+-            if out['validation'].get('publication_mode')=='in_place':return self._retire_moved(id,intent,manifest,out)
++            if out['validation'].get('publication_mode')=='in_place' and not duplicate:return self._retire_moved(id,intent,manifest,out)
+             self._sorted(final,BoundaryError)  # before any copy or marker change; again before each disposal below
+             self._set(id,'checking');held=[];self.phases[id]='Checking original files'
+             required=sum(s['size'] for s in manifest['sources'])
+@@ -570,6 +587,15 @@
+         db.execute('INSERT OR REPLACE INTO source_retirements VALUES(?,?,?,?,?,?,?,?)',(intent['manifest']['root'],source['path'],intent['id'],intent['job_id'],source['sha256'],source['size'],source['modified'],'removed'))
+         db.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(intent['manifest']['root'],source['path']))
+     def restore(self,id):
++        row=self._rows('SELECT intent FROM source_cleanup WHERE id=?',(id,))
++        intent=json.loads(row[0]['intent']) if row else {}
++        if __import__('publication_reuse').task(intent.get('manifest')):
++            protector=getattr(self,'restore_protector',None)
++            if not callable(protector):raise BoundaryError('Extra-source restoration requires its protected parent publication')
++            with protector(intent['job_id']):return self._restore(id)
++        return self._restore(id)
++
++    def _restore(self,id):
+         receipt=next((r for r in self.status() if r['id']==id),None)
+         if receipt and not receipt['restore_available']:
+             raise BoundaryError('Temporary recovery files are unavailable after successful cleanup; original tracks cannot be restored from them')
+--- a/storage_cleanup.py
++++ b/storage_cleanup.py
+@@ -161,6 +161,8 @@
+         if str(uuid.UUID(job_id)) != job_id:
+             raise BoundaryError('Invalid completed job identity')
+         m = json.loads(row['manifest']); out = json.loads(row['output'])
++        import publication_reuse
++        if publication_reuse.task(m):raise BoundaryError('Duplicate cleanup requires distinct publication and cleanup owners')
+         if hashlib.sha256(packed(m).encode('utf-8')).hexdigest() != row['manifest_hash']:
+             raise BoundaryError('Completed manifest identity changed')
+         if out['job_id'] != job_id or out['validation'].get('passed') is not True:
+@@ -178,18 +180,42 @@
+                 raise BoundaryError('Legacy output checks do not match the recorded output')
+         return m, out
+ 
++    def cleanup_owners(self,job_id):
++        """Explicit child cleanup and parent publication facts, never retagged output."""
++        import publication_reuse
++        with connect(self.database) as db:
++            row=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
++            if not row or row['state']!='completed':raise BoundaryError('Only completed verification can discard recovery copies')
++            manifest=json.loads(row['manifest'])
++            if publication_reuse.task(manifest):
++                if publication_reuse.digest(manifest)!=row['manifest_hash']:raise BoundaryError('Duplicate cleanup manifest changed')
++                owners=publication_reuse.checked_result(db,manifest,json.loads(row['output']),job_id)
++                from source_cleanup import CleanupJobs
++                CleanupJobs._validation_contract(owners['parent_manifest'],owners['parent_output'])
++                return owners
++        manifest,output=self._job(job_id)
++        return {'schema':'books-original-cleanup-owners-v1','cleanup_job_id':job_id,'manifest':manifest,'parent_manifest':manifest,'parent_output':output}
++
+     @contextlib.contextmanager
+-    def protected_output(self, job_id, guard=None):
++    def protected_output(self,job_id,guard=None):
++        # Existing publication/working consumers keep the ordinary ownership contract.
++        with self.protected_cleanup(job_id,guard) as owners:
++            import publication_reuse
++            if publication_reuse.task(owners['manifest']):raise BoundaryError('A cleanup-only task cannot act as a publication owner')
++            yield owners['manifest'],owners['parent_output']
++
++    @contextlib.contextmanager
++    def protected_cleanup(self, job_id, guard=None):
+         (guard or self.guard)()
+-        m, original = self._job(job_id)
+-        frozen_root=ordinary(m.get('output_root',m['root']))
+-        if ordinary(original.get('root',str(frozen_root)))!=frozen_root or ordinary(original['final_path'])!=ordinary(m['destination']):
++        owners=self.cleanup_owners(job_id);publication=owners['parent_manifest'];original=owners['parent_output']
++        frozen_root=ordinary(publication.get('output_root',publication['root']))
++        if ordinary(original.get('root',str(frozen_root)))!=frozen_root or ordinary(original['final_path'])!=ordinary(publication['destination']):
+             raise BoundaryError('Frozen publication provenance changed')
+         out,envelope=self.output_location(original) if self.output_location else (original,None)
+         root=ordinary(out.get('root',str(frozen_root)));final=ordinary(out['final_path'])
+         if not final.is_relative_to(root) or final.suffix.lower()!='.m4b':raise BoundaryError('Completed output destination changed')
+-        prior=getattr(self._location_local,'publication',None);prior_effective=getattr(self._location_local,'effective',None)
+-        self._location_local.publication=(original,envelope);self._location_local.effective=out
++        prior=getattr(self._location_local,'publication',None);prior_effective=getattr(self._location_local,'effective',None);prior_owners=getattr(self._location_local,'cleanup_owners',None)
++        self._location_local.publication=(original,envelope);self._location_local.effective=out;self._location_local.cleanup_owners=owners
+         try:
+             with DirectoryBoundary(root,final.parent) as ancestry,VerifiedFile(final) as handle:
+                 if out.get('identity') is not None and handle.facts()['identity']!=out['identity']:raise BoundaryError('Relocated output native identity changed; copies retained')
+@@ -197,18 +223,26 @@
+                 value=hashlib.sha256()
+                 for block in handle.chunks():(guard or self.guard)();value.update(block)
+                 if handle.facts()['size']!=out['size'] or value.hexdigest()!=out['sha256']:raise BoundaryError('Completed output bytes changed; copies retained')
+-                yield m,original
+-        finally:self._location_local.publication=prior;self._location_local.effective=prior_effective
++                yield owners
++        finally:self._location_local.publication=prior;self._location_local.effective=prior_effective;self._location_local.cleanup_owners=prior_owners
+ 
+     @contextlib.contextmanager
+     def _publication_transaction(self):
+         current=getattr(self._location_local,'publication',None)
+-        if not self.output_location_guard or current is None:
++        owners=getattr(self._location_local,'cleanup_owners',None)
++        duplicate=bool(owners and __import__('publication_reuse').task(owners['manifest']))
++        if current is None or not self.output_location_guard and not duplicate:
+             yield None;return
+         original,envelope=current
+         with connect(self.database) as db:
+             db.execute('BEGIN IMMEDIATE')
+-            if not self.output_location_guard(db,original,envelope,require_transaction=True):raise BoundaryError('Current publication changed before copy disposition')
++            if duplicate:
++                import publication_reuse
++                child=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(owners['cleanup_job_id'],)).fetchone()
++                if not child or child['state']!='completed' or json.loads(child['manifest'])!=owners['manifest'] or child['manifest_hash']!=publication_reuse.digest(owners['manifest']):raise BoundaryError('Duplicate cleanup owner changed before copy disposition')
++                current_owners=publication_reuse.checked_result(db,owners['manifest'],json.loads(child['output']),owners['cleanup_job_id'])
++                if current_owners!=owners:raise BoundaryError('Duplicate publication relation changed before copy disposition')
++            if self.output_location_guard and not self.output_location_guard(db,original,envelope,require_transaction=True):raise BoundaryError('Current publication changed before copy disposition')
+             for derived in getattr(self._location_local,'derived_publications',()):
+                 if not self.repair_location_guard or not self.repair_location_guard(db,derived['original'],derived['envelope'],kind=derived['kind'],repair_journal_sha256=derived['journal_sha256'],require_transaction=True):raise BoundaryError('Authorized repaired publication changed before copy disposition')
+             prior=getattr(self._location_local,'disposal_db',None);self._location_local.disposal_db=db
+@@ -534,7 +568,9 @@
+         Startup remains inactive. Explicit resume checks completed jobs, including
+         retirement attention, without repeatedly hashing already disposed media.
+         """
+-        manifest,output=self._job(job_id)
++        owners=self.cleanup_owners(job_id);manifest=owners['manifest'];output=owners['parent_output']
++        import publication_reuse
++        if publication_reuse.task(manifest):return False  # This task never owned a media producer or staging files.
+         recorded=output['validation'].get('staging_artifacts',{})
+         attempt_id=recorded.get('attempt_id')
+         if not attempt_id:return False  # No exact producer receipt, no candidate.
+@@ -558,7 +594,10 @@
+         selected; publication and native byte/name/stream guards stay mandatory.
+         This never satisfies the full staging/retirement/Ready obligation.
+         """
+-        with self.protected_output(job_id) as (manifest, output):
++        with self.protected_cleanup(job_id) as owners:
++            manifest=owners['manifest'];output=owners['parent_output']
++            import publication_reuse
++            if publication_reuse.task(manifest):raise BoundaryError('Extra-source cleanup has no producer working files')
+             recorded = output['validation'].get('staging_artifacts', {})
+             attempt_id = recorded.get('attempt_id')
+             if not attempt_id or str(uuid.UUID(attempt_id)) != attempt_id:
+@@ -617,7 +656,8 @@
+         output_hash = ''
+         self._phase='verify completed output';self._disposition='not_started'
+         try:
+-            with self.protected_output(job_id) as (manifest, output):
++            with self.protected_cleanup(job_id) as owners:
++                manifest=owners['manifest'];output=owners['parent_output']
+                 output_hash = output['sha256']
+                 previous = next((r for r in self.status() if r['job_id'] == job_id), None)
+                 if previous and previous['state'] == 'completed' and previous['output_hash'] == output_hash:
+@@ -628,7 +668,8 @@
+                     self._phase='verify source retirement'
+                     cleanup, members = self._source_safety(stack, job_id, manifest, output)
+                     self._phase='verify staging'
+-                    targets = self._staging(stack, job_id, manifest, output)
++                    import publication_reuse
++                    targets = [] if publication_reuse.task(manifest) else self._staging(stack, job_id, manifest, output)
+                     if cleanup and include_recovery:
+                         recovery_dir=self.recovery_root/cleanup['id']
+                         stack.enter_context(DirectoryBoundary(self.recovery_root.anchor,recovery_dir))
+@@ -682,7 +723,7 @@
+ 
+     def _folder_obligations(self, job_id, manifest, output):
+         """Require the existing exact retirement and completed copy-purge proofs."""
+-        current_m,current_out=self._job(job_id)
++        owners=self.cleanup_owners(job_id);current_m=owners['manifest'];current_out=owners['parent_output']
+         if current_m!=manifest or current_out!=output:raise BoundaryError('Completed folder-cleanup provenance changed')
+         with connect(self.database) as db:
+             row=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+@@ -962,7 +1003,7 @@
+     def _root_reachable(self, job_id):
+         """The library folder the book's job came from can be listed now (ruling 77b: Z: or the NAS away is no outcome)."""
+         try:
+-            manifest,_output=self._job(job_id)
++            manifest=self.cleanup_owners(job_id)['manifest']
+             root=manifest['root']
+             with os.scandir(root) as listing:next(listing,None)
+             return True
+@@ -983,7 +1024,7 @@
+         with connect(self.database) as db:
+             rows=[(r[0],r[1]) for r in db.execute('SELECT path,state FROM source_folder_cleanup_directories WHERE job_id=? AND state IN (%s)' % ','.join('?'*len(states)),(job_id,*states))]
+             prior=db.execute('SELECT * FROM source_folder_cleanup_jobs WHERE job_id=?',(job_id,)).fetchone()
+-        manifest,_output=self._job(job_id)
++        manifest=self.cleanup_owners(job_id)['manifest']
+         own={ordinary(source['path']).parent for source in manifest['sources']}
+         present=[]
+         for path,_state in rows:
+@@ -1025,7 +1066,7 @@
+             # Cheap immutable provenance checks precede a full output hash. Known refusals
+             # must not re-read gigabytes on each Start/retention wake. Full verification
+             # still happens before any file or directory disposal.
+-            manifest,output=self._job(job_id);output_hash=output['sha256']
++            owners=self.cleanup_owners(job_id);manifest=owners['manifest'];output=owners['parent_output'];output_hash=output['sha256']
+             self._folder_obligations(job_id,manifest,output)
+             candidates=self._folder_candidates(manifest)
+             self._check_current_roots(candidates)
+@@ -1033,7 +1074,8 @@
+                 prior={ordinary(r[0]) for r in db.execute('SELECT path FROM source_folder_cleanup_directories WHERE job_id=?',(job_id,))}
+             if not prior.issubset(set(candidates)):raise BoundaryError('Source-folder receipt escaped approved source provenance')
+             self._reconcile_removed_files(job_id)
+-            with self.protected_output(job_id) as (manifest,output):
++            with self.protected_cleanup(job_id) as owners:
++                manifest=owners['manifest'];output=owners['parent_output']
+                 self._folder_obligations(job_id,manifest,output)
+                 self._check_current_roots(candidates)
+                 self._folder_set(job_id,output_hash,'checking')
+--- a/web_server.py
++++ b/web_server.py
+@@ -80,6 +80,7 @@
+         unit = {'encoding': 'seconds', 'originals': 'files', 'recovery copies': 'files'}.get(step)
+         row = {'id': kind, 'kind': kind, 'subject': jobs['current_title'], 'step': step,
+                'state': ACTIVITY_STATES.get(jobs.get('state'), 'running'), 'reason': progress.get('reason', '')} | _measure(progress, unit)
++        if jobs.get('current_task_kind')=='duplicate_source_cleanup':row['task_kind']='duplicate_source_cleanup'
+         if kind == 'conversion':
+             row.update(step_index=CONVERSION_STEPS.get(step, 1), step_count=4)
+         if type(progress.get('started')) is int:
+@@ -88,7 +89,7 @@
+     held = jobs.get('attention_row')
+     if isinstance(held, dict) and not any(row['kind'] == 'cleanup' for row in rows):
+         rows.append({'id': 'cleanup', 'kind': 'cleanup', 'subject': held.get('title') or '', 'step': held.get('phase') or 'originals',
+-                     'state': 'attention', 'reason': held.get('reason') or ''} | _measure(held, 'files'))
++                     'state': 'attention', 'reason': held.get('reason') or '', 'task_kind':held.get('task_kind')} | _measure(held, 'files'))
+     check = jobs.get('published_check')
+     if isinstance(check, dict):
+         row = {'id': 'identity', 'kind': 'identity', 'subject': '', 'step': 'identity', 'state': 'running'} | _measure(check, 'books')
+--- a/web/app.js
++++ b/web/app.js
+@@ -1057,6 +1057,7 @@
+ const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
+ const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
+ function activityLabel(row){
++  if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
+   if(row.kind==='chapter')return 'Checking source audio';
+   if(row.kind==='admission')return row.state==='pausing'?'Pausing start checks…':'Checking pending audiobook work';
+   if(row.kind==='maintenance')return row.state==='pausing'?'Stopping finished-book checks…':'Checking finished books';
+@@ -1067,6 +1068,7 @@
+   return row.step==='researching'?'Researching books':'Scanning files';
+ }
+ function activityStep(row,finishing){
++  if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
+   let step;
+   if(row.kind==='chapter')return 'Checking the complete audio before correcting the final chapter end.';
+   if(row.kind==='admission' || row.kind==='maintenance')return row.step_text || (row.kind==='admission'?'Checking pending audiobook work':'Checking finished books');
+@@ -2566,6 +2568,7 @@
+   return 'Technical detail: '+(facts || rawReasons(row).join('; ') || 'Unavailable')+folder+(details.length?' — '+details.join(' '):'');
+ }
+ function candidateStatus(row){
++  const extra=row.creation?.job;if(extra?.task_kind==='duplicate_source_cleanup')return extra.state || 'Checking extra source';
+   const identityStatus=cleanupIdentityText(row);if(identityStatus)return identityStatus.status;
+   const ask=askText(row);if(ask)return askDone.has(row.id) && ASK_DONE[askDone.get(row.id)]?.[0] || ask.status;
+   const attention=attentionText(row);if(attention)return attention.status;
+--- a/tests/test_automatic_media.py
++++ b/tests/test_automatic_media.py
+@@ -67,6 +67,92 @@
+         self.assertTrue(self.service.reviews._context(fresh)['automatic_approval']);self.assertFalse(self.service.reviews._context(fresh).get('automatic_pending'))
+         self.assertTrue(self.service._output_valid(job['output']))
+         self.assertFalse(any(p.suffix in ('.stdout','.stderr') for p in self.service.reviews.cache.iterdir()))
++
++    def test_identical_extra_source_uses_existing_publication_without_conversion(self):
++        """Real automatic admission, real first codec run, native child cleanup."""
++        import hashlib
++        from scanner import connect
++        originals=[source.read_bytes() for source in self.sources]
++        row,result=self.result();_,parent_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
++        parent=next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==parent_id)
++        with connect(self.inv.database) as db:before=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone())
++        final=Path(parent['output']['final_path']);output_bytes=final.read_bytes()
++        extra=self.audio/'Extra e\u0301';extra.mkdir()
++        duplicate=[]
++        for index,data in enumerate(originals,1):
++            path=extra/(str(index).zfill(2)+'.mp3');path.write_bytes(data);duplicate.append(path)
++        self.inv.launch('Audiobooks');finish_scan(self.inv)
++        rows=self.service.reviews.page()['rows'];current=next(row for row in rows if any(m['path']==str(duplicate[0]) for m in row['members']))
++        research=PublicResearch(self.client).lookup(current,str(self.audio));self.assertEqual(research['reasons'],[])
++        with patch.object(self.service,'_run_media',side_effect=AssertionError('Duplicate must never convert or publish')):
++            _,child_id=self.service.approve_automatic(current,research,threading.Event(),self.client);self.wait()
++        child=next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==child_id)
++        self.assertEqual(child['state'],'completed',child)
++        self.assertEqual(child['manifest']['task_kind'],'duplicate_source_cleanup')
++        self.assertEqual(child['output']['schema'],'books-duplicate-verification-v1')
++        self.assertNotIn('publication_intent',json.loads(self.service.jobs._rows('SELECT journal FROM audio_jobs WHERE job_id=?',(child_id,))[0]['journal']))
++        cleanup=self.service.cleanup.status(child_id);self.assertEqual(cleanup['state'],'completed',cleanup)
++        self.assertEqual(cleanup['removed'],2);self.assertTrue(all(not source.exists() for source in duplicate))
++        self.assertEqual(final.read_bytes(),output_bytes);self.assertEqual(hashlib.sha256(output_bytes).hexdigest(),parent['output']['sha256'])
++        with connect(self.inv.database) as db:
++            self.assertEqual(dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()),before)
++            self.assertFalse(db.execute("SELECT 1 FROM owned_artifacts WHERE job_id=? AND kind='output'",(child_id,)).fetchone())
++        self.assertEqual(self.service.state()['converted_total'],1)
++
++    def test_single_m4b_unicode_duplicate_of_inplace_parent_has_its_own_recovery(self):
++        import copy,hashlib
++        from native_io import VerifiedFile,BoundaryError
++        from scanner import connect
++        for source in self.sources:source.unlink()
++        original_folder=self.audio/'Original';original_folder.mkdir()
++        old=original_folder/'Неисповедимыи\u0306 путь 2.m4b'
++        subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=1.5','-i',str(self.cover_path),'-map','0:a','-map','1:v','-c:a','aac','-b:a','64k','-ar','44100','-ac','1','-c:v','png','-disposition:v','attached_pic','-metadata','title=A Book','-metadata','album=A Book','-metadata','artist=John Writer',str(old)],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
++        original=old.read_bytes();old_identity=old.stat().st_ino
++        self.inv.launch('Audiobooks');finish_scan(self.inv)
++        row=next(row for row in self.service.reviews.page()['rows'] if any(m['path']==str(old) for m in row['members']))
++        result=PublicResearch(self.client).lookup(row,str(self.audio));self.assertEqual(result['reasons'],[])
++        _,parent_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
++        parent=next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==parent_id)
++        self.assertEqual(parent['output']['validation'].get('publication_mode'),'in_place')
++        self.assertFalse(old.exists());self.assertEqual(self.service.cleanup.status(parent_id)['state'],'completed')
++        with connect(self.inv.database) as db:before=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone())
++        final=Path(parent['output']['final_path']);finished=final.read_bytes()
++        extra=original_folder/'Неисповедимый путь 2.m4b';extra.write_bytes(original)
++        self.assertNotEqual(extra.stat().st_ino,old_identity)
++        self.inv.launch('Audiobooks');finish_scan(self.inv)
++        current=next(row for row in self.service.reviews.page()['rows'] if any(m['path']==str(extra) for m in row['members']))
++        research=PublicResearch(self.client).lookup(current,str(self.audio));self.assertEqual(research['reasons'],[])
++        with patch.object(self.service,'_run_media',side_effect=AssertionError('No second producer')),patch.object(self.service.jobs,'after_completed',None):
++            _,child_id=self.service.approve_automatic(current,research,threading.Event(),self.client);self.wait()
++        child=next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==child_id);self.assertEqual(child['state'],'completed',child)
++        cleanup_id=self.service.enroll_cleanup(child_id)['cleanup_id']
++        # Known changed output refuses before any extra-source disposition.
++        final.write_bytes(b'changed finished output')
++        with self.assertRaisesRegex(BoundaryError,'changed or unavailable'):self.service.cleanup.run(cleanup_id)
++        self.assertEqual(extra.read_bytes(),original)
++        final.write_bytes(finished)
++        # Same path/size/time but changed source bytes also refuse.
++        stat=extra.stat();extra.write_bytes(b'x'*len(original));__import__('os').utime(extra,ns=(stat.st_atime_ns,stat.st_mtime_ns))
++        with self.assertRaisesRegex(BoundaryError,'Original bytes differ'):self.service.cleanup.run(cleanup_id)
++        self.assertTrue(extra.exists());extra.write_bytes(original);__import__('os').utime(extra,ns=(stat.st_atime_ns,stat.st_mtime_ns))
++        # Cancel keeps the source and its verified child recovery; Resume uses it.
++        self.service.cleanup.stop.set();self.service.cleanup.run(cleanup_id);self.service.cleanup.stop.clear()
++        self.assertTrue(extra.exists());self.assertEqual(self.service.cleanup.status(child_id)['removed'],0)
++        with connect(self.inv.database) as db:
++            member=dict(db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(cleanup_id,)).fetchone())
++            self.assertEqual(member['state'],'backup_verified');self.assertTrue(member['backup_facts'])
++            intent=json.loads(db.execute('SELECT intent FROM source_cleanup WHERE id=?',(cleanup_id,)).fetchone()[0])
++            self.assertEqual(intent['cleanup_mode'],'duplicate_backup_removal')
++        self.assertEqual(Path(member['backup']).read_bytes(),original)
++        self.service.cleanup.run(cleanup_id);self.assertFalse(extra.exists())
++        self.assertEqual(self.service.cleanup.status(child_id)['removed'],1)
++        self.assertEqual(final.read_bytes(),finished)
++        self.service.cleanup.restore(cleanup_id);self.assertEqual(extra.read_bytes(),original)
++        self.assertEqual(self.service.cleanup.status(child_id)['state'],'needs_attention')
++        self.assertEqual(final.read_bytes(),finished)
++        with connect(self.inv.database) as db:self.assertEqual(dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()),before)
++        self.assertTrue(self.service._output_valid(parent['output']))
++        self.assertEqual(self.service.state()['converted_total'],1)
+     def test_independent_catalog_to_actual_verified_publication_and_ready_without_manual_step(self):
+         from test_public_work_identity import FallbackFixture,cap_fantlab
+         fixture=FallbackFixture(self.cover);client=PublicClient(self.inv.database,fetch=fixture.fetch);cap_fantlab(self.inv.database,time.time())
+--- a/tests/test_storage_cleanup.py
++++ b/tests/test_storage_cleanup.py
+@@ -155,4 +155,135 @@
+         self.source.restore(self.cleanup_id)
+         self.assertTrue(all(Path(s['path']).exists() for s in self.sources))
+ 
++class DuplicateCleanupOwnersTests(unittest.TestCase):
++    """Native child receipts and immutable parent publication ownership."""
++    def setUp(self):
++        import copy,publication_reuse as reuse
++        RetentionTests.setUp(self)
++        self.manifest['metadata_facts']={'work_ids':['fixture:recording'],'source_fingerprint':'parent-generation','authors':['Author']}
++        self.manifest['cleanup_policy']={'enabled':True}
++        with connect(self.db) as db:db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=? WHERE job_id=?',(packed(self.manifest),reuse.digest(self.manifest),self.job_id))
++        self.child=copy.deepcopy(self.manifest);self.child.update(job_id=str(uuid.uuid4()),candidate_id=str(uuid.uuid4()))
++        self.child['metadata_facts']['source_fingerprint']='extra-generation'
++        folder=self.library/'Extra e\u0301';folder.mkdir()
++        for index,source in enumerate(self.child['sources']):
++            path=folder/(str(index)+'.mp3');path.write_bytes(Path(source['path']).read_bytes());stat=path.stat()
++            source.update(path=str(path),modified=str(stat.st_mtime_ns),fingerprint={'size':stat.st_size,'modified':str(stat.st_mtime_ns)})
++        with connect(self.db) as db:self.child['publication_reuse']=reuse.derive(db,self.child,self.job_id)
++        self.child['task_kind']=reuse.KIND
++        self.parent_stage={p:p.read_bytes() for p in self.stage.iterdir()}
++    def tearDown(self):RetentionTests.tearDown(self)
++    def completed(self):
++        import publication_reuse as reuse
++        self.queue.enqueue(self.child)
++        with connect(self.db) as db:owners=reuse.resolve(db,self.child)
++        facts=[]
++        for source in self.child['sources']:
++            with VerifiedFile(source['path']) as file:facts.append(dict(file.facts(),path=source['path'],sha256=file.sha256()))
++        result=reuse.verification(owners,facts,None)
++        self.queue._update(self.child['job_id'],state='completed',stage='completed',output=packed(result),journal=packed({'duplicate_verification':result}))
++        return {'job_id':self.child['job_id'],'state':'completed','manifest':self.child,'output':result}
++    def test_complete_source_order_chapter_and_manual_choice_mismatches_refuse(self):
++        import copy,publication_reuse as reuse
++        changes=[lambda m:m['sources'].reverse(),lambda m:m['sources'][0].update(sha256='0'*64),
++            lambda m:m['sources'][0].update(size=1),lambda m:m.update(chapters=['A chapter now requested']),
++            lambda m:m['metadata_facts'].update(work_ids=['different:work']),
++            lambda m:m['metadata_facts'].update(edition={'value':'different edition'}),
++            lambda m:(m['metadata_facts'].update(entered_names={'fields':['title']}),m['metadata'].update(title='A different requested title'))]
++        self.manifest['metadata_facts']['edition']={'value':'original edition'}
++        with connect(self.db) as db:db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=? WHERE job_id=?',(packed(self.manifest),reuse.digest(self.manifest),self.job_id))
++        for change in changes:
++            with self.subTest(change=change):
++                child=copy.deepcopy(self.child);change(child)
++                with connect(self.db) as db,self.assertRaisesRegex(ValueError,'no longer matches'):reuse.derive(db,child,self.job_id)
++        self.assertTrue(all(Path(s['path']).exists() for s in self.child['sources']))
++    def test_parent_record_mutation_and_reuse_chain_refuse(self):
++        import copy,publication_reuse as reuse
++        self.completed()
++        with connect(self.db) as db:
++            changed=copy.deepcopy(self.output);changed['size']+=1
++            db.execute('UPDATE audio_jobs SET output=? WHERE job_id=?',(packed(changed),self.job_id))
++        with self.assertRaises(ValueError):self.storage.cleanup_owners(self.child['job_id'])
++        with connect(self.db) as db:
++            db.execute('UPDATE audio_jobs SET output=? WHERE job_id=?',(packed(self.output),self.job_id))
++            with self.assertRaisesRegex(ValueError,'reuse chain'):reuse.derive(db,self.child,self.child['job_id'])
++    def test_two_eligible_parent_receipts_hold_instead_of_selecting_one(self):
++        import copy,publication_reuse as reuse
++        other=copy.deepcopy(self.manifest);other['job_id']=str(uuid.uuid4());other['candidate_id']=str(uuid.uuid4())
++        self.queue.enqueue(other);out=copy.deepcopy(self.output);out['job_id']=other['job_id']
++        self.queue._update(other['job_id'],state='completed',output=packed(out))
++        with connect(self.db) as db,self.assertRaisesRegex(ValueError,'unambiguous'):reuse.derive(db,self.child,self.job_id)
++    def test_concurrent_admission_is_idempotent_per_source_generation(self):
++        import copy,threading
++        other=copy.deepcopy(self.child);other['job_id']=str(uuid.uuid4());answers=[]
++        def enqueue(manifest):
++            try:answers.append(self.queue.enqueue(manifest))
++            except ValueError:answers.append('refused')
++        threads=[threading.Thread(target=enqueue,args=(manifest,)) for manifest in (self.child,other)]
++        for thread in threads:thread.start()
++        for thread in threads:thread.join(10);self.assertFalse(thread.is_alive())
++        with connect(self.db) as db:
++            self.assertEqual(db.execute('SELECT count(*) FROM duplicate_cleanup_tasks').fetchone()[0],1)
++            self.assertEqual(db.execute('SELECT count(*) FROM audio_jobs').fetchone()[0],2)
++        self.assertEqual(len(answers),2)
++    def test_partial_failure_resumes_only_remaining_child_and_never_parent_staging(self):
++        child=self.completed();cleanup_id=self.source.enroll(child,{})
++        second=self.child['sources'][1]['path'];real=VerifiedFile.dispose
++        def refuse(file):
++            if str(file.path)==second:raise BoundaryError('Private second-source refusal')
++            return real(file)
++        with patch.object(VerifiedFile,'dispose',refuse),self.assertRaisesRegex(BoundaryError,'second-source'):self.source.run(cleanup_id)
++        self.assertFalse(Path(self.child['sources'][0]['path']).exists());self.assertTrue(Path(second).exists())
++        with connect(self.db) as db:self.assertEqual(db.execute('SELECT count(*) FROM source_retirements WHERE job_id=?',(self.child['job_id'],)).fetchone()[0],1)
++        self.source.run(cleanup_id);self.assertEqual(self.source.status(self.child['job_id'])['removed'],2)
++        self.storage.run(self.child['job_id'],include_recovery=True)
++        self.assertEqual({p:p.read_bytes() for p in self.stage.iterdir()},self.parent_stage)
++        self.assertEqual(list((self.source.root/cleanup_id).iterdir()),[])
++        with self.assertRaisesRegex(BoundaryError,'cannot act as a publication owner'):
++            with self.storage.protected_output(self.child['job_id']):pass
++    def test_unknown_absent_source_after_removal_intent_is_never_claimed_removed(self):
++        child=self.completed();cleanup_id=self.source.enroll(child,{})
++        self.source.stop.set();self.source.run(cleanup_id);self.source.stop.clear()
++        source=self.child['sources'][0]
++        with connect(self.db) as db:db.execute("UPDATE cleanup_members SET state='removal_intended' WHERE cleanup_id=? AND path=?",(cleanup_id,source['path']))
++        Path(source['path']).unlink()
++        with self.assertRaisesRegex(BoundaryError,'unknown outcome'):self.source.run(cleanup_id)
++        with connect(self.db) as db:self.assertFalse(db.execute('SELECT 1 FROM source_retirements WHERE job_id=?',(self.child['job_id'],)).fetchone())
++        self.assertTrue(Path(self.child['sources'][1]['path']).exists())
++
++    def test_failed_startup_enrollment_records_inert_attention_without_revalidating_parent(self):
++        from merge_service import MergeService
++        from types import SimpleNamespace
++        child=self.completed();self.queue._update(self.job_id,state='needs attention',reason='Private parent hold')
++        fake=SimpleNamespace(inventory=SimpleNamespace(database=self.db),enroll_cleanup=lambda job:self.storage.cleanup_owners(job),_no_scan=lambda:None)
++        fake._enrollment_attention=lambda job,error:MergeService._enrollment_attention(fake,job,error)
++        MergeService._enroll_completed_without_start(fake,child)
++        receipt=self.source.status(self.child['job_id']);self.assertEqual(receipt['state'],'needs_attention')
++        with connect(self.db) as db:
++            intent=json.loads(db.execute('SELECT intent FROM source_cleanup WHERE job_id=?',(self.child['job_id'],)).fetchone()[0])
++            self.assertTrue(intent['blocked_verification']);self.assertFalse(MergeService._cleanup_guard(fake,db,intent))
++        self.assertTrue(all(Path(source['path']).exists() for source in self.child['sources']))
++
++    def test_parent_relation_is_rechecked_in_copy_disposition_writer_transaction(self):
++        self.completed()
++        with self.storage.protected_cleanup(self.child['job_id']):
++            self.queue._update(self.job_id,state='needs attention',reason='Private concurrent publication change')
++            with self.assertRaisesRegex(ValueError,'not durably completed'):
++                with self.storage._publication_transaction():self.fail('A changed parent must never admit copy disposition')
++        self.assertEqual({path:path.read_bytes() for path in self.stage.iterdir()},self.parent_stage)
++
++    def test_only_old_duplicate_holds_get_one_new_policy_opportunity(self):
++        from automatic_processing import AutomaticProcessing
++        from public_research import RESEARCH_VERSION
++        from types import SimpleNamespace
++        fake=SimpleNamespace()
++        for reason in ('Identical verified recording already arranged — duplicate sources preserved','An audiobook already exists at this path. Review it or choose a different reviewed destination.'):
++            prior={'state':'Held','until_change':True,'reasons':[reason],'research_version':RESEARCH_VERSION}
++            refreshed=AutomaticProcessing._refresh_wait(fake,{},prior)
++            self.assertFalse(refreshed['until_change']);self.assertTrue(prior['until_change'])
++            current=dict(prior,duplicate_cleanup_policy=1)
++            self.assertEqual(AutomaticProcessing._refresh_wait(fake,{},current),current)
++        unrelated={'state':'Held','until_change':True,'reasons':['Possible duplicate recording — original sources preserved'],'research_version':RESEARCH_VERSION}
++        self.assertEqual(AutomaticProcessing._refresh_wait(fake,{},unrelated),unrelated)
++
+ if __name__=='__main__':unittest.main()
+--- a/tests/test_progress_rows.py
++++ b/tests/test_progress_rows.py
+@@ -210,6 +210,12 @@
+ 
+ 
+ class ActivityRowTests(unittest.TestCase):
++    def test_extra_source_activity_keeps_typed_cleanup_identity(self):
++        jobs={'state':'Running','current_title':'Extra','current_task_kind':'duplicate_source_cleanup','progress':{'phase':'checking extra source'}}
++        self.assertEqual(activities(jobs,None,None,None,{},now_ms=1)[0]['task_kind'],'duplicate_source_cleanup')
++        jobs={'attention_row':{'title':'Extra','task_kind':'duplicate_source_cleanup','reason':'Current output changed'}}
++        row=activities(jobs,None,None,None,{},now_ms=1)[0]
++        self.assertEqual((row['task_kind'],row['state']),('duplicate_source_cleanup','attention'))
+     def test_rows_kinds_order_measurements_and_step_start(self):
+         memo={}
+         jobs={'state':'Running','current_title':'Book','progress':{'phase':'normalizing','completed':30,'total':60,'unit':'seconds','item':1,'items':2,'started':111},
+--- a/tests/test_inline_series_frontend.js
++++ b/tests/test_inline_series_frontend.js
+@@ -98,6 +98,12 @@
+  assert.equal(run('namesOpen("cand-inline")'),false,'a stalled read cannot keep Loading these names visible indefinitely');
+  assert.equal(run('namesNotes.get("cand-inline").text'),"Couldn't load this book's names. Press Edit names to try again.");
+  context.fetch=savedFetch;context.setTimeout=savedTimer;
++ context.extraRow={creation:{job:{task_kind:'duplicate_source_cleanup',state:'Extra source removed. Finished audiobook kept.'}},audiobook_ready:false};
++ assert.equal(run('candidateStatus(extraRow)'),'Extra source removed. Finished audiobook kept.');
++ context.extraActivity={kind:'conversion',task_kind:'duplicate_source_cleanup',step:'checking extra source',state:'running'};
++ assert.equal(run('activityLabel(extraActivity)'),'Checking extra source');assert.equal(run('activityStep(extraActivity,false)'),'Checking extra source');
++ context.extraActivity.kind='cleanup';assert.equal(run('activityLabel(extraActivity)'),'Removing extra source');
++ context.extraActivity.state='attention';assert.equal(run('activityLabel(extraActivity)'),'Extra source kept');
+  console.log('inline author/title/series draft, preview, approval and editor reuse: passed');
+ })().catch(error=>{console.error(error);process.exitCode=1;});
+ `;

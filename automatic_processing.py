@@ -135,7 +135,7 @@ class AutomaticProcessing:
     def _record(self,row,state,result=None,retry_at=None):
         # Replay only this local candidate write. Each BEGIN IMMEDIATE retry
         # rereads committed history; never mutate a prior attempt's input/result.
-        supplied=dict(result or {},research_version=RESEARCH_VERSION)
+        supplied=dict(result or {},research_version=RESEARCH_VERSION,duplicate_cleanup_policy=1)
         def persist(db):
             recorded=dict(supplied)
             old=db.execute('SELECT revision,fingerprint,state,result FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
@@ -198,7 +198,7 @@ class AutomaticProcessing:
         result=json.loads(r['result'])
         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
-        return {'state':r['state'],'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
+        return {'state':r['state'],'duplicate_cleanup_policy':result.get('duplicate_cleanup_policy'),'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
                 'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
                 'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0)}
     def _rules_generation(self):
@@ -215,6 +215,10 @@ class AutomaticProcessing:
         if (record.get('rules_generation') or '')==generation:return False
         return rules.changed_for(record) if rules is not None and hasattr(rules,'changed_for') else True
     def _refresh_wait(self,row,previous):
+        if previous and previous['state']=='Held' and previous.get('duplicate_cleanup_policy')!=1:
+            reasons=previous.get('reasons') or []
+            duplicate=any(reason=='Identical verified recording already arranged — duplicate sources preserved' or reason.startswith('An audiobook already exists at this path') for reason in reasons if isinstance(reason,str))
+            if duplicate:return dict(previous,until_change=False,retry_at=None)
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         if previous and previous['state']=='Held' and previous.get('reasons')==['Sources disagree on the title or author'] and (previous.get('metadata_facts') or {}).get('identity_basis')=='local_agreement' and previous.get('local_source_gate_version')!=LOCAL_SOURCE_GATE_VERSION:
             # Narrow policy invalidation only. The normal worker still respects editing leases,

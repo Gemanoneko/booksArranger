@@ -155,4 +155,135 @@ class RetentionTests(unittest.TestCase):
         self.source.restore(self.cleanup_id)
         self.assertTrue(all(Path(s['path']).exists() for s in self.sources))
 
+class DuplicateCleanupOwnersTests(unittest.TestCase):
+    """Native child receipts and immutable parent publication ownership."""
+    def setUp(self):
+        import copy,publication_reuse as reuse
+        RetentionTests.setUp(self)
+        self.manifest['metadata_facts']={'work_ids':['fixture:recording'],'source_fingerprint':'parent-generation','authors':['Author']}
+        self.manifest['cleanup_policy']={'enabled':True}
+        with connect(self.db) as db:db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=? WHERE job_id=?',(packed(self.manifest),reuse.digest(self.manifest),self.job_id))
+        self.child=copy.deepcopy(self.manifest);self.child.update(job_id=str(uuid.uuid4()),candidate_id=str(uuid.uuid4()))
+        self.child['metadata_facts']['source_fingerprint']='extra-generation'
+        folder=self.library/'Extra e\u0301';folder.mkdir()
+        for index,source in enumerate(self.child['sources']):
+            path=folder/(str(index)+'.mp3');path.write_bytes(Path(source['path']).read_bytes());stat=path.stat()
+            source.update(path=str(path),modified=str(stat.st_mtime_ns),fingerprint={'size':stat.st_size,'modified':str(stat.st_mtime_ns)})
+        with connect(self.db) as db:self.child['publication_reuse']=reuse.derive(db,self.child,self.job_id)
+        self.child['task_kind']=reuse.KIND
+        self.parent_stage={p:p.read_bytes() for p in self.stage.iterdir()}
+    def tearDown(self):RetentionTests.tearDown(self)
+    def completed(self):
+        import publication_reuse as reuse
+        self.queue.enqueue(self.child)
+        with connect(self.db) as db:owners=reuse.resolve(db,self.child)
+        facts=[]
+        for source in self.child['sources']:
+            with VerifiedFile(source['path']) as file:facts.append(dict(file.facts(),path=source['path'],sha256=file.sha256()))
+        result=reuse.verification(owners,facts,None)
+        self.queue._update(self.child['job_id'],state='completed',stage='completed',output=packed(result),journal=packed({'duplicate_verification':result}))
+        return {'job_id':self.child['job_id'],'state':'completed','manifest':self.child,'output':result}
+    def test_complete_source_order_chapter_and_manual_choice_mismatches_refuse(self):
+        import copy,publication_reuse as reuse
+        changes=[lambda m:m['sources'].reverse(),lambda m:m['sources'][0].update(sha256='0'*64),
+            lambda m:m['sources'][0].update(size=1),lambda m:m.update(chapters=['A chapter now requested']),
+            lambda m:m['metadata_facts'].update(work_ids=['different:work']),
+            lambda m:m['metadata_facts'].update(edition={'value':'different edition'}),
+            lambda m:(m['metadata_facts'].update(entered_names={'fields':['title']}),m['metadata'].update(title='A different requested title'))]
+        self.manifest['metadata_facts']['edition']={'value':'original edition'}
+        with connect(self.db) as db:db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=? WHERE job_id=?',(packed(self.manifest),reuse.digest(self.manifest),self.job_id))
+        for change in changes:
+            with self.subTest(change=change):
+                child=copy.deepcopy(self.child);change(child)
+                with connect(self.db) as db,self.assertRaisesRegex(ValueError,'no longer matches'):reuse.derive(db,child,self.job_id)
+        self.assertTrue(all(Path(s['path']).exists() for s in self.child['sources']))
+    def test_parent_record_mutation_and_reuse_chain_refuse(self):
+        import copy,publication_reuse as reuse
+        self.completed()
+        with connect(self.db) as db:
+            changed=copy.deepcopy(self.output);changed['size']+=1
+            db.execute('UPDATE audio_jobs SET output=? WHERE job_id=?',(packed(changed),self.job_id))
+        with self.assertRaises(ValueError):self.storage.cleanup_owners(self.child['job_id'])
+        with connect(self.db) as db:
+            db.execute('UPDATE audio_jobs SET output=? WHERE job_id=?',(packed(self.output),self.job_id))
+            with self.assertRaisesRegex(ValueError,'reuse chain'):reuse.derive(db,self.child,self.child['job_id'])
+    def test_two_eligible_parent_receipts_hold_instead_of_selecting_one(self):
+        import copy,publication_reuse as reuse
+        other=copy.deepcopy(self.manifest);other['job_id']=str(uuid.uuid4());other['candidate_id']=str(uuid.uuid4())
+        self.queue.enqueue(other);out=copy.deepcopy(self.output);out['job_id']=other['job_id']
+        self.queue._update(other['job_id'],state='completed',output=packed(out))
+        with connect(self.db) as db,self.assertRaisesRegex(ValueError,'unambiguous'):reuse.derive(db,self.child,self.job_id)
+    def test_concurrent_admission_is_idempotent_per_source_generation(self):
+        import copy,threading
+        other=copy.deepcopy(self.child);other['job_id']=str(uuid.uuid4());answers=[]
+        def enqueue(manifest):
+            try:answers.append(self.queue.enqueue(manifest))
+            except ValueError:answers.append('refused')
+        threads=[threading.Thread(target=enqueue,args=(manifest,)) for manifest in (self.child,other)]
+        for thread in threads:thread.start()
+        for thread in threads:thread.join(10);self.assertFalse(thread.is_alive())
+        with connect(self.db) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM duplicate_cleanup_tasks').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT count(*) FROM audio_jobs').fetchone()[0],2)
+        self.assertEqual(len(answers),2)
+    def test_partial_failure_resumes_only_remaining_child_and_never_parent_staging(self):
+        child=self.completed();cleanup_id=self.source.enroll(child,{})
+        second=self.child['sources'][1]['path'];real=VerifiedFile.dispose
+        def refuse(file):
+            if str(file.path)==second:raise BoundaryError('Private second-source refusal')
+            return real(file)
+        with patch.object(VerifiedFile,'dispose',refuse),self.assertRaisesRegex(BoundaryError,'second-source'):self.source.run(cleanup_id)
+        self.assertFalse(Path(self.child['sources'][0]['path']).exists());self.assertTrue(Path(second).exists())
+        with connect(self.db) as db:self.assertEqual(db.execute('SELECT count(*) FROM source_retirements WHERE job_id=?',(self.child['job_id'],)).fetchone()[0],1)
+        self.source.run(cleanup_id);self.assertEqual(self.source.status(self.child['job_id'])['removed'],2)
+        self.storage.run(self.child['job_id'],include_recovery=True)
+        self.assertEqual({p:p.read_bytes() for p in self.stage.iterdir()},self.parent_stage)
+        self.assertEqual(list((self.source.root/cleanup_id).iterdir()),[])
+        with self.assertRaisesRegex(BoundaryError,'cannot act as a publication owner'):
+            with self.storage.protected_output(self.child['job_id']):pass
+    def test_unknown_absent_source_after_removal_intent_is_never_claimed_removed(self):
+        child=self.completed();cleanup_id=self.source.enroll(child,{})
+        self.source.stop.set();self.source.run(cleanup_id);self.source.stop.clear()
+        source=self.child['sources'][0]
+        with connect(self.db) as db:db.execute("UPDATE cleanup_members SET state='removal_intended' WHERE cleanup_id=? AND path=?",(cleanup_id,source['path']))
+        Path(source['path']).unlink()
+        with self.assertRaisesRegex(BoundaryError,'unknown outcome'):self.source.run(cleanup_id)
+        with connect(self.db) as db:self.assertFalse(db.execute('SELECT 1 FROM source_retirements WHERE job_id=?',(self.child['job_id'],)).fetchone())
+        self.assertTrue(Path(self.child['sources'][1]['path']).exists())
+
+    def test_failed_startup_enrollment_records_inert_attention_without_revalidating_parent(self):
+        from merge_service import MergeService
+        from types import SimpleNamespace
+        child=self.completed();self.queue._update(self.job_id,state='needs attention',reason='Private parent hold')
+        fake=SimpleNamespace(inventory=SimpleNamespace(database=self.db),enroll_cleanup=lambda job:self.storage.cleanup_owners(job),_no_scan=lambda:None)
+        fake._enrollment_attention=lambda job,error:MergeService._enrollment_attention(fake,job,error)
+        MergeService._enroll_completed_without_start(fake,child)
+        receipt=self.source.status(self.child['job_id']);self.assertEqual(receipt['state'],'needs_attention')
+        with connect(self.db) as db:
+            intent=json.loads(db.execute('SELECT intent FROM source_cleanup WHERE job_id=?',(self.child['job_id'],)).fetchone()[0])
+            self.assertTrue(intent['blocked_verification']);self.assertFalse(MergeService._cleanup_guard(fake,db,intent))
+        self.assertTrue(all(Path(source['path']).exists() for source in self.child['sources']))
+
+    def test_parent_relation_is_rechecked_in_copy_disposition_writer_transaction(self):
+        self.completed()
+        with self.storage.protected_cleanup(self.child['job_id']):
+            self.queue._update(self.job_id,state='needs attention',reason='Private concurrent publication change')
+            with self.assertRaisesRegex(ValueError,'not durably completed'):
+                with self.storage._publication_transaction():self.fail('A changed parent must never admit copy disposition')
+        self.assertEqual({path:path.read_bytes() for path in self.stage.iterdir()},self.parent_stage)
+
+    def test_only_old_duplicate_holds_get_one_new_policy_opportunity(self):
+        from automatic_processing import AutomaticProcessing
+        from public_research import RESEARCH_VERSION
+        from types import SimpleNamespace
+        fake=SimpleNamespace()
+        for reason in ('Identical verified recording already arranged — duplicate sources preserved','An audiobook already exists at this path. Review it or choose a different reviewed destination.'):
+            prior={'state':'Held','until_change':True,'reasons':[reason],'research_version':RESEARCH_VERSION}
+            refreshed=AutomaticProcessing._refresh_wait(fake,{},prior)
+            self.assertFalse(refreshed['until_change']);self.assertTrue(prior['until_change'])
+            current=dict(prior,duplicate_cleanup_policy=1)
+            self.assertEqual(AutomaticProcessing._refresh_wait(fake,{},current),current)
+        unrelated={'state':'Held','until_change':True,'reasons':['Possible duplicate recording — original sources preserved'],'research_version':RESEARCH_VERSION}
+        self.assertEqual(AutomaticProcessing._refresh_wait(fake,{},unrelated),unrelated)
+
 if __name__=='__main__':unittest.main()

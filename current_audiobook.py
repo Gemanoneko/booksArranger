@@ -80,6 +80,7 @@ class CurrentAudiobooks:
         return result
 
     def publication(self,jobs,candidate):
+        jobs=[job for job in jobs if not __import__('publication_reuse').task(job['manifest'])]
         parent,relation=self.replacements.representative(jobs,candidate)
         if not parent:return None
         if relation and relation['state'] in {'published','retiring','completed'}:

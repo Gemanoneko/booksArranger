@@ -1,0 +1,25 @@
+test_identical_extra_source_uses_existing_publication_without_conversion (test_automatic_media.AutomaticMediaTests.test_identical_extra_source_uses_existing_publication_without_conversion)
+Real automatic admission, real first codec run, native child cleanup. ... ERROR
+
+======================================================================
+ERROR: test_identical_extra_source_uses_existing_publication_without_conversion (test_automatic_media.AutomaticMediaTests.test_identical_extra_source_uses_existing_publication_without_conversion)
+Real automatic admission, real first codec run, native child cleanup.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\converted-duplicate-20261104\baseline-d9c0da2\tests\test_automatic_media.py", line 88, in test_identical_extra_source_uses_existing_publication_without_conversion
+    _,child_id=self.service.approve_automatic(current,research,threading.Event(),self.client);self.wait()
+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\converted-duplicate-20261104\baseline-d9c0da2\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\converted-duplicate-20261104\baseline-d9c0da2\merge_service.py", line 4161, in approve_automatic
+    self._recording_review(gate_row,result,stop)  # the files being converted
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\converted-duplicate-20261104\baseline-d9c0da2\merge_service.py", line 4794, in _recording_review
+    raise ValueError('Identical verified recording already arranged — duplicate sources preserved')
+ValueError: Identical verified recording already arranged — duplicate sources preserved
+
+----------------------------------------------------------------------
+Ran 1 test in 10.976s
+
+FAILED (errors=1)

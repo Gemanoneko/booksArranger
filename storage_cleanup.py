@@ -161,6 +161,8 @@ class StorageCleanup:
         if str(uuid.UUID(job_id)) != job_id:
             raise BoundaryError('Invalid completed job identity')
         m = json.loads(row['manifest']); out = json.loads(row['output'])
+        import publication_reuse
+        if publication_reuse.task(m):raise BoundaryError('Duplicate cleanup requires distinct publication and cleanup owners')
         if hashlib.sha256(packed(m).encode('utf-8')).hexdigest() != row['manifest_hash']:
             raise BoundaryError('Completed manifest identity changed')
         if out['job_id'] != job_id or out['validation'].get('passed') is not True:
@@ -178,18 +180,42 @@ class StorageCleanup:
                 raise BoundaryError('Legacy output checks do not match the recorded output')
         return m, out
 
+    def cleanup_owners(self,job_id):
+        """Explicit child cleanup and parent publication facts, never retagged output."""
+        import publication_reuse
+        with connect(self.database) as db:
+            row=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+            if not row or row['state']!='completed':raise BoundaryError('Only completed verification can discard recovery copies')
+            manifest=json.loads(row['manifest'])
+            if publication_reuse.task(manifest):
+                if publication_reuse.digest(manifest)!=row['manifest_hash']:raise BoundaryError('Duplicate cleanup manifest changed')
+                owners=publication_reuse.checked_result(db,manifest,json.loads(row['output']),job_id)
+                from source_cleanup import CleanupJobs
+                CleanupJobs._validation_contract(owners['parent_manifest'],owners['parent_output'])
+                return owners
+        manifest,output=self._job(job_id)
+        return {'schema':'books-original-cleanup-owners-v1','cleanup_job_id':job_id,'manifest':manifest,'parent_manifest':manifest,'parent_output':output}
+
     @contextlib.contextmanager
-    def protected_output(self, job_id, guard=None):
+    def protected_output(self,job_id,guard=None):
+        # Existing publication/working consumers keep the ordinary ownership contract.
+        with self.protected_cleanup(job_id,guard) as owners:
+            import publication_reuse
+            if publication_reuse.task(owners['manifest']):raise BoundaryError('A cleanup-only task cannot act as a publication owner')
+            yield owners['manifest'],owners['parent_output']
+
+    @contextlib.contextmanager
+    def protected_cleanup(self, job_id, guard=None):
         (guard or self.guard)()
-        m, original = self._job(job_id)
-        frozen_root=ordinary(m.get('output_root',m['root']))
-        if ordinary(original.get('root',str(frozen_root)))!=frozen_root or ordinary(original['final_path'])!=ordinary(m['destination']):
+        owners=self.cleanup_owners(job_id);publication=owners['parent_manifest'];original=owners['parent_output']
+        frozen_root=ordinary(publication.get('output_root',publication['root']))
+        if ordinary(original.get('root',str(frozen_root)))!=frozen_root or ordinary(original['final_path'])!=ordinary(publication['destination']):
             raise BoundaryError('Frozen publication provenance changed')
         out,envelope=self.output_location(original) if self.output_location else (original,None)
         root=ordinary(out.get('root',str(frozen_root)));final=ordinary(out['final_path'])
         if not final.is_relative_to(root) or final.suffix.lower()!='.m4b':raise BoundaryError('Completed output destination changed')
-        prior=getattr(self._location_local,'publication',None);prior_effective=getattr(self._location_local,'effective',None)
-        self._location_local.publication=(original,envelope);self._location_local.effective=out
+        prior=getattr(self._location_local,'publication',None);prior_effective=getattr(self._location_local,'effective',None);prior_owners=getattr(self._location_local,'cleanup_owners',None)
+        self._location_local.publication=(original,envelope);self._location_local.effective=out;self._location_local.cleanup_owners=owners
         try:
             with DirectoryBoundary(root,final.parent) as ancestry,VerifiedFile(final) as handle:
                 if out.get('identity') is not None and handle.facts()['identity']!=out['identity']:raise BoundaryError('Relocated output native identity changed; copies retained')
@@ -197,18 +223,26 @@ class StorageCleanup:
                 value=hashlib.sha256()
                 for block in handle.chunks():(guard or self.guard)();value.update(block)
                 if handle.facts()['size']!=out['size'] or value.hexdigest()!=out['sha256']:raise BoundaryError('Completed output bytes changed; copies retained')
-                yield m,original
-        finally:self._location_local.publication=prior;self._location_local.effective=prior_effective
+                yield owners
+        finally:self._location_local.publication=prior;self._location_local.effective=prior_effective;self._location_local.cleanup_owners=prior_owners
 
     @contextlib.contextmanager
     def _publication_transaction(self):
         current=getattr(self._location_local,'publication',None)
-        if not self.output_location_guard or current is None:
+        owners=getattr(self._location_local,'cleanup_owners',None)
+        duplicate=bool(owners and __import__('publication_reuse').task(owners['manifest']))
+        if current is None or not self.output_location_guard and not duplicate:
             yield None;return
         original,envelope=current
         with connect(self.database) as db:
             db.execute('BEGIN IMMEDIATE')
-            if not self.output_location_guard(db,original,envelope,require_transaction=True):raise BoundaryError('Current publication changed before copy disposition')
+            if duplicate:
+                import publication_reuse
+                child=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(owners['cleanup_job_id'],)).fetchone()
+                if not child or child['state']!='completed' or json.loads(child['manifest'])!=owners['manifest'] or child['manifest_hash']!=publication_reuse.digest(owners['manifest']):raise BoundaryError('Duplicate cleanup owner changed before copy disposition')
+                current_owners=publication_reuse.checked_result(db,owners['manifest'],json.loads(child['output']),owners['cleanup_job_id'])
+                if current_owners!=owners:raise BoundaryError('Duplicate publication relation changed before copy disposition')
+            if self.output_location_guard and not self.output_location_guard(db,original,envelope,require_transaction=True):raise BoundaryError('Current publication changed before copy disposition')
             for derived in getattr(self._location_local,'derived_publications',()):
                 if not self.repair_location_guard or not self.repair_location_guard(db,derived['original'],derived['envelope'],kind=derived['kind'],repair_journal_sha256=derived['journal_sha256'],require_transaction=True):raise BoundaryError('Authorized repaired publication changed before copy disposition')
             prior=getattr(self._location_local,'disposal_db',None);self._location_local.disposal_db=db
@@ -534,7 +568,9 @@ class StorageCleanup:
         Startup remains inactive. Explicit resume checks completed jobs, including
         retirement attention, without repeatedly hashing already disposed media.
         """
-        manifest,output=self._job(job_id)
+        owners=self.cleanup_owners(job_id);manifest=owners['manifest'];output=owners['parent_output']
+        import publication_reuse
+        if publication_reuse.task(manifest):return False  # This task never owned a media producer or staging files.
         recorded=output['validation'].get('staging_artifacts',{})
         attempt_id=recorded.get('attempt_id')
         if not attempt_id:return False  # No exact producer receipt, no candidate.
@@ -558,7 +594,10 @@ class StorageCleanup:
         selected; publication and native byte/name/stream guards stay mandatory.
         This never satisfies the full staging/retirement/Ready obligation.
         """
-        with self.protected_output(job_id) as (manifest, output):
+        with self.protected_cleanup(job_id) as owners:
+            manifest=owners['manifest'];output=owners['parent_output']
+            import publication_reuse
+            if publication_reuse.task(manifest):raise BoundaryError('Extra-source cleanup has no producer working files')
             recorded = output['validation'].get('staging_artifacts', {})
             attempt_id = recorded.get('attempt_id')
             if not attempt_id or str(uuid.UUID(attempt_id)) != attempt_id:
@@ -617,7 +656,8 @@ class StorageCleanup:
         output_hash = ''
         self._phase='verify completed output';self._disposition='not_started'
         try:
-            with self.protected_output(job_id) as (manifest, output):
+            with self.protected_cleanup(job_id) as owners:
+                manifest=owners['manifest'];output=owners['parent_output']
                 output_hash = output['sha256']
                 previous = next((r for r in self.status() if r['job_id'] == job_id), None)
                 if previous and previous['state'] == 'completed' and previous['output_hash'] == output_hash:
@@ -628,7 +668,8 @@ class StorageCleanup:
                     self._phase='verify source retirement'
                     cleanup, members = self._source_safety(stack, job_id, manifest, output)
                     self._phase='verify staging'
-                    targets = self._staging(stack, job_id, manifest, output)
+                    import publication_reuse
+                    targets = [] if publication_reuse.task(manifest) else self._staging(stack, job_id, manifest, output)
                     if cleanup and include_recovery:
                         recovery_dir=self.recovery_root/cleanup['id']
                         stack.enter_context(DirectoryBoundary(self.recovery_root.anchor,recovery_dir))
@@ -682,7 +723,7 @@ class StorageCleanup:
 
     def _folder_obligations(self, job_id, manifest, output):
         """Require the existing exact retirement and completed copy-purge proofs."""
-        current_m,current_out=self._job(job_id)
+        owners=self.cleanup_owners(job_id);current_m=owners['manifest'];current_out=owners['parent_output']
         if current_m!=manifest or current_out!=output:raise BoundaryError('Completed folder-cleanup provenance changed')
         with connect(self.database) as db:
             row=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
@@ -962,7 +1003,7 @@ class StorageCleanup:
     def _root_reachable(self, job_id):
         """The library folder the book's job came from can be listed now (ruling 77b: Z: or the NAS away is no outcome)."""
         try:
-            manifest,_output=self._job(job_id)
+            manifest=self.cleanup_owners(job_id)['manifest']
             root=manifest['root']
             with os.scandir(root) as listing:next(listing,None)
             return True
@@ -983,7 +1024,7 @@ class StorageCleanup:
         with connect(self.database) as db:
             rows=[(r[0],r[1]) for r in db.execute('SELECT path,state FROM source_folder_cleanup_directories WHERE job_id=? AND state IN (%s)' % ','.join('?'*len(states)),(job_id,*states))]
             prior=db.execute('SELECT * FROM source_folder_cleanup_jobs WHERE job_id=?',(job_id,)).fetchone()
-        manifest,_output=self._job(job_id)
+        manifest=self.cleanup_owners(job_id)['manifest']
         own={ordinary(source['path']).parent for source in manifest['sources']}
         present=[]
         for path,_state in rows:
@@ -1025,7 +1066,7 @@ class StorageCleanup:
             # Cheap immutable provenance checks precede a full output hash. Known refusals
             # must not re-read gigabytes on each Start/retention wake. Full verification
             # still happens before any file or directory disposal.
-            manifest,output=self._job(job_id);output_hash=output['sha256']
+            owners=self.cleanup_owners(job_id);manifest=owners['manifest'];output=owners['parent_output'];output_hash=output['sha256']
             self._folder_obligations(job_id,manifest,output)
             candidates=self._folder_candidates(manifest)
             self._check_current_roots(candidates)
@@ -1033,7 +1074,8 @@ class StorageCleanup:
                 prior={ordinary(r[0]) for r in db.execute('SELECT path FROM source_folder_cleanup_directories WHERE job_id=?',(job_id,))}
             if not prior.issubset(set(candidates)):raise BoundaryError('Source-folder receipt escaped approved source provenance')
             self._reconcile_removed_files(job_id)
-            with self.protected_output(job_id) as (manifest,output):
+            with self.protected_cleanup(job_id) as owners:
+                manifest=owners['manifest'];output=owners['parent_output']
                 self._folder_obligations(job_id,manifest,output)
                 self._check_current_roots(candidates)
                 self._folder_set(job_id,output_hash,'checking')

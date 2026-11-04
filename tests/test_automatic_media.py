@@ -67,6 +67,92 @@ class AutomaticMediaTests(unittest.TestCase):
         self.assertTrue(self.service.reviews._context(fresh)['automatic_approval']);self.assertFalse(self.service.reviews._context(fresh).get('automatic_pending'))
         self.assertTrue(self.service._output_valid(job['output']))
         self.assertFalse(any(p.suffix in ('.stdout','.stderr') for p in self.service.reviews.cache.iterdir()))
+
+    def test_identical_extra_source_uses_existing_publication_without_conversion(self):
+        """Real automatic admission, real first codec run, native child cleanup."""
+        import hashlib
+        from scanner import connect
+        originals=[source.read_bytes() for source in self.sources]
+        row,result=self.result();_,parent_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
+        parent=next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==parent_id)
+        with connect(self.inv.database) as db:before=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone())
+        final=Path(parent['output']['final_path']);output_bytes=final.read_bytes()
+        extra=self.audio/'Extra e\u0301';extra.mkdir()
+        duplicate=[]
+        for index,data in enumerate(originals,1):
+            path=extra/(str(index).zfill(2)+'.mp3');path.write_bytes(data);duplicate.append(path)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
+        rows=self.service.reviews.page()['rows'];current=next(row for row in rows if any(m['path']==str(duplicate[0]) for m in row['members']))
+        research=PublicResearch(self.client).lookup(current,str(self.audio));self.assertEqual(research['reasons'],[])
+        with patch.object(self.service,'_run_media',side_effect=AssertionError('Duplicate must never convert or publish')):
+            _,child_id=self.service.approve_automatic(current,research,threading.Event(),self.client);self.wait()
+        child=next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==child_id)
+        self.assertEqual(child['state'],'completed',child)
+        self.assertEqual(child['manifest']['task_kind'],'duplicate_source_cleanup')
+        self.assertEqual(child['output']['schema'],'books-duplicate-verification-v1')
+        self.assertNotIn('publication_intent',json.loads(self.service.jobs._rows('SELECT journal FROM audio_jobs WHERE job_id=?',(child_id,))[0]['journal']))
+        cleanup=self.service.cleanup.status(child_id);self.assertEqual(cleanup['state'],'completed',cleanup)
+        self.assertEqual(cleanup['removed'],2);self.assertTrue(all(not source.exists() for source in duplicate))
+        self.assertEqual(final.read_bytes(),output_bytes);self.assertEqual(hashlib.sha256(output_bytes).hexdigest(),parent['output']['sha256'])
+        with connect(self.inv.database) as db:
+            self.assertEqual(dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()),before)
+            self.assertFalse(db.execute("SELECT 1 FROM owned_artifacts WHERE job_id=? AND kind='output'",(child_id,)).fetchone())
+        self.assertEqual(self.service.state()['converted_total'],1)
+
+    def test_single_m4b_unicode_duplicate_of_inplace_parent_has_its_own_recovery(self):
+        import copy,hashlib
+        from native_io import VerifiedFile,BoundaryError
+        from scanner import connect
+        for source in self.sources:source.unlink()
+        original_folder=self.audio/'Original';original_folder.mkdir()
+        old=original_folder/'Неисповедимыи\u0306 путь 2.m4b'
+        subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=1.5','-i',str(self.cover_path),'-map','0:a','-map','1:v','-c:a','aac','-b:a','64k','-ar','44100','-ac','1','-c:v','png','-disposition:v','attached_pic','-metadata','title=A Book','-metadata','album=A Book','-metadata','artist=John Writer',str(old)],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        original=old.read_bytes();old_identity=old.stat().st_ino
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
+        row=next(row for row in self.service.reviews.page()['rows'] if any(m['path']==str(old) for m in row['members']))
+        result=PublicResearch(self.client).lookup(row,str(self.audio));self.assertEqual(result['reasons'],[])
+        _,parent_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
+        parent=next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==parent_id)
+        self.assertEqual(parent['output']['validation'].get('publication_mode'),'in_place')
+        self.assertFalse(old.exists());self.assertEqual(self.service.cleanup.status(parent_id)['state'],'completed')
+        with connect(self.inv.database) as db:before=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone())
+        final=Path(parent['output']['final_path']);finished=final.read_bytes()
+        extra=original_folder/'Неисповедимый путь 2.m4b';extra.write_bytes(original)
+        self.assertNotEqual(extra.stat().st_ino,old_identity)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
+        current=next(row for row in self.service.reviews.page()['rows'] if any(m['path']==str(extra) for m in row['members']))
+        research=PublicResearch(self.client).lookup(current,str(self.audio));self.assertEqual(research['reasons'],[])
+        with patch.object(self.service,'_run_media',side_effect=AssertionError('No second producer')),patch.object(self.service.jobs,'after_completed',None):
+            _,child_id=self.service.approve_automatic(current,research,threading.Event(),self.client);self.wait()
+        child=next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==child_id);self.assertEqual(child['state'],'completed',child)
+        cleanup_id=self.service.enroll_cleanup(child_id)['cleanup_id']
+        # Known changed output refuses before any extra-source disposition.
+        final.write_bytes(b'changed finished output')
+        with self.assertRaisesRegex(BoundaryError,'changed or unavailable'):self.service.cleanup.run(cleanup_id)
+        self.assertEqual(extra.read_bytes(),original)
+        final.write_bytes(finished)
+        # Same path/size/time but changed source bytes also refuse.
+        stat=extra.stat();extra.write_bytes(b'x'*len(original));__import__('os').utime(extra,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+        with self.assertRaisesRegex(BoundaryError,'Original bytes differ'):self.service.cleanup.run(cleanup_id)
+        self.assertTrue(extra.exists());extra.write_bytes(original);__import__('os').utime(extra,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+        # Cancel keeps the source and its verified child recovery; Resume uses it.
+        self.service.cleanup.stop.set();self.service.cleanup.run(cleanup_id);self.service.cleanup.stop.clear()
+        self.assertTrue(extra.exists());self.assertEqual(self.service.cleanup.status(child_id)['removed'],0)
+        with connect(self.inv.database) as db:
+            member=dict(db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(cleanup_id,)).fetchone())
+            self.assertEqual(member['state'],'backup_verified');self.assertTrue(member['backup_facts'])
+            intent=json.loads(db.execute('SELECT intent FROM source_cleanup WHERE id=?',(cleanup_id,)).fetchone()[0])
+            self.assertEqual(intent['cleanup_mode'],'duplicate_backup_removal')
+        self.assertEqual(Path(member['backup']).read_bytes(),original)
+        self.service.cleanup.run(cleanup_id);self.assertFalse(extra.exists())
+        self.assertEqual(self.service.cleanup.status(child_id)['removed'],1)
+        self.assertEqual(final.read_bytes(),finished)
+        self.service.cleanup.restore(cleanup_id);self.assertEqual(extra.read_bytes(),original)
+        self.assertEqual(self.service.cleanup.status(child_id)['state'],'needs_attention')
+        self.assertEqual(final.read_bytes(),finished)
+        with connect(self.inv.database) as db:self.assertEqual(dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()),before)
+        self.assertTrue(self.service._output_valid(parent['output']))
+        self.assertEqual(self.service.state()['converted_total'],1)
     def test_independent_catalog_to_actual_verified_publication_and_ready_without_manual_step(self):
         from test_public_work_identity import FallbackFixture,cap_fantlab
         fixture=FallbackFixture(self.cover);client=PublicClient(self.inv.database,fetch=fixture.fetch);cap_fantlab(self.inv.database,time.time())

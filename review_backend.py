@@ -845,7 +845,7 @@ class CandidateReviewService:
             raise
         finally:activity.pop(row['id'],None)
 
-    def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None,held=None):
+    def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None,held=None,reuse_parent=None):
         """held (0.21.0 in-place publication only): {normcase path: {'sha256','source_chapters'}} for a source the
         converting job holds deny-writers after proving its reviewed bytes in full; its metadata edit changes size."""
         import reacquire_sources,source_proofs
@@ -854,7 +854,14 @@ class CandidateReviewService:
             held=held or {}
             # ready=False: the converter's revision guard (_guard) runs this up to four times per book under group_lock (F31).
             row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job,allow_automatic_pending=allow_automatic_pending,held=held,ready=False);ctx=self._context(row)
-            if not row['creation']['can_create']:raise ValueError('; '.join(row['creation']['reasons']))
+            reasons=list(row['creation']['reasons'])
+            if reuse_parent:
+                # Internal typed admission only: this never authorizes publication
+                # at an occupied name. Complete byte/identity correspondence below
+                # must produce a cleanup-only manifest before it can be queued.
+                collision='An audiobook already exists at this path. Review it or choose a different reviewed destination.'
+                reasons=[reason for reason in reasons if reason!=collision]
+            if reasons:raise ValueError('; '.join(reasons))
             members={m['member_key']:m for m in row['members']};sources=[]
             for key in row['track_order']:
                 if key not in row['included']:continue
@@ -904,5 +911,10 @@ class CandidateReviewService:
                         for part in plan:
                             if part.get('terminal_end_correction') is None:part.pop('terminal_end_correction',None)
                         if any(part['chapters'] for part in plan):manifest['part_chapters']=plan
+            if reuse_parent:
+                import publication_reuse
+                with connect(self.inventory.database) as db:
+                    manifest['publication_reuse']=publication_reuse.derive(db,manifest,reuse_parent)
+                manifest['task_kind']=publication_reuse.KIND
             with connect(self.inventory.database) as db:__import__('admission_diagnostics').clear(db,row)
             return manifest

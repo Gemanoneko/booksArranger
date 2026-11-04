@@ -1057,6 +1057,7 @@ function checkActivities(list,jobs){
 const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
 const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
 function activityLabel(row){
+  if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
   if(row.kind==='chapter')return 'Checking source audio';
   if(row.kind==='admission')return row.state==='pausing'?'Pausing start checks…':'Checking pending audiobook work';
   if(row.kind==='maintenance')return row.state==='pausing'?'Stopping finished-book checks…':'Checking finished books';
@@ -1067,6 +1068,7 @@ function activityLabel(row){
   return row.step==='researching'?'Researching books':'Scanning files';
 }
 function activityStep(row,finishing){
+  if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
   let step;
   if(row.kind==='chapter')return 'Checking the complete audio before correcting the final chapter end.';
   if(row.kind==='admission' || row.kind==='maintenance')return row.step_text || (row.kind==='admission'?'Checking pending audiobook work':'Checking finished books');
@@ -2566,6 +2568,7 @@ function technicalText(row){
   return 'Technical detail: '+(facts || rawReasons(row).join('; ') || 'Unavailable')+folder+(details.length?' — '+details.join(' '):'');
 }
 function candidateStatus(row){
+  const extra=row.creation?.job;if(extra?.task_kind==='duplicate_source_cleanup')return extra.state || 'Checking extra source';
   const identityStatus=cleanupIdentityText(row);if(identityStatus)return identityStatus.status;
   const ask=askText(row);if(ask)return askDone.has(row.id) && ASK_DONE[askDone.get(row.id)]?.[0] || ask.status;
   const attention=attentionText(row);if(attention)return attention.status;

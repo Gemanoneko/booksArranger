@@ -182,6 +182,7 @@ class SeriesBackfill:
         result = []
         for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY updated,job_id"):
             manifest = json.loads(row['manifest'])
+            if __import__('publication_reuse').task(manifest):continue
             review = manifest.get('metadata') or {}
             entry = entries.get(row['job_id'])
             record = json.loads(entry['record']) if entry else {}
@@ -305,6 +306,7 @@ class SeriesBackfill:
         job_id = row['job_id']
         manifest = json.loads(row['manifest'])
         output = json.loads(row['output'])
+        if __import__('publication_reuse').task(manifest):return 'Extra-source cleanup does not own the finished audiobook'
         if manifest.get('replacement_id') or manifest.get('replacement_parent_job_id'):
             return 'Part of a replacement; left as it is'
         with connect(self.database) as db:

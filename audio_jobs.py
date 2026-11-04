@@ -16,7 +16,7 @@ import retry_refusal
 import destination_admission
 
 
-STAGES = {"checking sources", "creating", "checking", "copying", "publishing"}
+STAGES = {"checking sources", "creating", "checking", "copying", "publishing", "checking extra source", "verified existing audiobook"}
 # Measured progress a running attempt may report, per journal stage: step -> unit. Not journaled.
 MEASURED = {"checking sources": {"preparing": "files", "source copies": "bytes", "checking audio": "seconds",
                                  "matching format": "seconds", "normalizing": "seconds", "joined audio": "seconds"},
@@ -464,6 +464,11 @@ class AudioJobs:
             db.execute("UPDATE audio_jobs SET " + ",".join(key + "=?" for key in fields) + " WHERE job_id=?", (*fields.values(), job_id))
 
     def _check_output(self, record, routine=False, stop=None, pace=None):
+        import publication_reuse
+        if publication_reuse.result(record):
+            validator=getattr(self,'reuse_validator',None)
+            if not callable(validator) or validator(copy.deepcopy(record),stop=stop,pace=pace) is not True:raise ValueError('Existing publication verification is unavailable')
+            return
         self._validate_record(record)
         if routine and self.output_current is not None:
             valid = self.output_current(copy.deepcopy(record), stop, pace)
@@ -530,10 +535,15 @@ class AudioJobs:
         an exact authorized former-output retirement as history. A stop is raised, never a verdict.
         """
         journal = json.loads(row["journal"])
-        record = json.loads(row["output"]) if row["output"] else journal.get("publication_intent")
+        manifest=json.loads(row['manifest'])
+        import publication_reuse
+        reused=publication_reuse.task(manifest)
+        record = json.loads(row["output"]) if row["output"] else journal.get("duplicate_verification") if reused else journal.get("publication_intent")
         try:
             self._check_output(record, routine, stop, pace)
-            if record["job_id"] != row["job_id"]:
+            if reused:
+                if not publication_reuse.result(record) or record['cleanup_job_id']!=row['job_id'] or record!=journal.get('duplicate_verification'):raise ValueError('Cleanup verification identity mismatch')
+            elif record["job_id"] != row["job_id"]:
                 raise ValueError("Output job identity mismatch")
             if row["state"] != 'completed' or json.loads(row['output'] or '{}') != record:
                 return {"state": "completed", "stage": "completed", "output": json.dumps(record), "reason": ""}
@@ -712,6 +722,8 @@ class AudioJobs:
                     context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(id,)).fetchone()
                     if not group or not context or group[0]!=revision or context[0]!=revision or json.loads(context[1])!=expected:raise ValueError('Automatic approval checkpoint changed')
                     db.execute('UPDATE candidate_context SET data=? WHERE id=? AND revision=?',(json.dumps(approved,ensure_ascii=False,allow_nan=False),id,revision))
+                import publication_reuse
+                if publication_reuse.task(frozen):publication_reuse.admit(db,frozen)
                 db.execute("INSERT INTO audio_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (frozen["job_id"], encoded, digest, "pending", "queued", None, "{}", None, "", timestamp, timestamp))
             return frozen["job_id"]
 
@@ -1171,7 +1183,9 @@ class AudioJobs:
         current = None
         for row in rows:
             if row["state"] == "pending": counts["queued"] += 1
-            elif row["state"] == "completed": counts["completed"] += 1
+            elif row["state"] == "completed":
+                import publication_reuse
+                if not publication_reuse.task(json.loads(row['manifest'])):counts["completed"] += 1
             elif row["state"] == "needs attention": counts["failed"] += 1
             elif row["state"] == "running": current = row
         running = bool(self._thread and self._thread.is_alive())
@@ -1312,16 +1326,18 @@ class AudioJobs:
         """Exactly one prior work-loop body, inside its retained admission capability."""
         job_id = row["job_id"]
         manifest = json.loads(row["manifest"])
+        import publication_reuse
+        reused=publication_reuse.task(manifest)
         try:
             import inplace_m4b
-            inplace_m4b.clear(self.database, manifest)
+            if not reused:inplace_m4b.clear(self.database, manifest)
         except Exception as error:
             self._update(job_id, state='needs attention', reason=str(error) or type(error).__name__)
             return True  # this source stays journaled; other books continue
         try:
             import reacquire_sources
             with self._db() as db:reacquire_sources.require_admission(db,manifest['candidate_id'])
-            if self.before_attempt:self.before_attempt(copy.deepcopy(row))
+            if self.before_attempt and not reused:self.before_attempt(copy.deepcopy(row))
             self._archive_attempt(row)
         except Exception as error:
             self._update(job_id,state='needs attention',reason='Working cleanup requires attention: '+str(error))
@@ -1360,7 +1376,12 @@ class AudioJobs:
                 self._progress[job_id]={'attempt_id':attempt,'phase':stage,'started':self._step_started(job_id,attempt,stage)}
                 if isinstance(details,dict) and isinstance(details.get('chapter_check'),dict):self._progress[job_id]['chapter_check']=copy.deepcopy(details['chapter_check'])
             entry = {"stage": stage, "at": _now(), "details": details}
+            if stage=='verified existing audiobook':
+                if not reused or not publication_reuse.result(details) or details.get('cleanup_job_id')!=job_id:raise ValueError('Invalid existing-publication verification result')
+                self._check_output(details)
+                journal['duplicate_verification']=copy.deepcopy(details)
             if stage == "publishing":
+                if reused:raise ValueError('Duplicate cleanup cannot publish')
                 if self._stop.is_set(): raise InterruptedError("Paused before publication")
                 if self.revision_guard(copy.deepcopy(manifest)) is not True:
                     raise ValueError(REVISION_GUARD_REFUSAL)
@@ -1381,7 +1402,7 @@ class AudioJobs:
                 runner_manifest = copy.deepcopy(manifest)
                 runner_manifest["attempt_id"] = attempt
                 record = self.runner(runner_manifest, self._stop, checkpoint)
-                intent = journal.get("publication_intent")
+                intent = journal.get("duplicate_verification") if reused else journal.get("publication_intent")
                 if intent is None or record != intent:
                     raise ValueError("Runner completion does not match durable publication intent")
                 self._check_output(record)
@@ -1408,7 +1429,7 @@ class AudioJobs:
                         return False # Preserve the rest of the queue without producing more attempts.
         finally:
             proofs.close()  # fingerprints never outlive the attempt (cleanup proofs always hash in full)
-            if self.after_attempt:
+            if self.after_attempt and not reused:
                 try:
                     self.after_attempt(job_id,attempt)
                     attempt_closed=True

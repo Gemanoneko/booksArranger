@@ -1,0 +1,24 @@
+test_complete_source_order_chapter_and_manual_choice_mismatches_refuse (test_storage_cleanup.DuplicateCleanupOwnersTests.test_complete_source_order_chapter_and_manual_choice_mismatches_refuse) ... ok
+test_concurrent_admission_is_idempotent_per_source_generation (test_storage_cleanup.DuplicateCleanupOwnersTests.test_concurrent_admission_is_idempotent_per_source_generation) ... ok
+test_failed_startup_enrollment_records_inert_attention_without_revalidating_parent (test_storage_cleanup.DuplicateCleanupOwnersTests.test_failed_startup_enrollment_records_inert_attention_without_revalidating_parent) ... ok
+test_only_old_duplicate_holds_get_one_new_policy_opportunity (test_storage_cleanup.DuplicateCleanupOwnersTests.test_only_old_duplicate_holds_get_one_new_policy_opportunity) ... ok
+test_parent_record_mutation_and_reuse_chain_refuse (test_storage_cleanup.DuplicateCleanupOwnersTests.test_parent_record_mutation_and_reuse_chain_refuse) ... ok
+test_parent_relation_is_rechecked_in_copy_disposition_writer_transaction (test_storage_cleanup.DuplicateCleanupOwnersTests.test_parent_relation_is_rechecked_in_copy_disposition_writer_transaction) ... ok
+test_partial_failure_resumes_only_remaining_child_and_never_parent_staging (test_storage_cleanup.DuplicateCleanupOwnersTests.test_partial_failure_resumes_only_remaining_child_and_never_parent_staging) ... ok
+test_two_eligible_parent_receipts_hold_instead_of_selecting_one (test_storage_cleanup.DuplicateCleanupOwnersTests.test_two_eligible_parent_receipts_hold_instead_of_selecting_one) ... ok
+test_unknown_absent_source_after_removal_intent_is_never_claimed_removed (test_storage_cleanup.DuplicateCleanupOwnersTests.test_unknown_absent_source_after_removal_intent_is_never_claimed_removed) ... ok
+test_cleanup_temporary_scan_and_indeterminate_rows (test_progress_rows.ActivityRowTests.test_cleanup_temporary_scan_and_indeterminate_rows) ... ok
+test_extra_source_activity_keeps_typed_cleanup_identity (test_progress_rows.ActivityRowTests.test_extra_source_activity_keeps_typed_cleanup_identity) ... ok
+test_research_pass_counts_this_pass (test_progress_rows.ActivityRowTests.test_research_pass_counts_this_pass) ... ok
+test_rows_kinds_order_measurements_and_step_start (test_progress_rows.ActivityRowTests.test_rows_kinds_order_measurements_and_step_start) ... ok
+AutomaticTests (unittest.loader._FailedTest.AutomaticTests) ... ERROR
+
+======================================================================
+ERROR: AutomaticTests (unittest.loader._FailedTest.AutomaticTests)
+----------------------------------------------------------------------
+AttributeError: module 'test_automatic_processing' has no attribute 'AutomaticTests'
+
+----------------------------------------------------------------------
+Ran 14 tests in 1.653s
+
+FAILED (errors=1)

@@ -200,8 +200,14 @@ class CleanupJobs:
     def enroll(self,job,binding,historical=False):
         if job['state']!='completed':raise ValueError('Only a completed validated audiobook can remove its sources')
         manifest=job['manifest'];output=job['output']
+        import publication_reuse
+        duplicate=publication_reuse.task(manifest)
+        if duplicate:
+            with connect(self.database) as db:owners=publication_reuse.checked_result(db,manifest,output,job['job_id'])
+            output=owners['parent_output']
+            self._validation_contract(owners['parent_manifest'],output)
         if output['validation'].get('passed') is not True or not manifest['sources']:raise ValueError('Complete output validation is required')
-        self._validation_contract(manifest,output)
+        if not duplicate:self._validation_contract(manifest,output)
         root=ordinary(manifest['root']);paths=[]
         for source in manifest['sources']:
             path=ordinary(source['path'])
@@ -215,6 +221,7 @@ class CleanupJobs:
             setup(db);prior=db.execute('SELECT id FROM source_cleanup WHERE job_id=?',(job['job_id'],)).fetchone()
         if not prior:self._sorted((self.output_location(output)[0] if self.output_location else output)['final_path'])
         id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':manifest,'output':output,'binding':binding,'actor':'assistant','created':stamp(),'recovery_identity':self.root_identity,'historical':historical}
+        if duplicate:intent['cleanup_mode']='duplicate_backup_removal'
         with connect(self.database) as db:
             setup(db)
             prior=db.execute('SELECT id FROM source_cleanup WHERE job_id=?',(job['job_id'],)).fetchone()
@@ -433,8 +440,18 @@ class CleanupJobs:
             except (BoundaryError,OSError,ValueError,KeyError):pass
     def _run(self,id,marked):
         row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))[0];intent=json.loads(row['intent']);manifest=intent['manifest'];out=intent['output']
+        import publication_reuse
+        duplicate=publication_reuse.task(manifest);publication_manifest=manifest
+        if duplicate:
+            if intent.get('cleanup_mode')!='duplicate_backup_removal':raise BoundaryError('Extra-source cleanup operation mode changed')
+            with connect(self.database) as db:
+                child=db.execute('SELECT state,output FROM audio_jobs WHERE job_id=?',(row['job_id'],)).fetchone()
+                if not child or child['state']!='completed':raise BoundaryError('Extra-source verification is not durably complete')
+                owners=publication_reuse.checked_result(db,manifest,json.loads(child['output']),row['job_id'])
+            if owners['parent_output']!=out:raise BoundaryError('Parent publication receipt changed')
+            publication_manifest=owners['parent_manifest']
         source_root=ordinary(manifest['root'])
-        frozen_root=ordinary(manifest.get('output_root',manifest['root']))
+        frozen_root=ordinary(publication_manifest.get('output_root',publication_manifest['root']))
         if ordinary(out.get('root',str(frozen_root)))!=frozen_root:raise BoundaryError('Validated output root differs from frozen output policy')
         if self.output_location:
             out,envelope=self.output_location(out)
@@ -454,7 +471,7 @@ class CleanupJobs:
             if art.sha256()!=manifest['cover']['sha256']:raise BoundaryError('Reviewed cover bytes changed')
             with connect(self.database) as db:
                 if not self.guard(db,intent):raise BoundaryError('Completed book review changed')
-            if out['validation'].get('publication_mode')=='in_place':return self._retire_moved(id,intent,manifest,out)
+            if out['validation'].get('publication_mode')=='in_place' and not duplicate:return self._retire_moved(id,intent,manifest,out)
             self._sorted(final,BoundaryError)  # before any copy or marker change; again before each disposal below
             self._set(id,'checking');held=[];self.phases[id]='Checking original files'
             required=sum(s['size'] for s in manifest['sources'])
@@ -570,6 +587,15 @@ class CleanupJobs:
         db.execute('INSERT OR REPLACE INTO source_retirements VALUES(?,?,?,?,?,?,?,?)',(intent['manifest']['root'],source['path'],intent['id'],intent['job_id'],source['sha256'],source['size'],source['modified'],'removed'))
         db.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(intent['manifest']['root'],source['path']))
     def restore(self,id):
+        row=self._rows('SELECT intent FROM source_cleanup WHERE id=?',(id,))
+        intent=json.loads(row[0]['intent']) if row else {}
+        if __import__('publication_reuse').task(intent.get('manifest')):
+            protector=getattr(self,'restore_protector',None)
+            if not callable(protector):raise BoundaryError('Extra-source restoration requires its protected parent publication')
+            with protector(intent['job_id']):return self._restore(id)
+        return self._restore(id)
+
+    def _restore(self,id):
         receipt=next((r for r in self.status() if r['id']==id),None)
         if receipt and not receipt['restore_available']:
             raise BoundaryError('Temporary recovery files are unavailable after successful cleanup; original tracks cannot be restored from them')

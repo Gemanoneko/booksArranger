@@ -1,0 +1,7 @@
+test_identical_extra_source_uses_existing_publication_without_conversion (test_automatic_media.AutomaticMediaTests.test_identical_extra_source_uses_existing_publication_without_conversion)
+Real automatic admission, real first codec run, native child cleanup. ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 12.438s
+
+OK

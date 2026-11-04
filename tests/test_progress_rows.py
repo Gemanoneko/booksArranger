@@ -210,6 +210,12 @@ class CleanupCountTests(unittest.TestCase):
 
 
 class ActivityRowTests(unittest.TestCase):
+    def test_extra_source_activity_keeps_typed_cleanup_identity(self):
+        jobs={'state':'Running','current_title':'Extra','current_task_kind':'duplicate_source_cleanup','progress':{'phase':'checking extra source'}}
+        self.assertEqual(activities(jobs,None,None,None,{},now_ms=1)[0]['task_kind'],'duplicate_source_cleanup')
+        jobs={'attention_row':{'title':'Extra','task_kind':'duplicate_source_cleanup','reason':'Current output changed'}}
+        row=activities(jobs,None,None,None,{},now_ms=1)[0]
+        self.assertEqual((row['task_kind'],row['state']),('duplicate_source_cleanup','attention'))
     def test_rows_kinds_order_measurements_and_step_start(self):
         memo={}
         jobs={'state':'Running','current_title':'Book','progress':{'phase':'normalizing','completed':30,'total':60,'unit':'seconds','item':1,'items':2,'started':111},

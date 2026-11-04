@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_complete_source_order_chapter_and_manual_choice_mismatches_refuse (test_storage_cleanup.DuplicateCleanupOwnersTests.test_complete_source_order_chapter_and_manual_choice_mismatches_refuse) ... ok\r\ntest_concurrent_admission_is_idempotent_per_source_generation (test_storage_cleanup.DuplicateCleanupOwnersTests.test_concurrent_admission_is_idempotent_per_source_generation) ... ok\r\ntest_parent_record_mutation_and_reuse_chain_refuse (test_storage_cleanup.DuplicateCleanupOwnersTests.test_parent_record_mutation_and_reuse_chain_refuse) ... ok\r\ntest_partial_failure_resumes_only_remaining_child_and_never_parent_staging (test_storage_cleanup.DuplicateCleanupOwnersTests.test_partial_failure_resumes_only_remaining_child_and_never_parent_staging) ... ok\r\ntest_two_eligible_parent_receipts_hold_instead_of_selecting_one (test_storage_cleanup.DuplicateCleanupOwnersTests.test_two_eligible_parent_receipts_hold_instead_of_selecting_one) ... ok\r\ntest_unknown_absent_source_after_removal_intent_is_never_claimed_removed (test_storage_cleanup.DuplicateCleanupOwnersTests.test_unknown_absent_source_after_removal_intent_is_never_claimed_removed) ... ok\r\ntest_ambiguous_relationship_overrides_reusable_job (test_recording_classification.RecordingTests.test_ambiguous_relationship_overrides_reusable_job) ... ok\r\ntest_collection_not_reused_as_constituent (test_recording_classification.RecordingTests.test_collection_not_reused_as_constituent) ... ok\r\ntest_component_order_and_unknown_volume_hold (test_recording_classification.RecordingTests.test_component_order_and_unknown_volume_hold) ... ok\r\ntest_encoded_packet_difference_is_not_distinct_proof (test_recording_classification.RecordingTests.test_encoded_packet_difference_is_not_distinct_proof) ... ok\r\ntest_identical_completed_current_output_can_reuse (test_recording_classification.RecordingTests.test_identical_completed_current_output_can_reuse) ... ok\r\ntest_identical_content_conflicting_credits_is_held (test_recording_classification.RecordingTests.test_identical_content_conflicting_credits_is_held) ... ok\r\ntest_incomplete_or_inconsistent_manifest_is_held (test_recording_classification.RecordingTests.test_incomplete_or_inconsistent_manifest_is_held) ... ok\r\ntest_missing_chapter_proof_blocks_reuse_even_same_source (test_recording_classification.RecordingTests.test_missing_chapter_proof_blocks_reuse_even_same_source) ... ok\r\ntest_missing_or_invalid_candidate_fingerprints_hold (test_recording_classification.RecordingTests.test_missing_or_invalid_candidate_fingerprints_hold) ... ok\r\ntest_new_verified_recording (test_recording_classification.RecordingTests.test_new_verified_recording) ... ok\r\ntest_no_mutation (test_recording_classification.RecordingTests.test_no_mutation) ... ok\r\ntest_packets_and_chapters_without_full_bytes_cannot_prove_identity (test_recording_classification.RecordingTests.test_packets_and_chapters_without_full_bytes_cannot_prove_identity) ... ok\r\ntest_packets_only_even_claimed_complete_interpretation_is_held (test_recording_classification.RecordingTests.test_packets_only_even_claimed_complete_interpretation_is_held) ... ok\r\ntest_same_packets_changed_decoder_or_timing_never_reused (test_recording_classification.RecordingTests.test_same_packets_changed_decoder_or_timing_never_reused) ... ok\r\ntest_same_title_different_verified_work_not_duplicate (test_recording_classification.RecordingTests.test_same_title_different_verified_work_not_duplicate) ... ok\r\ntest_suffix_safe_deterministic_and_verified_only (test_recording_classification.RecordingTests.test_suffix_safe_deterministic_and_verified_only) ... ok\r\ntest_unfinished_unapproved_or_stale_output_cannot_reuse (test_recording_classification.RecordingTests.test_unfinished_unapproved_or_stale_output_cannot_reuse) ... ok\r\ntest_unverified_narrator_cannot_prove_distinct (test_recording_classification.RecordingTests.test_unverified_narrator_cannot_prove_distinct) ... ok\r\ntest_verified_different_narrator_retained_and_marked (test_recording_classification.RecordingTests.test_verified_different_narrator_retained_and_marked) ... ok\r\ntest_verified_different_volume_not_same_book (test_recording_classification.RecordingTests.test_verified_different_volume_not_same_book) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 26 tests in 1.305s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 3944,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 109,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 1741.2458,
+  "outputBytes": 4322
+}

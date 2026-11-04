@@ -221,6 +221,7 @@ class MergeService:
                                             verified=self._publication_current,remember=self._publication_verified,pace=self._pacer,bindings=self.publication_bindings)
         self.retirement=ReplacementRetirement(self.replacements,self.cache_dir.parent/'replacement-recovery',inventory.roots['Audiobooks'],threading.Event(),self._replacement_guard,self.publications.protect_former,bindings=self.publication_bindings)
         self.jobs = AudioJobs(inventory.database, self._run, self._guard, self._output_valid,self.retirement.historical_retired)
+        self.jobs.reuse_validator=self._reuse_output_valid
         self.jobs.output_current=self._output_current;self.jobs.verify_pace=self._pacer
         self.jobs.background_stop=_Flag(lambda:bool(self.__dict__.get('_maintenance_paused') or self.__dict__.get('_foreground_waiters',0) or self.__dict__.get('_closing') or self.draining or self.inventory.worker and self.inventory.worker.is_alive() or self._worker_active() or self.__dict__.get('_update_hold') is not None and self._update_hold.is_set()))
         self.retirement.stop=self.jobs._stop
@@ -234,6 +235,7 @@ class MergeService:
         self.cleanup.after_drain=None  # Each Merge resume supplies its own generation-bound handoff.
         from storage_cleanup import StorageCleanup
         self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard,output_location=self.publication_bindings.current,output_location_guard=self.publication_bindings.guard,repair_publication=self._repair_publication,repair_location_guard=self.publication_bindings.guard,source_roots=self._all_source_roots)
+        self.cleanup.restore_protector=self.storage_cleanup.protected_cleanup
         from working_lifecycle import WorkingLifecycle
         self.working=WorkingLifecycle(inventory.database,self.stage_root,self._working_guard)
         from producer_recovery import ProducerRecovery,windows_boot
@@ -285,7 +287,8 @@ class MergeService:
         # seed progress_books' cache (_lookups), so the first status does not resolve them again. progress(done, total)
         # reports each book to the startup loader, which may stop the construction there (web_server.LoadAborted).
         known=self._known_identities()
-        completed=[job for job in self.jobs.status()['jobs'] if job['state']=='completed']
+        completed_tasks=[job for job in self.jobs.status()['jobs'] if job['state']=='completed']
+        completed=[job for job in completed_tasks if not __import__('publication_reuse').task(job['manifest'])]
         with connect(inventory.database) as db:
             db.executemany('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)',[(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size']) for job in completed])
             enrolled={row[0] for row in db.execute('SELECT job_id FROM source_cleanup')}
@@ -303,7 +306,7 @@ class MergeService:
                 except (ValueError,OSError,KeyError):pass  # Current-view reports the binding failure; catalog remains readable.
         self._lookups=looked
         if progress is not None:progress(len(completed),len(completed))
-        for job in completed:
+        for job in completed_tasks:
             if job['manifest'].get('cleanup_policy',{}).get('enabled') and job['job_id'] not in enrolled:
                 # A crash after durable audio success but before enrollment does
                 # not turn its explicit frozen policy into a historical sweep.
@@ -406,6 +409,10 @@ class MergeService:
     def _attempt_boundary(self,row):
         import destination_admission
         manifest=json.loads(row['manifest'])
+        if __import__('publication_reuse').task(manifest):
+            if not self._guard(manifest):raise ValueError('Extra-source review or publication changed')
+            yield
+            return
         if any(key in manifest for key in ('replacement_id','replacement_parent_job_id')):
             relation=self.replacements.get(new_job=manifest['job_id'])
             target=self._destination_policy()['output_root'] or manifest['root']
@@ -427,7 +434,7 @@ class MergeService:
 
     def _enroll_completed_without_start(self,job):
         try:
-            self._dispose_retained(job['job_id'])
+            if not __import__('publication_reuse').task(job.get('manifest')):self._dispose_retained(job['job_id'])
             self.enroll_cleanup(job['job_id'])
         except (ValueError,OSError) as error:
             # Senua 0.21.3 F1: a process started without a valid output folder enrols nothing and parks nothing;
@@ -439,6 +446,11 @@ class MergeService:
     def _enrollment_attention(self,job,error):
         with connect(self.inventory.database) as db:
             id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':job['manifest'],'output':job['output'],'binding':{},'actor':'assistant'}
+            if __import__('publication_reuse').task(job['manifest']):
+                # Failure reporting must not require the proof whose refusal it
+                # reports. This inert receipt can never authorize disposition.
+                output=(job.get('output') or {}).get('parent_output') or {}
+                intent.update(output=output,cleanup_mode='duplicate_backup_removal',blocked_verification=True)
             db.execute('INSERT OR IGNORE INTO source_cleanup VALUES(?,?,?,?,?,?,?)',(id,job['job_id'],packed(intent),'needs_attention',str(error),'',''))
 
     def _register(self,path,job,kind,hash='',size=0):
@@ -520,6 +532,7 @@ class MergeService:
                 looked=self.__dict__.get('_lookups') or {};kept={}
                 for job,relation in representatives:
                     if not job or job['manifest']['candidate_id'] not in catalog_approved:continue
+                    if __import__('publication_reuse').task(job['manifest']):continue
                     record=job.get('output') or {};effective=None;location_envelope=None
                     key=(token,packed(record)) if token is not None else None
                     saved=looked.get(job['job_id'])
@@ -788,7 +801,7 @@ class MergeService:
             # the active row between two books.
             error=errors[0];held=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
             phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
-            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason','')}
+            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason',''),'task_kind':held['manifest'].get('task_kind') if held else None}
             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
         totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
         self._converted_cache=(started,set(totals.get('converted_ids') or ()),token)
@@ -807,6 +820,7 @@ class MergeService:
             'pause':pause,'start_admission':self._current_start_admission(),
             'current_job_origin':job_origin(current['manifest']) if current else 'unknown',
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
+            'current_task_kind':current['manifest'].get('task_kind') if current else None,
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
@@ -973,10 +987,17 @@ class MergeService:
     def _cleanup_guard(self,db,intent):
         try:
             self._no_scan();manifest=intent['manifest']
+            if intent.get('blocked_verification'):return False
             from producer_recovery import protected_dependency
             if protected_dependency(db,[item['path'] for item in manifest.get('sources',[])]):return False
             row=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(intent['job_id'],)).fetchone()
-            if not row or row['state']!='completed' or packed(json.loads(row['manifest']))!=packed(manifest) or packed(json.loads(row['output']))!=packed(intent['output']):return False
+            if not row or row['state']!='completed' or packed(json.loads(row['manifest']))!=packed(manifest):return False
+            import publication_reuse
+            if publication_reuse.task(manifest):
+                if intent.get('cleanup_mode')!='duplicate_backup_removal':return False
+                owners=publication_reuse.checked_result(db,manifest,json.loads(row['output']),intent['job_id'])
+                if owners['parent_output']!=intent['output']:return False
+            elif packed(json.loads(row['output']))!=packed(intent['output']):return False
             if '_location_envelope' in intent and not self.publication_bindings.guard(db,intent['output'],intent['_location_envelope']):return False
             return self._cleanup_binding(db,manifest)==intent['binding']
         except (ValueError,KeyError,TypeError):return False
@@ -1417,13 +1438,15 @@ class MergeService:
         finally:self._post_current=None
 
     def _prune_completed(self,job_id,source_completed=False,stop=None):
-        if source_completed:self.working.schedule_published(job_id)
+        with connect(self.inventory.database) as db:raw=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+        duplicate=bool(raw and __import__('publication_reuse').task(json.loads(raw[0])))
+        if source_completed and not duplicate:self.working.schedule_published(job_id)
         if hasattr(self,'replacements'):
             relation=self.replacements.get(parent=job_id)
             if relation and relation['state'] in {'retiring','completed'}:
                 with connect(self.inventory.database) as db:parent=self.replacements.raw_job(db,job_id)
                 if self.retirement.historical_retired(parent,stop=stop):return
-        self._prune_working(job_id)
+        if not duplicate:self._prune_working(job_id)
         self.recovery.sync()
         # Between books (not during Start's re-check of every finished book, which the sweep covers).
         if stop is None and (source_completed or (self.cleanup.status(job_id) or {}).get('state')=='completed'):self._purge_recovery_now(job_id)
@@ -1445,6 +1468,8 @@ class MergeService:
         posting=self.__dict__.setdefault('_post_jobs',set());posting.add(job_id)
         try:self._after_completed_work(job_id)
         finally:posting.discard(job_id)
+        with connect(self.inventory.database) as db:raw=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+        if raw and __import__('publication_reuse').task(json.loads(raw[0])):return
         # Rulings 69 and 71h: a book whose chosen folder it was not converted into (outside Sorted, chosen while it ran)
         # is moved there now, after its sources were handled; never converted again.
         try:self._move_to_chosen(job_id)
@@ -1453,9 +1478,11 @@ class MergeService:
     def _after_completed_work(self,job_id):
         # Durable audio success already exists. Cleanup failure must not reset it.
         row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
-        self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
-        try:self.working.discharge_published(job_id,self.storage_cleanup,revisit=True)
-        except (OSError,ValueError):pass  # Exact held reason stays in the working ledger.
+        duplicate=__import__('publication_reuse').task(row['manifest'])
+        if not duplicate:
+            self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
+            try:self.working.discharge_published(job_id,self.storage_cleanup,revisit=True)
+            except (OSError,ValueError):pass  # Exact held reason stays in the working ledger.
         # A boot-proved recovery child cleans up once its lease on the old files ends (_finish_recovery_child).
         if (row['manifest'].get('retry_intent') or {}).get('retained_disposal') is True:return
         if row['manifest'].get('cleanup_policy',{}).get('enabled'):
@@ -1576,6 +1603,14 @@ class MergeService:
         from review_backend import job_destination
         value={'job_id':job['job_id'],'job_origin':job_origin(job['manifest']),'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False}),
                'destination':job_destination(job['manifest'])}
+        if __import__('publication_reuse').task(job['manifest']):
+            receipt=value['cleanup'] or {}
+            label='Checking extra source'
+            if job['state']=='needs attention' or receipt.get('state')=='needs_attention':label='Extra source kept'
+            elif receipt.get('state')=='completed':label='Extra source removed. Finished audiobook kept.'
+            elif receipt.get('state') in {'removing','checking','waiting','paused','pausing'}:label='Removing extra source'
+            value.update(task_kind='duplicate_source_cleanup',state=label)
+            return value
         if (job.get('progress') or {}).get('chapter_check'):value['chapter_check']=copy.deepcopy(job['progress']['chapter_check'])
         if job['state']=='needs attention':
             with connect(self.inventory.database) as db:failure=db.execute('SELECT journal FROM audio_jobs WHERE job_id=?',(job['job_id'],)).fetchone()
@@ -2102,6 +2137,7 @@ class MergeService:
         rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
         if not rows or not check(rows[0]):return None
         manifest=json.loads(rows[0]['manifest'])
+        if __import__('publication_reuse').task(manifest):return None
         with self.jobs._db() as db:
             newest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND "+CURRENT+" ORDER BY created DESC, job_id DESC LIMIT 1",(manifest.get('candidate_id'),)).fetchone()
         if manifest.get('candidate_id')!=identity or manifest.get('candidate_revision')!=revision or not newest or newest[0]!=job_id:
@@ -3360,6 +3396,9 @@ class MergeService:
         (_names_replan): planned under other names than those now in force (Edit names), a job that converts only part of
         one source folder (ruling 71d), a foreign author still in Cyrillic (ruling 71f) or a destination folder chosen
         since it was planned (ruling 69). Each check reads only the catalog; an unreadable one never stops the queue."""
+        manifest=job.get('manifest') or {}
+        if isinstance(manifest,str):manifest=json.loads(manifest)
+        if __import__('publication_reuse').task(manifest):return False
         for check in (self._names_changed,self._trilogy_stale,getattr(self,'_replan_needed',None),getattr(self,'_override_stale',None)):
             if check is None:continue
             try:
@@ -3535,6 +3574,7 @@ class MergeService:
         import book_restart,entered_names
         from sqlite_retry import transaction
         manifest=json.loads(job['manifest']);identity=manifest['candidate_id']
+        if __import__('publication_reuse').task(manifest):raise ValueError('Extra-source cleanup cannot be replanned as a conversion')
         try:
             row=self.reviews._row('Audiobooks',identity)
             approval=(self.reviews._context(row) or {}).get('user_approval')
@@ -3907,7 +3947,7 @@ class MergeService:
         # left the to-do list until the next Start. The destination is checked before anything is written; the late check
         # in build_manifest stays (and the publication itself never overwrites).
         _relative,destination,_reason=self._approval_destination(row,result)
-        if destination and os.path.lexists(destination):raise ValueError('An audiobook already exists at this path; nothing was overwritten')
+        if destination and os.path.lexists(destination) and not self._recording_review(row,result,threading.Event()):raise ValueError('An audiobook already exists at this path; nothing was overwritten')
         approval=result['approval']
         files=[m['path'] for m in sorted(row['members'],key=lambda m:m.get('order') or 0) if include is None or m['path'] in include]
         ctx=self.reviews._context(row)
@@ -4158,7 +4198,7 @@ class MergeService:
                                 context=self.reviews._context(fresh);context['cover_choices']=fresh['cover_choices']+[selected_cover]
                                 fresh=self.reviews._write(fresh,context,bump=False)
                                 result['metadata_facts']['cover']={'kind':'neutral'}
-                            self._recording_review(gate_row,result,stop)  # the files being converted
+                            reuse_parent=self._recording_review(gate_row,result,stop)  # the files being converted
                         else:
                             covers=[c for c in fresh['cover_choices'] if c['source_label'].startswith('Embedded artwork:')]
                             if len(covers)!=1:raise ValueError('Cover not verified')
@@ -4207,7 +4247,7 @@ class MergeService:
                             # Pending metadata stays invisible to approval counts/public creation.
                             fresh=self.reviews._write(fresh,context,bump=False)
                             try:
-                                manifest=self.reviews.build_manifest('Audiobooks',fresh['id'],fresh['revision'],allow_automatic_pending=True,stop=stop)
+                                manifest=self.reviews.build_manifest('Audiobooks',fresh['id'],fresh['revision'],allow_automatic_pending=True,stop=stop,**({'reuse_parent':reuse_parent} if standing and reuse_parent else {}))
                                 approved=copy.deepcopy(context);approved.pop('automatic_pending',None)
                                 approved['automatic_approval']={'matcher_version':VERSION,'work_id':result['work']['id'],'sources':result['sources'],'approved_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
                                 # Queue insertion and final approval become durable together.
@@ -4765,6 +4805,7 @@ class MergeService:
         candidate=entry(row['id'],facts['work_ids'],review,facts,tracks);existing=[];related=[]
         for job in self.jobs.status()['jobs']:
             manifest=job['manifest'];other_id=manifest['candidate_id']
+            if __import__('publication_reuse').task(manifest):continue
             if other_id==row['id']:continue
             try:other=self.reviews._row('Audiobooks',other_id);context=self.reviews._context(other)
             except ValueError:continue
@@ -4789,9 +4830,12 @@ class MergeService:
             self.reviews._write(row,context,bump=False)
         if decision['hold']:raise ValueError('Possible duplicate recording — original sources preserved')
         if decision.get('reuse_job_id'):
-            # Proven existing publication may be skipped; do not manufacture a new
-            # completed candidate/job or remove this duplicate's original bytes.
-            raise ValueError('Identical verified recording already arranged — duplicate sources preserved')
+            eligible=[item for item in existing if item.get('approved') and item.get('completed_verified') and item.get('current_output_valid') and item['id'] in marker['related_ids']]
+            if len(eligible)!=1:raise ValueError('Extra source kept: existing publication is ambiguous')
+            parent=next(job for job in self.jobs.status()['jobs'] if job['job_id']==decision['reuse_job_id'])
+            current=self.publications.publication(self.jobs.status()['jobs'],parent['manifest']['candidate_id'])
+            if not current or current['kind']!='original' or current['id']!=parent['job_id']:raise ValueError('Extra source kept: current publication lineage needs review')
+            return decision['reuse_job_id']
         if decision['classification']=='related_distinct':
             facts['destination_suffix']=decision['destination_suffix']
             facts['recording_chapter_policy']='joined-chapters-v1'
@@ -4855,6 +4899,13 @@ class MergeService:
         try:
             self._reacquire_admission(identity=manifest['candidate_id'])
             self._no_scan()
+            import publication_reuse
+            if publication_reuse.task(manifest):
+                frozen={k:v for k,v in manifest.items() if k!='attempt_id'}
+                with connect(self.inventory.database) as db:
+                    publication_reuse.resolve(db,frozen)
+                    self._cleanup_binding(db,frozen)
+                return True
             if manifest.get('replacement_id'):
                 relation=self.replacements.get(new_job=manifest['job_id'])
                 if not relation or relation['id']!=manifest['replacement_id'] or relation['state']!='queued':return False
@@ -4876,9 +4927,48 @@ class MergeService:
         except (ValueError,OSError,KeyError):return False
 
     def _run(self, manifest, stop, checkpoint):
+        if __import__('publication_reuse').task(manifest):return self._run_reuse(manifest,stop,checkpoint)
         self._active_producer=(manifest['job_id'],manifest['attempt_id'])
         try:return self._run_media(manifest,stop,checkpoint)
         finally:self._active_producer=None
+
+    def _reuse_output_valid(self,record,stop=None,pace=None):
+        import publication_reuse
+        try:
+            with connect(self.inventory.database) as db:
+                row=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(record.get('cleanup_job_id'),)).fetchone()
+                if not row:return False
+                owners=publication_reuse.checked_result(db,json.loads(row[0]),record)
+            return self._output_valid(owners['parent_output'],stop,pace)
+        except (ValueError,OSError,KeyError,TypeError):return False
+
+    def _run_reuse(self,manifest,stop,checkpoint):
+        """Verify a parent publication and every extra source; never publish audio."""
+        import publication_reuse
+        from source_cleanup import single_stream
+        frozen={k:v for k,v in manifest.items() if k!='attempt_id'}
+        with connect(self.inventory.database) as db:owners=publication_reuse.resolve(db,frozen)
+        checkpoint('checking extra source')
+        with self.publication_bindings.protect(owners['parent_output']) as (output,envelope),contextlib.ExitStack() as held:
+            ancestry=held.enter_context(DirectoryBoundary(output['root'],ordinary(output['final_path']).parent))
+            parent=held.enter_context(VerifiedFile(output['final_path']))
+            if [list(i) for i in ancestry.identities]!=[list(i) for i in output['parent_identity']] or parent.facts()['size']!=output['size'] or parent.sha256()!=output['sha256']:raise ValueError('Extra source kept: finished audiobook changed')
+            if output.get('identity') is not None and parent.facts()['identity']!=output['identity']:raise ValueError('Extra source kept: finished audiobook identity changed')
+            override=(manifest.get('metadata_facts') or {}).get('destination_override') or {}
+            if override and ordinary(override['folder'])!=ordinary(output['final_path']).parent:raise ValueError('Extra source kept: chosen folder differs from the finished audiobook')
+            identities={tuple(parent.facts()['identity'])};facts=[]
+            for source in manifest['sources']:
+                if stop.is_set():raise InterruptedError()
+                path=ordinary(source['path']);held.enter_context(DirectoryBoundary(manifest['root'],path.parent))
+                handle=held.enter_context(VerifiedFile(path));single_stream(path);actual=handle.facts()
+                native_id=tuple(actual['identity'])
+                if actual['links']!=1 or native_id in identities or actual['size']!=source['size'] or str(actual['modified'])!=str(source['modified']) or handle.sha256()!=source['sha256']:raise ValueError('Extra source kept: reviewed source bytes or identity changed')
+                identities.add(native_id);facts.append(dict(actual,path=source['path'],sha256=source['sha256']))
+            if stop.is_set():raise InterruptedError()
+            if not self._guard(frozen):raise ValueError('Extra source kept: current review or publication changed')
+            verified=publication_reuse.verification(owners,facts,envelope)
+            checkpoint('verified existing audiobook',verified)
+            return verified
 
     def _run_media(self, manifest, stop, checkpoint):
         stages={'Checking sources':'checking sources','Checking source audio':'checking sources','Creating audio':'creating','Checking output':'checking'}
@@ -5111,7 +5201,7 @@ class MergeService:
         return [{'id':str(uuid.uuid5(uuid.NAMESPACE_URL,library+'\x1f'+p)),'path':p} for p in directories]
 
     def _completed_output(self,identity):
-        jobs=[j for j in self.jobs.status()['jobs'] if j['manifest']['candidate_id']==identity and j['state']=='completed']
+        jobs=[j for j in self.jobs.status()['jobs'] if j['manifest']['candidate_id']==identity and j['state']=='completed' and not __import__('publication_reuse').task(j['manifest'])]
         for job in reversed(jobs):
             if self._output_valid(job['output']):return job
         return None

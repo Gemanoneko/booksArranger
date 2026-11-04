@@ -144,7 +144,8 @@ class RecoveryRetention:
         # because a copy is already gone is purged too; a missing copy is recorded, never an error.
         row=persisted[0]
         try:
-            with self.storage.protected_output(job_id,guard=self.guard) as (manifest,output),contextlib.ExitStack() as stack:
+            with self.storage.protected_cleanup(job_id,guard=self.guard) as owners,contextlib.ExitStack() as stack:
+                manifest=owners['manifest'];output=owners['parent_output']
                 if output['sha256']!=row['output_hash']:raise BoundaryError('Retention output identity changed')
                 events=self._rows('SELECT completed_at FROM recovery_completion WHERE cleanup_id=?',(row['cleanup_id'],))
                 deadlines={(moment(row['completed_at'])+timedelta(hours=hours)).isoformat() for hours in (HOURS,LEGACY_HOURS)} if events else set()

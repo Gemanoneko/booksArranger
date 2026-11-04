@@ -1,0 +1,6 @@
+test_a_book_in_a_separate_sorted_folder_gets_its_series_name_there (test_series_backfill.BackfillTests.test_a_book_in_a_separate_sorted_folder_gets_its_series_name_there) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.698s
+
+OK
