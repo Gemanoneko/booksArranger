@@ -20,6 +20,12 @@ The Edit names tooltip promises title, author, series and universe editing. Serg
 
 Fix the existing editor through its normal entry point so the promised series and universe fields can be loaded, edited and saved. Preserve existing manual title and folder choices. Loading failures must be actionable rather than remaining indefinitely in the loading state. Judy owns the exact fields, interaction and copy specification. Ender owns the technical diagnosis and implementation.
 
+## Restore Open source folder
+
+Sergei additionally reported that Open source folder stays disabled with Opening folder... for several minutes before Explorer eventually opens. He can open the same folder promptly by hand in Explorer. The demonstrated candidate is Рассказы Warhammer 40000 by King William.
+
+Fix the delay in the existing app request through its normal entry point. Diagnose its admission, backend and shell-response handling rather than attributing the delay to NAS availability without evidence. Dispatch promptly when the selected source path is valid, complete or fail the busy state visibly, and allow a safe retry. Preserve the existing source-path validation and argument handling. Judy specifies the minimal button and feedback states. Testing that would open Explorer or take focus still requires Sergei's permission.
+
 ## Verification and handoff
 
 Use private fixtures for the duplicate's Unicode-path case, recording identity and cleanup safety, the confirmed trilogy's names and routing, persisted manual choices, and the editor's real loading and saving flow. No live source removal or movement is authorized by this implementation brief. Sully owns all commits, versioning and release operations. Futaba verifies a committed or pinned correction before delivery.
