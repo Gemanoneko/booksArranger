@@ -1,0 +1,198 @@
+diff --git a/audio_jobs.py b/audio_jobs.py
+index 567cb3a..cfdabd4 100644
+--- a/audio_jobs.py
++++ b/audio_jobs.py
+@@ -1157,8 +1157,11 @@ class AudioJobs:
+             if worker.is_alive():
+                 raise TimeoutError("Owned runner has not stopped; queue is still pausing")
+         if verifier and verifier is not threading.current_thread():
+-            # Read-only until its locked stop check, so a file still being hashed never writes after this.
+-            verifier.join(min(timeout, 5))
++            # A stopped verifier may still own a catalog connection or output lease.
++            # Retain shutdown ownership until that thread has actually closed them.
++            verifier.join(timeout)
++            if verifier.is_alive():
++                raise TimeoutError('Published audiobook verification has not reached its safe stop')
+ 
+     def status(self):
+         import m4b_readmission
+diff --git a/merge_service.py b/merge_service.py
+index e90593f..43de0a5 100644
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -1191,11 +1191,16 @@ class MergeService:
+     def start_published_check(self):
+         """After construction: re-verify published audiobooks off the startup path (AudioJobs._recover). The existing-data
+         pass of ruling 71d starts beside it (regroup_partial_jobs)."""
+-        self.jobs.start_published_check()
+         def regroup():
+             try:self.regroup_partial_jobs()
+             except Exception:pass  # each job stays as it was; the claim check still sets a pending one aside before it runs
+-        threading.Thread(target=regroup,name='books-folder-regroup',daemon=True).start()
++        with _BULK_LOCK:
++            if self.__dict__.get('_closing'):return
++            self.jobs.start_published_check()
++            thread=self.__dict__.get('_regroup_thread')
++            if thread and thread.is_alive():return
++            self._regroup_thread=threading.Thread(target=regroup,name='books-folder-regroup',daemon=True)
++            self._regroup_thread.start()
+ 
+     def _retry_view(self,key):
+         deadline=self.__dict__.get('_cleanup_retry_at',{}).get(key)
+@@ -3443,12 +3448,14 @@ class MergeService:
+         import book_restart
+         from sqlite_retry import transaction
+         done=[]
++        if self.__dict__.get('_closing'):return done
+         with connect(self.inventory.database) as db:
+             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return done
+             book_restart.ensure(db)
+             rows=[dict(r) for r in db.execute("SELECT * FROM audio_jobs WHERE state IN ('pending','needs attention') AND output IS NULL AND job_id NOT IN (SELECT job_id FROM audio_job_set_aside)")]
+             chosen=[]
+             for row in rows:
++                if self.__dict__.get('_closing'):return done
+                 try:
+                     manifest=json.loads(row['manifest']);journal=json.loads(row['journal'] or '{}')
+                     if isinstance(journal,dict) and 'publication_intent' in journal:continue
+@@ -3457,6 +3464,7 @@ class MergeService:
+                 except (ValueError,KeyError,TypeError,sqlite3.Error):continue
+         stamp=__import__('audio_jobs')._now()
+         for row,manifest in chosen:
++            if self.__dict__.get('_closing'):break
+             identity=manifest['candidate_id']
+             def write(db,row=row,identity=identity):
+                 current=db.execute('SELECT state,output,journal FROM audio_jobs WHERE job_id=?',(row['job_id'],)).fetchone()
+@@ -5030,6 +5038,10 @@ class MergeService:
+         if self._retention_thread:
+             self._retention_thread.join(30)
+             if self._retention_thread.is_alive():raise TimeoutError('Recovery cleanup is reaching its safe file checkpoint')
++        regroup=self.__dict__.get('_regroup_thread')
++        if regroup and regroup is not threading.current_thread():
++            regroup.join(30)
++            if regroup.is_alive():raise TimeoutError('Folder regroup is still closing its catalog reads')
+         self.jobs.close()
+         if hasattr(self,'publications'):self.publications.close()
+         self.cleanup.close()
+diff --git a/tests/test_startup_published_check.py b/tests/test_startup_published_check.py
+index 265cb58..853b5e5 100644
+--- a/tests/test_startup_published_check.py
++++ b/tests/test_startup_published_check.py
+@@ -83,10 +83,38 @@ class StartupPublishedCheckTests(unittest.TestCase):
+         queue = AudioJobs(self.db, None, lambda m: True, slow)
+         queue.start_published_check()
+         self.assertTrue(entered.wait(5))
+-        queue.close(timeout=0.2)  # bounded: a book still being hashed never blocks Quit
+-        release.set(); queue._verifier.join(5)
++        try:
++            with self.assertRaises(TimeoutError):queue.close(timeout=0.2)
++        finally:
++            release.set(); queue._verifier.join(5)
++        self.assertFalse(queue._verifier.is_alive())
++        queue.close()
+         self.assertEqual(self.states(queue)[self.completed['job_id']][0], 'completed')
+ 
++    def test_close_refuses_completion_while_the_verifier_holds_a_catalog_connection(self):
++        entered = threading.Event(); release = threading.Event(); connection_closed = threading.Event()
++        queue = AudioJobs(self.db, None, lambda manifest: True, lambda record: True)
++        original_rows = queue._rows
++        def held_rows(query, params=()):
++            if threading.current_thread().name != 'BooksArrangerPublishedCheck':
++                return original_rows(query, params)
++            try:
++                with queue._db() as db:
++                    db.execute('SELECT count(*) FROM sqlite_master').fetchone(); entered.set()
++                    if not release.wait(10): raise TimeoutError('Private published reader was not released')
++                    return [dict(row) for row in db.execute(query, params)]
++            finally: connection_closed.set()
++        with patch.object(queue, '_rows', held_rows):
++            queue.start_published_check()
++            try:
++                self.assertTrue(entered.wait(5))
++                with self.assertRaises(TimeoutError): queue.close(timeout=.01)
++                self.assertFalse(connection_closed.is_set())
++            finally:
++                release.set(); queue._verifier.join(10); queue.close()
++        self.assertTrue(connection_closed.is_set())
++        self.assertFalse(queue._verifier.is_alive())
++
+     def test_resume_takes_over_and_the_deferred_check_never_overwrites_it(self):
+         entered, release = threading.Event(), threading.Event()
+         calls = []
+diff --git a/tests/test_web.py b/tests/test_web.py
+index 219fe14..fdd5911 100644
+--- a/tests/test_web.py
++++ b/tests/test_web.py
+@@ -518,6 +518,73 @@ class BrowserTests(unittest.TestCase):
+         choose.assert_called_once_with(identity, 1, None)
+ 
+ 
++class StartupWorkerClosureTests(unittest.TestCase):
++    def test_server_close_waits_for_the_startup_regroup_catalog_connection(self):
++        import merge_service
++        entered = threading.Event(); release = threading.Event(); connection_closed = threading.Event()
++        closed = threading.Event(); owners = []; errors = []
++        original_connect = merge_service.connect
++        @contextlib.contextmanager
++        def held_connect(database, *args, **kwargs):
++            target = threading.current_thread().name == 'books-folder-regroup'
++            try:
++                with original_connect(database, *args, **kwargs) as db:
++                    if target:
++                        db.execute('SELECT count(*) FROM sqlite_master').fetchone()
++                        owners.append(threading.current_thread()); entered.set()
++                        if not release.wait(10): raise TimeoutError('Private startup reader was not released')
++                    yield db
++            finally:
++                if target: connection_closed.set()
++        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
++            base = Path(directory)
++            roots = {label: str(base / label) for label in ('Audiobooks', 'Podcasts', 'Ebooks')}
++            for path in roots.values(): Path(path).mkdir()
++            inventory = Inventory(base / 'catalog.sqlite3', roots)
++            with patch.object(merge_service, 'connect', held_connect), patch.object(merge_service.MergeService, 'start_retention'):
++                server = BrowserServer(('127.0.0.1', 0), inventory)
++                merge = server.merge
++                def close():
++                    try: server.server_close()
++                    except Exception as error: errors.append(error)
++                    finally: closed.set()
++                closer = threading.Thread(target=close)
++                try:
++                    self.assertTrue(entered.wait(5))
++                    merge.start_published_check()  # A repeated startup call shares the owned regroup worker.
++                    closer.start()
++                    self.assertFalse(closed.wait(.1), 'Server close returned while startup still owned the catalog')
++                    self.assertFalse(connection_closed.is_set())
++                finally:
++                    release.set()
++                    if closer.ident is not None: closer.join(10)
++                    for owner in owners: owner.join(10)
++                    server.server_close()
++                self.assertTrue(closed.is_set()); self.assertEqual(errors, [])
++                self.assertTrue(connection_closed.is_set())
++                self.assertEqual(len(owners), 1)
++                self.assertTrue(all(not owner.is_alive() for owner in owners))
++                with patch.object(merge.jobs, 'start_published_check') as start:
++                    merge.start_published_check()
++                    start.assert_not_called()
++                from native_io import VerifiedFile
++                with VerifiedFile(base / 'catalog.sqlite3', delete=True): pass
++
++    def test_regroup_join_timeout_keeps_resources_owned_until_close_can_finish(self):
++        from merge_service import MergeService
++        merge = MergeService.__new__(MergeService)
++        merge._retention_stop = threading.Event(); merge._retention_wake = threading.Event()
++        merge._retention_thread = None; merge.jobs = Mock(); merge.cleanup = Mock()
++        worker = SimpleNamespace(join=Mock(), is_alive=Mock(return_value=True))
++        merge._regroup_thread = worker
++        with self.assertRaisesRegex(TimeoutError, 'Folder regroup'): merge.close()
++        self.assertTrue(merge._closing); self.assertIs(merge._regroup_thread, worker)
++        merge.jobs.close.assert_not_called(); merge.cleanup.close.assert_not_called()
++        worker.is_alive.return_value = False
++        merge.close()
++        merge.jobs.close.assert_called_once(); merge.cleanup.close.assert_called_once()
++
++
+ class CandidatePageReadinessTests(unittest.TestCase):
+     def client(self,responses):
+         client=BrowserTests('test_every_attention_chip_is_served_through_the_http_route')

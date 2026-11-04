@@ -1157,8 +1157,11 @@ class AudioJobs:
             if worker.is_alive():
                 raise TimeoutError("Owned runner has not stopped; queue is still pausing")
         if verifier and verifier is not threading.current_thread():
-            # Read-only until its locked stop check, so a file still being hashed never writes after this.
-            verifier.join(min(timeout, 5))
+            # A stopped verifier may still own a catalog connection or output lease.
+            # Retain shutdown ownership until that thread has actually closed them.
+            verifier.join(timeout)
+            if verifier.is_alive():
+                raise TimeoutError('Published audiobook verification has not reached its safe stop')
 
     def status(self):
         import m4b_readmission

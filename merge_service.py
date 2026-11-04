@@ -1191,11 +1191,16 @@ class MergeService:
     def start_published_check(self):
         """After construction: re-verify published audiobooks off the startup path (AudioJobs._recover). The existing-data
         pass of ruling 71d starts beside it (regroup_partial_jobs)."""
-        self.jobs.start_published_check()
         def regroup():
             try:self.regroup_partial_jobs()
             except Exception:pass  # each job stays as it was; the claim check still sets a pending one aside before it runs
-        threading.Thread(target=regroup,name='books-folder-regroup',daemon=True).start()
+        with _BULK_LOCK:
+            if self.__dict__.get('_closing'):return
+            self.jobs.start_published_check()
+            thread=self.__dict__.get('_regroup_thread')
+            if thread and thread.is_alive():return
+            self._regroup_thread=threading.Thread(target=regroup,name='books-folder-regroup',daemon=True)
+            self._regroup_thread.start()
 
     def _retry_view(self,key):
         deadline=self.__dict__.get('_cleanup_retry_at',{}).get(key)
@@ -3443,12 +3448,14 @@ class MergeService:
         import book_restart
         from sqlite_retry import transaction
         done=[]
+        if self.__dict__.get('_closing'):return done
         with connect(self.inventory.database) as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return done
             book_restart.ensure(db)
             rows=[dict(r) for r in db.execute("SELECT * FROM audio_jobs WHERE state IN ('pending','needs attention') AND output IS NULL AND job_id NOT IN (SELECT job_id FROM audio_job_set_aside)")]
             chosen=[]
             for row in rows:
+                if self.__dict__.get('_closing'):return done
                 try:
                     manifest=json.loads(row['manifest']);journal=json.loads(row['journal'] or '{}')
                     if isinstance(journal,dict) and 'publication_intent' in journal:continue
@@ -3457,6 +3464,7 @@ class MergeService:
                 except (ValueError,KeyError,TypeError,sqlite3.Error):continue
         stamp=__import__('audio_jobs')._now()
         for row,manifest in chosen:
+            if self.__dict__.get('_closing'):break
             identity=manifest['candidate_id']
             def write(db,row=row,identity=identity):
                 current=db.execute('SELECT state,output,journal FROM audio_jobs WHERE job_id=?',(row['job_id'],)).fetchone()
@@ -5030,6 +5038,10 @@ class MergeService:
         if self._retention_thread:
             self._retention_thread.join(30)
             if self._retention_thread.is_alive():raise TimeoutError('Recovery cleanup is reaching its safe file checkpoint')
+        regroup=self.__dict__.get('_regroup_thread')
+        if regroup and regroup is not threading.current_thread():
+            regroup.join(30)
+            if regroup.is_alive():raise TimeoutError('Folder regroup is still closing its catalog reads')
         self.jobs.close()
         if hasattr(self,'publications'):self.publications.close()
         self.cleanup.close()

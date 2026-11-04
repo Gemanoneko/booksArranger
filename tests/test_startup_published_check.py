@@ -83,9 +83,37 @@ class StartupPublishedCheckTests(unittest.TestCase):
         queue = AudioJobs(self.db, None, lambda m: True, slow)
         queue.start_published_check()
         self.assertTrue(entered.wait(5))
-        queue.close(timeout=0.2)  # bounded: a book still being hashed never blocks Quit
-        release.set(); queue._verifier.join(5)
+        try:
+            with self.assertRaises(TimeoutError):queue.close(timeout=0.2)
+        finally:
+            release.set(); queue._verifier.join(5)
+        self.assertFalse(queue._verifier.is_alive())
+        queue.close()
         self.assertEqual(self.states(queue)[self.completed['job_id']][0], 'completed')
+
+    def test_close_refuses_completion_while_the_verifier_holds_a_catalog_connection(self):
+        entered = threading.Event(); release = threading.Event(); connection_closed = threading.Event()
+        queue = AudioJobs(self.db, None, lambda manifest: True, lambda record: True)
+        original_rows = queue._rows
+        def held_rows(query, params=()):
+            if threading.current_thread().name != 'BooksArrangerPublishedCheck':
+                return original_rows(query, params)
+            try:
+                with queue._db() as db:
+                    db.execute('SELECT count(*) FROM sqlite_master').fetchone(); entered.set()
+                    if not release.wait(10): raise TimeoutError('Private published reader was not released')
+                    return [dict(row) for row in db.execute(query, params)]
+            finally: connection_closed.set()
+        with patch.object(queue, '_rows', held_rows):
+            queue.start_published_check()
+            try:
+                self.assertTrue(entered.wait(5))
+                with self.assertRaises(TimeoutError): queue.close(timeout=.01)
+                self.assertFalse(connection_closed.is_set())
+            finally:
+                release.set(); queue._verifier.join(10); queue.close()
+        self.assertTrue(connection_closed.is_set())
+        self.assertFalse(queue._verifier.is_alive())
 
     def test_resume_takes_over_and_the_deferred_check_never_overwrites_it(self):
         entered, release = threading.Event(), threading.Event()

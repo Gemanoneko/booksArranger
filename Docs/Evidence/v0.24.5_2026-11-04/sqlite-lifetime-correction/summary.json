@@ -1,0 +1,114 @@
+{
+  "base_head": "f6553e7b78bf9d7f011b5728b2d219ad48732add",
+  "candidate": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101",
+  "frozen_files": [
+    {
+      "path": "audio_jobs.py",
+      "size": 96540,
+      "sha256": "8c0e946f3d9fb364bacf255e633fd54dc50ec6b58364e9458c04018fae42c393"
+    },
+    {
+      "path": "merge_service.py",
+      "size": 422151,
+      "sha256": "f4fcc528eff7a5691fa5d2b2cadfdf7847945348d07172ec6165e6219603783c"
+    },
+    {
+      "path": "tests/test_web.py",
+      "size": 45703,
+      "sha256": "0ee0c07472a3c5e71b0f110aea438e1e3a54c9204521953423a4b820a21fd135"
+    },
+    {
+      "path": "tests/test_startup_published_check.py",
+      "size": 18941,
+      "sha256": "0d480e7efa82021349d0feecd73fcb8f61812f0aba769a50d85c021458f0362f"
+    }
+  ],
+  "patch_sha256": "164ba429a5f62c2ad8d1f5417d6787826b149cfbc1d35d7b4c70b336facb2e89",
+  "cause": [
+    "MergeService.start_published_check created an untracked books-folder-regroup daemon. Server close ignored it while regroup_partial_jobs could still open/read/write the catalog.",
+    "AudioJobs.close silently returned after a published-verifier join bound without establishing thread/resource closure."
+  ],
+  "fix": [
+    "Retain one live startup-regroup thread under the same _BULK_LOCK closing fence, reject late admissions, check closing between regroup rows, and join it before dependent resources close.",
+    "Published verifier close honors the supplied timeout and raises while the verifier remains alive, preserving shutdown ownership for retry."
+  ],
+  "baseline": {
+    "source": "Exact f6553e7 product bytes with new lifetime tests overlaid",
+    "cases": 5,
+    "failures": 2,
+    "errors": 0,
+    "seconds": 1.192,
+    "owned_ms": 1947.7663,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 4,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 123,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "reason": "Both real SQLite-holder lifetime regressions failed. Existing malformed payload, owner lock/strict port and detached-snapshot cases passed in the same low-load control."
+  },
+  "corrected": {
+    "cases": 71,
+    "failures": 0,
+    "errors": 0,
+    "seconds": 20.336,
+    "owned_ms": 21094.2788,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 18,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 1347,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "closed": true,
+    "outputComplete": true,
+    "modules": [
+      "test_web",
+      "test_startup_published_check",
+      "test_status_snapshot",
+      "test_folder_regroup.FolderRegroupTests.test_unfinished_job_of_part_of_a_folder_is_set_aside_and_the_folder_regroups"
+    ]
+  },
+  "lifetime_proof": [
+    "Event-controlled actual scanner.connect context in books-folder-regroup holds a real private SQLite file. Close cannot report completion until its context and thread exit. The closed file then admits native DELETE access.",
+    "Repeated startup uses the retained regroup worker. A late start after close admits no published check.",
+    "An injected still-alive regroup worker forces TimeoutError and leaves jobs/cleanup owned. Retry completes once the worker is no longer alive.",
+    "A real SQLite context held by BooksArrangerPublishedCheck causes close(timeout=.01) to raise until the context is released and the verifier exits."
+  ],
+  "owned_command": [
+    "node",
+    "owned.mjs",
+    "<studio>/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+    "<tool>/build-cache/qa-ownership/node_modules/koffi",
+    "<tool>/build-cache/qa-runtime/python/python.exe",
+    "focused.py",
+    "src",
+    "corrected.json",
+    "test_web",
+    "test_startup_published_check",
+    "test_status_snapshot",
+    "test_folder_regroup.FolderRegroupTests.test_unfinished_job_of_part_of_a_folder_is_set_aside_and_the_folder_regroups"
+  ],
+  "limits": [
+    "The original full worker and fixture database were removed by the gate, so the original failing handle was not available for direct attribution. The private baseline proves two concrete startup lifetime defects on the same source and path.",
+    "The unchanged status-snapshot timeout test emits its expected StatusUnavailable from an uncaught test reader thread while reporting OK; preserved in raw output.",
+    "Focused only. No full or hidden repeat was run."
+  ]
+}

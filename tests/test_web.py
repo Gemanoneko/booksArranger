@@ -518,6 +518,73 @@ class BrowserTests(unittest.TestCase):
         choose.assert_called_once_with(identity, 1, None)
 
 
+class StartupWorkerClosureTests(unittest.TestCase):
+    def test_server_close_waits_for_the_startup_regroup_catalog_connection(self):
+        import merge_service
+        entered = threading.Event(); release = threading.Event(); connection_closed = threading.Event()
+        closed = threading.Event(); owners = []; errors = []
+        original_connect = merge_service.connect
+        @contextlib.contextmanager
+        def held_connect(database, *args, **kwargs):
+            target = threading.current_thread().name == 'books-folder-regroup'
+            try:
+                with original_connect(database, *args, **kwargs) as db:
+                    if target:
+                        db.execute('SELECT count(*) FROM sqlite_master').fetchone()
+                        owners.append(threading.current_thread()); entered.set()
+                        if not release.wait(10): raise TimeoutError('Private startup reader was not released')
+                    yield db
+            finally:
+                if target: connection_closed.set()
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
+            base = Path(directory)
+            roots = {label: str(base / label) for label in ('Audiobooks', 'Podcasts', 'Ebooks')}
+            for path in roots.values(): Path(path).mkdir()
+            inventory = Inventory(base / 'catalog.sqlite3', roots)
+            with patch.object(merge_service, 'connect', held_connect), patch.object(merge_service.MergeService, 'start_retention'):
+                server = BrowserServer(('127.0.0.1', 0), inventory)
+                merge = server.merge
+                def close():
+                    try: server.server_close()
+                    except Exception as error: errors.append(error)
+                    finally: closed.set()
+                closer = threading.Thread(target=close)
+                try:
+                    self.assertTrue(entered.wait(5))
+                    merge.start_published_check()  # A repeated startup call shares the owned regroup worker.
+                    closer.start()
+                    self.assertFalse(closed.wait(.1), 'Server close returned while startup still owned the catalog')
+                    self.assertFalse(connection_closed.is_set())
+                finally:
+                    release.set()
+                    if closer.ident is not None: closer.join(10)
+                    for owner in owners: owner.join(10)
+                    server.server_close()
+                self.assertTrue(closed.is_set()); self.assertEqual(errors, [])
+                self.assertTrue(connection_closed.is_set())
+                self.assertEqual(len(owners), 1)
+                self.assertTrue(all(not owner.is_alive() for owner in owners))
+                with patch.object(merge.jobs, 'start_published_check') as start:
+                    merge.start_published_check()
+                    start.assert_not_called()
+                from native_io import VerifiedFile
+                with VerifiedFile(base / 'catalog.sqlite3', delete=True): pass
+
+    def test_regroup_join_timeout_keeps_resources_owned_until_close_can_finish(self):
+        from merge_service import MergeService
+        merge = MergeService.__new__(MergeService)
+        merge._retention_stop = threading.Event(); merge._retention_wake = threading.Event()
+        merge._retention_thread = None; merge.jobs = Mock(); merge.cleanup = Mock()
+        worker = SimpleNamespace(join=Mock(), is_alive=Mock(return_value=True))
+        merge._regroup_thread = worker
+        with self.assertRaisesRegex(TimeoutError, 'Folder regroup'): merge.close()
+        self.assertTrue(merge._closing); self.assertIs(merge._regroup_thread, worker)
+        merge.jobs.close.assert_not_called(); merge.cleanup.close.assert_not_called()
+        worker.is_alive.return_value = False
+        merge.close()
+        merge.jobs.close.assert_called_once(); merge.cleanup.close.assert_called_once()
+
+
 class CandidatePageReadinessTests(unittest.TestCase):
     def client(self,responses):
         client=BrowserTests('test_every_attention_chip_is_served_through_the_http_route')

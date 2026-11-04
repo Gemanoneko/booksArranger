@@ -1,0 +1,28 @@
+test_server_close_waits_for_the_startup_regroup_catalog_connection (test_web.StartupWorkerClosureTests.test_server_close_waits_for_the_startup_regroup_catalog_connection) ... FAIL
+test_close_refuses_completion_while_the_verifier_holds_a_catalog_connection (test_startup_published_check.StartupPublishedCheckTests.test_close_refuses_completion_while_the_verifier_holds_a_catalog_connection) ... FAIL
+test_malformed_payloads_and_configured_roots_only (test_web.BrowserTests.test_malformed_payloads_and_configured_roots_only) ... ok
+test_catalog_owner_lock_and_strict_port (test_web.BrowserTests.test_catalog_owner_lock_and_strict_port) ... ok
+test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights (test_status_snapshot.SharedSnapshotTests.test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights) ... ok
+
+======================================================================
+FAIL: test_server_close_waits_for_the_startup_regroup_catalog_connection (test_web.StartupWorkerClosureTests.test_server_close_waits_for_the_startup_regroup_catalog_connection)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-sqlite-20261104\src\tests\test_web.py", line 555, in test_server_close_waits_for_the_startup_regroup_catalog_connection
+    self.assertFalse(closed.wait(.1), 'Server close returned while startup still owned the catalog')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false : Server close returned while startup still owned the catalog
+
+======================================================================
+FAIL: test_close_refuses_completion_while_the_verifier_holds_a_catalog_connection (test_startup_published_check.StartupPublishedCheckTests.test_close_refuses_completion_while_the_verifier_holds_a_catalog_connection)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-sqlite-20261104\src\tests\test_startup_published_check.py", line 111, in test_close_refuses_completion_while_the_verifier_holds_a_catalog_connection
+    with self.assertRaises(TimeoutError): queue.close(timeout=.01)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: TimeoutError not raised
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.192s
+
+FAILED (failures=2)
