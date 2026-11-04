@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "QA_REAL_CODEC_RESULT {\"automatic_state\": \"Idle\", \"blocked_attempt\": \"7e6d129b-dc18-424c-87f6-5122d3883493\", \"blocked_job\": \"750125d1-cea7-4803-a7bf-2b24b7ff1665\", \"blocked_reason\": \"Working cleanup requires attention: A prior producer is not durably closed; another attempt is not admitted\", \"completed_job_ids\": [\"bdb9ada9-9e19-4125-b488-6705e6462a94\", \"dfa8416f-b768-4588-850f-2c7cdaa0660a\", \"ff38b953-25cb-449c-a15d-d220c35a7f5b\"], \"outputs\": {\"2\": {\"path\": \"C:\\\\Antigravity Projects\\\\ba45\\\\tmpdedtuj6r\\\\Audiobooks Sorted\\\\Петров Иван\\\\Курс истории. Лекция\\\\Курс истории. Лекция - 2 - Рим - Петров Иван.m4b\", \"sha256\": \"93379f1eafe155c0926e860ea3e59303482ae163fcadf7be341c577cea20cbef\", \"size\": 318522}, \"3\": {\"path\": \"C:\\\\Antigravity Projects\\\\ba45\\\\tmpdedtuj6r\\\\Audiobooks Sorted\\\\Петров Иван\\\\Курс истории. Лекция\\\\Курс истории. Лекция - 3 - Египет - Петров Иван.m4b\", \"sha256\": \"21beaa75ddb09ea70eb293782a31a14c8921aedc4a050e7f727d7e6711a7d548\", \"size\": 318540}, \"4\": {\"path\": \"C:\\\\Antigravity Projects\\\\ba45\\\\tmpdedtuj6r\\\\Audiobooks Sorted\\\\Петров Иван\\\\Курс истории. Лекция\\\\Курс истории. Лекция - 4 - Персия - Петров Иван.m4b\", \"sha256\": \"2264538adf9421758ae50f5695e659ba6e292823fffe431f80a9c6d4bddaa6ad\", \"size\": 318540}}, \"retained_source_sha256\": {\"C:\\\\Antigravity Projects\\\\ba45\\\\tmpdedtuj6r\\\\audio\\\\Unsorted\\\\1\\\\01.mp3\": \"899a39f4158bd79424b3cda0709414fe6537ae3f2791a2f3ff5adfddf59e649b\", \"C:\\\\Antigravity Projects\\\\ba45\\\\tmpdedtuj6r\\\\audio\\\\Unsorted\\\\1\\\\02.mp3\": \"afdf76974b0fdd56508be2ff1022fbfca0f8afe37ecf5a075689192325ae355a\"}, \"source\": \"f6553e7b78bf9d7f011b5728b2d219ad48732add\", \"start_count\": 1}\r\n",
+  "err": "test_one_start_skips_retained_producer_and_finishes_three_real_books (__main__.RealCodecContinuation.test_one_start_skips_retained_producer_and_finishes_three_real_books) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 1 test in 46.344s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 75812,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 178,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 3039,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 47116.4492,
+  "outputBytes": 2080
+}

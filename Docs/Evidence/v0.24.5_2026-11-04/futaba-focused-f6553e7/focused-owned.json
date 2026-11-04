@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_a_cached_answer_never_waits_behind_another_threads_request (test_gap_fill.ClientLockTests.test_a_cached_answer_never_waits_behind_another_threads_request) ... ok\r\ntest_a_delayed_first_dispatch_cannot_compress_the_second_reservation (test_gap_fill.ClientLockTests.test_a_delayed_first_dispatch_cannot_compress_the_second_reservation) ... ok\r\ntest_a_reservation_that_fails_to_commit_leaves_no_url_waiting (test_gap_fill.ClientLockTests.test_a_reservation_that_fails_to_commit_leaves_no_url_waiting) ... ok\r\ntest_one_url_asked_by_two_threads_is_fetched_once (test_gap_fill.ClientLockTests.test_one_url_asked_by_two_threads_is_fetched_once) ... ok\r\ntest_requests_to_one_site_stay_spaced_from_two_threads (test_gap_fill.ClientLockTests.test_requests_to_one_site_stay_spaced_from_two_threads) ... ok\r\ntest_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) ... ok\r\ntest_a_closed_source_defers_the_book_until_it_reopens (test_gap_fill.GapFillTests.test_a_closed_source_defers_the_book_until_it_reopens) ... ok\r\ntest_no_answer_is_recorded_as_none_and_never_asked_again (test_gap_fill.GapFillTests.test_no_answer_is_recorded_as_none_and_never_asked_again) ... ok\r\ntest_only_books_approved_with_background_gaps_and_only_their_newest_job (test_gap_fill.GapFillTests.test_only_books_approved_with_background_gaps_and_only_their_newest_job) ... ok\r\ntest_the_pass_records_what_a_source_confirms_in_its_own_lane_and_changes_no_book (test_gap_fill.GapFillTests.test_the_pass_records_what_a_source_confirms_in_its_own_lane_and_changes_no_book) ... ok\r\ntest_a_background_lane_uses_at_most_its_share_and_research_keeps_the_rest (test_gap_fill.LaneTests.test_a_background_lane_uses_at_most_its_share_and_research_keeps_the_rest) ... ok\r\ntest_series_backfill_reserves_in_the_series_lane (test_gap_fill.LaneTests.test_series_backfill_reserves_in_the_series_lane) ... ok\r\ntest_the_wikimedia_family_counts_as_one_site_for_a_lane (test_gap_fill.LaneTests.test_the_wikimedia_family_counts_as_one_site_for_a_lane) ... ok\r\ntest_the_app_starts_the_pass_with_series_backfill_on_the_automatic_research_and_stops_it_on_close (test_gap_fill.ServiceTests.test_the_app_starts_the_pass_with_series_backfill_on_the_automatic_research_and_stops_it_on_close) ... ok\r\ntest_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights (test_status_snapshot.SharedSnapshotTests.test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights) ... ok\r\ntest_retained_producer_holds_only_its_book_and_three_independent_jobs_finish (test_attempt_working_lifecycle.WorkingLifecycleTests.test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish) ... ok\r\ntest_a_current_failed_producer_hold_does_not_stop_the_queue (test_attempt_working_lifecycle.WorkingLifecycleTests.test_a_current_failed_producer_hold_does_not_stop_the_queue) ... ok\r\ntest_malformed_payloads_and_configured_roots_only (test_web.BrowserTests.test_malformed_payloads_and_configured_roots_only) ... ok\r\ntest_shutdown_is_protected_and_controlled (test_web.BrowserTests.test_shutdown_is_protected_and_controlled) ... ok\r\ntest_quit_refuses_new_work_waits_for_book_then_shuts_down (test_desktop_quit.ControlTests.test_quit_refuses_new_work_waits_for_book_then_shuts_down) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 20 tests in 23.166s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 13476,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 1517,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 24347.404599999998,
+  "outputBytes": 3474
+}

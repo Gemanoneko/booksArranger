@@ -1,0 +1,26 @@
+{
+  "source_commit": "bf4425de09c355d2a0743771ca4209b24c8f0de1",
+  "source": "private Git archive of the committed source; no shared working tree used for execution",
+  "source_files": 1334,
+  "source_before_after_identical": true,
+  "line_ending_note": "Archived native_io.py is CRLF SHA256 981201d8cb6ab0189ab7aa2e367e4079c4a2bb8736d2212291ae9c75c4ea2b83; LF-normalized SHA256 fed91fd457dca820ba5c23bddd2a5a7d6dd32e15443c20bc6c401723fb309950 matches Ender's frozen source. Archived lifecycle test SHA256 e1bd75bed51f5d8ffa0620aca89ba79664944d4aa70e5ff560ecb3352ce9177f matches the frozen file. Archive was tested unmodified.",
+  "selection": ["test_attempt_working_lifecycle", "test_set_release.SetReleaseTests"],
+  "tests_run": 47,
+  "tests_failed": 0,
+  "tests_errored": 0,
+  "test_seconds": 126.247,
+  "owner_elapsed_ms": 126982.497,
+  "owner": {
+    "code": 0,
+    "ok": true,
+    "closed": true,
+    "outputComplete": true,
+    "forced": false,
+    "timedOut": false,
+    "overflow": false,
+    "truncated": false,
+    "native": {"active": 0, "assigned": 0, "unsignaled": 0, "complete": true, "zero": true}
+  },
+  "focused_verdict": "PASS",
+  "scope_limit": "Private focused source behavior, including original ruling 56/57 cases. Full packaged entry and hidden/native gates are separate."
+}

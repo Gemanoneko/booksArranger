@@ -1,0 +1,42 @@
+{
+  "tool": "books-arranger",
+  "version": "0.24.5",
+  "source_commit": "cc5ea7f9deb3b2843cb75b1392e24314532a0f2a",
+  "build_id": "3369d944-a8e3-4513-a758-5e006309cf9b",
+  "product_digest": "749eee7ece79f60b4236cdfc6481bcf5d16595b0a88009fb5df596321cc0380f",
+  "release_artifact_manifest_sha256": "233f2a17919e596a63a16a7661df7ce2c5972b65a84f8c1823aeaacee9a8c1dc",
+  "runtime_pointer_sha256": "f93162afd9dcfaacdfc7cd68c2267028c713b441ac97ea91c8419e0cc9b8a20a",
+  "context_sha256": "d69afc8c0240ea4a80ac8353f0a2ff6db7775f6b135090d6e35b4128ec0cc0f3",
+  "invocations_on_this_build": 1,
+  "started_at": "2026-11-04T07:26:51.640Z",
+  "finished_at": "2026-11-04T07:37:05.658Z",
+  "outer_elapsed_ms": 614018,
+  "work_timeout_ms": 900000,
+  "transport_timeout_ms": 930000,
+  "outer_exit_code": 1,
+  "outer_killed": false,
+  "owned_check": {
+    "code": 1,
+    "elapsed_ms": 574146.6814,
+    "closed": true,
+    "output_complete": true,
+    "forced": false,
+    "timed_out": false,
+    "overflow": false,
+    "truncated": false,
+    "closure_error": null,
+    "native": {"active": 0, "assigned": 0, "unsignaled": 0, "complete": true, "zero": true}
+  },
+  "node_tests": {"total": 242, "passed": 242, "failed": 0},
+  "python_tests": {"batches": 13, "passed_batches": 12, "failed_batches": 1, "total_tests": 2352, "errors": 0, "failures": 1},
+  "failure": {
+    "case": "test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start",
+    "location": "tests/test_set_release.py:78; tests/test_approve_as_is.py:45",
+    "phase": "private Approve job wait after Start",
+    "assertion": "Private Approve job exceeded 60 s"
+  },
+  "hidden_check_run": false,
+  "verdict": "NO-GO",
+  "receipt": "Entry-check receipt v2: books-arranger v0.24.5 @ cc5ea7f9deb3b2843cb75b1392e24314532a0f2a (dirty: N) [source:7d46961cb5eca3742392b6bbf0565150ae54a1a52e2404701b073c8a513a301f; harness:9b22b0d8f2bbf0e97479aa66c1baadc730f20c1adfda441f59fea31130f8e6b4; runtime:184635bb7ec812008517fba764778ffcd9b6b293fb75401dd44d8c3bdaff04a0; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean (1 subfolder note)",
+  "raw_file_index": "files.json"
+}

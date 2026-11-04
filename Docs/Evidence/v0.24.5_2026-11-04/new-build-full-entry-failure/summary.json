@@ -1,0 +1,48 @@
+{
+  "tool": "books-arranger",
+  "version": "0.24.5",
+  "source_commit": "f6553e7b78bf9d7f011b5728b2d219ad48732add",
+  "build_id": "27b521b3-3d89-40b6-889b-5350d862d08e",
+  "product_digest": "3a2b60eb20f3c411fe1bd8c9a1b375bf652e5d2469c4e05840fa351b64254f96",
+  "release_artifact_manifest_sha256": "a44358f11c9fb7284ec07d1351867808f262edf5c7ab1d87494fbd4f6070c657",
+  "runtime_pointer_sha256": "58a6e6a326194d8712afdf34e98a70f99909bfec93a4d1edabbc9853333b58e9",
+  "context_sha256": "15b078673e26249f600de676bedf5c48f0253e9327fda48faef4b8209a6ad441",
+  "invocations_on_this_build": 1,
+  "started_at": "2026-11-04T06:54:23.208Z",
+  "finished_at": "2026-11-04T07:03:55.657Z",
+  "outer_elapsed_ms": 572449,
+  "work_timeout_ms": 900000,
+  "transport_timeout_ms": 930000,
+  "outer_exit_code": 1,
+  "outer_killed": false,
+  "owned_check": {
+    "code": 1,
+    "elapsed_ms": 543879.024,
+    "closed": true,
+    "output_complete": true,
+    "forced": false,
+    "timed_out": false,
+    "overflow": false,
+    "truncated": false,
+    "closure_error": null,
+    "native": {"active": 0, "assigned": 0, "unsignaled": 0, "complete": true, "zero": true}
+  },
+  "node_tests": {"total": 242, "passed": 242, "failed": 0},
+  "python_tests": {"batches": 13, "passed_batches": 12, "failed_batches": 1, "total_tests": 2349, "errors": 1, "failures": 0},
+  "failure": {
+    "case": "test_web.BrowserTests.test_catalog_owner_lock_and_strict_port",
+    "location": "tests/test_web.py:104",
+    "phase": "tearDown",
+    "error": "PermissionError [WinError 32] while removing private state/inventory.sqlite3"
+  },
+  "hidden_check_run": false,
+  "verdict": "NO-GO",
+  "receipt": "Entry-check receipt v2: books-arranger v0.24.5 @ f6553e7b78bf9d7f011b5728b2d219ad48732add (dirty: N) [source:4ee3be9deb6faf5a96286b036205904a1d70f75b60cc4269a5a56eb8ad4516ec; harness:f241f294365f17adf81c709624c70deb4a7d9f8a8fdc6feb871f6f215a0a10e8; runtime:184635bb7ec812008517fba764778ffcd9b6b293fb75401dd44d8c3bdaff04a0; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean",
+  "raw_file_sha256": {
+    "invocation.json": "87a6892ce451a621f7bc4e26e4762dca844bc4897113543a5b0905d83ff1b772",
+    "operator.mjs": "bf6f3461f14a9d1509c17a3bc36f444bee32bc4e10f1c54c7e5b8c9574f425de",
+    "outer-result.json": "d01789e8ce0379360843424ef4b847798b42cb66865569ea2e927e5a22198263",
+    "outer-stderr.log": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57",
+    "outer-stdout.log": "06a51002c7366da23f965c6d31de26098e5e8aec208f6729cbe5d38a1f20c116"
+  }
+}

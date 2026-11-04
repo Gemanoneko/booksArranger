@@ -1,0 +1,11 @@
+# Books Arranger 0.24.5 QA pattern alert — SQLite teardown lock
+
+**Pattern:** Full entry checks have twice reported Windows `WinError 32` while cleaning a private test SQLite file. The earlier corrected-build entry had teardown errors in background recovery and web shutdown tests. The single approved repeat on source `94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb` reported it in `test_web.BrowserTests.test_malformed_payloads_and_configured_roots_only` for `inventory.sqlite3`.
+
+**Evidence:** [Earlier corrected entry](Evidence/v0.24.5_2026-11-03/corrected-build-entry-failure/summary.json); [single approved repeat](Evidence/v0.24.5_2026-11-03/single-approved-repeat/summary.json). The two signatures show recurring teardown contention, not a proven common holder or root cause.
+
+**Disposition:** Fix. Route diagnosis and any code or harness change to Ender. Futaba will verify the specific fix from a committed build or pinned snapshot after authorization. The current 0.24.5 build remains QA NO-GO; this alert grants no additional full invocation.
+
+**2026-11-04 recurrence:** The one authorized full entry on new source `f6553e7b78bf9d7f011b5728b2d219ad48732add`, build `27b521b3-3d89-40b6-889b-5350d862d08e`, failed with one `WinError 32` teardown error in `test_web.BrowserTests.test_catalog_owner_lock_and_strict_port`. It occurred at `tests/test_web.py:104` while removing private `inventory.sqlite3`; all other 12 Python batches and all 242 Node cases passed. The owned check closed with native complete zero. [New-build entry evidence](Evidence/v0.24.5_2026-11-04/new-build-full-entry-failure/summary.json). Disposition remains **fix**; the holder is not yet known.
+
+**Release verification:** Ender's `cc5ea7f` correction retains and joins startup regroup and published-verifier threads before dependent SQLite resources close. The original failing holder was not retained for direct attribution; event-controlled private SQLite holder regressions failed on the baseline and passed after correction. Futaba's independent 79-case pass included both web cases, and the final `bf4425d` full entry passed all 13 Python batches including those web cases with no teardown error. Disposition for this release: **fix verified**. [Final full entry](Evidence/v0.24.5_2026-11-04/new-build-r3-full-entry-pass/summary.json).

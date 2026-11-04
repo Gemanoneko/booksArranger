@@ -5,7 +5,26 @@
 Release source commit: 94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb
 Release artifact manifest SHA256: a8acd696647c4a231b5724d5237f2c02fab514bb5aa3e6fc7c9f7a8cea93d9d2
 
-The final package build `c87f0090-7289-4c9b-8eed-eacc948b6d3e` passed packaging and failed its sole full entry. Release is parked. The approved hidden Electron check remains unused.
+The final package build `c87f0090-7289-4c9b-8eed-eacc948b6d3e` passed packaging and failed its initial full entry and one separately approved repeat. Release is parked. The approved hidden Electron check remains unused.
+
+## Single approved full repeat — 2026-11-03
+
+Sergei approved exactly one full repeat on the same pinned source and build. Fresh schema 3 context assembly produced the same context SHA256, `0735a7214730ea5b4b9ca701bb18945de4ec4c97c60cdb1dfa08197194b396da`, and the exact 900000 ms work / 930000 ms exit-and-EOF transport invocation ran once. It finished at 20:32:46.238Z after 535.745 seconds with exit 1. The owned check closed normally: complete native zero, active 0, no force, runner timeout, output truncation or closure error. The artifact manifest and runtime pointer still matched their retained hashes before the run.
+
+Ender's preceding focused diagnosis on the same source passed the exact ruling 56 case in isolation (27.676 seconds), under one-shot 12-peer contention (37.087 seconds), and under sustained owned 12-peer contention (42.671 seconds). One sustained ruling 57 peer failed after the target passed; its state reason was not printed. Ender did not run a second full entry or produce a sender receipt for this approval. [Focused diagnosis](Evidence/v0.24.5_2026-11-03/r56-focused-diagnosis/diagnosis.md)
+
+All 13 Python batches completed 2,344 cases, with one failure, one error and zero skips. The formerly timed-out ruling 56 case and its ruling 57 peer both passed in this full load. All 242 Node cases passed; no frontend assertion was reported.
+
+- **Major — research request spacing:** `test_gap_fill.ClientLockTests.test_requests_to_one_site_stay_spaced_from_two_threads` observed 1.0176933 seconds between requests; its assertion required at least 1.05 seconds. This is an observed full-suite failure. Root cause remains undiagnosed.
+- **Major — test web teardown:** `test_web.BrowserTests.test_malformed_payloads_and_configured_roots_only` could not remove its private `inventory.sqlite3` during teardown because Windows reported WinError 32 (file in use). The holder and cause remain undiagnosed.
+
+The entry gate failed; the same build remains **NO-GO**. This repeat does not clear the packaged app launch/close flow, PA-1 native check, live installed-copy behavior or the still-unused hidden Electron check. No further full invocation is authorized by this approval. Pattern alert: [recurring SQLite teardown lock](BooksArranger_QAPatternAlert_v0.24.5_2026-11-03.md), disposition **fix**.
+
+Actual Futaba receipt:
+
+> Entry-check receipt v2: books-arranger v0.24.5 @ 94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb (dirty: N) [source:16de00ce0f5c64e88c2fe23790e75e047276183ce5c26e9d8957e4775b5470bc; harness:26083c79afadbb3ea094b139adc7c2e9959a0f32fae4fe1283859ad4f5dfb2d8; runtime:5d3562ed3a04005275ea9af81576a624a3b926445cc80236e9fedc95590a29e1; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean (1 subfolder note)
+
+[Single approved repeat records](Evidence/v0.24.5_2026-11-03/single-approved-repeat/summary.json)
 
 ## Parked final entry failure
 

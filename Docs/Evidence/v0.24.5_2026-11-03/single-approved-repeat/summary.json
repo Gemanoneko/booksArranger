@@ -1,0 +1,104 @@
+{
+  "status": "FAIL",
+  "source": "94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb",
+  "build": "c87f0090-7289-4c9b-8eed-eacc948b6d3e",
+  "artifact_manifest_sha256": "a8acd696647c4a231b5724d5237f2c02fab514bb5aa3e6fc7c9f7a8cea93d9d2",
+  "context_sha256": "0735a7214730ea5b4b9ca701bb18945de4ec4c97c60cdb1dfa08197194b396da",
+  "callback": {
+    "started_at": "2026-11-03T20:23:50.493Z",
+    "finished_at": "2026-11-03T20:32:46.238Z",
+    "pid": 53660,
+    "error": {
+      "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs --context C:/Antigravity Projects/q/context/context.json --context-sha 0735a7214730ea5b4b9ca701bb18945de4ec4c97c60cdb1dfa08197194b396da --run-root C:/Antigravity Projects/q\nEntry checks failed; QA remains blocked\n",
+      "code": 1,
+      "signal": null,
+      "killed": false
+    },
+    "exit_code": 1
+  },
+  "elapsedMs": 535745,
+  "receipt": "Entry-check receipt v2: books-arranger v0.24.5 @ 94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb (dirty: N) [source:16de00ce0f5c64e88c2fe23790e75e047276183ce5c26e9d8957e4775b5470bc; harness:26083c79afadbb3ea094b139adc7c2e9959a0f32fae4fe1283859ad4f5dfb2d8; runtime:5d3562ed3a04005275ea9af81576a624a3b926445cc80236e9fedc95590a29e1; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean (1 subfolder note)",
+  "python": {
+    "batches": 13,
+    "completed": 2344,
+    "failures": 1,
+    "errors": 1,
+    "skips": 0
+  },
+  "relevant_passes": [
+    "test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start (test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start) ... ok",
+    "test_ruling_57_approve_one_does_not_release_the_other_even_after_start (test_set_release.SetReleaseTests.test_ruling_57_approve_one_does_not_release_the_other_even_after_start) ... ok"
+  ],
+  "failures": [
+    "FAIL: test_requests_to_one_site_stay_spaced_from_two_threads (test_gap_fill.ClientLockTests.test_requests_to_one_site_stay_spaced_from_two_threads)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\q\\entry-run-iK4vto\\scratch\\9\\tests\\test_gap_fill.py\", line 176, in test_requests_to_one_site_stay_spaced_from_two_threads\r\n    self.assertEqual(len(times), 2); self.assertGreaterEqual(times[1] - times[0], public_research.host_policy('api.fantlab.ru')[1] - 0.05)\r\n                                     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: 1.017693300000019 not greater than or equal to 1.05\r\n",
+    "ERROR: test_malformed_payloads_and_configured_roots_only (test_web.BrowserTests.test_malformed_payloads_and_configured_roots_only)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"shutil.py\", line 701, in _rmtree_unsafe\r\nPermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\\\Antigravity Projects\\\\q\\\\entry-run-iK4vto\\\\scratch\\\\0\\\\scratch\\\\web-2026-10-09\\\\tests\\\\tmpguvufa3l\\\\state\\\\inventory.sqlite3'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\q\\entry-run-iK4vto\\scratch\\0\\tests\\test_web.py\", line 104, in tearDown\r\n    self.temp.cleanup()\r\n    ~~~~~~~~~~~~~~~~~^^\r\n  File \"tempfile.py\", line 976, in cleanup\r\n  File \"tempfile.py\", line 956, in _rmtree\r\n  File \"shutil.py\", line 852, in rmtree\r\n  File \"shutil.py\", line 705, in _rmtree_unsafe\r\n  File \"tempfile.py\", line 931, in onexc\r\nPermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\\\Antigravity Projects\\\\q\\\\entry-run-iK4vto\\\\scratch\\\\0\\\\scratch\\\\web-2026-10-09\\\\tests\\\\tmpguvufa3l\\\\state\\\\inventory.sqlite3'\r\n"
+  ],
+  "node_result": [
+    "# pass 242",
+    "# fail 0"
+  ],
+  "frontend": [],
+  "owned": {
+    "cwd": "C:\\Antigravity Projects\\q\\entry-run-iK4vto",
+    "code": 1,
+    "closed": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 10872,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 18407,
+        "incompleteQueries": 385,
+        "firstIncomplete": {
+          "assigned": 37,
+          "listed": 36,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 11,
+          "listed": 10,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    },
+    "forced": false,
+    "timedOut": false,
+    "overflow": false,
+    "truncated": false,
+    "outputComplete": true,
+    "closureError": null
+  },
+  "records": [
+    {
+      "file": "invocation.json",
+      "size": 1876,
+      "sha256": "1cfb748926fa725b67a7f0e41bbd56b5339df7f3399df0c74a45bd019909e498"
+    },
+    {
+      "file": "outer-result.json",
+      "size": 579,
+      "sha256": "654c2269911e01dc4033bd3af369c0f77c25acdc718be2ec8d3ce42444cbb09f"
+    },
+    {
+      "file": "outer-stdout.log",
+      "size": 732331,
+      "sha256": "be2dd4363eabef1b8bb947f8469f4b8bb0d267d45f48ddf60c0413b535ee1f7f"
+    },
+    {
+      "file": "outer-stderr.log",
+      "size": 40,
+      "sha256": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57"
+    },
+    {
+      "file": "context.json",
+      "size": 4798,
+      "sha256": "0735a7214730ea5b4b9ca701bb18945de4ec4c97c60cdb1dfa08197194b396da"
+    }
+  ]
+}

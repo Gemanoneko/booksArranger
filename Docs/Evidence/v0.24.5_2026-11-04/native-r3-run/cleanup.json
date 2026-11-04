@@ -1,0 +1,16 @@
+{
+  "private_root": "C:/Antigravity Projects/qa-native-0245-bf4425d-20261104-r2",
+  "removed": true,
+  "removed_at": "2026-11-04T08:32:46.940Z",
+  "accepted_summary_sha256": "fc1203cf1a783d4417ab3b663db90cba3347fd5262952df62c3a2004715ef908",
+  "accepted_roles": 12,
+  "inner_native_complete_zero": true,
+  "controller_native_complete_zero": true,
+  "own_tray_leaf_absence_verified": true,
+  "preexisting_tray_unchanged": true,
+  "one_numeric_history_reference_bytes": 8,
+  "private_baseline_sha256": "7dbd118d487bc01ecf40a736d65bf93a41a2edca5615f0388918d2fab3c4eda2",
+  "launch_marker_sha256": "2c9afdd1a25ef51502a1f30d2b69878dce548f165189947c8b8f2a4c062bc4ca",
+  "progress_sha256": "721c467eb42b2b9928ee0eca35a725e240bd8bc53ffcefbe0f72877906535600",
+  "shared_q_retained": true
+}

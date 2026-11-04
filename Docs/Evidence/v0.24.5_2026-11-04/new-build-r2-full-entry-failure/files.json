@@ -1,0 +1,82 @@
+[
+  {
+    "path": "context/context.json",
+    "size": 4788,
+    "sha256": "d69afc8c0240ea4a80ac8353f0a2ff6db7775f6b135090d6e35b4128ec0cc0f3"
+  },
+  {
+    "path": "context/context.json.sha256",
+    "size": 65,
+    "sha256": "23f34dd21c4742b569911894ab582b55528adf456b615437d31f57b62dfe7ec6"
+  },
+  {
+    "path": "context/harness-manifest.json",
+    "size": 248,
+    "sha256": "c29c497cae6ba26b6ce36f2d473e0229d2f54a1b7a13e9c961b3a292b680c68f"
+  },
+  {
+    "path": "context/runtime-bundled-media.json",
+    "size": 5823,
+    "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31"
+  },
+  {
+    "path": "context/runtime-dependencies.json",
+    "size": 1052511,
+    "sha256": "12beb4db0c60007d19b7a2a6fb771f2e0ced48299fc92cc151c8188970e1b2e3"
+  },
+  {
+    "path": "context/runtime-git.json",
+    "size": 1381113,
+    "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606"
+  },
+  {
+    "path": "context/runtime-mp3-fixture.json",
+    "size": 133,
+    "sha256": "52e26c12f66067257afd51b841c2e44c7bc8a23a03684ec371936547da1317c8"
+  },
+  {
+    "path": "context/runtime-node-installation.json",
+    "size": 311392,
+    "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca"
+  },
+  {
+    "path": "context/runtime-ownership.json",
+    "size": 13523,
+    "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+  },
+  {
+    "path": "context/runtime-powershell.json",
+    "size": 146442,
+    "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3"
+  },
+  {
+    "path": "context/source-manifest.json",
+    "size": 203569,
+    "sha256": "b405798bac3197393b404979472b68f3991b47b0722123818d89f4aed4176b48"
+  },
+  {
+    "path": "invocation.json",
+    "size": 1876,
+    "sha256": "24b5326ac66bdfd2c018abbee94ef236b5a14dd9e086e6576d7fb195208fce14"
+  },
+  {
+    "path": "operator.mjs",
+    "size": 2657,
+    "sha256": "5d324cc428b1b320a4a8c546bacfe575d362968859d35cde8c8a94e664831666"
+  },
+  {
+    "path": "outer-result.json",
+    "size": 579,
+    "sha256": "c621cff43f9a509c98c05ac928d3c217f82d8f16966ffcf6a0003646b3439339"
+  },
+  {
+    "path": "outer-stderr.log",
+    "size": 40,
+    "sha256": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57"
+  },
+  {
+    "path": "outer-stdout.log",
+    "size": 733646,
+    "sha256": "6f1f21e36e8709fde85c19bd29aa8c0585fe81a8a53812a39cca2ce682ae193b"
+  }
+]

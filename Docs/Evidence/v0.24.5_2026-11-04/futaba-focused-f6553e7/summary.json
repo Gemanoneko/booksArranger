@@ -1,0 +1,124 @@
+{
+  "source": "f6553e7b78bf9d7f011b5728b2d219ad48732add",
+  "build": "pending",
+  "scope": "Private pinned snapshot from Git archive with seven corrected worktree-byte overlays; no focus, network, live catalog, Z: write, full entry or hidden Electron check",
+  "focused": {
+    "status": "PASS",
+    "cases": 20,
+    "code": 0,
+    "ok": true,
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "overflow": false,
+    "outputComplete": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 4,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 1517,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "elapsedMs": 24347.404599999998
+  },
+  "codec": {
+    "status": "OWNED RESULT FAIL; functional assertions observed but not accepted as QA pass",
+    "cases": 1,
+    "observed": {
+      "start_count": 1,
+      "blocked_reason": "Working cleanup requires attention: A prior producer is not durably closed; another attempt is not admitted",
+      "blocked_attempt": "1cee15b2-9722-4350-a534-f8483d42c8df",
+      "completed_count": 3,
+      "distinct_output_sha256": [
+        "93379f1eafe155c0926e860ea3e59303482ae163fcadf7be341c577cea20cbef",
+        "21beaa75ddb09ea70eb293782a31a14c8921aedc4a050e7f727d7e6711a7d548",
+        "2264538adf9421758ae50f5695e659ba6e292823fffe431f80a9c6d4bddaa6ad"
+      ],
+      "retained_source_sha256": [
+        "899a39f4158bd79424b3cda0709414fe6537ae3f2791a2f3ff5adfddf59e649b",
+        "afdf76974b0fdd56508be2ff1022fbfca0f8afe37ecf5a075689192325ae355a"
+      ]
+    },
+    "code": null,
+    "ok": false,
+    "closed": true,
+    "forced": true,
+    "timedOut": false,
+    "overflow": false,
+    "outputComplete": false,
+    "reason": "Final supervisor output differs from streamed bytes",
+    "closureError": null,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 178,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 3179,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "elapsedMs": 49361.7463
+  },
+  "postflight": "All 18 recorded source, runner, helper, Python and ownership-manifest SHA256 entries matched after both runs",
+  "records": [
+    {
+      "file": "preflight.sha256",
+      "size": 1918,
+      "sha256": "5d79c6046f56588589b226620fb6e2febf1c07d8a9e661ec6636f90633c32171"
+    },
+    {
+      "file": "owned.mjs",
+      "size": 1183,
+      "sha256": "acb18eb23040a263b9a5afb071aea447bad3f7b8dbcfa8a94f4299f413b0aae7"
+    },
+    {
+      "file": "focused.py",
+      "size": 993,
+      "sha256": "eab6f956b2b72a0f41584f6b439f8d5a938f6f4b08a07f1493fcf13c45055942"
+    },
+    {
+      "file": "focused-owned.json",
+      "size": 4219,
+      "sha256": "bbce18bc6a9c1885e28b94bcd66ef4673d821ed1d052dfd0ffa8203d1ff05b80"
+    },
+    {
+      "file": "focused-owned.json.log",
+      "size": 3474,
+      "sha256": "d89dea198c5ec551b35629d983c3ce51785c331728222a470da1d06cf690f4d1"
+    },
+    {
+      "file": "codec_probe.py",
+      "size": 5412,
+      "sha256": "d54dbb517bd9b144f30745ba1a35a81a458217b9aef2359d3b2359ad5cd9fbf4"
+    },
+    {
+      "file": "codec-owned.json",
+      "size": 3161,
+      "sha256": "d0bdcf0c7f484811c3a47e6b3dd332b75127aa12df43cf420d682c42f9d8851d"
+    },
+    {
+      "file": "codec-owned.json.log",
+      "size": 2257,
+      "sha256": "31671bf132142123d13994d047d95e77e388b81687b6fc833e97811be369b64c"
+    },
+    {
+      "file": "postflight-result.log",
+      "size": 1535,
+      "sha256": "fce48083648c04e61a16d9de3a6bdc8107bb925cbec3963c0e91916ef5a6c1bd"
+    }
+  ]
+}

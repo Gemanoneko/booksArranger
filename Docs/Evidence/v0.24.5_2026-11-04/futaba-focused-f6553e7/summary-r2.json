@@ -1,0 +1,109 @@
+{
+  "source": "f6553e7b78bf9d7f011b5728b2d219ad48732add",
+  "build": "pending",
+  "initial_owner_failure": {
+    "summary": "summary.json",
+    "sha256": "15c45ecef942ceca67183fdc92aa46db586c79c35f8df04e9c10690c1a5ca6ec",
+    "status": "FAIL; retained unchanged"
+  },
+  "correction": "Private QA script only: stdout/stderr configured as UTF-8 before imports and fixture execution; canonical bounded owner unchanged",
+  "focused_rerun": {
+    "status": "PASS",
+    "cases": 1,
+    "seconds": 46.344,
+    "observed": {
+      "start_count": 1,
+      "blocked_reason": "Working cleanup requires attention: A prior producer is not durably closed; another attempt is not admitted",
+      "blocked_attempt": "7e6d129b-dc18-424c-87f6-5122d3883493",
+      "blocked_source_sha256": [
+        "899a39f4158bd79424b3cda0709414fe6537ae3f2791a2f3ff5adfddf59e649b",
+        "afdf76974b0fdd56508be2ff1022fbfca0f8afe37ecf5a075689192325ae355a"
+      ],
+      "completed_job_ids": [
+        "bdb9ada9-9e19-4125-b488-6705e6462a94",
+        "dfa8416f-b768-4588-850f-2c7cdaa0660a",
+        "ff38b953-25cb-449c-a15d-d220c35a7f5b"
+      ],
+      "outputs": [
+        {
+          "size": 318522,
+          "sha256": "93379f1eafe155c0926e860ea3e59303482ae163fcadf7be341c577cea20cbef"
+        },
+        {
+          "size": 318540,
+          "sha256": "21beaa75ddb09ea70eb293782a31a14c8921aedc4a050e7f727d7e6711a7d548"
+        },
+        {
+          "size": 318540,
+          "sha256": "2264538adf9421758ae50f5695e659ba6e292823fffe431f80a9c6d4bddaa6ad"
+        }
+      ],
+      "automatic_state": "Idle"
+    },
+    "owned": {
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "forced": false,
+      "timedOut": false,
+      "overflow": false,
+      "truncated": false,
+      "outputComplete": true,
+      "closureError": null,
+      "elapsedMs": 47116.4492,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 178,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 3039,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      }
+    }
+  },
+  "postflight": "All 19 recorded pins matched after rerun",
+  "records": [
+    {
+      "file": "summary.json",
+      "size": 3781,
+      "sha256": "15c45ecef942ceca67183fdc92aa46db586c79c35f8df04e9c10690c1a5ca6ec"
+    },
+    {
+      "file": "codec_probe_utf8.py",
+      "size": 5495,
+      "sha256": "52370b180ad58abc160bc75618c26294fe64f3f9cb7f78ace3ad7b8023a95a9f"
+    },
+    {
+      "file": "codec-utf8.patch",
+      "size": 450,
+      "sha256": "96d5f8fdd9fff7005e2fe883524727bb12ed3af3beabafb79ccfbb02b6813b75"
+    },
+    {
+      "file": "preflight-r2.sha256",
+      "size": 2791,
+      "sha256": "b90e0c55ce7f2e93d6dea9550f6e99605b42cd007eec0ba65eff46857c960eb6"
+    },
+    {
+      "file": "postflight-r2-result.log",
+      "size": 1613,
+      "sha256": "d18177a0262312037392b5c7c8e09d46c4b4e1425a00455b9fc4a80614acd6cf"
+    },
+    {
+      "file": "codec-owned-r2.json",
+      "size": 2931,
+      "sha256": "c0505a4070b774f410bbd9c1d389f72e96c34c862cba8d4e4c2e7cbaec490a36"
+    },
+    {
+      "file": "codec-owned-r2.json.log",
+      "size": 2080,
+      "sha256": "6cbefe48bfdd1dce324ca4203e44a34a889ab3caf4c22d5148380acce0345197"
+    }
+  ]
+}

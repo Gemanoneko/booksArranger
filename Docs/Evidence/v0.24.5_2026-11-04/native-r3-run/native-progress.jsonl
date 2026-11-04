@@ -1,0 +1,19 @@
+{"stage":"input-verification","at":"2026-11-04T08:26:38.099Z"}
+{"stage":"inputs-verified","at":"2026-11-04T08:26:42.932Z"}
+{"stage":"explicit-membership-witness-ready","at":"2026-11-04T08:26:43.630Z"}
+{"stage":"fake-update-server-ready","at":"2026-11-04T08:26:43.687Z"}
+{"stage":"private-engine-port-ready","at":"2026-11-04T08:26:43.690Z","port":50457}
+{"stage":"app-starting","at":"2026-11-04T08:26:43.690Z"}
+{"stage":"app-started","at":"2026-11-04T08:26:43.773Z","pid":91168}
+{"stage":"engine-loaded","at":"2026-11-04T08:26:45.873Z"}
+{"stage":"checking-update","at":"2026-11-04T08:26:45.873Z"}
+{"stage":"update-checked","at":"2026-11-04T08:26:45.898Z","checked":{"version":"0.24.5","available":"0.24.6","ready":false,"packaged":true,"busy":{"check":true,"download":false,"install":false},"check":{"phase":"available","at":"10:26","cause":"","code":0,"attempt":1,"version":"0.24.6"},"download":{"phase":"idle","at":"","cause":"","progress":0},"install":{"phase":"idle","at":"","cause":"","waiting":[],"critical":[],"elapsed":0,"safe":0,"problems":[],"stopped":[],"resuming":[],"resumeSeconds":0,"cancelAt":0,"cancelling":false},"canCancel":false,"showInstaller":false,"installerPath":""},"requests":["/Gemanoneko/booksArranger/releases.atom","/Gemanoneko/booksArranger/releases/latest","/Gemanoneko/booksArranger/releases/download/v0.24.6/latest.yml"]}
+{"stage":"downloading-update","at":"2026-11-04T08:26:45.898Z"}
+{"stage":"update-downloaded","at":"2026-11-04T08:26:45.911Z","downloaded":{"version":"0.24.5","available":"0.24.6","ready":true,"packaged":true,"busy":{"check":false,"download":false,"install":false},"check":{"phase":"available","at":"10:26","cause":"","code":0,"attempt":1,"version":"0.24.6"},"download":{"phase":"ready","at":"10:26","cause":"","progress":100},"install":{"phase":"idle","at":"","cause":"","waiting":[],"critical":[],"elapsed":0,"safe":0,"problems":[],"stopped":[],"resuming":[],"resumeSeconds":0,"cancelAt":0,"cancelling":false},"canCancel":false,"showInstaller":false,"installerPath":"C:\\Antigravity Projects\\qa-native-0245-bf4425d-20261104-r2\\pa1-c2d002ed-118f-47c1-8364-39a8f6d91352\\home\\local\\books-arranger-updater\\pending\\Books-Arranger-Setup-0.24.6.exe"}}
+{"stage":"installing-invalid-update","at":"2026-11-04T08:26:45.911Z"}
+{"stage":"old-engine-recovered","at":"2026-11-04T08:26:47.496Z"}
+{"stage":"closing-window","at":"2026-11-04T08:26:52.512Z"}
+{"stage":"window-close-command-finished","at":"2026-11-04T08:26:55.562Z"}
+{"stage":"quitting","at":"2026-11-04T08:26:55.578Z"}
+{"stage":"quit-command-finished","at":"2026-11-04T08:26:58.534Z"}
+{"stage":"functional-passed","at":"2026-11-04T08:26:59.272Z"}

@@ -1,0 +1,17 @@
+TAP version 13
+# BOOKS_PA1_FUNCTIONAL {"schema":"books-pa1-functional-v1","binding":{"version":"0.24.5","source_head":"bf4425de09c355d2a0743771ca4209b24c8f0de1","product_digest":"509fcca6bf4c909827bd815cd6c6b3bcce4aa111e085f9eec0186e4bb6c7b156","build_id":"c2d002ed-118f-47c1-8364-39a8f6d91352","artifact_manifest_sha256":"0c01cb73b9ed7b4adc7e6eeccdbb30b1c933a99ccf554af5fbf0aca4b0a09133","runtime_manifest_sha256":"f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e","phase_contract_sha256":"63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"},"case":{"phase":"PA-1","entry":"tests/real-shell-update.test.mjs","title":"PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again"},"assertions":["update_available_next_version","download_sha512_verified","shell_still_running_after_failed_install","installer_blocked_cause","windows_refusal_positive_control","fake_github_download_seen","old_engine_health_version","normal_quit_ends_shell"],"fixture_root":"C:/Antigravity Projects/qa-native-0245-bf4425d-20261104-r2/pa1-c2d002ed-118f-47c1-8364-39a8f6d91352","exe":"C:\\\\Antigravity Projects\\\\qa-native-0245-bf4425d-20261104-r2\\\\pa1-c2d002ed-118f-47c1-8364-39a8f6d91352\\\\app\\\\Books Arranger.exe","downloadVerified":true,"invalidInstallerRefused":true,"oldEngineRecovered":true,"shellStayedRunning":true,"healthVersionMatched":true,"closedByQuit":true,"payloadUnchanged":true,"endpointsOwned":true,"noVisibleOwnWindow":true,"intrusion":null,"window_observations":168,"listener_observations":{"checks":168,"intrusion":null,"listenerTableClass":3,"listenerQueries":61,"reportedListenerStates":[0]}}
+# Subtest: PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again
+ok 1 - PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again
+  ---
+  duration_ms: 21178.6531
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 21299.3088

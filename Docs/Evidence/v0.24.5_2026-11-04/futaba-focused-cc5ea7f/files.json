@@ -1,0 +1,37 @@
+[
+  {
+    "file": "focused-result.json",
+    "size": 14792,
+    "sha256": "79d56bcd8eff86c09532cc65e9d130dc4ddd563b4346f0670aa3bf66bffac9be"
+  },
+  {
+    "file": "focused-result.json.log",
+    "size": 13898,
+    "sha256": "93eabd9c395530faba0df535979ec01fa022fb0a05452a12cb18c6f6661bdf11"
+  },
+  {
+    "file": "focused.py",
+    "size": 1138,
+    "sha256": "f4afe8e1ba8affb0aa56b3b6b8ddc0812922d9737990ba8fb950a1eb7ff8afd0"
+  },
+  {
+    "file": "launcher.log",
+    "size": 14157,
+    "sha256": "fa37194120dce64204bbd2cc10baccef1114700fd80280f38080a1a502748396"
+  },
+  {
+    "file": "owned.mjs",
+    "size": 1183,
+    "sha256": "acb18eb23040a263b9a5afb071aea447bad3f7b8dbcfa8a94f4299f413b0aae7"
+  },
+  {
+    "file": "source-after.json",
+    "size": 243505,
+    "sha256": "a912a308d8f8a14b750630e0024f30996dad4c0107aaf5c483a1d55c7ec37569"
+  },
+  {
+    "file": "source-before.json",
+    "size": 243505,
+    "sha256": "a912a308d8f8a14b750630e0024f30996dad4c0107aaf5c483a1d55c7ec37569"
+  }
+]
