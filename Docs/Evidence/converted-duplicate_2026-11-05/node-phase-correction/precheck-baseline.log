@@ -1,0 +1,24 @@
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ "Can't convert — M4B feature unsupported"
+- "Can't convert — M4B not supported"
+                       ^
+
+    at C:\Antigravity Projects\Worktrees\Books Arranger\frontend-fixtures-025-20261105\tests\test_precheck_frontend.js:126:10
+    at Object.<anonymous> (C:\Antigravity Projects\Worktrees\Books Arranger\frontend-fixtures-025-20261105\tests\test_precheck_frontend.js:169:3)
+    at Module._compile (node:internal/modules/cjs/loader:1968:14)
+    at Object.<anonymous> (C:\Antigravity Projects\Worktrees\Books Arranger\frontend-fixtures-025-20261105\tests\test_precheck_frontend.js:128:196)
+    at Module._compile (node:internal/modules/cjs/loader:1968:14)
+    at Object..js (node:internal/modules/cjs/loader:2108:10)
+    at Module.load (node:internal/modules/cjs/loader:1690:32)
+    at Module._load (node:internal/modules/cjs/loader:1480:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: "Can't convert — M4B feature unsupported",
+  expected: "Can't convert — M4B not supported",
+  operator: 'strictEqual',
+  diff: 'simple'
+}

@@ -80,7 +80,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   value=text(stale('s3',{group:'retry',precheck:'passed'}));
   assert.deepEqual([value.status,value.hint,!!value.warn],['Stopped — ready to retry','Retry was refused in v0.18.0. The app was updated, and this M4B now passes its check.',false]);
   assert.equal(text(stale('s4',{group:'retry',precheck:'passed'},{app_version:''})).hint,'Retry was refused. The app was updated, and this M4B now passes its check.','no stored version: the clause is dropped');
-  assert.equal(run('candidateStatus('+JSON.stringify(stale('s5',{group:'unsupported'}))+')'),"Can't convert — M4B not supported");
+  assert.equal(run('candidateStatus('+JSON.stringify(stale('s5',{group:'unsupported'}))+')'),"Can't convert — M4B feature unsupported");
   assert.equal(text(stale('s6',{group:'retry',precheck:undefined})).status,'Stopped — try again','positive control: a row the check does not cover');
   // A current refusal comes before the pre-check.
   assert.equal(text(m4bRow('s7',{attention:{group:'other',cause:null,originals_untouched:true,precheck:'pending'},readmission:refusal('file_problem')})).status,'Stopped — check refused');

@@ -1,0 +1,86 @@
+{
+  "baseline": "0ec4971169a70d57a407ae1a9ef6bf96227724d4",
+  "files": [
+    {
+      "path": "tests/test_precheck_frontend.js",
+      "bytes": 12997,
+      "sha256": "b47b4fd7794c45a6c6e3dcd0b0fb782327fc656722747ff0b19279a53c5f2314",
+      "lf_sha256": "f6e30914c5f2d09164396eacb872c5c8fba1d1a4b97034352d1ff56b0daae16f",
+      "baseline_lf_sha256": "5b2e011b1eb9cdce8d8670e29eaf4b9019f9e0ff8d8d3efa48d5959d756e2c0e"
+    }
+  ],
+  "patch_sha256": "2d25ce21d44836b487f91db776e3ce559c3fa0ef5f14f4f1abb394a541a76236",
+  "change": "One stale expected status string only: unsupported M4B feature refusal now expects the user-approved feature-specific label. No runtime or mock change; legacy singleMP3 replacement copy retained.",
+  "authority": "Committed Docs/BooksArranger_ConvertedDuplicate_UX_2026-11-04.md media addendum, table feature row and feature-only filter paragraph (lines78/83). Fixture stale(s5,{group:unsupported}) is a current unsupported-feature row after precheck; no invalid-container or failedMP3 proof is inferred.",
+  "results": {
+    "baseline": "Exact precheck old label failure reproduced in owned285.0311ms/nativezero.",
+    "corrected": "The unchanged precheck selector passed as one of all39 canonical frontend scripts.",
+    "complete_phase": {
+      "syntax": 11,
+      "node_entries": 18,
+      "node_cases": 242,
+      "node_failed": 0,
+      "node_skipped": 0,
+      "node_cancelled": 0,
+      "frontend_scripts": 39,
+      "commands": 51,
+      "owned_elapsed_ms": 23529.9717,
+      "source_inputs_unchanged": true,
+      "normal_native_zero": true
+    }
+  },
+  "graph": "Literal syntax list and sorted test_*.js discovery taken from canonical scripts/check-desktop.mjs; fixed Node entry list imported from scripts/qa-phase-contract.mjs and validated by phaseAccounting. PA1_ENTRY explicitly excluded. All51commands executed even if an earlier command would fail; full canonical check/Python/native phase not invoked.",
+  "environment": "Private TEMP/profile/fixture paths, reviewed runOwned600000 helper, windowsHide children, pure Node/DOM doubles. No Electron/native shell/Explorer/live/Z access. Current checkout raw lock74c5e770... differs from LF pin01d87... by known checkout endings; no Node failure and no pin/graph edit.",
+  "evidence": [
+    {
+      "path": "complete-node-phase.json",
+      "bytes": 79337,
+      "sha256": "9cd3b70c4b28d99c564a3b461e0375b530d1c28454ed95166b289ee4294b06e1"
+    },
+    {
+      "path": "complete-node-phase.log",
+      "bytes": 75873,
+      "sha256": "4cda17198c8931adfc847529c86540006f0df353f5088e62cfaeb4c821d4974a"
+    },
+    {
+      "path": "freeze.mjs",
+      "bytes": 4302,
+      "sha256": "49bfc981e6a0715c44b5c1d9907dbe073342aeb967fa9513a257928568edda17"
+    },
+    {
+      "path": "owned-node.mjs",
+      "bytes": 1949,
+      "sha256": "010c18b9ba1c72885a07bf2748604b9b720d30bd5e032a08824856528e7b5b71"
+    },
+    {
+      "path": "phase-plan.json",
+      "bytes": 9545,
+      "sha256": "fb974ac6849d4977efac119c37c3c26487b8a17d62f755d1464888eeb24d0c56"
+    },
+    {
+      "path": "phase-result.json",
+      "bytes": 82465,
+      "sha256": "72ebfb2e852ce95b71a234b53f5a52060d71d63a0c792fe94b37b351816bbc7d"
+    },
+    {
+      "path": "phase.mjs",
+      "bytes": 4358,
+      "sha256": "ecac1eb890ce1cdbdecdfc638350551fbf781a4952932da7da1873d0f938fde4"
+    },
+    {
+      "path": "precheck-baseline.json",
+      "bytes": 2043,
+      "sha256": "5809b40846db0e03fbc53397800eba3748a60284ee73d073e623914743e1e6c3"
+    },
+    {
+      "path": "precheck-baseline.log",
+      "bytes": 1298,
+      "sha256": "7e5191d8d28070684e4332c1c3c7881fcc7554f1712bae26ec30d0fa00ed3c2f"
+    },
+    {
+      "path": "source.patch",
+      "bytes": 1414,
+      "sha256": "2d25ce21d44836b487f91db776e3ce559c3fa0ef5f14f4f1abb394a541a76236"
+    }
+  ]
+}

@@ -1,0 +1,420 @@
+{
+  "source": "0ec4971169a70d57a407ae1a9ef6bf96227724d4",
+  "root": "C:/Antigravity Projects/Worktrees/Books Arranger/frontend-fixtures-025-20261105",
+  "check_sha256": "8feb2faae2e2799439e8b6c31858199834bc311993bd1171b5a78e8f3fae2322",
+  "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f",
+  "syntaxFiles": [
+    "desktop/main.js",
+    "desktop/preload.js",
+    "desktop/update-controller.js",
+    "desktop/engine-update.js",
+    "desktop/launch-options.js",
+    "desktop/status-flight.js",
+    "desktop/quit-watch.js",
+    "web/desktop-ui.js",
+    "desktop/startup.js",
+    "web/load-state.js",
+    "desktop/folder-picker.js"
+  ],
+  "nodeEntries": [
+    "tests/release-contract.test.mjs",
+    "tests/release-flow.test.mjs",
+    "tests/update-controller.test.mjs",
+    "tests/engine-update.test.mjs",
+    "tests/launch-options.test.mjs",
+    "tests/release-leased-executables.test.mjs",
+    "tests/status-flight.test.mjs",
+    "tests/quit-watch.test.mjs",
+    "tests/python-check-batches.test.mjs",
+    "tests/gate-source-guard.test.mjs",
+    "tests/load-state.test.mjs",
+    "tests/startup.test.mjs",
+    "tests/desktop-loading.test.mjs",
+    "tests/main-startup.test.mjs",
+    "tests/qa-entry-context.test.mjs",
+    "tests/desktop-folder-picker.test.mjs",
+    "tests/gate-scratch.test.mjs",
+    "tests/real-shell-update-contract.test.mjs"
+  ],
+  "frontendScripts": [
+    "test_0223_ui_frontend.js",
+    "test_0231_destination_frontend.js",
+    "test_0231_rows_frontend.js",
+    "test_0242_frontend.js",
+    "test_attention_frontend.js",
+    "test_automatic_frontend.js",
+    "test_browser.js",
+    "test_bulk_retry_receipts_frontend.js",
+    "test_busy_frontend.js",
+    "test_cleanup_frontend.js",
+    "test_connection.js",
+    "test_delete_frontend.js",
+    "test_delete_leaves_frontend.js",
+    "test_inline_series_frontend.js",
+    "test_iron_skazka_frontend.js",
+    "test_kept_frontend.js",
+    "test_metadata_frontend.js",
+    "test_missing_files_frontend.js",
+    "test_odd_names_frontend.js",
+    "test_original_title_frontend.js",
+    "test_panel_lock_frontend.js",
+    "test_precheck_frontend.js",
+    "test_producer_recovery_frontend.js",
+    "test_progress_frontend.js",
+    "test_queue_frontend.js",
+    "test_recovery_frontend.js",
+    "test_refused_retry_frontend.js",
+    "test_retry_frontend.js",
+    "test_retry_selected_frontend.js",
+    "test_ruling35_frontend.js",
+    "test_ruling37_frontend.js",
+    "test_save_metadata_frontend.js",
+    "test_setup_frontend.js",
+    "test_stale_list_frontend.js",
+    "test_stale_wording_frontend.js",
+    "test_startover_frontend.js",
+    "test_startup_frontend.js",
+    "test_todo_frontend.js",
+    "test_todo_holds_frontend.js"
+  ],
+  "commands": [
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/main.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/preload.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/update-controller.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/engine-update.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/launch-options.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/status-flight.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/quit-watch.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "web/desktop-ui.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/startup.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "web/load-state.js"
+      ]
+    },
+    {
+      "kind": "syntax",
+      "args": [
+        "--check",
+        "desktop/folder-picker.js"
+      ]
+    },
+    {
+      "kind": "pure-node",
+      "args": [
+        "--test",
+        "--test-reporter=tap",
+        "tests/release-contract.test.mjs",
+        "tests/release-flow.test.mjs",
+        "tests/update-controller.test.mjs",
+        "tests/engine-update.test.mjs",
+        "tests/launch-options.test.mjs",
+        "tests/release-leased-executables.test.mjs",
+        "tests/status-flight.test.mjs",
+        "tests/quit-watch.test.mjs",
+        "tests/python-check-batches.test.mjs",
+        "tests/gate-source-guard.test.mjs",
+        "tests/load-state.test.mjs",
+        "tests/startup.test.mjs",
+        "tests/desktop-loading.test.mjs",
+        "tests/main-startup.test.mjs",
+        "tests/qa-entry-context.test.mjs",
+        "tests/desktop-folder-picker.test.mjs",
+        "tests/gate-scratch.test.mjs",
+        "tests/real-shell-update-contract.test.mjs"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_0223_ui_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_0231_destination_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_0231_rows_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_0242_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_attention_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_automatic_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_browser.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_bulk_retry_receipts_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_busy_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_cleanup_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_connection.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_delete_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_delete_leaves_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_inline_series_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_iron_skazka_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_kept_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_metadata_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_missing_files_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_odd_names_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_original_title_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_panel_lock_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_precheck_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_producer_recovery_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_progress_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_queue_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_recovery_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_refused_retry_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_retry_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_retry_selected_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_ruling35_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_ruling37_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_save_metadata_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_setup_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_stale_list_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_stale_wording_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_startover_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_startup_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_todo_frontend.js"
+      ]
+    },
+    {
+      "kind": "frontend-dom-double",
+      "args": [
+        "tests\\test_todo_holds_frontend.js"
+      ]
+    }
+  ],
+  "excludedNative": "tests/real-shell-update.test.mjs",
+  "timeoutMs": 600000
+}

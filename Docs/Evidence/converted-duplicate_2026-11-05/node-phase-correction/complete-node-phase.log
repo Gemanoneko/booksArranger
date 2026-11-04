@@ -1,0 +1,1604 @@
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/main.js"],"code":0,"signal":null,"error":null,"elapsedMs":90.86710000000001}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/preload.js"],"code":0,"signal":null,"error":null,"elapsedMs":84.87989999999999}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/update-controller.js"],"code":0,"signal":null,"error":null,"elapsedMs":75.7438}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/engine-update.js"],"code":0,"signal":null,"error":null,"elapsedMs":74.2749}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/launch-options.js"],"code":0,"signal":null,"error":null,"elapsedMs":73.3247}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/status-flight.js"],"code":0,"signal":null,"error":null,"elapsedMs":76.83669999999995}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/quit-watch.js"],"code":0,"signal":null,"error":null,"elapsedMs":74.00800000000004}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","web/desktop-ui.js"],"code":0,"signal":null,"error":null,"elapsedMs":74.07689999999991}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/startup.js"],"code":0,"signal":null,"error":null,"elapsedMs":80.3786}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","web/load-state.js"],"code":0,"signal":null,"error":null,"elapsedMs":82.72789999999998}
+NODE_PHASE_COMMAND {"kind":"syntax","args":["--check","desktop/folder-picker.js"],"code":0,"signal":null,"error":null,"elapsedMs":76.03179999999998}
+NODE_PHASE_COMMAND {"kind":"pure-node","args":["--test","--test-reporter=tap","tests/release-contract.test.mjs","tests/release-flow.test.mjs","tests/update-controller.test.mjs","tests/engine-update.test.mjs","tests/launch-options.test.mjs","tests/release-leased-executables.test.mjs","tests/status-flight.test.mjs","tests/quit-watch.test.mjs","tests/python-check-batches.test.mjs","tests/gate-source-guard.test.mjs","tests/load-state.test.mjs","tests/startup.test.mjs","tests/desktop-loading.test.mjs","tests/main-startup.test.mjs","tests/qa-entry-context.test.mjs","tests/desktop-folder-picker.test.mjs","tests/gate-scratch.test.mjs","tests/real-shell-update-contract.test.mjs"],"code":0,"signal":null,"error":null,"elapsedMs":15735.988299999999}
+TAP version 13
+# Subtest: cancel returns null
+ok 1 - cancel returns null
+  ---
+  duration_ms: 0.7809
+  type: 'test'
+  ...
+# Subtest: a pick returns the absolute path and the dialog is modal to the app window
+ok 2 - a pick returns the absolute path and the dialog is modal to the app window
+  ---
+  duration_ms: 0.3813
+  type: 'test'
+  ...
+# Subtest: defaultPath is passed through when absolute and dropped otherwise
+ok 3 - defaultPath is passed through when absolute and dropped otherwise
+  ---
+  duration_ms: 0.0916
+  type: 'test'
+  ...
+# Subtest: invalid native answers reject and are distinguishable from user cancellation
+ok 4 - invalid native answers reject and are distinguishable from user cancellation
+  ---
+  duration_ms: 0.2804
+  type: 'test'
+  ...
+# Subtest: IPC answers the app window only; another sender is refused before any dialog
+ok 5 - IPC answers the app window only; another sender is refused before any dialog
+  ---
+  duration_ms: 0.2671
+  type: 'test'
+  ...
+# Subtest: the bridge answers nothing but the chosen path or null
+ok 6 - the bridge answers nothing but the chosen path or null
+  ---
+  duration_ms: 0.099
+  type: 'test'
+  ...
+# Subtest: concurrent trusted requests share one native picker until cancellation settles
+ok 7 - concurrent trusted requests share one native picker until cancellation settles
+  ---
+  duration_ms: 0.1813
+  type: 'test'
+  ...
+# Subtest: a rejected native picker releases its single-flight lock for the next request
+ok 8 - a rejected native picker releases its single-flight lock for the next request
+  ---
+  duration_ms: 0.1473
+  type: 'test'
+  ...
+# Subtest: loadingWaits: loading holds Restart to update unless the load is stuck or stopped
+ok 9 - loadingWaits: loading holds Restart to update unless the load is stuck or stopped
+  ---
+  duration_ms: 3.2219
+  type: 'test'
+  ...
+# Subtest: while loading: the hint sits under the strip, Quit stops loading, Restart to update is inert and answered
+ok 10 - while loading: the hint sits under the strip, Quit stops loading, Restart to update is inert and answered
+  ---
+  duration_ms: 3.4529
+  type: 'test'
+  ...
+# Subtest: stuck, then loaded: Restart to update is live again and Quit keeps its normal tooltip
+ok 11 - stuck, then loaded: Restart to update is live again and Quit keeps its normal tooltip
+  ---
+  duration_ms: 2.5952
+  type: 'test'
+  ...
+# Subtest: during an update the window Quit is inert with its reason and a press is answered, never silent
+ok 12 - during an update the window Quit is inert with its reason and a press is answered, never silent
+  ---
+  duration_ms: 1.9676
+  type: 'test'
+  ...
+# Subtest: m-5: a click on the inert Restart to update while loading writes the not-yet line
+ok 13 - m-5: a click on the inert Restart to update while loading writes the not-yet line
+  ---
+  duration_ms: 0.939
+  type: 'test'
+  ...
+# Subtest: Cancel update: the line is written at the press, and the button stays with its new face
+ok 14 - Cancel update: the line is written at the press, and the button stays with its new face
+  ---
+  duration_ms: 1.2089
+  type: 'test'
+  ...
+# Subtest: startup diagnostic copy uses the preload/main bridge and refuses foreign or oversized requests
+ok 15 - startup diagnostic copy uses the preload/main bridge and refuses foreign or oversized requests
+  ---
+  duration_ms: 3.5924
+  type: 'test'
+  ...
+# Subtest: update mode starts before the request is sent, so an exit 0 installs instead of closing the app
+ok 16 - update mode starts before the request is sent, so an exit 0 installs instead of closing the app
+  ---
+  duration_ms: 0.9344
+  type: 'test'
+  ...
+# Subtest: a slow answer to the request is not a failure: it is sent again and the update goes on
+ok 17 - a slow answer to the request is not a failure: it is sent again and the update goes on
+  ---
+  duration_ms: 0.146
+  type: 'test'
+  ...
+# Subtest: HTTP absence only succeeds after the exact native zero exit
+ok 18 - HTTP absence only succeeds after the exact native zero exit
+  ---
+  duration_ms: 0.1042
+  type: 'test'
+  ...
+# Subtest: status polls feed the progress line: what it waits for and each phase
+ok 19 - status polls feed the progress line: what it waits for and each phase
+  ---
+  duration_ms: 0.4383
+  type: 'test'
+  ...
+# Subtest: the overall bound (3 minutes) cancels, names what did not stop, and the old app runs on
+ok 20 - the overall bound (3 minutes) cancels, names what did not stop, and the old app runs on
+  ---
+  duration_ms: 2.8994
+  type: 'test'
+  ...
+# Subtest: Cancel update while waiting: the engine undoes the update and the shell leaves update mode
+ok 21 - Cancel update while waiting: the engine undoes the update and the shell leaves update mode
+  ---
+  duration_ms: 0.299
+  type: 'test'
+  ...
+# Subtest: too late to cancel: the engine is already ending, so the update goes on to install
+ok 22 - too late to cancel: the engine is already ending, so the update goes on to install
+  ---
+  duration_ms: 0.2533
+  type: 'test'
+  ...
+# Subtest: the engine's own bound or a failed close is read from status and leaves update mode
+ok 23 - the engine's own bound or a failed close is read from status and leaves update mode
+  ---
+  duration_ms: 0.284
+  type: 'test'
+  ...
+# Subtest: a refusal (a Quit is under way) restores the shell and is not retried
+ok 24 - a refusal (a Quit is under way) restores the shell and is not retried
+  ---
+  duration_ms: 0.2589
+  type: 'test'
+  ...
+# Subtest: an engine exit other than 0 is typed; update mode stays for the controller to start the old engine again
+ok 25 - an engine exit other than 0 is typed; update mode stays for the controller to start the old engine again
+  ---
+  duration_ms: 0.2507
+  type: 'test'
+  ...
+# Subtest: no update without an owned running engine
+ok 26 - no update without an owned running engine
+  ---
+  duration_ms: 0.1201
+  type: 'test'
+  ...
+# Subtest: Cancel and the engine-side outcomes carry what did not start again, typed
+ok 27 - Cancel and the engine-side outcomes carry what did not start again, typed
+  ---
+  duration_ms: 0.4018
+  type: 'test'
+  ...
+# Subtest: the shell gives up on an engine still ending for the update; its later exit never closes the app
+ok 28 - the shell gives up on an engine still ending for the update; its later exit never closes the app
+  ---
+  duration_ms: 2.5757
+  type: 'test'
+  ...
+# Subtest: a passing run removes every entry it made and nothing that was there before
+ok 29 - a passing run removes every entry it made and nothing that was there before
+  ---
+  duration_ms: 115.0643
+  type: 'test'
+  ...
+# Subtest: a failing run keeps only the copies it names as evidence, and says so
+ok 30 - a failing run keeps only the copies it names as evidence, and says so
+  ---
+  duration_ms: 131.0875
+  type: 'test'
+  ...
+# Subtest: a scratch folder the run made goes too, once empty; links inside are unlinked, never followed
+ok 31 - a scratch folder the run made goes too, once empty; links inside are unlinked, never followed
+  ---
+  duration_ms: 107.1201
+  type: 'test'
+  ...
+# Subtest: an entry still in use is reported, not hidden
+ok 32 - an entry still in use is reported, not hidden
+  ---
+  duration_ms: 4667.5542
+  type: 'test'
+  ...
+# Subtest: the real gate removes its worker copies and the scratch folder it made when it fails
+ok 33 - the real gate removes its worker copies and the scratch folder it made when it fails
+  ---
+  duration_ms: 997.4949
+  type: 'test'
+  ...
+# Subtest: the real gate leaves what was in scratch before it ran
+ok 34 - the real gate leaves what was in scratch before it ran
+  ---
+  duration_ms: 1006.7517
+  type: 'test'
+  ...
+# Subtest: a passing gate cleans up before it prints its pass line
+ok 35 - a passing gate cleans up before it prints its pass line
+  ---
+  duration_ms: 0.6102
+  type: 'test'
+  ...
+# Subtest: a root without data/ is not refused
+ok 36 - a root without data/ is not refused
+  ---
+  duration_ms: 2.4272
+  type: 'test'
+  ...
+# Subtest: data/ in any form marks a live checkout
+ok 37 - data/ in any form marks a live checkout
+  ---
+  duration_ms: 6.8337
+  type: 'test'
+  ...
+# Subtest: check-desktop.mjs refuses a live checkout before it copies or writes anything
+ok 38 - check-desktop.mjs refuses a live checkout before it copies or writes anything
+  ---
+  duration_ms: 147.4625
+  type: 'test'
+  ...
+# Subtest: positive control: without data/ the same copy gets past the guard
+ok 39 - positive control: without data/ the same copy gets past the guard
+  ---
+  duration_ms: 143.4801
+  type: 'test'
+  ...
+# Subtest: capture flag refuses existing file without changing any bytes
+ok 40 - capture flag refuses existing file without changing any bytes
+  ---
+  duration_ms: 5.3644
+  type: 'test'
+  ...
+# Subtest: capture refuses source recovery screenshot and reparse paths before file access
+ok 41 - capture refuses source recovery screenshot and reparse paths before file access
+  ---
+  duration_ms: 0.1265
+  type: 'test'
+  ...
+# Subtest: the thresholds live in one place
+ok 42 - the thresholds live in one place
+  ---
+  duration_ms: 0.7346
+  type: 'test'
+  ...
+# Subtest: before the first answer the engine-silence row applies from the launch
+ok 43 - before the first answer the engine-silence row applies from the launch
+  ---
+  duration_ms: 0.3485
+  type: 'test'
+  ...
+# Subtest: time alone changes nothing: ten minutes of progress stay Working
+ok 44 - time alone changes nothing: ten minutes of progress stay Working
+  ---
+  duration_ms: 1.1081
+  type: 'test'
+  ...
+# Subtest: no progress while answering: Waiting at 10 s, Stuck at 30 s, Working again when it moves
+ok 45 - no progress while answering: Waiting at 10 s, Stuck at 30 s, Working again when it moves
+  ---
+  duration_ms: 0.2206
+  type: 'test'
+  ...
+# Subtest: no answer: Waiting at 3 s, Stuck at 10 s, with the engine-quiet line
+ok 46 - no answer: Waiting at 3 s, Stuck at 10 s, with the engine-quiet line
+  ---
+  duration_ms: 0.1106
+  type: 'test'
+  ...
+# Subtest: a sleep gap restarts both clocks instead of counting the gap
+ok 47 - a sleep gap restarts both clocks instead of counting the gap
+  ---
+  duration_ms: 0.0656
+  type: 'test'
+  ...
+# Subtest: Stopped is the shell's fact and names no threshold; a taken port names the other process
+ok 48 - Stopped is the shell's fact and names no threshold; a taken port names the other process
+  ---
+  duration_ms: 0.0743
+  type: 'test'
+  ...
+# Subtest: a named cause changes the wording, never the thresholds
+ok 49 - a named cause changes the wording, never the thresholds
+  ---
+  duration_ms: 0.11
+  type: 'test'
+  ...
+# Subtest: formats: durations, running clock, counts, units, the Ready line
+ok 50 - formats: durations, running clock, counts, units, the Ready line
+  ---
+  duration_ms: 11.4995
+  type: 'test'
+  ...
+# Subtest: the tray tooltip per state; loaded means every part and took_ms, or no loading object
+ok 51 - the tray tooltip per state; loaded means every part and took_ms, or no loading object
+  ---
+  duration_ms: 0.3679
+  type: 'test'
+  ...
+# Subtest: the window opens at app ready with the first frame, before the engine answers; the engine page takes over
+ok 52 - the window opens at app ready with the first frame, before the engine answers; the engine page takes over
+  ---
+  duration_ms: 1376.003
+  type: 'test'
+  ...
+# Subtest: an engine that exits while loading is the strip's Stopped, with its last lines; no error box, the app stays
+ok 53 - an engine that exits while loading is the strip's Stopped, with its last lines; no error box, the app stays
+  ---
+  duration_ms: 606.3826
+  type: 'test'
+  ...
+# Subtest: a port held by another copy names its process
+ok 54 - a port held by another copy names its process
+  ---
+  duration_ms: 295.4824
+  type: 'test'
+  ...
+# Subtest: Quit while loading closes at once: no confirmation, the window and tray go, the engine pipe closes
+ok 55 - Quit while loading closes at once: no confirmation, the window and tray go, the engine pipe closes
+  ---
+  duration_ms: 219.2824
+  type: 'test'
+  ...
+# Subtest: Restart engine ends the stuck engine, shows the first frame and launches again
+ok 56 - Restart engine ends the stuck engine, shows the first frame and launches again
+  ---
+  duration_ms: 530.6636
+  type: 'test'
+  ...
+# Subtest: first run: "Use this folder" closes the setup window and the main window opens at Step 1; the folder is kept once loaded
+ok 57 - first run: "Use this folder" closes the setup window and the main window opens at Step 1; the folder is kept once loaded
+  ---
+  duration_ms: 312.5358
+  type: 'test'
+  ...
+# [update] Installer did not start: Error: spawn UNKNOWN
+#     at file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:232:88
+#     at new Promise (<anonymous>)
+#     at updater.spawnLog (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:232:11)
+#     at provider.spawnLog (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\update-controller.js:58:46)
+#     at updater.doInstall (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:234:42)
+#     at updater.install (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:235:126)
+#     at updater.quitAndInstall (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:236:76)
+#     at installUpdate (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\main.js:674:17)
+#     at UpdateController.install (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\main.js:659:17)
+#     at UpdateController.restart (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\update-controller.js:177:18)
+# [update] Update did not install: Error: spawn UNKNOWN
+#     at file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:232:88
+#     at new Promise (<anonymous>)
+#     at updater.spawnLog (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:232:11)
+#     at provider.spawnLog (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\update-controller.js:58:46)
+#     at updater.doInstall (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:234:42)
+#     at updater.install (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:235:126)
+#     at updater.quitAndInstall (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:236:76)
+#     at installUpdate (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\main.js:674:17)
+#     at UpdateController.install (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\main.js:659:17)
+#     at UpdateController.restart (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\update-controller.js:177:18)
+# [update] The updater asked the app to quit; the shell decides when it exits
+# Subtest: M-1: an installer that cannot start keeps the app open: the old engine starts again and the Install line says so
+ok 58 - M-1: an installer that cannot start keeps the app open: the old engine starts again and the Install line says so
+  ---
+  duration_ms: 1215.8759
+  type: 'test'
+  ...
+# [update] Installer did not start: Error: spawn UNKNOWN
+#     at file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:232:88
+#     at new Promise (<anonymous>)
+#     at updater.spawnLog (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:232:11)
+#     at provider.spawnLog (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\update-controller.js:58:46)
+#     at updater.doInstall (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:234:42)
+#     at updater.install (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:235:126)
+#     at updater.quitAndInstall (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:236:76)
+#     at installUpdate (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\main.js:674:17)
+#     at UpdateController.install (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\main.js:659:17)
+#     at UpdateController.restart (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\update-controller.js:177:18)
+# [update] Update did not install: Error: spawn UNKNOWN
+#     at file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:232:88
+#     at new Promise (<anonymous>)
+#     at updater.spawnLog (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:232:11)
+#     at provider.spawnLog (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\update-controller.js:58:46)
+#     at updater.doInstall (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:234:42)
+#     at updater.install (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:235:126)
+#     at updater.quitAndInstall (file:///C:/Antigravity%20Projects/Worktrees/Books%20Arranger/frontend-fixtures-025-20261105/tests/main-startup.test.mjs:236:76)
+#     at installUpdate (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\main.js:674:17)
+#     at UpdateController.install (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\main.js:659:17)
+#     at UpdateController.restart (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\frontend-fixtures-025-20261105\\desktop\\update-controller.js:177:18)
+# [update] The updater asked the app to quit; the shell decides when it exits
+# Subtest: M-1: after a first-run New catalog, the relaunch after a failed install opens the existing catalog
+ok 59 - M-1: after a first-run New catalog, the relaunch after a failed install opens the existing catalog
+  ---
+  duration_ms: 1216.4604
+  type: 'test'
+  ...
+# Subtest: first run with --start-hidden: no form shows; the tray says choose a data folder and opens the form
+ok 60 - first run with --start-hidden: no form shows; the tray says choose a data folder and opens the form
+  ---
+  duration_ms: 61.116
+  type: 'test'
+  ...
+# Subtest: first run with --show-inactive shows the form without taking focus
+ok 61 - first run with --show-inactive shows the form without taking focus
+  ---
+  duration_ms: 46.0607
+  type: 'test'
+  ...
+# Subtest: m-12: a copy started with --quit and no copy running exits at once, quietly: no window, no tray, no engine
+ok 62 - m-12: a copy started with --quit and no copy running exits at once, quietly: no window, no tray, no engine
+  ---
+  duration_ms: 62.2371
+  type: 'test'
+  ...
+# Subtest: m-12: --quit sent to the first-run form ends it after the second copy has its answer
+ok 63 - m-12: --quit sent to the first-run form ends it after the second copy has its answer
+  ---
+  duration_ms: 46.3872
+  type: 'test'
+  ...
+# Subtest: diagnostic copy reaches the actual main handler only for the app while generic clipboard permission stays denied
+ok 64 - diagnostic copy reaches the actual main handler only for the app while generic clipboard permission stays denied
+  ---
+  duration_ms: 25.6127
+  type: 'test'
+  ...
+# Subtest: all short worker layouts retain the original fallback prerequisite
+ok 65 - all short worker layouts retain the original fallback prerequisite
+  ---
+  duration_ms: 0.9833
+  type: 'test'
+  ...
+# Subtest: fixed short fixture bounds leave the existing 240-character output guard intact
+ok 66 - fixed short fixture bounds leave the existing 240-character output guard intact
+  ---
+  duration_ms: 0.1353
+  type: 'test'
+  ...
+# Subtest: server conflicts remain serial and every declared pattern appears exactly once
+ok 67 - server conflicts remain serial and every declared pattern appears exactly once
+  ---
+  duration_ms: 0.3597
+  type: 'test'
+  ...
+# Subtest: measured heavy modules spread longest first; serial modules stay together; declared order is kept
+ok 68 - measured heavy modules spread longest first; serial modules stay together; declared order is kept
+  ---
+  duration_ms: 0.3421
+  type: 'test'
+  ...
+# Subtest: the real inventory projects every worker under the deadline from its measured seconds
+ok 69 - the real inventory projects every worker under the deadline from its measured seconds
+  ---
+  duration_ms: 1.5551
+  type: 'test'
+  ...
+# Subtest: the approved deadline rebalance keeps every production pattern and occurrence, with serial servers and fixed limits
+ok 70 - the approved deadline rebalance keeps every production pattern and occurrence, with serial servers and fixed limits
+  ---
+  duration_ms: 1.4204
+  type: 'test'
+  ...
+# Subtest: the gate prints every worker's real seconds beside its projection (Senua 0.22.0 early review, m5)
+ok 71 - the gate prints every worker's real seconds beside its projection (Senua 0.22.0 early review, m5)
+  ---
+  duration_ms: 0.8105
+  type: 'test'
+  ...
+# Subtest: the syntax checks, node cases and page scripts run beside the Python workers, not on their critical path
+ok 72 - the syntax checks, node cases and page scripts run beside the Python workers, not on their critical path
+  ---
+  duration_ms: 0.4306
+  type: 'test'
+  ...
+# Subtest: duplicate and malformed patterns cannot silently change discovery
+ok 73 - duplicate and malformed patterns cannot silently change discovery
+  ---
+  duration_ms: 0.1222
+  type: 'test'
+  ...
+# Subtest: actual complete occurrence count is summed without deduplicating loader IDs
+ok 74 - actual complete occurrence count is summed without deduplicating loader IDs
+  ---
+  duration_ms: 0.3478
+  type: 'test'
+  ...
+# Subtest: refuses omitted completion
+ok 75 - refuses omitted completion
+  ---
+  duration_ms: 0.1641
+  type: 'test'
+  ...
+# Subtest: refuses skipped case
+ok 76 - refuses skipped case
+  ---
+  duration_ms: 0.098
+  type: 'test'
+  ...
+# Subtest: refuses failure
+ok 77 - refuses failure
+  ---
+  duration_ms: 0.091
+  type: 'test'
+  ...
+# Subtest: refuses error
+ok 78 - refuses error
+  ---
+  duration_ms: 0.0701
+  type: 'test'
+  ...
+# Subtest: refuses missing ID
+ok 79 - refuses missing ID
+  ---
+  duration_ms: 0.0718
+  type: 'test'
+  ...
+# Subtest: refuses false success
+ok 80 - refuses false success
+  ---
+  duration_ms: 0.0935
+  type: 'test'
+  ...
+# Subtest: refuses wrong worker
+ok 81 - refuses wrong worker
+  ---
+  duration_ms: 0.0782
+  type: 'test'
+  ...
+# Subtest: refuses unknown pattern
+ok 82 - refuses unknown pattern
+  ---
+  duration_ms: 0.0643
+  type: 'test'
+  ...
+# Subtest: refuses missing worker
+ok 83 - refuses missing worker
+  ---
+  duration_ms: 0.375
+  type: 'test'
+  ...
+# Subtest: gate deadline consumes startup and only tightens its fixed cap with the parent work deadline
+ok 84 - gate deadline consumes startup and only tightens its fixed cap with the parent work deadline
+  ---
+  duration_ms: 0.24
+  type: 'test'
+  ...
+# Subtest: each worker keeps its own finite cap inside the original gate and parent deadline
+ok 85 - each worker keeps its own finite cap inside the original gate and parent deadline
+  ---
+  duration_ms: 0.4622
+  type: 'test'
+  ...
+# Subtest: a split module runs as two complementary halves of its classes (0.22.3)
+ok 86 - a split module runs as two complementary halves of its classes (0.22.3)
+  ---
+  duration_ms: 0.411
+  type: 'test'
+  ...
+# Subtest: arguments: every path and the expected HEAD are required, absolute and exact (E5)
+ok 87 - arguments: every path and the expected HEAD are required, absolute and exact (E5)
+  ---
+  duration_ms: 0.984
+  type: 'test'
+  ...
+# Subtest: git ignores the caller's GIT_* variables and takes no optional locks (E4)
+ok 88 - git ignores the caller's GIT_* variables and takes no optional locks (E4)
+  ---
+  duration_ms: 0.3901
+  type: 'test'
+  ...
+# Subtest: the assembler's Git command: -c core.fsmonitor=false -C <worktree>, no caller GIT_DIR, hidden window (E4)
+ok 89 - the assembler's Git command: -c core.fsmonitor=false -C <worktree>, no caller GIT_DIR, hidden window (E4)
+  ---
+  duration_ms: 0.5312
+  type: 'test'
+  ...
+# Subtest: a good run pins the wrapper in the harness and the assembler in the graph (E1, E2)
+ok 90 - a good run pins the wrapper in the harness and the assembler in the graph (E1, E2)
+  ---
+  duration_ms: 134.5118
+  type: 'test'
+  ...
+# Subtest: refusals write nothing: an existing context, a dirty tree, a wrong HEAD, a runtime that differs, a link
+ok 91 - refusals write nothing: an existing context, a dirty tree, a wrong HEAD, a runtime that differs, a link
+  ---
+  duration_ms: 128.0382
+  type: 'test'
+  ...
+# Subtest: assembler refuses a different committed phase contract before creating context
+ok 92 - assembler refuses a different committed phase contract before creating context
+  ---
+  duration_ms: 48.7536
+  type: 'test'
+  ...
+# Subtest: missing or mislocated metadata runtimes refuse before Git and before context writes
+ok 93 - missing or mislocated metadata runtimes refuse before Git and before context writes
+  ---
+  duration_ms: 219.803
+  type: 'test'
+  ...
+# Subtest: Git and PowerShell whole-tree drift during metadata inspection refuses before context writes
+ok 94 - Git and PowerShell whole-tree drift during metadata inspection refuses before context writes
+  ---
+  duration_ms: 169.5627
+  type: 'test'
+  ...
+# Subtest: refusals for the bound mean the engine is gone
+ok 95 - refusals for the bound mean the engine is gone
+  ---
+  duration_ms: 0.546
+  type: 'test'
+  ...
+# Subtest: any reply or a timeout resets the count: the engine is still there
+ok 96 - any reply or a timeout resets the count: the engine is still there
+  ---
+  duration_ms: 0.0938
+  type: 'test'
+  ...
+# Subtest: only a refused connection counts as gone
+ok 97 - only a refused connection counts as gone
+  ---
+  duration_ms: 0.0886
+  type: 'test'
+  ...
+# Subtest: a Quit request that runs out is sent again until the engine takes it
+ok 98 - a Quit request that runs out is sent again until the engine takes it
+  ---
+  duration_ms: 0.1638
+  type: 'test'
+  ...
+# Subtest: no answer at all for the bound is "silent", never a bare timeout
+ok 99 - no answer at all for the bound is "silent", never a bare timeout
+  ---
+  duration_ms: 0.1859
+  type: 'test'
+  ...
+# Subtest: refused connections mean the engine is gone; an HTTP refusal keeps its reason
+ok 100 - refused connections mean the engine is gone; an HTTP refusal keeps its reason
+  ---
+  duration_ms: 0.2126
+  type: 'test'
+  ...
+# Subtest: Quit waits until its own engine host has exited, however long its safe stop takes within the bound
+ok 101 - Quit waits until its own engine host has exited, however long its safe stop takes within the bound
+  ---
+  duration_ms: 0.5713
+  type: 'test'
+  ...
+# Subtest: past the bound the host is ended through its own handle, and Quit waits for that too
+ok 102 - past the bound the host is ended through its own handle, and Quit waits for that too
+  ---
+  duration_ms: 1.2121
+  type: 'test'
+  ...
+# Subtest: the shell ends Quit through endOwnEngine on its own child only
+ok 103 - the shell ends Quit through endOwnEngine on its own child only
+  ---
+  duration_ms: 0.9449
+  type: 'test'
+  ...
+# Subtest: all eighteen original identities occur exactly once across mandatory phases
+ok 104 - all eighteen original identities occur exactly once across mandatory phases
+  ---
+  duration_ms: 1.6392
+  type: 'test'
+  ...
+# Subtest: missing, duplicated, renamed or pure-labelled native entries refuse
+ok 105 - missing, duplicated, renamed or pure-labelled native entries refuse
+  ---
+  duration_ms: 0.4168
+  type: 'test'
+  ...
+# Subtest: native evidence is mandatory for 0.24.2 and every later release
+ok 106 - native evidence is mandatory for 0.24.2 and every later release
+  ---
+  duration_ms: 0.3357
+  type: 'test'
+  ...
+# Subtest: authority absent, stale or allowing shared-list writes refuses
+ok 107 - authority absent, stale or allowing shared-list writes refuses
+  ---
+  duration_ms: 0.7766
+  type: 'test'
+  ...
+# Subtest: each candidate binding field is checked
+ok 108 - each candidate binding field is checked
+  ---
+  duration_ms: 0.2728
+  type: 'test'
+  ...
+# Subtest: fixed plan rejects wrong selector, deadline, external fixture or authority bytes
+ok 109 - fixed plan rejects wrong selector, deadline, external fixture or authority bytes
+  ---
+  duration_ms: 0.9692
+  type: 'test'
+  ...
+# Subtest: all eight original functional assertions and extra proof are mandatory
+ok 110 - all eight original functional assertions and extra proof are mandatory
+  ---
+  duration_ms: 0.4054
+  type: 'test'
+  ...
+# Subtest: original ownership rejects timeout, forced, unknown or incomplete closure
+ok 111 - original ownership rejects timeout, forced, unknown or incomplete closure
+  ---
+  duration_ms: 0.258
+  type: 'test'
+  ...
+# Subtest: normal final zero closure retains earlier incomplete sampling diagnostics
+ok 112 - normal final zero closure retains earlier incomplete sampling diagnostics
+  ---
+  duration_ms: 0.4191
+  type: 'test'
+  ...
+# Subtest: sampling counts require safe integers and at least one completed final observation
+ok 113 - sampling counts require safe integers and at least one completed final observation
+  ---
+  duration_ms: 0.4343
+  type: 'test'
+  ...
+# Subtest: strict raw evidence accepts internally consistent original inner and outer owner records
+ok 114 - strict raw evidence accepts internally consistent original inner and outer owner records
+  ---
+  duration_ms: 1.6901
+  type: 'test'
+  ...
+# Subtest: installed Node TAP diagnostics decode only the exact planned paths and preserve raw evidence
+ok 115 - installed Node TAP diagnostics decode only the exact planned paths and preserve raw evidence
+  ---
+  duration_ms: 1.9283
+  type: 'test'
+  ...
+# Subtest: functional marker rejects foreign paths, traversal, extra escaping and mixed TAP path spellings
+ok 116 - functional marker rejects foreign paths, traversal, extra escaping and mixed TAP path spellings
+  ---
+  duration_ms: 0.3974
+  type: 'test'
+  ...
+# Subtest: decoded facts cannot retain the old doubled path or hide marker changes with rebound record hashes
+ok 117 - decoded facts cannot retain the old doubled path or hide marker changes with rebound record hashes
+  ---
+  duration_ms: 1.5654
+  type: 'test'
+  ...
+# Subtest: every missing or byte-changed raw evidence record refuses
+ok 118 - every missing or byte-changed raw evidence record refuses
+  ---
+  duration_ms: 11.9318
+  type: 'test'
+  ...
+# Subtest: copied receipt for another candidate refuses even with valid hashes
+ok 119 - copied receipt for another candidate refuses even with valid hashes
+  ---
+  duration_ms: 0.5753
+  type: 'test'
+  ...
+# Subtest: unsafe, duplicate and oversized record references refuse before reads
+ok 120 - unsafe, duplicate and oversized record references refuse before reads
+  ---
+  duration_ms: 1.0169
+  type: 'test'
+  ...
+# Subtest: valid exact own leaf deletion leaves only the explicitly counted eight bytes
+ok 121 - valid exact own leaf deletion leaves only the explicitly counted eight bytes
+  ---
+  duration_ms: 0.8118
+  type: 'test'
+  ...
+# Subtest: no cleanup adapter call occurs with missing normal app-owner proof
+ok 122 - no cleanup adapter call occurs with missing normal app-owner proof
+  ---
+  duration_ms: 0.255
+  type: 'test'
+  ...
+# Subtest: wrong executable, additional leaf, subkey and foreign list drift refuse before deletion
+ok 123 - wrong executable, additional leaf, subkey and foreign list drift refuse before deletion
+  ---
+  duration_ms: 0.7136
+  type: 'test'
+  ...
+# Subtest: a preexisting leaf is never adopted or deleted
+ok 124 - a preexisting leaf is never adopted or deleted
+  ---
+  duration_ms: 0.1958
+  type: 'test'
+  ...
+# Subtest: same-handle executable/extra-value drift refuses and closes the retained handle
+ok 125 - same-handle executable/extra-value drift refuses and closes the retained handle
+  ---
+  duration_ms: 0.489
+  type: 'test'
+  ...
+# Subtest: foreign drift after handle validation refuses without rollback or list write
+ok 126 - foreign drift after handle validation refuses without rollback or list write
+  ---
+  duration_ms: 0.2504
+  type: 'test'
+  ...
+# Subtest: post-delete drift reports partial outcome and never restores shared state
+ok 127 - post-delete drift reports partial outcome and never restores shared state
+  ---
+  duration_ms: 0.3472
+  type: 'test'
+  ...
+# Subtest: deletion or close failure cannot become cleanup PASS
+ok 128 - deletion or close failure cannot become cleanup PASS
+  ---
+  duration_ms: 0.4981
+  type: 'test'
+  ...
+# Subtest: native adapter stays default refused before its first loader call
+ok 129 - native adapter stays default refused before its first loader call
+  ---
+  duration_ms: 0.1974
+  type: 'test'
+  ...
+# Subtest: known HWND lookup returns its PID only after a successful thread result
+ok 130 - known HWND lookup returns its PID only after a successful thread result
+  ---
+  duration_ms: 0.061
+  type: 'test'
+  ...
+# Subtest: failed or unknown HWND lookup refuses both enumeration and foreground identities
+ok 131 - failed or unknown HWND lookup refuses both enumeration and foreground identities
+  ---
+  duration_ms: 0.0946
+  type: 'test'
+  ...
+# Subtest: actual outer forwarding writes distinct controller bytes without inner TAP substitution
+ok 132 - actual outer forwarding writes distinct controller bytes without inner TAP substitution
+  ---
+  duration_ms: 0.1504
+  type: 'test'
+  ...
+# Subtest: outer forwarding refuses abnormal owner before writes and rejects write failure
+ok 133 - outer forwarding refuses abnormal owner before writes and rejects write failure
+  ---
+  duration_ms: 0.1034
+  type: 'test'
+  ...
+# Subtest: callback hashes bound to inner TAP instead of controller bytes refuse despite coherent hashes
+ok 134 - callback hashes bound to inner TAP instead of controller bytes refuse despite coherent hashes
+  ---
+  duration_ms: 0.5185
+  type: 'test'
+  ...
+# Subtest: published Python-shaped payload inventory verifies and copies without depending on JSON key order
+ok 135 - published Python-shaped payload inventory verifies and copies without depending on JSON key order
+  ---
+  duration_ms: 141.4514
+  type: 'test'
+  ...
+# Subtest: actual payload verifier rejects changed bytes, members, keys and typed facts after manifest rebinding
+ok 136 - actual payload verifier rejects changed bytes, members, keys and typed facts after manifest rebinding
+  ---
+  duration_ms: 339.6667
+  type: 'test'
+  ...
+# Subtest: readPin preserves adjacent inode identities above 2^53 and rejects the wrong one before reading bytes
+ok 137 - readPin preserves adjacent inode identities above 2^53 and rejects the wrong one before reading bytes
+  ---
+  duration_ms: 0.4977
+  type: 'test'
+  ...
+# Subtest: bigint metadata retains hardlink, ancestor, safe-number and byte integrity refusals
+ok 138 - bigint metadata retains hardlink, ancestor, safe-number and byte integrity refusals
+  ---
+  duration_ms: 0.2735
+  type: 'test'
+  ...
+# Subtest: private shell commands route close then Quit only to the same hidden private executable and profile
+ok 139 - private shell commands route close then Quit only to the same hidden private executable and profile
+  ---
+  duration_ms: 0.4279
+  type: 'test'
+  ...
+# Subtest: close-session proof requires the live primary, unchanged healthy engine and an observed hidden owned window
+ok 140 - close-session proof requires the live primary, unchanged healthy engine and an observed hidden owned window
+  ---
+  duration_ms: 0.1938
+  type: 'test'
+  ...
+# Subtest: one forced but fully closed attempt reuses only its exact unchanged app and original baseline
+ok 141 - one forced but fully closed attempt reuses only its exact unchanged app and original baseline
+  ---
+  duration_ms: 55.9029
+  type: 'test'
+  ...
+# Subtest: recovery refuses unknown/live closure, forged callback, new fixture and chained attempts
+ok 142 - recovery refuses unknown/live closure, forged callback, new fixture and chained attempts
+  ---
+  duration_ms: 99.6553
+  type: 'test'
+  ...
+# Subtest: recovery cannot adopt another release, escape its bound arena or change the original payload
+ok 143 - recovery cannot adopt another release, escape its bound arena or change the original payload
+  ---
+  duration_ms: 23.685
+  type: 'test'
+  ...
+# Subtest: exact 93 generated-cache refresh preserves EXE identity, Python sources and the entire new payload
+ok 144 - exact 93 generated-cache refresh preserves EXE identity, Python sources and the entire new payload
+  ---
+  duration_ms: 3266.0014
+  type: 'test'
+  ...
+# Subtest: known third attempt binds both real failure categories and selects only the original private engine port
+ok 145 - known third attempt binds both real failure categories and selects only the original private engine port
+  ---
+  duration_ms: 61.6223
+  type: 'test'
+  ...
+# Subtest: known third attempt refuses unknown second closure, forged callback or an unbound payload refresh
+ok 146 - known third attempt refuses unknown second closure, forged callback or an unbound payload refresh
+  ---
+  duration_ms: 197.049
+  type: 'test'
+  ...
+# Subtest: private port selection refuses a busy port, fallback, changed record or wrong saved URL before app launch
+ok 147 - private port selection refuses a busy port, fallback, changed record or wrong saved URL before app launch
+  ---
+  duration_ms: 47.2477
+  type: 'test'
+  ...
+# Subtest: private Quit command has a finite wait without any PID kill or command fallback
+ok 148 - private Quit command has a finite wait without any PID kill or command fallback
+  ---
+  duration_ms: 11.0459
+  type: 'test'
+  ...
+# Subtest: exact SDK listener-only role keeps raw state diagnostics without mapping state zero to LISTEN
+ok 149 - exact SDK listener-only role keeps raw state diagnostics without mapping state zero to LISTEN
+  ---
+  duration_ms: 0.5423
+  type: 'test'
+  ...
+# Subtest: listener-role decoder rejects nonlistener contradictions, wildcard, unknown owner, duplicate and malformed rows
+ok 150 - listener-role decoder rejects nonlistener contradictions, wildcard, unknown owner, duplicate and malformed rows
+  ---
+  duration_ms: 0.3003
+  type: 'test'
+  ...
+# Subtest: known fourth attempt binds all three failures and the current base while requiring an absent live control record
+ok 151 - known fourth attempt binds all three failures and the current base while requiring an absent live control record
+  ---
+  duration_ms: 84.1198
+  type: 'test'
+  ...
+# Subtest: known fourth attempt refuses a relabelled history, unknown third closure and unrecorded next attempt
+ok 152 - known fourth attempt refuses a relabelled history, unknown third closure and unrecorded next attempt
+  ---
+  duration_ms: 104.724
+  type: 'test'
+  ...
+# Subtest: known fifth attempt pins all four actual failure categories and current payload with absent control record
+ok 153 - known fifth attempt pins all four actual failure categories and current payload with absent control record
+  ---
+  duration_ms: 107.95
+  type: 'test'
+  ...
+# Subtest: known fifth refuses missing fourth provenance, forced fourth closure and arbitrary sixth attempt
+ok 154 - known fifth refuses missing fourth provenance, forced fourth closure and arbitrary sixth attempt
+  ---
+  duration_ms: 70.3052
+  type: 'test'
+  ...
+# Subtest: explicit query-only witness retains fixed handle, checks current worker and rejects foreign process
+ok 155 - explicit query-only witness retains fixed handle, checks current worker and rejects foreign process
+  ---
+  duration_ms: 0.4313
+  type: 'test'
+  ...
+# Subtest: witness rejects kill-on-close or breakaway flags, failed assignment, incomplete list and missing worker
+ok 156 - witness rejects kill-on-close or breakaway flags, failed assignment, incomplete list and missing worker
+  ---
+  duration_ms: 0.3025
+  type: 'test'
+  ...
+# Subtest: version and package lock/publisher must be exact
+ok 157 - version and package lock/publisher must be exact
+  ---
+  duration_ms: 0.9091
+  type: 'test'
+  ...
+# Subtest: report verdict/source/manifest are unambiguous, no approval inference
+ok 158 - report verdict/source/manifest are unambiguous, no approval inference
+  ---
+  duration_ms: 0.3502
+  type: 'test'
+  ...
+# Subtest: product digest permits final docs only and catches dependency/code/config drift
+ok 159 - product digest permits final docs only and catches dependency/code/config drift
+  ---
+  duration_ms: 0.3259
+  type: 'test'
+  ...
+# Subtest: artifact gate refuses traversal, duplicates, stale version or absent payload proof
+ok 160 - artifact gate refuses traversal, duplicates, stale version or absent payload proof
+  ---
+  duration_ms: 0.3335
+  type: 'test'
+  ...
+# Subtest: remote receipt requires exact uploaded names/sizes/digests and stable tag
+ok 161 - remote receipt requires exact uploaded names/sizes/digests and stable tag
+  ---
+  duration_ms: 0.1624
+  type: 'test'
+  ...
+# Subtest: keep four is bounded and cannot prune the release just published
+ok 162 - keep four is bounded and cannot prune the release just published
+  ---
+  duration_ms: 3.4565
+  type: 'test'
+  ...
+# Subtest: acceptance index names exactly the dated reports for this version
+ok 163 - acceptance index names exactly the dated reports for this version
+  ---
+  duration_ms: 0.4702
+  type: 'test'
+  ...
+# Subtest: native phase is mandatory from 0.24.2 through later major versions
+ok 164 - native phase is mandatory from 0.24.2 through later major versions
+  ---
+  duration_ms: 0.2964
+  type: 'test'
+  ...
+# Subtest: historical artifact readers remain readable but cannot accept a current version
+ok 165 - historical artifact readers remain readable but cannot accept a current version
+  ---
+  duration_ms: 0.4378
+  type: 'test'
+  ...
+# Subtest: QA evidence line is exactly one hash and GO prose alone cannot replace it
+ok 166 - QA evidence line is exactly one hash and GO prose alone cannot replace it
+  ---
+  duration_ms: 0.4339
+  type: 'test'
+  ...
+# Subtest: complete in-memory evidence has exact original case and every raw role
+ok 167 - complete in-memory evidence has exact original case and every raw role
+  ---
+  duration_ms: 2.9648
+  type: 'test'
+  ...
+# Subtest: each source version build product artifact runtime and phase binding is enforced
+ok 168 - each source version build product artifact runtime and phase binding is enforced
+  ---
+  duration_ms: 3.0267
+  type: 'test'
+  ...
+# Subtest: authority and functional case cannot be replaced by copied or skipped proof
+ok 169 - authority and functional case cannot be replaced by copied or skipped proof
+  ---
+  duration_ms: 4.9882
+  type: 'test'
+  ...
+# Subtest: mandatory phase inventory cannot omit duplicate or relabel the native case
+ok 170 - mandatory phase inventory cannot omit duplicate or relabel the native case
+  ---
+  duration_ms: 0.2198
+  type: 'test'
+  ...
+# Subtest: every raw reference is required byte-bound and confined before file reads
+ok 171 - every raw reference is required byte-bound and confined before file reads
+  ---
+  duration_ms: 4.7447
+  type: 'test'
+  ...
+# Subtest: inner and controller ownership each require normal complete zero closure
+ok 172 - inner and controller ownership each require normal complete zero closure
+  ---
+  duration_ms: 9.1791
+  type: 'test'
+  ...
+# Subtest: coherent inner and controller receipts retain transient observations after normal final zero
+ok 173 - coherent inner and controller receipts retain transient observations after normal final zero
+  ---
+  duration_ms: 2.0125
+  type: 'test'
+  ...
+# Subtest: malformed sampling in either original owner refuses even with coherent raw hashes
+ok 174 - malformed sampling in either original owner refuses even with coherent raw hashes
+  ---
+  duration_ms: 8.3763
+  type: 'test'
+  ...
+# Subtest: execution totals and functional markers cannot be skipped duplicated or replaced
+ok 175 - execution totals and functional markers cannot be skipped duplicated or replaced
+  ---
+  duration_ms: 1.4323
+  type: 'test'
+  ...
+# Subtest: callback postflight and own-leaf cleanup failures cannot become release evidence
+ok 176 - callback postflight and own-leaf cleanup failures cannot become release evidence
+  ---
+  duration_ms: 6.791
+  type: 'test'
+  ...
+# Subtest: outer callback cannot authenticate inner TAP or diagnostic streams as controller output
+ok 177 - outer callback cannot authenticate inner TAP or diagnostic streams as controller output
+  ---
+  duration_ms: 0.5155
+  type: 'test'
+  ...
+# Subtest: publishes only accepted files then verifies remote before cleanup
+ok 178 - publishes only accepted files then verifies remote before cleanup
+  ---
+  duration_ms: 8.5111
+  type: 'test'
+  ...
+# Subtest: missing candidate prepares and stops before credentials/publication
+ok 179 - missing candidate prepares and stops before credentials/publication
+  ---
+  duration_ms: 1.2415
+  type: 'test'
+  ...
+# Subtest: changed candidate or NO-GO never authenticates or publishes
+ok 180 - changed candidate or NO-GO never authenticates or publishes
+  ---
+  duration_ms: 1.9422
+  type: 'test'
+  ...
+# Subtest: zero-exit builder is not success if remote asset hashes differ
+ok 181 - zero-exit builder is not success if remote asset hashes differ
+  ---
+  duration_ms: 0.983
+  type: 'test'
+  ...
+# Subtest: submodules/special Git entries are not silently excluded
+ok 182 - submodules/special Git entries are not silently excluded
+  ---
+  duration_ms: 0.1167
+  type: 'test'
+  ...
+# Subtest: cleanup verifies identities and preserves current release
+ok 183 - cleanup verifies identities and preserves current release
+  ---
+  duration_ms: 2.5254
+  type: 'test'
+  ...
+# Subtest: valid current native bundle reaches original release assertions in gate order
+ok 184 - valid current native bundle reaches original release assertions in gate order
+  ---
+  duration_ms: 1.4159
+  type: 'test'
+  ...
+# Subtest: missing native evidence blocks every current and future publish before credentials
+ok 185 - missing native evidence blocks every current and future publish before credentials
+  ---
+  duration_ms: 2.7252
+  type: 'test'
+  ...
+# Subtest: GO prose missing duplicate stale or invented native summary SHA is insufficient
+ok 186 - GO prose missing duplicate stale or invented native summary SHA is insufficient
+  ---
+  duration_ms: 2.4987
+  type: 'test'
+  ...
+# Subtest: candidate source version product build artifact runtime and phase mismatches refuse publish
+ok 187 - candidate source version product build artifact runtime and phase mismatches refuse publish
+  ---
+  duration_ms: 4.0967
+  type: 'test'
+  ...
+# Subtest: each missing or changed raw native record stops before payload and credentials
+ok 188 - each missing or changed raw native record stops before payload and credentials
+  ---
+  duration_ms: 11.5662
+  type: 'test'
+  ...
+# Subtest: unsafe duplicate oversized and cross-version native references refuse before referenced reads
+ok 189 - unsafe duplicate oversized and cross-version native references refuse before referenced reads
+  ---
+  duration_ms: 3.8884
+  type: 'test'
+  ...
+# Subtest: normal ownership callback postflight and cleanup failures all block publishing
+ok 190 - normal ownership callback postflight and cleanup failures all block publishing
+  ---
+  duration_ms: 11.8724
+  type: 'test'
+  ...
+# Subtest: skipped duplicate replacement or incomplete native case cannot publish despite coherent hashes
+ok 191 - skipped duplicate replacement or incomplete native case cannot publish despite coherent hashes
+  ---
+  duration_ms: 4.2406
+  type: 'test'
+  ...
+# Subtest: authority is required for this candidate and cannot be inferred from GO
+ok 192 - authority is required for this candidate and cannot be inferred from GO
+  ---
+  duration_ms: 3.264
+  type: 'test'
+  ...
+# Subtest: historical artifacts or reports cannot replace current publish prerequisites
+ok 193 - historical artifacts or reports cannot replace current publish prerequisites
+  ---
+  duration_ms: 1.2943
+  type: 'test'
+  ...
+# Subtest: native summary size or hash races cannot authenticate
+ok 194 - native summary size or hash races cannot authenticate
+  ---
+  duration_ms: 1.751
+  type: 'test'
+  ...
+# Subtest: coherently rehashed inner-stream callback binding refuses before credentials or publication
+ok 195 - coherently rehashed inner-stream callback binding refuses before credentials or publication
+  ---
+  duration_ms: 0.6595
+  type: 'test'
+  ...
+# Subtest: publisher uses only exact native leased Git CLI and Node paths
+ok 196 - publisher uses only exact native leased Git CLI and Node paths
+  ---
+  duration_ms: 0.7552
+  type: 'test'
+  ...
+# Subtest: missing or PATH relative Git/GH capabilities refuse without fallback
+ok 197 - missing or PATH relative Git/GH capabilities refuse without fallback
+  ---
+  duration_ms: 0.2772
+  type: 'test'
+  ...
+# Subtest: the startup record: launching, running, stopped once, a new launch keeps the last load
+ok 198 - the startup record: launching, running, stopped once, a new launch keeps the last load
+  ---
+  duration_ms: 1.6011
+  type: 'test'
+  ...
+# Subtest: health is ours only with our process and version; another copy means the port is taken
+ok 199 - health is ours only with our process and version; another copy means the port is taken
+  ---
+  duration_ms: 0.2064
+  type: 'test'
+  ...
+# Subtest: last load took: saved only for a completed load, read back on the next start
+ok 200 - last load took: saved only for a completed load, read back on the next start
+  ---
+  duration_ms: 7.7565
+  type: 'test'
+  ...
+# Subtest: the tray Restart to update waits for loading unless it is stuck or stopped
+ok 201 - the tray Restart to update waits for loading unless it is stuck or stopped
+  ---
+  duration_ms: 0.2775
+  type: 'test'
+  ...
+# Subtest: concurrent readers share one request and one answer
+ok 202 - concurrent readers share one request and one answer
+  ---
+  duration_ms: 1.1151
+  type: 'test'
+  ...
+# Subtest: a finished answer is reused for one second, then refreshed
+ok 203 - a finished answer is reused for one second, then refreshed
+  ---
+  duration_ms: 0.1567
+  type: 'test'
+  ...
+# Subtest: maxAge 0 never answers from the old value but still joins the request in flight
+ok 204 - maxAge 0 never answers from the old value but still joins the request in flight
+  ---
+  duration_ms: 0.1517
+  type: 'test'
+  ...
+# Subtest: a short caller timeout ends only that wait; later polls join the same slow request
+ok 205 - a short caller timeout ends only that wait; later polls join the same slow request
+  ---
+  duration_ms: 490.6684
+  type: 'test'
+  ...
+# Subtest: failures are shared, never cached, and the next poll retries once
+ok 206 - failures are shared, never cached, and the next poll retries once
+  ---
+  duration_ms: 0.3789
+  type: 'test'
+  ...
+# Subtest: invalidate drops the remembered answer after a phase-changing control
+ok 207 - invalidate drops the remembered answer after a phase-changing control
+  ---
+  duration_ms: 0.1444
+  type: 'test'
+  ...
+# Subtest: an answer ages from when its request was sent, not when it arrived (M1)
+ok 208 - an answer ages from when its request was sent, not when it arrived (M1)
+  ---
+  duration_ms: 0.0869
+  type: 'test'
+  ...
+# Subtest: invalidate detaches the request in flight: it is never joined and never refills the answer (m1)
+ok 209 - invalidate detaches the request in flight: it is never joined and never refills the answer (m1)
+  ---
+  duration_ms: 0.0994
+  type: 'test'
+  ...
+# Subtest: a stale reply arriving after invalidate leaves nothing remembered (m1)
+ok 210 - a stale reply arriving after invalidate leaves nothing remembered (m1)
+  ---
+  duration_ms: 0.0712
+  type: 'test'
+  ...
+# Subtest: a backwards clock step counts as expired, never as fresh (m2)
+ok 211 - a backwards clock step counts as expired, never as fresh (m2)
+  ---
+  duration_ms: 0.1036
+  type: 'test'
+  ...
+# Subtest: the default clock is monotonic: a frozen wall clock cannot pin an answer (m2)
+ok 212 - the default clock is monotonic: a frozen wall clock cannot pin an answer (m2)
+  ---
+  duration_ms: 60.8683
+  type: 'test'
+  ...
+# Subtest: restart holds the installer from before the engine stops until the installer starts
+ok 213 - restart holds the installer from before the engine stops until the installer starts
+  ---
+  duration_ms: 2.4386
+  type: 'test'
+  ...
+# Subtest: GitHub black-holed: 3 tries of 30 s, 5 s and 15 s apart, then its own plain line
+ok 214 - GitHub black-holed: 3 tries of 30 s, 5 s and 15 s apart, then its own plain line
+  ---
+  duration_ms: 0.5972
+  type: 'test'
+  ...
+# Subtest: no internet and a GitHub error fail at once, each with its cause
+ok 215 - no internet and a GitHub error fail at once, each with its cause
+  ---
+  duration_ms: 0.4037
+  type: 'test'
+  ...
+# Subtest: a check answers up to date or available, with the time
+ok 216 - a check answers up to date or available, with the time
+  ---
+  duration_ms: 0.1925
+  type: 'test'
+  ...
+# Subtest: a failed install never shows up as a check result
+ok 217 - a failed install never shows up as a check result
+  ---
+  duration_ms: 0.797
+  type: 'test'
+  ...
+# Subtest: download: progress, ready, and every typed failure
+ok 218 - download: progress, ready, and every typed failure
+  ---
+  duration_ms: 1.3495
+  type: 'test'
+  ...
+# Subtest: missing checksum and admin installer cannot become ready
+ok 219 - missing checksum and admin installer cannot become ready
+  ---
+  duration_ms: 0.3971
+  type: 'test'
+  ...
+# Subtest: the installer would not start: the old engine starts again, and the line and Show installer file name the file
+ok 220 - the installer would not start: the old engine starts again, and the line and Show installer file name the file
+  ---
+  duration_ms: 0.3846
+  type: 'test'
+  ...
+# Subtest: Cancel update while it waits: no installer, no engine restart, the lease is released
+ok 221 - Cancel update while it waits: no installer, no engine restart, the lease is released
+  ---
+  duration_ms: 0.5101
+  type: 'test'
+  ...
+# Subtest: Cancel pressed while an idle engine already ends for the update: no installer, the old engine starts again
+ok 222 - Cancel pressed while an idle engine already ends for the update: no installer, the old engine starts again
+  ---
+  duration_ms: 2.379
+  type: 'test'
+  ...
+# Subtest: a tampered artifact never stops the engine and asks for a new download
+ok 223 - a tampered artifact never stops the engine and asks for a new download
+  ---
+  duration_ms: 0.1864
+  type: 'test'
+  ...
+# Subtest: verification that runs out of time keeps the download for another try
+ok 224 - verification that runs out of time keeps the download for another try
+  ---
+  duration_ms: 0.1246
+  type: 'test'
+  ...
+# Subtest: lease loss after the engine stopped: no installer, and the old engine starts again
+ok 225 - lease loss after the engine stopped: no installer, and the old engine starts again
+  ---
+  duration_ms: 0.1671
+  type: 'test'
+  ...
+# Subtest: an engine that exits unsafely is started again; one that cannot be started says so
+ok 226 - an engine that exits unsafely is started again; one that cannot be started says so
+  ---
+  duration_ms: 0.1323
+  type: 'test'
+  ...
+# Subtest: dev build says updates work only in the installed app and never asks GitHub
+ok 227 - dev build says updates work only in the installed app and never asks GitHub
+  ---
+  duration_ms: 0.0573
+  type: 'test'
+  ...
+# Subtest: page: the controller records read as their lines (black-holed GitHub, dev build)
+ok 228 - page: the controller records read as their lines (black-holed GitHub, dev build)
+  ---
+  duration_ms: 1.5044
+  type: 'test'
+  ...
+# Subtest: page: every Check, Download and Install line reads as Judy wrote it
+ok 229 - page: every Check, Download and Install line reads as Judy wrote it
+  ---
+  duration_ms: 1.9466
+  type: 'test'
+  ...
+# Subtest: page: phase lines, with the seconds counter apart from the live text
+ok 230 - page: phase lines, with the seconds counter apart from the live text
+  ---
+  duration_ms: 1.1634
+  type: 'test'
+  ...
+# Subtest: page: the confirm names the running work; idle starts at once; unknown work confirms
+ok 231 - page: the confirm names the running work; idle starts at once; unknown work confirms
+  ---
+  duration_ms: 1.5345
+  type: 'test'
+  ...
+# Subtest: page: buttons have real tooltips, busy ones use aria-disabled, and show only when they apply
+ok 232 - page: buttons have real tooltips, busy ones use aria-disabled, and show only when they apply
+  ---
+  duration_ms: 0.8932
+  type: 'test'
+  ...
+# Subtest: the Install line names what did not start again after Cancel, the bound or a failed close
+ok 233 - the Install line names what did not start again after Cancel, the bound or a failed close
+  ---
+  duration_ms: 1.54
+  type: 'test'
+  ...
+# Subtest: a late exit of an engine ending for the update starts the old engine again, with the engine_exit line
+ok 234 - a late exit of an engine ending for the update starts the old engine again, with the engine_exit line
+  ---
+  duration_ms: 0.9801
+  type: 'test'
+  ...
+# Subtest: a failed installer start never lets the updater start its own fallback; a good start goes through
+ok 235 - a failed installer start never lets the updater start its own fallback; a good start goes through
+  ---
+  duration_ms: 92.6471
+  type: 'test'
+  ...
+# Subtest: lookups alone: the Cancel line names them without the warning tint; anything to press keeps it
+ok 236 - lookups alone: the Cancel line names them without the warning tint; anything to press keeps it
+  ---
+  duration_ms: 0.8297
+  type: 'test'
+  ...
+# Subtest: an ended engine: the installer, engine exit and engine restart lines name the work that stays stopped
+ok 237 - an ended engine: the installer, engine exit and engine restart lines name the work that stays stopped
+  ---
+  duration_ms: 3.7222
+  type: 'test'
+  ...
+# Subtest: a late engine exit during the lease close is kept and starts the old engine once the install has ended
+ok 238 - a late engine exit during the lease close is kept and starts the old engine once the install has ended
+  ---
+  duration_ms: 26.3532
+  type: 'test'
+  ...
+# Subtest: a download the connection cut short reads as the connection dropped
+ok 239 - a download the connection cut short reads as the connection dropped
+  ---
+  duration_ms: 0.4271
+  type: 'test'
+  ...
+# Subtest: page: Cancel update answers at the press, names what is slow to resume from 3 s, and keeps its button
+ok 240 - page: Cancel update answers at the press, names what is slow to resume from 3 s, and keeps its button
+  ---
+  duration_ms: 0.8813
+  type: 'test'
+  ...
+# Subtest: page: the confirm names approvals in flight; the conversion line says it comes back with Resume audiobook jobs
+ok 241 - page: the confirm names approvals in flight; the conversion line says it comes back with Resume audiobook jobs
+  ---
+  duration_ms: 0.6216
+  type: 'test'
+  ...
+# Subtest: a Cancel press is answered at once: cancelling, its time, and the button stays
+ok 242 - a Cancel press is answered at once: cancelling, its time, and the button stays
+  ---
+  duration_ms: 0.216
+  type: 'test'
+  ...
+1..242
+# tests 242
+# suites 0
+# pass 242
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 15651.0177
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_0223_ui_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":138.66560000000027}
+PASS 0.22.3 UI: names as facts and Edit names (ruling 40); the Save clock, Goes to, It left this list and Show it; block lines with fixes; learned author rules with Take back
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_0231_destination_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":135.8739999999998}
+PASS 0.23.1 destination: the block on every row, Choose folder… with the stub picker, the chosen folder lines, reset and its confirmation, move states and every failure, Now in, Open book folder
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_0231_rows_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":141.3172999999988}
+PASS 0.23.1 rows: Open source folder (one, several, 12, gone list, details builder, bounded pending and retry), the In line, Book / Author / reader lines, Numbers and membership lines, gap faces, Includes, the raised folder question
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_0242_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":110.98500000000058}
+PASS 0.24.2 frontend: admission, maintenance, cancellation, pause origins, membership, chapter diagnostics, names, identity and routing display
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_attention_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":348.9647999999979}
+PASS attention classes, row hints, Retry and Repair, queued next, repaired record, group strip, server Retry all with confirmation, details lines, list loading and request discipline, whole files and research history
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_automatic_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":148.96770000000106}
+PASS automatic lifecycle acknowledgements, controls, disconnects, holds/evidence, draft leases, Held paging and focused poll preservation
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_browser.js"],"code":0,"signal":null,"error":null,"elapsedMs":112.53729999999996}
+PASS browser unsaved-review fingerprint survives source refresh and stale save is surfaced
+PASS anthology toggling preserves/restores reviewed fields, reloads roles, keeps comment sources distinct, excludes ebooks
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_bulk_retry_receipts_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":100.83450000000084}
+Bulk retry actual-app DOM assertions PASS (25)
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_busy_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":117.49819999999818}
+PASS busy engine (desktop): the 3 s notice with its passes, Last update, the 2 min notice, no offline flag, the press ladder, the not-confirmed lines, Delete slowly
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_cleanup_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":109.57259999999951}
+PASS cleanup identity legacy/observed diagnostics, real controls/pending/queue/cancel and no conversion mutation
+PASS cleanup policy, historical retention, authoritative partial pause/failure/completion, output success, verified counters and stage-specific job controls
+PASS proposal drafts, provenance/source coverage, dirty revisions, include/order invalidation, page-only ready queue, and single-M4B guard
+PASS explicit inspector focus, same-record draft retention, opaque folder identity and adjacent failure without native launch
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_connection.js"],"code":0,"signal":null,"error":null,"elapsedMs":118.079899999997}
+PASS actual polling failure/recovery, repeated failure, partial refresh, stale library, review/read-error preservation, old HTML fallback, explicit file units, once-per-owner Paused/Idle acknowledgement with Running suppression, blocked unavailable shutdown and intentional shutdown
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_delete_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":723.4716000000008}
+PASS Delete book: offer-only button, last with its tooltip, dialog with Cancel focused, Enter confirms nothing, exact paths, success, partial, refusals, lost connection; groups, folders, stay and last-copy lines; Remove this copy with its proof, refusals and no Approve on duplicate rows
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_delete_leaves_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":172.10979999999836}
+PASS a deleted book leaves in the same render, its count drops, and a stale list or status cannot bring it back
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_inline_series_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":152.31110000000263}
+inline author/title/series draft, preview, approval and editor reuse: passed
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_iron_skazka_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":145.28080000000045}
+PASS Iron Retry row and automatic queue hint; Сказка Convert…, confirmation dialog (Tab cycle, default focus, Esc, inert until both ticked, trusted press only), K2/K4, R1a, R1b, R2, R3, R3b, changed book, K3 deletion line
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_kept_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":295.52850000000035}
+PASS kept-files classes and copy, Keep files row and panel action (one request, pending, refused, landed), kept-by-choice lines, strip groups and zero hiding with fallback, Jobs panel total
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_metadata_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":114.17640000000029}
+PASS proposal drafts, provenance/source coverage, dirty revisions, include/order invalidation, page-only ready queue, and single-M4B guard
+PASS explicit inspector focus, same-record draft retention, opaque folder identity and adjacent failure without native launch
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_missing_files_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":105.8279999999977}
+PASS gone files read "No longer found" in rows and details; no old error text; a returned unreadable file is a read error again
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_odd_names_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":165.37029999999868}
+PASS odd-name questions: Title unclear, Author unclear from a folder, two people; chip Title or author; never in Select all or bulk Approve as is
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_original_title_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":107.65509999999995}
+PASS no waiting state, row or copy; the Original title fact; the name-language sentence
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_panel_lock_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":141.52899999999863}
+PASS panel lock: the panel's own chapter default never holds a row's Save or Approve; a real panel edit still does, said on screen with Discard panel edits
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_precheck_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":134.05159999999887}
+PASS pre-check checking and can't-open rows, stale refusal with a passed check, Checking strip group, Repair verb, working folder in Technical detail
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_producer_recovery_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":121.16630000000077}
+PASS producer recovery typed states, exact POST, duplicate guard, pending focus, acknowledged-only restart copy, failure/offline retention, dirty draft/caret, Clear suppression and retained history
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_progress_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":102.71149999999761}
+PASS progress rows: measured and indeterminate steps, detail formats, fixed order, overflow, paused/attention/idle, elapsed and ETA, page contract
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_queue_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":160.00790000000052}
+PASS queued Retry and Delete book: blocked tooltips, queued faces with Cancel, order and count, cancel and too late, every outcome line, the blocked dialog, inert siblings, bulk left out, n = 0 copy
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_recovery_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":104.22880000000077}
+PASS recovery facts, fixed scope, Cancel focus, keyboard trap/return, stale polling, disconnect, unknown values, deletion receipts, one guarded submission and selection clearing
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_refused_retry_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":124.44550000000163}
+PASS refused Retry rows per typed cause, stale state, left-out count, focus hand-off, held refused row
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_retry_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":131.22479999999996}
+PASS retry block states, C1 job reason, C2 wording, request/feedback/focus, book scoping, desktop Quit
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_retry_selected_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":170.61260000000038}
+PASS Retry selected in Output needs attention, its confirmation and per-book requests, no double press, remembered Queued over stale lists, review wording elsewhere
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_ruling35_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":140.8565000000017}
+PASS ruling 35 on the page: queued Approve with Cancel and its outcome, rows never hold each other, held Start over and toolbar presses; Edit names: read, pairing, Applies to, queued Save, row line, Place and Entered
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_ruling37_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":117.60139999999956}
+PASS the rest of ruling 35 on the page: Resume kept while pausing and cancelled by a second press, Retry all and Convert wait for a scan, recovery deletion queued with Cancel, S6 delete refusals in the engine's words
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_save_metadata_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":106.26090000000113}
+PASS Save preview metadata: Saving… at the press, Saved. with the answer, no press dropped, typed edits kept unsaved, rebased on Candidate changed, waits for another press
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_setup_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":86.38090000000011}
+PASS setup form: a refusal shows the shell's sentence only; every control has its tooltip; busy and empty are aria-disabled
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_stale_list_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":120.62679999999818}
+PASS stale list: the poll never waits for the list, S0-S8, re-ask keeps the clock, the busy pause, list reads out of oldestWait, the status time limit, another day; 76a fingerprint
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_stale_wording_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":97.04750000000058}
+PASS no stale retention wording in 18 page and shell files
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_startover_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":210.0691999999981}
+PASS Start over, combined press, release and its dialog, Started over states/filter/summary, working files, bulk release, pending start, narrow table structure
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_startup_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":141.25920000000042}
+PASS startup: first frame, states from silence, parts withheld, inert controls, Stopped, restart_safe, settle
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_todo_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":570.5061999999998}
+PASS to-do list: chips and counts, shortcut, row fields and Goes to, Approve as is / typed / Ctrl+Enter, author choices (ruling 14), Name taken, missing files, Same author?, bulk Approve as is, Technical details
+NODE_PHASE_COMMAND {"kind":"frontend-dom-double","args":["tests\\test_todo_holds_frontend.js"],"code":0,"signal":null,"error":null,"elapsedMs":333.72339999999895}
+PASS to-do 0.22.0 review: three hold chips, one sentence per cause, lists and faces, Change order, Scan again, catch-all, No choice lines, unsaved edits, Retry selected, Still checking, copy
+NODE_PHASE_RESULT {"ok":true,"syntaxRan":11,"nodeEntriesRan":18,"nodeCases":242,"frontendScriptsRan":39,"commandsRan":51,"sourceInputsUnchanged":true}
