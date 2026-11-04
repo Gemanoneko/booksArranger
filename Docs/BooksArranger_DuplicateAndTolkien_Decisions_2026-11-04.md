@@ -26,6 +26,16 @@ Sergei additionally reported that Open source folder stays disabled with Opening
 
 Fix the delay in the existing app request through its normal entry point. Diagnose its admission, backend and shell-response handling rather than attributing the delay to NAS availability without evidence. Dispatch promptly when the selected source path is valid, complete or fail the busy state visibly, and allow a safe retry. Preserve the existing source-path validation and argument handling. Judy specifies the minimal button and feedback states. Testing that would open Explorer or take focus still requires Sergei's permission.
 
+## Include the reported media refusals in 0.25.0
+
+Sergei requested fixes for the stopped 57-source Koontz book Странный Томас 03, Брат Томас and four single-file M4B candidates. Read-only saved diagnostics distinguish three PNG chapter-image preservation refusals from the AAC audio itself. Those titles are Splatterpunk stories 3, Последняя глава and Сборник рассказов японских авторов Сад Камней. The fourth title, Самые страшные русские народные сказки, has stored packet/container errors and a recorded size of 2 MiB. The Koontz job has a saved MP3 full-decode error without the failing filename.
+
+Implement supported, narrowly verified PNG chapter-image handling without discarding chapter images or weakening audio, sample, extent and container proofs. Make source failures identify the actual file and reason. The UI must distinguish an unsupported preservation feature from invalid media. Damaged or missing audio does not become a successful conversion through a wording change or relaxed verification.
+
+Sergei separately approved bounded read-only diagnostics on the exact affected Z: sources. The plan covers the Koontz manifest's 57 MP3 paths, at most 501,440,217 saved source bytes, decoding sequentially until the first failure. It also covers headers and moov ranges of the four exact M4Bs, capped at 8 MiB metadata per file and 32 MiB total, plus strict decoding of the 2 MiB suspect. Stop on changed source identity or size, denied access, limit or timeout. Outputs remain local. No source writes, movement, deletion, live database mutation, Explorer launch or focus-taking is authorized. Clean all temporary files and folders after preserving necessary evidence.
+
+Sergei asked the team to continue overnight and finish the requested work unless a blocker requires his input. Continue independent app fixes if a damaged source needs a replacement that the team cannot reconstruct.
+
 ## Verification and handoff
 
 Use private fixtures for the duplicate's Unicode-path case, recording identity and cleanup safety, the confirmed trilogy's names and routing, persisted manual choices, and the editor's real loading and saving flow. No live source removal or movement is authorized by this implementation brief. Sully owns all commits, versioning and release operations. Futaba verifies a committed or pinned correction before delivery.
