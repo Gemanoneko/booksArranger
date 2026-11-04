@@ -3101,6 +3101,8 @@ class MergeService:
         review=result.get('review') or {}
         if str(review.get('series') or '').strip() and str(review.get('number') or '').strip():
             answer['series']={'name':str(review['series']).strip(),'number':str(review['number']).strip()}
+        from tolkien_trilogy import author_world,DECISION
+        if author_world(review,result.get('metadata_facts')):answer['names_decision']=DECISION
         if names is not None:
             answer['place']=self._place(result.get('review') or {})
             values=dict(names)
@@ -3239,7 +3241,10 @@ class MergeService:
                 proposed.update(series=preview['series']['name'],number=preview['series']['number'])
             for field,value in proposed.items():
                 if field in ('title','author') and not str(value or '').strip():continue
-                if field not in now and (isinstance(value,str) if field!='collection' else type(value)is bool):fields[field]['proposal']=value
+                from tolkien_trilogy import superseded_series,DECISION
+                superseded=(field=='series' and preview.get('names_decision')==DECISION and
+                    superseded_series({'fields':['series'],'saved_utc':{'series':now['series'].get('saved')}} if field in now else {},fields[field]['proposal']))
+                if (field not in now or superseded) and (isinstance(value,str) if field!='collection' else type(value)is bool):fields[field]['proposal']=value
         except (ValueError,OSError) as error:
             place,destination=self._place({'universe':fields['universe']['proposal'],'series':fields['series']['proposal'],'number':fields['number']['proposal'],
                                            'anthology':fields['collection']['proposal']}),{'path':'','absolute':'','taken':False,'reason':str(error)[:200]}

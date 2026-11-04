@@ -5,8 +5,11 @@ credit and source fingerprint bind the decision. A title or author alone never
 establishes membership. Frozen publications are not rewritten by this module.
 """
 import copy
+from datetime import datetime,timezone
 
 DECISION='user:tolkien-trilogy-2026-11-04'
+# Time of the durable decision document (37ab171), not a guessed chat timestamp.
+RECORDED=datetime.fromisoformat('2026-11-04T19:52:41+00:00')
 CYCLE='https://fantlab.ru/work1693'
 SERIES='Lord of the Rings'
 WORLD='Middle-earth'
@@ -15,6 +18,17 @@ WORKS={'The Fellowship of the Ring':('fantlab:1667','1'),
        'The Return of the King':('fantlab:1669','3')}
 AUTHORS={'Tolkien J. R. R.','J. R. R. Tolkien','John Ronald Reuel Tolkien','Джон Рональд Руэл Толкин'}
 FIELDS=('title','author','canonical_author','series','number','universe')
+
+
+def superseded_series(entered,value):
+    """Only the old exact Russian spelling predating this superseding decision."""
+    if value not in ('Властелин колец','Властелин Колец') or 'series' not in (entered.get('fields') or []):return False
+    saved=(entered.get('saved_utc') or {}).get('series')
+    if saved is None:return True  # Legacy receipts predate per-field save provenance.
+    try:
+        moment=datetime.fromisoformat(saved.replace('Z','+00:00'))
+        return moment.tzinfo is not None and moment<=RECORDED
+    except (ValueError,TypeError,AttributeError):return False
 
 
 def _binding(review,facts):
@@ -47,8 +61,10 @@ def apply(result):
     facts.pop('trilogy_routing',None)
     if not _confirmed(out):return out
     review=out['review'];names=(out.get('approval') or {}).get('names') or {}
-    entered=set((facts.get('entered_names') or {}).get('fields') or [])
-    if 'series' not in names and 'series' not in entered:review['series']=SERIES
+    saved=facts.get('entered_names') or {};entered=set(saved.get('fields') or [])
+    typed=set((out.get('approval') or {}).get('typed_names') or [])
+    explicit_series='series' in typed or 'series' in names and 'series' not in entered
+    if not explicit_series and ('series' not in entered or superseded_series(saved,review.get('series'))):review['series']=SERIES
     if not review.get('universe') and 'universe' not in names and 'universe' not in entered:review['universe']=WORLD
     if review.get('series')==SERIES and review.get('universe')==WORLD:
         facts['trilogy_routing']={'schema':'books-trilogy-routing-v1','decision':DECISION,

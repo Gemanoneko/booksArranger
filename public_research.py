@@ -644,6 +644,7 @@ class PublicResearch:
         if names:record['names']=names
         record['names_entered']=[field for field in entered_names.FIELDS if field in found]
         record['names_digest']=stamp
+        record['names_saved_utc']={field:item['saved'] for field,item in found.items() if isinstance(item.get('saved'),str)}
         return record
     def approved(self,row,root,title=None,author=None,chosen=None,names=None,retained=None):
         """Sergei's Approve (rulings 6a, 6b, 11a): the book's identity is the title and author shown on its row, his
@@ -681,7 +682,7 @@ class PublicResearch:
         if not final_author and not collection:final_author=NO_AUTHOR
         settled=local_identity.settled(record,final_title,final_author,'approved',typed,collection=collection,rules=self.rules(),
                                        folder='\\'.join(reversed(local_identity._ancestors(row,root))),answered=author is None and chosen is not None)
-        for key in ('names','names_entered','names_digest'):
+        for key in ('names','names_entered','names_digest','names_saved_utc'):
             if key in record:settled[key]=copy.deepcopy(record[key])
         if english and english.get('series') and not settled.get('series') and not {'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)):
             settled['series']=dict(english['series'])  # found with the Russian title (_english_original); never his own values
@@ -693,7 +694,7 @@ class PublicResearch:
         result['local_agreement']=local_identity.summary(settled)
         result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index,retained_fields=known)
         result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown,
-                            'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or []),
+                            'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or []),'typed_names':sorted(typed_names),
                             # Rulings 52 and 53 (Senua's 0.22.3 review, M10): the split's series is unconfirmed and not his.
                             'series_question':bool(record.get('series_unconfirmed')) and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names))),
                             # Ruling 74b (Sergei 2026-10-31, the follow-up): the numbers disagree and nothing he typed or saved says
@@ -1277,7 +1278,7 @@ class PublicResearch:
         if 'universe' in saved_names and saved_names['universe'] is not None:review['universe']=saved_names['universe']
         elif local.get('universe'):review['universe']=local['universe']  # rulings 30 and 37
         facts['work_ids']=[work['id']]
-        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
+        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or []),'saved_utc':dict(local.get('names_saved_utc') or {})}  # Edit names: the job's names
         reasons=list(reasons)+source_gate(row,work)
         result['work']=work
         result['sources'].insert(0,{'url':'','kind':'local_agreement','verified_identity':True,'agreement':summary})
@@ -1545,7 +1546,7 @@ class PublicResearch:
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
         facts['research_version']=RESEARCH_VERSION  # ruling 71f: a job planned under this research needs no re-check
-        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
+        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or []),'saved_utc':dict(local.get('names_saved_utc') or {})}  # Edit names: the job's names
         if result.get('original_title'):facts['original_title_lookup']=dict(result['original_title'])  # ruling 38: the details panel's fact
         if spelling:facts['author_spelling']=spelling
         # background: the gaps the background pass fills later (gap_fill), with what it asks the sources about. Series

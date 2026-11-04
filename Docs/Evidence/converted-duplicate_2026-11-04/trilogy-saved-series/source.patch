@@ -1,0 +1,143 @@
+diff --git a/merge_service.py b/merge_service.py
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -3101,6 +3101,8 @@
+         review=result.get('review') or {}
+         if str(review.get('series') or '').strip() and str(review.get('number') or '').strip():
+             answer['series']={'name':str(review['series']).strip(),'number':str(review['number']).strip()}
++        from tolkien_trilogy import author_world,DECISION
++        if author_world(review,result.get('metadata_facts')):answer['names_decision']=DECISION
+         if names is not None:
+             answer['place']=self._place(result.get('review') or {})
+             values=dict(names)
+@@ -3239,7 +3241,10 @@
+                 proposed.update(series=preview['series']['name'],number=preview['series']['number'])
+             for field,value in proposed.items():
+                 if field in ('title','author') and not str(value or '').strip():continue
+-                if field not in now and (isinstance(value,str) if field!='collection' else type(value)is bool):fields[field]['proposal']=value
++                from tolkien_trilogy import superseded_series,DECISION
++                superseded=(field=='series' and preview.get('names_decision')==DECISION and
++                    superseded_series({'fields':['series'],'saved_utc':{'series':now['series'].get('saved')}} if field in now else {},fields[field]['proposal']))
++                if (field not in now or superseded) and (isinstance(value,str) if field!='collection' else type(value)is bool):fields[field]['proposal']=value
+         except (ValueError,OSError) as error:
+             place,destination=self._place({'universe':fields['universe']['proposal'],'series':fields['series']['proposal'],'number':fields['number']['proposal'],
+                                            'anthology':fields['collection']['proposal']}),{'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
+diff --git a/public_research.py b/public_research.py
+--- a/public_research.py
++++ b/public_research.py
+@@ -644,6 +644,7 @@
+         if names:record['names']=names
+         record['names_entered']=[field for field in entered_names.FIELDS if field in found]
+         record['names_digest']=stamp
++        record['names_saved_utc']={field:item['saved'] for field,item in found.items() if isinstance(item.get('saved'),str)}
+         return record
+     def approved(self,row,root,title=None,author=None,chosen=None,names=None,retained=None):
+         """Sergei's Approve (rulings 6a, 6b, 11a): the book's identity is the title and author shown on its row, his
+@@ -681,7 +682,7 @@
+         if not final_author and not collection:final_author=NO_AUTHOR
+         settled=local_identity.settled(record,final_title,final_author,'approved',typed,collection=collection,rules=self.rules(),
+                                        folder='\\'.join(reversed(local_identity._ancestors(row,root))),answered=author is None and chosen is not None)
+-        for key in ('names','names_entered','names_digest'):
++        for key in ('names','names_entered','names_digest','names_saved_utc'):
+             if key in record:settled[key]=copy.deepcopy(record[key])
+         if english and english.get('series') and not settled.get('series') and not {'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)):
+             settled['series']=dict(english['series'])  # found with the Russian title (_english_original); never his own values
+@@ -693,7 +694,7 @@
+         result['local_agreement']=local_identity.summary(settled)
+         result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index,retained_fields=known)
+         result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown,
+-                            'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or []),
++                            'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or []),'typed_names':sorted(typed_names),
+                             # Rulings 52 and 53 (Senua's 0.22.3 review, M10): the split's series is unconfirmed and not his.
+                             'series_question':bool(record.get('series_unconfirmed')) and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names))),
+                             # Ruling 74b (Sergei 2026-10-31, the follow-up): the numbers disagree and nothing he typed or saved says
+@@ -1277,7 +1278,7 @@
+         if 'universe' in saved_names and saved_names['universe'] is not None:review['universe']=saved_names['universe']
+         elif local.get('universe'):review['universe']=local['universe']  # rulings 30 and 37
+         facts['work_ids']=[work['id']]
+-        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
++        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or []),'saved_utc':dict(local.get('names_saved_utc') or {})}  # Edit names: the job's names
+         reasons=list(reasons)+source_gate(row,work)
+         result['work']=work
+         result['sources'].insert(0,{'url':'','kind':'local_agreement','verified_identity':True,'agreement':summary})
+@@ -1545,7 +1546,7 @@
+         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
+         facts['work_ids']=work_ids
+         facts['research_version']=RESEARCH_VERSION  # ruling 71f: a job planned under this research needs no re-check
+-        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
++        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or []),'saved_utc':dict(local.get('names_saved_utc') or {})}  # Edit names: the job's names
+         if result.get('original_title'):facts['original_title_lookup']=dict(result['original_title'])  # ruling 38: the details panel's fact
+         if spelling:facts['author_spelling']=spelling
+         # background: the gaps the background pass fills later (gap_fill), with what it asks the sources about. Series
+diff --git a/tolkien_trilogy.py b/tolkien_trilogy.py
+--- a/tolkien_trilogy.py
++++ b/tolkien_trilogy.py
+@@ -5,8 +5,11 @@
+ establishes membership. Frozen publications are not rewritten by this module.
+ """
+ import copy
++from datetime import datetime,timezone
+ 
+ DECISION='user:tolkien-trilogy-2026-11-04'
++# Time of the durable decision document (37ab171), not a guessed chat timestamp.
++RECORDED=datetime.fromisoformat('2026-11-04T19:52:41+00:00')
+ CYCLE='https://fantlab.ru/work1693'
+ SERIES='Lord of the Rings'
+ WORLD='Middle-earth'
+@@ -15,6 +18,17 @@
+        'The Return of the King':('fantlab:1669','3')}
+ AUTHORS={'Tolkien J. R. R.','J. R. R. Tolkien','John Ronald Reuel Tolkien','Джон Рональд Руэл Толкин'}
+ FIELDS=('title','author','canonical_author','series','number','universe')
++
++
++def superseded_series(entered,value):
++    """Only the old exact Russian spelling predating this superseding decision."""
++    if value not in ('Властелин колец','Властелин Колец') or 'series' not in (entered.get('fields') or []):return False
++    saved=(entered.get('saved_utc') or {}).get('series')
++    if saved is None:return True  # Legacy receipts predate per-field save provenance.
++    try:
++        moment=datetime.fromisoformat(saved.replace('Z','+00:00'))
++        return moment.tzinfo is not None and moment<=RECORDED
++    except (ValueError,TypeError,AttributeError):return False
+ 
+ 
+ def _binding(review,facts):
+@@ -47,8 +61,10 @@
+     facts.pop('trilogy_routing',None)
+     if not _confirmed(out):return out
+     review=out['review'];names=(out.get('approval') or {}).get('names') or {}
+-    entered=set((facts.get('entered_names') or {}).get('fields') or [])
+-    if 'series' not in names and 'series' not in entered:review['series']=SERIES
++    saved=facts.get('entered_names') or {};entered=set(saved.get('fields') or [])
++    typed=set((out.get('approval') or {}).get('typed_names') or [])
++    explicit_series='series' in typed or 'series' in names and 'series' not in entered
++    if not explicit_series and ('series' not in entered or superseded_series(saved,review.get('series'))):review['series']=SERIES
+     if not review.get('universe') and 'universe' not in names and 'universe' not in entered:review['universe']=WORLD
+     if review.get('series')==SERIES and review.get('universe')==WORLD:
+         facts['trilogy_routing']={'schema':'books-trilogy-routing-v1','decision':DECISION,
+diff --git a/tests/test_shared_routing.py b/tests/test_shared_routing.py
+--- a/tests/test_shared_routing.py
++++ b/tests/test_shared_routing.py
+@@ -229,6 +229,22 @@
+         ctx['source_hashes'][key]['sha256']='b'*64
+         self.assertFalse(MergeService._trilogy_stale(service,job),'a changed source retains its existing safety admission')
+ 
++    def test_superseding_decision_replans_old_saved_russian_series_but_respects_later_choices(self):
++        from public_research import attach_shared_routing
++        from tolkien_trilogy import pending_changed
++        old=self.result();old['metadata_facts']['entered_names']={'fields':['series'],'saved_utc':{'series':'2026-10-29T12:00:00Z'}}
++        old['approval']={'names':{'series':'Властелин колец'},'entered':['series'],'typed_names':[]}
++        corrected=attach_shared_routing(old)
++        self.assertEqual(corrected['review']['series'],'Lord of the Rings')
++        manifest={'metadata':old['review'],'metadata_facts':old['metadata_facts'],
++                  'evidence':{'metadata_fields':[{'field':'series','source_url':'https://fantlab.ru/work1693'}]}}
++        self.assertTrue(pending_changed(manifest),'the old saved Russian series cannot leave its pending job on the old route')
++        for value in ('My later series','Властелин колец'):
++            later=copy.deepcopy(old);later['review']['series']=value;later['metadata_facts']['entered_names']['saved_utc']['series']='2026-11-05T00:00:00Z'
++            self.assertEqual(attach_shared_routing(later)['review']['series'],value,'later saved choices remain authoritative')
++        typed=copy.deepcopy(old);typed['approval']['typed_names']=['series']
++        self.assertEqual(attach_shared_routing(typed)['review']['series'],'Властелин колец','a new explicit press is not an old saved spelling')
++
+ 
+ if __name__ == '__main__':
+     unittest.main()

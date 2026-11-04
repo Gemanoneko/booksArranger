@@ -1,0 +1,45 @@
+{
+  "schema": "books-trilogy-saved-series-followup-v1",
+  "baseline_head": "f23d836e921b4d213ea3be04e688251404ed6dd4",
+  "frozen_at": "2026-11-04T20:33:37.953678+00:00",
+  "files": [
+    {
+      "path": "merge_service.py",
+      "size": 431189,
+      "sha256": "f0a845da8379445a9d325842a74ce7cac467d7ead5b31fc3a4998fb9edc5bc37",
+      "lf_sha256": "7f74727f5e9c5a6f89a81d426e723b6d1b55639f0b3e1a57e0a7397a4cc1a5a5",
+      "baseline_lf_sha256": "b487303575003a0eaf945952aafcba9373c89f0920e8d0c81c30cb81c475d210"
+    },
+    {
+      "path": "public_research.py",
+      "size": 203762,
+      "sha256": "f5c5242ae4ff7477d3bb1be6ddff899f26b3d1140c21115e0fea6f9a9d4460aa",
+      "lf_sha256": "acdf889c18ff15ca06e5db7dc633362df870db64defdedc4b0e3e5c244a77109",
+      "baseline_lf_sha256": "d1a3abb457710b36812c1a086e7a8fb33bd5fe7e533d25e72aeaa8b11873b2b0"
+    },
+    {
+      "path": "tolkien_trilogy.py",
+      "size": 7169,
+      "sha256": "0692ef62d2b06383c0b090860e9f8404a8b2d34dc548240ff16b98d9a33343ce",
+      "lf_sha256": "0692ef62d2b06383c0b090860e9f8404a8b2d34dc548240ff16b98d9a33343ce",
+      "baseline_lf_sha256": "742ab80b66c980224ee6f34745db296e65ac049483b821dd14720eb2407574d6"
+    },
+    {
+      "path": "tests/test_shared_routing.py",
+      "size": 17099,
+      "sha256": "75cd231da8c58d56e0857f21a634cd4fab67691e3c2a37d256efab100d7f77bb",
+      "lf_sha256": "b7f5689199d6a62eb6c18ca1c7badc8b32b3f4a30b708cf14da270c459a8cb64",
+      "baseline_lf_sha256": "6cee5b037685033b7f75d9f8b02b29fb64e62de8ba66de3d55e63e7d8105f1e8"
+    }
+  ],
+  "patch_sha256": "1581dbf83197498bad8a429f9988944431ac40ef428ddc09c0e491068709ffb0",
+  "result": {
+    "tests": 13,
+    "ok": true,
+    "owned": "trilogy-saved-series-2.json"
+  },
+  "review_finding": "Senua T1: old entered Russian series prevented the superseding decision and pending replan. Legacy receipts or exact Russian series saved before durable decision recording are superseded; future typed/stored choices survive.",
+  "decision_recorded_utc": "2026-11-04T19:52:41Z",
+  "decision_record_commit": "37ab1713978d5a09477a84c6f50505483f4c6faf",
+  "scope": "Four-file followup only. No duplicate-core changes in these paths. No Title/folder reset or finished-output mutation. Current duplicate core in audio_jobs.py/publication_reuse.py excluded."
+}

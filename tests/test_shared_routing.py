@@ -229,6 +229,22 @@ class TrilogyDecisionTests(unittest.TestCase):
         ctx['source_hashes'][key]['sha256']='b'*64
         self.assertFalse(MergeService._trilogy_stale(service,job),'a changed source retains its existing safety admission')
 
+    def test_superseding_decision_replans_old_saved_russian_series_but_respects_later_choices(self):
+        from public_research import attach_shared_routing
+        from tolkien_trilogy import pending_changed
+        old=self.result();old['metadata_facts']['entered_names']={'fields':['series'],'saved_utc':{'series':'2026-10-29T12:00:00Z'}}
+        old['approval']={'names':{'series':'Властелин колец'},'entered':['series'],'typed_names':[]}
+        corrected=attach_shared_routing(old)
+        self.assertEqual(corrected['review']['series'],'Lord of the Rings')
+        manifest={'metadata':old['review'],'metadata_facts':old['metadata_facts'],
+                  'evidence':{'metadata_fields':[{'field':'series','source_url':'https://fantlab.ru/work1693'}]}}
+        self.assertTrue(pending_changed(manifest),'the old saved Russian series cannot leave its pending job on the old route')
+        for value in ('My later series','Властелин колец'):
+            later=copy.deepcopy(old);later['review']['series']=value;later['metadata_facts']['entered_names']['saved_utc']['series']='2026-11-05T00:00:00Z'
+            self.assertEqual(attach_shared_routing(later)['review']['series'],value,'later saved choices remain authoritative')
+        typed=copy.deepcopy(old);typed['approval']['typed_names']=['series']
+        self.assertEqual(attach_shared_routing(typed)['review']['series'],'Властелин колец','a new explicit press is not an old saved spelling')
+
 
 if __name__ == '__main__':
     unittest.main()
