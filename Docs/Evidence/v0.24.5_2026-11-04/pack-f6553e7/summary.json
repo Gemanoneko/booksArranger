@@ -1,0 +1,30 @@
+{
+  "schema": "books-0245-pack-receipt-v1",
+  "worktree": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0245-release-20261104",
+  "source_head": "f6553e7b78bf9d7f011b5728b2d219ad48732add",
+  "version": "0.24.5",
+  "build_id": "27b521b3-3d89-40b6-889b-5350d862d08e",
+  "product_digest": "3a2b60eb20f3c411fe1bd8c9a1b375bf652e5d2469c4e05840fa351b64254f96",
+  "manifest_sha256": "a44358f11c9fb7284ec07d1351867808f262edf5c7ab1d87494fbd4f6070c657",
+  "runtime_pointer_sha256": "58a6e6a326194d8712afdf34e98a70f99909bfec93a4d1edabbc9853333b58e9",
+  "owned_result_sha256": "f1c28f390b88b13d551698ef0d549c0360ae48bd9c3215f67ffe2d9b620b41a5",
+  "owned_elapsed_ms": 79040.5536,
+  "native_zero": true,
+  "artifacts": [
+    {
+      "path": "builds/27b521b3-3d89-40b6-889b-5350d862d08e/Books-Arranger-Setup-0.24.5.exe",
+      "sha256": "6b3a6f87a962b85798a6a3ed11aabdae7fb8258de82c38387eb49dc189e0a280",
+      "size": 174681044
+    },
+    {
+      "path": "builds/27b521b3-3d89-40b6-889b-5350d862d08e/Books-Arranger-Setup-0.24.5.exe.blockmap",
+      "sha256": "60e3601c9f0ea334d7e5b0ae6cf1bfc00618f96f2cd56262b68c3c66d90cc43c",
+      "size": 182057
+    },
+    {
+      "path": "builds/27b521b3-3d89-40b6-889b-5350d862d08e/latest.yml",
+      "sha256": "2782af87ec064ed265b21501634ffbe5e0ffac1fd96800873644b3eab54d0aa3",
+      "size": 360
+    }
+  ]
+}
