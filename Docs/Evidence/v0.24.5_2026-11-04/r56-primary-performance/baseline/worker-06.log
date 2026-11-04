@@ -1,0 +1,18 @@
+test_ruling_56_a_paused_run_stays_paused (test_set_release.SetReleaseTests.test_ruling_56_a_paused_run_stays_paused) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 27.889s
+
+OK
+test_m12_discworld_correction_does_not_rename_other_folders (test_set_release.SetReleaseTests.test_m12_discworld_correction_does_not_rename_other_folders) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 37.392s
+
+OK
+test_m11_ruling_33_approve_as_shown (test_set_release.SetReleaseTests.test_m11_ruling_33_approve_as_shown) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 30.775s
+
+OK

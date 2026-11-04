@@ -1,0 +1,18 @@
+test_saved_answer_then_same_press_title_series_queues_only_until_explicit_start (test_set_release.SavedSeriesReceiptTests.test_saved_answer_then_same_press_title_series_queues_only_until_explicit_start) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 30.979s
+
+OK
+test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used (test_approve_as_is.ApproveAsIsTests.test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 29.192s
+
+OK
+test_typed_title_and_author_are_used_and_saved_as_entered_by_you (test_approve_as_is.ApproveAsIsTests.test_typed_title_and_author_are_used_and_saved_as_entered_by_you) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 17.059s
+
+OK

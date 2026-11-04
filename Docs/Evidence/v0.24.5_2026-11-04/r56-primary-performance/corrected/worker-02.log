@@ -1,0 +1,24 @@
+test_approve_overrides_an_order_hold_and_a_taken_name_is_never_overwritten (test_approve_as_is.ApproveAsIsTests.test_approve_overrides_an_order_hold_and_a_taken_name_is_never_overwritten) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 27.672s
+
+OK
+test_convert_whats_there_leaves_out_the_missing_file (test_approve_as_is.ApproveAsIsTests.test_convert_whats_there_leaves_out_the_missing_file) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 29.518s
+
+OK
+test_saved_values_are_the_identity_without_any_other_source (test_approve_as_is.ApproveAsIsTests.test_saved_values_are_the_identity_without_any_other_source) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.339s
+
+OK
+test_ruling_57_approve_one_does_not_release_the_other_even_after_start (test_set_release.SetReleaseTests.test_ruling_57_approve_one_does_not_release_the_other_even_after_start) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 35.701s
+
+OK

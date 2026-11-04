@@ -1,0 +1,47 @@
+{
+  "pass": true,
+  "seconds": 62.93758279999747,
+  "case": "test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start",
+  "stats": {
+    "Popen": {
+      "count": 53,
+      "seconds": 0.5643291999804205,
+      "max": 0.013114400004269555
+    },
+    "CreateToolhelp32Snapshot": {
+      "count": 45,
+      "seconds": 8.235406799976772,
+      "max": 0.21281949999684002
+    },
+    "resume_owned_primary": {
+      "count": 45,
+      "seconds": 14.136830000032205,
+      "max": 0.36924840000574477
+    },
+    "run_owned": {
+      "count": 24,
+      "seconds": 14.88493080000626,
+      "max": 0.883989299996756
+    },
+    "state": {
+      "count": 214,
+      "seconds": 40.23691509998025,
+      "max": 0.5764337000000523
+    },
+    "resume_press": {
+      "count": 1,
+      "seconds": 0.030579900005250238,
+      "max": 0.030579900005250238
+    },
+    "_after_completed": {
+      "count": 2,
+      "seconds": 22.686356500002148,
+      "max": 16.37795349999942
+    },
+    "_work_attempt": {
+      "count": 2,
+      "seconds": 50.3261155999935,
+      "max": 32.27142269999604
+    }
+  }
+}

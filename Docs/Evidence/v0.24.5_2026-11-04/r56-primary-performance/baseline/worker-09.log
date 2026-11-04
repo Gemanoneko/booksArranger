@@ -1,0 +1,12 @@
+test_m11_no_author_approve_as_shown (test_set_release.SetReleaseTests.test_m11_no_author_approve_as_shown) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 29.087s
+
+OK
+test_m11_two_people_approve_as_shown (test_set_release.SetReleaseTests.test_m11_two_people_approve_as_shown) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 42.925s
+
+OK

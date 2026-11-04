@@ -1,0 +1,55 @@
+{
+  "schema": "books-pack-stale-manifest-recovery-v1",
+  "started_utc": "2026-11-04T06:42:45.435982+00:00",
+  "action": "archive exact stale manifest through existing native CAS; preserve all artifacts and retained runtime",
+  "original_manifest": {
+    "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\dist\\release-artifacts.json",
+    "receipt": {
+      "identity": [
+        2803554832,
+        67764224,
+        4002879
+      ],
+      "dev": 133335364132330000,
+      "ino": 291045125922821183,
+      "identity_method": "FileIdInfo128",
+      "attributes": 32,
+      "links": 1,
+      "modified": 1793464659571335700,
+      "size": 59855,
+      "sha256": "5c23fe856d8df656793af93f5e6e897727d1e8726f6696e42d9c676b9e9c8832"
+    }
+  },
+  "before": {
+    "files": 680,
+    "logical_bytes": 1715444172,
+    "inventory_sha256": "5c937b1c04b80daadfbd4f697e3296b78df6098950249774152d8f57d05878f7"
+  },
+  "state": "VERIFIED_COMPLETE",
+  "archived_path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\dist\\release-artifacts.json.previous-c52fb8f6-2dc2-457a-b31c-918a7372f43d",
+  "archived_manifest": {
+    "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\dist\\release-artifacts.json.previous-c52fb8f6-2dc2-457a-b31c-918a7372f43d",
+    "receipt": {
+      "identity": [
+        2803554832,
+        67764224,
+        4002879
+      ],
+      "dev": 133335364132330000,
+      "ino": 291045125922821183,
+      "identity_method": "FileIdInfo128",
+      "attributes": 32,
+      "links": 1,
+      "modified": 1793464659571335700,
+      "size": 59855,
+      "sha256": "5c23fe856d8df656793af93f5e6e897727d1e8726f6696e42d9c676b9e9c8832"
+    }
+  },
+  "after": {
+    "files": 680,
+    "logical_bytes": 1715444172,
+    "inventory_sha256": "5c937b1c04b80daadfbd4f697e3296b78df6098950249774152d8f57d05878f7"
+  },
+  "unchanged_guard_accepts_fresh_state": true,
+  "finished_utc": "2026-11-04T06:42:55.130023+00:00"
+}

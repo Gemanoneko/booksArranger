@@ -1,0 +1,32 @@
+{
+  "schema": "books-exact-lock-byte-restoration-v1",
+  "head": "f6553e7b78bf9d7f011b5728b2d219ad48732add",
+  "target": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0245-release-20261104\\package-lock.json",
+  "pinned_sha256": "48ff09fc1d00712e3e87aa79e746a15d2755ae34615b925956a15d18f5684f55",
+  "before": {
+    "size": 133459,
+    "sha256": "aead6c984b3f6c4aaba8b2937f08a27214a85f9920f9ba3cfae9e1a2df78877a",
+    "crlf": 3647,
+    "lf": 3647
+  },
+  "committed_blob": {
+    "size": 129812,
+    "sha256": "48ff09fc1d00712e3e87aa79e746a15d2755ae34615b925956a15d18f5684f55",
+    "crlf": 0,
+    "lf": 3647
+  },
+  "same_dependency_json": true,
+  "only_crlf_conversion": true,
+  "status_before": "",
+  "restored_utc": "2026-11-04T08:49:17.058294+02:00",
+  "after": {
+    "size": 129812,
+    "sha256": "48ff09fc1d00712e3e87aa79e746a15d2755ae34615b925956a15d18f5684f55",
+    "crlf": 0,
+    "lf": 3647
+  },
+  "status_after": "",
+  "verified": true,
+  "initial_status_after_write": " M package-lock.json\n",
+  "verified_after_refresh_utc": "2026-11-04T06:50:26.4379218Z"
+}

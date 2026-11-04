@@ -1,0 +1,12 @@
+test_ruling_57_approve_one_does_not_release_the_other_even_after_start (test_set_release.SetReleaseTests.test_ruling_57_approve_one_does_not_release_the_other_even_after_start) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 60.593s
+
+OK
+test_ruling_56_a_paused_run_stays_paused (test_set_release.SetReleaseTests.test_ruling_56_a_paused_run_stays_paused) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 23.615s
+
+OK

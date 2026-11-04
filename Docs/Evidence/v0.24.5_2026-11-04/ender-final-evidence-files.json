@@ -1,0 +1,253 @@
+{
+  "schema": "books-ender-final-evidence-files-v1",
+  "frozen_at": "2026-11-04T08:38:26.653Z",
+  "release_version": "0.24.5",
+  "source_head": "bf4425de09c355d2a0743771ca4209b24c8f0de1",
+  "main_head_observed": "6cf2b320e351abc4245a1e379c2d7bcca91fd709",
+  "evidence_only": true,
+  "active_files": [],
+  "intentionally_uncommitted_after_scoped_commit": [],
+  "cleanup_note": "No cleanup needed before tag. Preserve old planner-refused metadata arena and q/release inputs until their owners confirm they are no longer required.",
+  "files": [
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/correction-focused/cleanup.json",
+      "size": 161,
+      "sha256": "602d9a6ad8f8a48185aa66e2beb076b7ae8c3669feec23c2a1d736dcc6e4a157"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/m1-cooldown/cleanup.json",
+      "size": 161,
+      "sha256": "090a089ff5b6698daf55be19739a1616b1e2b1837cc71a8cad2caa7ebf6ab7e5"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/native-recipe/README.md",
+      "size": 7262,
+      "sha256": "812837dcfd3e3adfc305cbf014e2149caa963c1919d09620fd1647dbb521168b"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/native-recipe/native-once.mjs",
+      "size": 12922,
+      "sha256": "3de1a8b3f15f6390cf6ed64e461478be542219af38b51a31bd209658201bd3c3"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/native-recipe/preflight-path-mismatch/authority.json",
+      "size": 1524,
+      "sha256": "44e82acc8a590f0bcc53b8deee8dff2dc38e739798f833dbabd05766acfc914d"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/native-recipe/preflight-path-mismatch/plan.json",
+      "size": 512724,
+      "sha256": "8da3ee4426d313e357a70dc83fed9d2795fa835212bdf4aa8060c54e0c1a3f82"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/archive-proof.json",
+      "size": 2020,
+      "sha256": "b59a69765d441d54d0dc45417df7c2f30b334d7d71d7be5b6e14f0e618de5dbe"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/archive-stale-manifest.py",
+      "size": 4934,
+      "sha256": "1e9890477ffb8000257c75c1a588932c61c14a435189f39d404c14be181c2313"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/archive.log",
+      "size": 2022,
+      "sha256": "636b06c6b84f4230bc3a40c844f4e9a57754113bb0b2e0f6bc796f49d6fd9f7c"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/cleanup.json",
+      "size": 317,
+      "sha256": "3445477ed3cf425ce9618c66218dff3818e1260f21facafaab4712a9cb28d825"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/failed-e563/empty-global.npmrc",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/failed-e563/empty.npmrc",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/failed-e563/file-receipts.json",
+      "size": 1081,
+      "sha256": "fed83fa531ab14fa0a8e6ea2a6e0d1bce9b95f6091605ddf22bb676c88edfd17"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/failed-e563/lease.json",
+      "size": 1002,
+      "sha256": "dd45a7651238dbf95e0544fe90e42d6ff0977590d3757ed42a36ea9a969c0965"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/failed-e563/native-operation-result.json",
+      "size": 517,
+      "sha256": "7120f4d9bf6d554e97e6221f231bbb921cb2b4a86cb7aae0ff8a27ba0d1a121e"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/lock-byte-restoration.json",
+      "size": 1105,
+      "sha256": "ebcd29e1e06fb4dd0fd3a43b917d393efd798bdf1e8bed1fa6016cfb42d2554d"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/qa-output-encoding.json",
+      "size": 930,
+      "sha256": "6a361531c0fe86b249482fb5400149c1c2c5cfd54d3b4d7911d7392daa6025b5"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/pack-recovery/stale-manifest.json",
+      "size": 59855,
+      "sha256": "5c23fe856d8df656793af93f5e6e897727d1e8726f6696e42d9c676b9e9c8832"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/target.json",
+      "size": 1176,
+      "sha256": "1967670ca31b439df859e2d51c8826458c806e060e8a2f7763648e2fee4bd943"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-00.log",
+      "size": 917,
+      "sha256": "bfd381c79d829e8e1fbe202ae76c32a0d8884674b5c472127478b7e7e66a1654"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-01.log",
+      "size": 833,
+      "sha256": "d2f9381c0dde29f04eb6229929510f550cf201e0d774f4be5693bfbb99461ff2"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-02.log",
+      "size": 1110,
+      "sha256": "11b40213483f470584c5a94f294bce266a63554409c2310b03b50cdafd1cb056"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-03.log",
+      "size": 811,
+      "sha256": "107aee267681e24d089a439afbd72dfcbe25d9858f813395e958a43b7d2089e8"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-04.log",
+      "size": 784,
+      "sha256": "6e324fab2c1b0cf77b6dec940e306d939a2dc1fe6275eb1ce9be3c7ecab8f2b3"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-05.log",
+      "size": 516,
+      "sha256": "f9e40df2a5ffe5bb0455ea1cd98a72f44fa466bfd215f84af9eb05006fc604cb"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-06.log",
+      "size": 712,
+      "sha256": "c12c90648003e2ccd07b0d1bf1f7a47a4de90cc1b2c9affcc3282d20b2f90240"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-07.log",
+      "size": 484,
+      "sha256": "6bf119a0a3aa093b2d4d599edd5208746b19b2358983f7b5a39c1a3f15230910"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-08.log",
+      "size": 436,
+      "sha256": "35e175208a08f5f3ff49570a7d73ef19b8fb9949bfd4e95b069dd2929442066d"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-09.log",
+      "size": 438,
+      "sha256": "04ad302f3fdc80a8839816af58c246d5a0e2586b97c494f76551bdbb13d930df"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-10.log",
+      "size": 873,
+      "sha256": "ebae7b481bb98bcff6038f617728b203d85800a5ddbb75a2b9be1202ab0c76fc"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-11.log",
+      "size": 932,
+      "sha256": "5ef691d408033eadf40983549c74ccb28b5aac859840a97f6c07e37f0e070399"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/baseline/worker-12.log",
+      "size": 1190,
+      "sha256": "2b893ba2674d976b054336670e6e6abfb2aac8424ac5e00641bef55acb5719f2"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/cleanup.json",
+      "size": 167,
+      "sha256": "ba34f1876c7196bd422da49ca5ad1b54bb5caf6b80c9d6d1299d4c3b065c573d"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/target.json",
+      "size": 1046,
+      "sha256": "bf3a55a1d37f9d333e6cb0f0243662ef04d71fb2fbedbc877e632855d03e45fd"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-00.log",
+      "size": 917,
+      "sha256": "113f831c19720bc189c29b84948bc8e41bce1964b7591429317e8d0864c73acc"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-01.log",
+      "size": 833,
+      "sha256": "8b016cfb821f07bb6908b7ad9948cbdef92dd75cb332a87b4af54fd7abe103e0"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-02.log",
+      "size": 1110,
+      "sha256": "e78312b8aebc67530230f48dfe811242b0a8256587e3beaca2039d4d98109c05"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-03.log",
+      "size": 811,
+      "sha256": "8ddfb0a3224f6bac881f25299f2a8f12bcdd788b5b5e4455a423476dd8afb626"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-04.log",
+      "size": 784,
+      "sha256": "9ea3dadd4d0b2dbcfda6840fc4bd99fabb1326a4c310638b93e10e319fbf56f3"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-05.log",
+      "size": 516,
+      "sha256": "56adb801515530cc2655d605ad952583e72a68644ead08b4b42cdce375e55fb3"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-06.log",
+      "size": 712,
+      "sha256": "a2428f01affc3115db84b17b3db49b663aa41360183f469b25ed6aec728ba4be"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-07.log",
+      "size": 484,
+      "sha256": "cd2dbd2e9d0df3877744e112a86a6d72df4f150d810503d0ecb5eaad634919da"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-08.log",
+      "size": 436,
+      "sha256": "03b27c8a2a49f0d19c6e105f046f535035b898eeee39289cc0305b13cf05df82"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-09.log",
+      "size": 438,
+      "sha256": "5cacd240c1b2addfab49cf55b9d617fa5b9d1650fe1933e0ad60e48bb51e5dec"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-10.log",
+      "size": 534,
+      "sha256": "66553bf8304824a9b7cc2fe75479c2770111c18cbb4c1b237047cadfa81634f5"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-11.log",
+      "size": 932,
+      "sha256": "ae011f4d4beec1732179a57a57f481ba0c7ac1c8e827d650aec88c4cb2326e66"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/r56-primary-performance/corrected/worker-12.log",
+      "size": 1093,
+      "sha256": "6d6203f6d1689f0a17c737040f5d295dea5f1e29f0f82ba9ea3b59f5da8b9d8b"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/sqlite-lifetime-correction/cleanup.json",
+      "size": 164,
+      "sha256": "711cf6cb6a0eb8c538eb06dbff28761dc6a997e76cee76e2dce0c132160edbe5"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "pass": true,
+  "seconds": 58.068350599998666,
+  "case": "test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start",
+  "stats": {
+    "Popen": {
+      "count": 53,
+      "seconds": 0.5034885999848484,
+      "max": 0.016448100002889987
+    },
+    "resume_owned_primary": {
+      "count": 45,
+      "seconds": 0.011216400031116791,
+      "max": 0.000560200001928024
+    },
+    "run_owned": {
+      "count": 24,
+      "seconds": 7.29809240000759,
+      "max": 0.41589160000148695
+    },
+    "state": {
+      "count": 181,
+      "seconds": 38.94873909998569,
+      "max": 0.37525909999385476
+    },
+    "resume_press": {
+      "count": 1,
+      "seconds": 0.04238769999938086,
+      "max": 0.04238769999938086
+    },
+    "_after_completed": {
+      "count": 2,
+      "seconds": 28.23236650000763,
+      "max": 14.764829700005066
+    },
+    "_work_attempt": {
+      "count": 2,
+      "seconds": 47.1885284999953,
+      "max": 24.25216079999518
+    }
+  }
+}

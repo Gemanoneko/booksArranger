@@ -1,0 +1,18 @@
+test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used (test_approve_as_is.ApproveAsIsTests.test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 26.655s
+
+OK
+test_typed_title_and_author_are_used_and_saved_as_entered_by_you (test_approve_as_is.ApproveAsIsTests.test_typed_title_and_author_are_used_and_saved_as_entered_by_you) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 20.107s
+
+OK
+test_approve_overrides_an_order_hold_and_a_taken_name_is_never_overwritten (test_approve_as_is.ApproveAsIsTests.test_approve_overrides_an_order_hold_and_a_taken_name_is_never_overwritten) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 27.044s
+
+OK

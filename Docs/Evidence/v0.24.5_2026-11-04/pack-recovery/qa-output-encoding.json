@@ -1,0 +1,20 @@
+{
+  "scope": "Read-only diagnosis of the private QA probe output framing failure",
+  "python": "WIP/Books Arranger/build-cache/qa-runtime/python/python.exe",
+  "arguments": ["-I", "-B"],
+  "observed_stdout_encoding": "cp1251",
+  "sample_unicode_escape": "\u041a\u0443\u0440\u0441",
+  "sample_pipe_bytes_hex": "caf3f0f1",
+  "utf8_roundtrip_before": false,
+  "after_explicit_stream_reconfigure": "utf-8",
+  "utf8_roundtrip_after": true,
+  "sys_flags_ignore_environment": 1,
+  "contract": "bounded-child decodes stdout/stderr as UTF-8; bounded-check requires the UTF-8 final text bytes to equal the raw streamed bytes",
+  "authorized_fixture_correction": [
+    "sys.stdout.reconfigure(encoding='utf-8')",
+    "sys.stderr.reconfigure(encoding='utf-8')"
+  ],
+  "canonical_runner_changes": false,
+  "original_failed_codec_result": "Docs/Evidence/v0.24.5_2026-11-04/futaba-focused-f6553e7/codec-owned.json",
+  "rerun_owner": "Futaba"
+}
