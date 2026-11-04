@@ -1,0 +1,41 @@
+{
+  "schema": "books-implementation-worktree-cleanup-v1",
+  "published_source": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+  "published_tag": "v0.25.0",
+  "method": "git worktree remove --force after LF-normalized tracked and untracked byte comparison to published source, reparse scan, and registration check",
+  "removed": [
+    {
+      "name": "frontend-fixtures-025-20261105",
+      "tracked_modified_matching_published": 1,
+      "untracked_files": 0,
+      "reparse_points": 0,
+      "path_and_registration_absent_after": true
+    },
+    {
+      "name": "m4b-chapter-image-025-20261104",
+      "tracked_modified_matching_published": 4,
+      "untracked_files": 0,
+      "reparse_points": 0,
+      "path_and_registration_absent_after": true
+    },
+    {
+      "name": "tolkien-fixtures-025-20261105",
+      "tracked_modified_matching_published": 1,
+      "untracked_files": 0,
+      "reparse_points": 0,
+      "path_and_registration_absent_after": true
+    },
+    {
+      "name": "converted-duplicate-20261104",
+      "tracked_modified_matching_published": 39,
+      "untracked_matching_published": 103,
+      "ignored_reproducible_pyc": 5,
+      "reparse_points": 0,
+      "path_and_registration_absent_after": true
+    }
+  ],
+  "retained": [
+    "0250-release-20261105-r3: current accepted installer and runtime",
+    "books-0242-candidate-20261101: preexisting dirty candidate"
+  ]
+}
