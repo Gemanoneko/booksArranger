@@ -1,0 +1,73 @@
+{
+  "schema": "books-tolkien-025-fixture-correction-v1",
+  "base": "e6912eb7e43cac35bf26a7a662bc9dc95c0e1d2d",
+  "branch": "codex/tolkien-fixtures-025",
+  "source": "C:/Antigravity Projects/Worktrees/Books Arranger/tolkien-fixtures-025-20261105",
+  "owned_file": {
+    "path": "tests/test_series_identity_242.py",
+    "size": 20310,
+    "sha256": "c9e619791a9ea0bc41732a5d39199ce311c8118b90531775ec58b4e748675d43"
+  },
+  "patch": {
+    "path": "implementation.patch",
+    "size": 3558,
+    "sha256": "9ec4e021dcad704875d0768a3b47a708e2523c0d8139e800f1f162766bfb1f5c"
+  },
+  "spec": {
+    "path": "Docs/BooksArranger_DuplicateAndTolkien_Decisions_2026-11-04.md",
+    "sha256": "1d7affb00c215550414c5061418dfbd916e3b0530ab888c5971ded24b838d535",
+    "scope": "Committed Nov4 exact trilogy name and author/world/series hierarchy; titles, numbers and chosen destinations remain authoritative"
+  },
+  "baseline": {
+    "test_methods": 21,
+    "failed_subcases": 5,
+    "methods_affected": 2,
+    "native_zero": true,
+    "proof": "baseline.log and baseline.json"
+  },
+  "corrected": {
+    "test_methods": 21,
+    "failed_subcases": 0,
+    "elapsed_test_seconds": 0.075,
+    "native_zero": true,
+    "proof": "corrected.log and corrected.json",
+    "checks": "Whole unchanged module collection; existing negative work/title/author/ordinal/cycle/member/universe and unrelated-family cases retained"
+  },
+  "changes": [
+    "RetainedResearchTests: accepted review series now Lord of the Rings while raw retained/catalog series and verified work series remain Властелин колец; assert row/local/saved evidence and gap fields unchanged.",
+    "SharedAuthorityTests: exact accepted author/Middle-earth/Lord of the Rings hierarchy and full series-number-title-author filename; original work series remains Russian and position remains exact.",
+    "Shared world authority now names user:middle-earth-trilogy-2026-11-04 with evidence user:tolkien-trilogy-2026-11-04; exact work/author/catalog-cycle memberships and source immutability retained."
+  ],
+  "limits": [
+    "Only the owned existing test file changed; no product/version/git mutations.",
+    "Metadata-only private fixtures; no network, media, live source/catalog, Z:, app or native-check access.",
+    "Focused runOwned600000ms regression proof; not a full entry or release clearance.",
+    "Old dirty M4B worktree and prior denied PNG scratch untouched."
+  ],
+  "retained": [
+    {
+      "path": "baseline.json",
+      "sha256": "9b858990e4d441af794d0f813300114bd36364bd2bdc942b772d356618cbc49b"
+    },
+    {
+      "path": "baseline.log",
+      "sha256": "8bf3c989ee63bdd3bc6efc2bedfccd578f06a74d60f8ac197336431a58c49cfa"
+    },
+    {
+      "path": "corrected.json",
+      "sha256": "42a6823af5b06f3e399f75084934f4788cc0ab900c1ee9ea9e083e8c4a2b16c2"
+    },
+    {
+      "path": "corrected.log",
+      "sha256": "d3e06e6a19e2a411b8cf8e5a3b30fea2ee68392184c38a159d6b03a8a3828feb"
+    },
+    {
+      "path": "owned.mjs",
+      "sha256": "c6a484dfe056af0504b3d4518076b35aa3231045b15e712ae0f5eb02b3f60c91"
+    },
+    {
+      "path": "focused.py",
+      "sha256": "86b048d009fedfb51e7ab0dbb0189707ca29572cbc33e4f0035e176fe3d15fe2"
+    }
+  ]
+}

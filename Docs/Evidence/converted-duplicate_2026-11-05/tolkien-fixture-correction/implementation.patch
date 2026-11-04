@@ -1,0 +1,42 @@
+diff --git a/tests/test_series_identity_242.py b/tests/test_series_identity_242.py
+index 7ca71ef..6743770 100644
+--- a/tests/test_series_identity_242.py
++++ b/tests/test_series_identity_242.py
+@@ -56,13 +56,17 @@ class RetainedResearchTests(unittest.TestCase):
+                 self.assertEqual(fields['catalog']['original_title'], title)
+                 self.assertEqual(fields['series']['name'], 'Властелин колец')
+                 self.assertEqual(fields['series']['number'], number)
++                before = copy.deepcopy((row, local, saved, fields))
+                 research = CacheOnlyResearch(local)
+                 result = research.approved(row, os.path.abspath('synthetic-source'), retained=saved)
+                 self.assertEqual(result['review']['title'], title)
+-                self.assertEqual(result['review']['series'], 'Властелин колец')
++                # The Nov 4 user decision supersedes accepted names, not retained catalog clues.
++                self.assertEqual(result['review']['series'], 'Lord of the Rings')
+                 self.assertEqual(result['review']['number'], number)
+                 self.assertEqual(result['review']['universe'], 'Middle-earth')
+                 self.assertEqual(result['work']['id'], saved['result']['work']['id'])
++                self.assertEqual(result['work']['verified_series']['name'], 'Властелин колец')
++                self.assertEqual((row, local, saved, fields), before)
+                 self.assertEqual(plan(os.path.abspath('synthetic-output'), result['review'], facts=result['metadata_facts']),
+                                  plan(os.path.abspath('synthetic-output'), research.approved(row, os.path.abspath('synthetic-source'), retained=saved)['review'], facts=result['metadata_facts']))
+ 
+@@ -185,11 +189,15 @@ class SharedAuthorityTests(unittest.TestCase):
+                 before = copy.deepcopy(first)
+                 result = attach_shared_routing(first)
+                 planned = plan(os.path.abspath('synthetic-output'), result['review'], facts=result['metadata_facts'])
+-                self.assertEqual(planned['relative_path'].split(os.sep)[:2], ['Middle-earth', 'Властелин колец'])
+-                self.assertTrue(os.path.basename(planned['path']).endswith(' - Tolkien J. R. R.m4b'))
++                self.assertEqual(result['review']['series'], 'Lord of the Rings')
++                self.assertEqual(result['review']['number'], number)
++                self.assertEqual(result['work']['verified_series']['name'], 'Властелин колец')
++                self.assertEqual(planned['relative_path'].split(os.sep)[:-1], ['Tolkien J. R. R', 'Middle-earth', 'Lord of the Rings'])
++                self.assertEqual(os.path.basename(planned['path']), f'Lord of the Rings - {number} - {title} - Tolkien J. R. R.m4b')
+                 self.assertEqual(result['metadata_facts']['authors'], ['Tolkien J. R. R.'])
+                 world = result['metadata_facts']['shared_routing']['universe']
+-                self.assertEqual((world['id'], world['basis']), ('user:middle-earth-2026-11-01', 'user'))
++                self.assertEqual((world['id'], world['basis']), ('user:middle-earth-trilogy-2026-11-04', 'user'))
++                self.assertEqual(world['evidence'], ['user:tolkien-trilogy-2026-11-04'])
+                 self.assertEqual(world['members'], [{'work_id': work_id, 'authors': ['Tolkien J. R. R.'], 'series_id': 'https://fantlab.ru/work1693'}])
+                 self.assertEqual(first, before)
+ 

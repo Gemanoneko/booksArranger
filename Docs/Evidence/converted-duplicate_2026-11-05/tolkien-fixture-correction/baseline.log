@@ -1,0 +1,103 @@
+test_confirmed_queen_section_set_asks_with_all_four_paths_in_order (test_series_identity_242.CorbettAndQueenTests.test_confirmed_queen_section_set_asks_with_all_four_paths_in_order) ... ok
+test_person_alias_unrelated_book_and_wrong_ordinal_keep_veto (test_series_identity_242.CorbettAndQueenTests.test_person_alias_unrelated_book_and_wrong_ordinal_keep_veto) ... ok
+test_queen_missing_foreign_credits_mixed_folders_or_explicit_keep_refuse (test_series_identity_242.CorbettAndQueenTests.test_queen_missing_foreign_credits_mixed_folders_or_explicit_keep_refuse) ... ok
+test_two_confirmed_eponymous_series_books_and_ordinals (test_series_identity_242.CorbettAndQueenTests.test_two_confirmed_eponymous_series_books_and_ordinals) ... ok
+test_changed_rules_disable_retained_evidence (test_series_identity_242.RetainedResearchTests.test_changed_rules_disable_retained_evidence) ... ok
+test_changed_saved_names_digest_requires_new_identity (test_series_identity_242.RetainedResearchTests.test_changed_saved_names_digest_requires_new_identity) ... ok
+test_conflicting_work_receipt_and_missing_author_credit_are_rejected (test_series_identity_242.RetainedResearchTests.test_conflicting_work_receipt_and_missing_author_credit_are_rejected) ... ok
+test_current_series_conflict_is_not_filled_from_old_evidence (test_series_identity_242.RetainedResearchTests.test_current_series_conflict_is_not_filled_from_old_evidence) ... ok
+test_real_tolkien_receipts_survive_empty_http_cache (test_series_identity_242.RetainedResearchTests.test_real_tolkien_receipts_survive_empty_http_cache) ... 
+  test_real_tolkien_receipts_survive_empty_http_cache (test_series_identity_242.RetainedResearchTests.test_real_tolkien_receipts_survive_empty_http_cache) (number='2') ... FAIL
+  test_real_tolkien_receipts_survive_empty_http_cache (test_series_identity_242.RetainedResearchTests.test_real_tolkien_receipts_survive_empty_http_cache) (number='3') ... FAIL
+test_stale_candidate_revision_source_or_policy_is_not_reused (test_series_identity_242.RetainedResearchTests.test_stale_candidate_revision_source_or_policy_is_not_reused) ... ok
+test_typed_series_and_explicit_empty_universe_win (test_series_identity_242.RetainedResearchTests.test_typed_series_and_explicit_empty_universe_win) ... ok
+test_typed_title_wins_but_keeps_confirmed_series (test_series_identity_242.RetainedResearchTests.test_typed_title_wins_but_keeps_confirmed_series) ... ok
+test_all_three_tolkien_volumes_have_exact_middle_earth_authority (test_series_identity_242.SharedAuthorityTests.test_all_three_tolkien_volumes_have_exact_middle_earth_authority) ... 
+  test_all_three_tolkien_volumes_have_exact_middle_earth_authority (test_series_identity_242.SharedAuthorityTests.test_all_three_tolkien_volumes_have_exact_middle_earth_authority) (work_id='fantlab:1667') ... FAIL
+  test_all_three_tolkien_volumes_have_exact_middle_earth_authority (test_series_identity_242.SharedAuthorityTests.test_all_three_tolkien_volumes_have_exact_middle_earth_authority) (work_id='fantlab:1668') ... FAIL
+  test_all_three_tolkien_volumes_have_exact_middle_earth_authority (test_series_identity_242.SharedAuthorityTests.test_all_three_tolkien_volumes_have_exact_middle_earth_authority) (work_id='fantlab:1669') ... FAIL
+test_book_page_does_not_establish_shared_series_identity (test_series_identity_242.SharedAuthorityTests.test_book_page_does_not_establish_shared_series_identity) ... ok
+test_explicit_destination_choice_still_wins_after_proof_assembly (test_series_identity_242.SharedAuthorityTests.test_explicit_destination_choice_still_wins_after_proof_assembly) ... ok
+test_fellowship_world_requires_identity_and_preserves_explicit_universe (test_series_identity_242.SharedAuthorityTests.test_fellowship_world_requires_identity_and_preserves_explicit_universe) ... ok
+test_general_shared_series_requires_same_stable_identity (test_series_identity_242.SharedAuthorityTests.test_general_shared_series_requires_same_stable_identity) ... ok
+test_general_world_with_two_confirmed_series_has_bound_world_proof (test_series_identity_242.SharedAuthorityTests.test_general_world_with_two_confirmed_series_has_bound_world_proof) ... ok
+test_omen_explicit_memberships_keep_true_author_and_filename (test_series_identity_242.SharedAuthorityTests.test_omen_explicit_memberships_keep_true_author_and_filename) ... ok
+test_source_and_peer_results_are_not_mutated (test_series_identity_242.SharedAuthorityTests.test_source_and_peer_results_are_not_mutated) ... ok
+test_wrong_omen_author_is_not_joined_by_title (test_series_identity_242.SharedAuthorityTests.test_wrong_omen_author_is_not_joined_by_title) ... ok
+
+======================================================================
+FAIL: test_real_tolkien_receipts_survive_empty_http_cache (test_series_identity_242.RetainedResearchTests.test_real_tolkien_receipts_survive_empty_http_cache) (number='2')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\tolkien-fixtures-025-20261105\tests\test_series_identity_242.py", line 62, in test_real_tolkien_receipts_survive_empty_http_cache
+    self.assertEqual(result['review']['series'], 'Властелин колец')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'Lord of the Rings' != 'Властелин колец'
+- Lord of the Rings
++ Властелин колец
+
+
+======================================================================
+FAIL: test_real_tolkien_receipts_survive_empty_http_cache (test_series_identity_242.RetainedResearchTests.test_real_tolkien_receipts_survive_empty_http_cache) (number='3')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\tolkien-fixtures-025-20261105\tests\test_series_identity_242.py", line 62, in test_real_tolkien_receipts_survive_empty_http_cache
+    self.assertEqual(result['review']['series'], 'Властелин колец')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'Lord of the Rings' != 'Властелин колец'
+- Lord of the Rings
++ Властелин колец
+
+
+======================================================================
+FAIL: test_all_three_tolkien_volumes_have_exact_middle_earth_authority (test_series_identity_242.SharedAuthorityTests.test_all_three_tolkien_volumes_have_exact_middle_earth_authority) (work_id='fantlab:1667')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\tolkien-fixtures-025-20261105\tests\test_series_identity_242.py", line 188, in test_all_three_tolkien_volumes_have_exact_middle_earth_authority
+    self.assertEqual(planned['relative_path'].split(os.sep)[:2], ['Middle-earth', 'Властелин колец'])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['Tolkien J. R. R', 'Middle-earth'] != ['Middle-earth', 'Властелин колец']
+
+First differing element 0:
+'Tolkien J. R. R'
+'Middle-earth'
+
+- ['Tolkien J. R. R', 'Middle-earth']
++ ['Middle-earth', 'Властелин колец']
+
+======================================================================
+FAIL: test_all_three_tolkien_volumes_have_exact_middle_earth_authority (test_series_identity_242.SharedAuthorityTests.test_all_three_tolkien_volumes_have_exact_middle_earth_authority) (work_id='fantlab:1668')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\tolkien-fixtures-025-20261105\tests\test_series_identity_242.py", line 188, in test_all_three_tolkien_volumes_have_exact_middle_earth_authority
+    self.assertEqual(planned['relative_path'].split(os.sep)[:2], ['Middle-earth', 'Властелин колец'])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['Tolkien J. R. R', 'Middle-earth'] != ['Middle-earth', 'Властелин колец']
+
+First differing element 0:
+'Tolkien J. R. R'
+'Middle-earth'
+
+- ['Tolkien J. R. R', 'Middle-earth']
++ ['Middle-earth', 'Властелин колец']
+
+======================================================================
+FAIL: test_all_three_tolkien_volumes_have_exact_middle_earth_authority (test_series_identity_242.SharedAuthorityTests.test_all_three_tolkien_volumes_have_exact_middle_earth_authority) (work_id='fantlab:1669')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\tolkien-fixtures-025-20261105\tests\test_series_identity_242.py", line 188, in test_all_three_tolkien_volumes_have_exact_middle_earth_authority
+    self.assertEqual(planned['relative_path'].split(os.sep)[:2], ['Middle-earth', 'Властелин колец'])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['Tolkien J. R. R', 'Middle-earth'] != ['Middle-earth', 'Властелин колец']
+
+First differing element 0:
+'Tolkien J. R. R'
+'Middle-earth'
+
+- ['Tolkien J. R. R', 'Middle-earth']
++ ['Middle-earth', 'Властелин колец']
+
+----------------------------------------------------------------------
+Ran 21 tests in 0.077s
+
+FAILED (failures=5)

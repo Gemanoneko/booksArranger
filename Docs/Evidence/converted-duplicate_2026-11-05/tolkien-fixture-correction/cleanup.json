@@ -1,0 +1,9 @@
+{
+  "removed_root": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\tolkien-fix025-1105",
+  "files_removed": 6,
+  "bytes_reclaimed": 30798.0,
+  "measurement": "Sum of identified file Length values before deletion; each preserved evidence copy SHA matched",
+  "folders_removed": 2,
+  "absent": true,
+  "method": "Individual exact ordinary files and empty owned directories only; no recursive deletion"
+}
