@@ -3230,6 +3230,16 @@ class MergeService:
         try:
             preview=self.approval_preview(id,revision,names={})
             place,destination=preview['place'],{'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
+            # The editor shows the same accepted names as its Goes to line,
+            # including the current confirmed trilogy decision. Saved entries
+            # remain authoritative; raw file names stay separately in read.
+            proposed={'title':preview.get('title'),'author':preview.get('author'),
+                      'universe':place.get('universe'),'collection':place.get('collection')}
+            if preview.get('series'):
+                proposed.update(series=preview['series']['name'],number=preview['series']['number'])
+            for field,value in proposed.items():
+                if field in ('title','author') and not str(value or '').strip():continue
+                if field not in now and (isinstance(value,str) if field!='collection' else type(value)is bool):fields[field]['proposal']=value
         except (ValueError,OSError) as error:
             place,destination=self._place({'universe':fields['universe']['proposal'],'series':fields['series']['proposal'],'number':fields['number']['proposal'],
                                            'anthology':fields['collection']['proposal']}),{'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
@@ -3345,12 +3355,39 @@ class MergeService:
         (_names_replan): planned under other names than those now in force (Edit names), a job that converts only part of
         one source folder (ruling 71d), a foreign author still in Cyrillic (ruling 71f) or a destination folder chosen
         since it was planned (ruling 69). Each check reads only the catalog; an unreadable one never stops the queue."""
-        for check in (self._names_changed,getattr(self,'_replan_needed',None),getattr(self,'_override_stale',None)):
+        for check in (self._names_changed,self._trilogy_stale,getattr(self,'_replan_needed',None),getattr(self,'_override_stale',None)):
             if check is None:continue
             try:
                 if check(job):return True
             except (ValueError,KeyError,TypeError,OSError,sqlite3.Error):continue
         return False
+
+    def _trilogy_stale(self,job):
+        """The confirmed still-queued trilogy follows the current user decision.
+
+        Keep the existing pending-name replan path and immutable old history;
+        never rewrite a started job or a completed publication.
+        """
+        from tolkien_trilogy import pending_changed
+        if job.get('state')!='pending' or job.get('attempt_id') or job.get('output'):return False
+        if 'publication_intent' in json.loads(job.get('journal') or '{}'):return False
+        manifest=json.loads(job['manifest'])
+        if not pending_changed(manifest):return False
+        row=self.reviews._row('Audiobooks',manifest['candidate_id'])
+        if row['revision']!=manifest['candidate_revision'] or row['fingerprint']!=(manifest.get('metadata_facts') or {}).get('source_fingerprint'):
+            # Saved names/grouping can advance a revision with identical sources.
+            # Admit that replan only with the complete current ordered hash scope.
+            context=getattr(self.reviews,'_context',None)
+            if not callable(context):return False
+            ctx=context(row);sources=manifest.get('sources') or [];members=row.get('members') or []
+            if not sources or [m.get('path') for m in members]!=[s.get('path') for s in sources]:return False
+            keys=[member_key(s['path']) for s in sources]
+            if [k for k in ctx.get('track_order',[]) if k in ctx.get('included',[])]!=keys or set(ctx.get('included',[]))!=set(keys):return False
+            for member,source,key in zip(members,sources,keys):
+                saved=ctx.get('source_hashes',{}).get(key,{})
+                if any(str(saved.get(k))!=str(source.get(k)) for k in ('sha256','size','modified')) or any(str(member.get(k))!=str(source.get(k)) for k in ('size','modified')):return False
+        self.__dict__.setdefault('_replan_reasons',{})[job['job_id']]='Set aside: the confirmed trilogy names and destination follow your 4 November decision. Nothing ran; the book is checked again with those names.'
+        return True
 
     def _names_changed(self,job):
         """True when this pending job was planned under other names than those now in force for its book

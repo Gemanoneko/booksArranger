@@ -1250,8 +1250,8 @@ class TolkienHeldTranslationTests(Base):
                 approval=self.approved(row)
                 self.assertEqual((approval['title'],approval['author']),(english,'Tolkien J. R. R.'))
                 review=self.research.approved(row,ROOT)['review']
-                self.assertEqual((review['series'],review['number'],review['canonical_author']),('Властелин колец',str(number),'Tolkien J. R. R.'))
-                self.assertIn('\\Tolkien J. R. R\\Властелин колец\\',self.approved_to(row))
+                self.assertEqual((review['series'],review['number'],review['canonical_author']),('Lord of the Rings',str(number),'Tolkien J. R. R.'))
+                self.assertIn('\\Tolkien J. R. R\\Middle-earth\\Lord of the Rings\\',self.approved_to(row))
                 self.assertIn(english,self.approved_to(row))
         self.assertFalse(any('goodreads.com/book/show' in url for url in calls))
         self.assertTrue(any('search-works?q=%D0%A5%D1%80%D0%B0%D0%BD%D0%B8%D1%82%D0%B5%D0%BB%D0%B8&' in url for url in calls),'the volume asked by its book title')
@@ -1360,10 +1360,10 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
             with self.subTest(album=album):
                 result=self.lookup(books[album]);review=result['review'];number,title=english[album]
                 self.assertEqual(result['reasons'],[],'identified by its files: research files it')
-                self.assertEqual((review['canonical_author'],review['title'],review['series'],review['number']),('Tolkien J. R. R.',title,'Властелин колец',str(number)))
+                self.assertEqual((review['canonical_author'],review['title'],review['series'],review['number']),('Tolkien J. R. R.',title,'Lord of the Rings',str(number)))
                 self.assertEqual(evidence_missing(result),set(),'the approval has evidence for every field its policy records')
                 path=self.goes_to(books[album],result)
-                self.assertIn('\\Middle-earth\\Властелин колец\\',path)
+                self.assertIn('\\Tolkien J. R. R\\Middle-earth\\Lord of the Rings\\',path)
                 self.assertTrue(path.endswith(' - Tolkien J. R. R.m4b'),'the shared world never replaces the author credit')
                 asked=len(calls);self.research.approved(books[album],ROOT)
                 self.assertEqual(len(calls),asked,'Approve and its preview read the cache only')
@@ -1400,7 +1400,7 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
         books,calls=self.books()
         control=self.lookup(books['Возвращение государя. Летопись третья'])
         self.assertEqual(control['reasons'],[],'the numbers agree: filed with no question')
-        self.assertEqual((control['review']['series'],control['review']['number'],control['review']['title']),('Властелин колец','3','The Return of the King'))
+        self.assertEqual((control['review']['series'],control['review']['number'],control['review']['title']),('Lord of the Rings','3','The Return of the King'))
         for album,title_number,source_number in (('Хранители. Летопись первая',1,'2'),('Две твердыни. Летопись вторая',2,'1')):
             with self.subTest(album=album):
                 row=books[album];result=self.lookup(row);ask=result.get('ask') or {}

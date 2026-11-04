@@ -266,6 +266,26 @@ class EditNamesTests(ApproveFixture):
         self.assertEqual(self.service.jobs.status()['jobs'],[],'no job');self.assertEqual(self.digest(sources),before,'sources unchanged')
         self.assertEqual([p for p in self.sorted.rglob('*') if p.is_file()],[],'nothing in Sorted')
 
+    def test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder(self):
+        import destination_overrides
+        source=tone(self.audio/'Private author'/'Book.mp3',self.cover,title='Book',album='Book',artist='Private author')
+        row=self.start()[0];before=source.read_bytes();chosen=self.sorted/'Folder chosen by you';chosen.mkdir()
+        with connect(self.inv.database) as db:
+            selected=destination_overrides.choose(db,folder=str(chosen),identity=destination_overrides.current_identity(chosen),
+                book_key=entered_names.book_key(row),candidate_id=row['id'])
+        self.service._destination_changed()  # The normal Choose folder press invalidates its cached choices.
+        values={'title':'My entered title','author':'Private author','series':'My series','number':'3','universe':'My universe','collection':False}
+        saved=self.service.names_save(row['id'],row['revision'],values)
+        current=self.service.reviews._row('Audiobooks',row['id']);editor=self.service.names_editor(current['id'],current['revision'])
+        self.assertEqual({key:editor['fields'][key]['proposal'] for key in values},values)
+        preview=self.service.approval_preview(current['id'],current['revision'],names={})
+        self.assertEqual(preview['place'],{'series':'My series','number':'3','universe':'My universe','collection':False})
+        self.assertEqual(Path(preview['absolute']).parent,chosen)
+        self.assertEqual(Path(preview['absolute']).name,'My series - 3 - My entered title - Private author.m4b')
+        with connect(self.inv.database) as db:choice=destination_overrides.live(db,book_key=entered_names.book_key(current))
+        self.assertEqual(choice['override_id'],selected['override_id']);self.assertEqual(choice['folder'],str(chosen))
+        self.assertEqual(source.read_bytes(),before);self.assertEqual(self.service.jobs.status()['jobs'],[])
+
     def test_a_collection_in_its_series_files_under_the_series_folder_and_the_row_carries_place_and_entered(self):
         self.scp();row=self.row('1')
         self.service.automatic._record(row,'Held',dict(self.research(row),reasons=['fixture hold']))  # researched: a collection

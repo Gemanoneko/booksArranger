@@ -1,0 +1,457 @@
+diff --git a/merge_service.py b/merge_service.py
+index 43de0a5..1899baf 100644
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -3230,6 +3230,16 @@ class MergeService:
+         try:
+             preview=self.approval_preview(id,revision,names={})
+             place,destination=preview['place'],{'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
++            # The editor shows the same accepted names as its Goes to line,
++            # including the current confirmed trilogy decision. Saved entries
++            # remain authoritative; raw file names stay separately in read.
++            proposed={'title':preview.get('title'),'author':preview.get('author'),
++                      'universe':place.get('universe'),'collection':place.get('collection')}
++            if preview.get('series'):
++                proposed.update(series=preview['series']['name'],number=preview['series']['number'])
++            for field,value in proposed.items():
++                if field in ('title','author') and not str(value or '').strip():continue
++                if field not in now and (isinstance(value,str) if field!='collection' else type(value)is bool):fields[field]['proposal']=value
+         except (ValueError,OSError) as error:
+             place,destination=self._place({'universe':fields['universe']['proposal'],'series':fields['series']['proposal'],'number':fields['number']['proposal'],
+                                            'anthology':fields['collection']['proposal']}),{'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
+@@ -3345,13 +3355,40 @@ class MergeService:
+         (_names_replan): planned under other names than those now in force (Edit names), a job that converts only part of
+         one source folder (ruling 71d), a foreign author still in Cyrillic (ruling 71f) or a destination folder chosen
+         since it was planned (ruling 69). Each check reads only the catalog; an unreadable one never stops the queue."""
+-        for check in (self._names_changed,getattr(self,'_replan_needed',None),getattr(self,'_override_stale',None)):
++        for check in (self._names_changed,self._trilogy_stale,getattr(self,'_replan_needed',None),getattr(self,'_override_stale',None)):
+             if check is None:continue
+             try:
+                 if check(job):return True
+             except (ValueError,KeyError,TypeError,OSError,sqlite3.Error):continue
+         return False
+ 
++    def _trilogy_stale(self,job):
++        """The confirmed still-queued trilogy follows the current user decision.
++
++        Keep the existing pending-name replan path and immutable old history;
++        never rewrite a started job or a completed publication.
++        """
++        from tolkien_trilogy import pending_changed
++        if job.get('state')!='pending' or job.get('attempt_id') or job.get('output'):return False
++        if 'publication_intent' in json.loads(job.get('journal') or '{}'):return False
++        manifest=json.loads(job['manifest'])
++        if not pending_changed(manifest):return False
++        row=self.reviews._row('Audiobooks',manifest['candidate_id'])
++        if row['revision']!=manifest['candidate_revision'] or row['fingerprint']!=(manifest.get('metadata_facts') or {}).get('source_fingerprint'):
++            # Saved names/grouping can advance a revision with identical sources.
++            # Admit that replan only with the complete current ordered hash scope.
++            context=getattr(self.reviews,'_context',None)
++            if not callable(context):return False
++            ctx=context(row);sources=manifest.get('sources') or [];members=row.get('members') or []
++            if not sources or [m.get('path') for m in members]!=[s.get('path') for s in sources]:return False
++            keys=[member_key(s['path']) for s in sources]
++            if [k for k in ctx.get('track_order',[]) if k in ctx.get('included',[])]!=keys or set(ctx.get('included',[]))!=set(keys):return False
++            for member,source,key in zip(members,sources,keys):
++                saved=ctx.get('source_hashes',{}).get(key,{})
++                if any(str(saved.get(k))!=str(source.get(k)) for k in ('sha256','size','modified')) or any(str(member.get(k))!=str(source.get(k)) for k in ('size','modified')):return False
++        self.__dict__.setdefault('_replan_reasons',{})[job['job_id']]='Set aside: the confirmed trilogy names and destination follow your 4 November decision. Nothing ran; the book is checked again with those names.'
++        return True
++
+     def _names_changed(self,job):
+         """True when this pending job was planned under other names than those now in force for its book
+         (entered_names.digest_for; the job's is in metadata_facts.entered_names). Reads only the store and the book."""
+diff --git a/organization.py b/organization.py
+index 72c0b4c..1518b77 100644
+--- a/organization.py
++++ b/organization.py
+@@ -51,6 +51,8 @@ def _plan(output_root,review,*,collection_fallback='legacy',facts=None):
+                 'accepted_routing':{'author':author,'cycle':cycle,'universe':'','number':number,'collection':True,'multi_author_cycle':False}}
+     folders=[]
+     if universe:
++        from tolkien_trilogy import author_world
++        if author_world(review,facts):folders.append(safe_name(author))
+         folders.append(safe_name(universe))
+         if cycle:folders.append(safe_name(cycle))
+     elif cycle:
+diff --git a/public_research.py b/public_research.py
+index 8835743..074e90c 100644
+--- a/public_research.py
++++ b/public_research.py
+@@ -2447,6 +2447,8 @@ def _routing_series_identity(result):
+     """A provider series identity, never a coincidental title or a book-page URL."""
+     review = result.get('review') or {}; facts = result.get('metadata_facts') or {}; work = result.get('work') or {}
+     series = work.get('verified_series') or {}
++    from tolkien_trilogy import author_world,CYCLE
++    if author_world(review,facts):return CYCLE
+     if facts.get('series_state') != 'verified' or series.get('name') != review.get('series') or str(series.get('number')) != review.get('number'):
+         return None
+     url = text(series.get('source_url'))
+@@ -2476,7 +2478,8 @@ def attach_shared_routing(result, peers=()):
+     """
+     import local_identity
+     from shared_routing import build, RoutingEvidenceError
+-    out = copy.deepcopy(result)
++    from tolkien_trilogy import apply as trilogy_decision,author_world,DECISION
++    out = trilogy_decision(result)
+     review = out.get('review'); facts = out.get('metadata_facts'); work = out.get('work') or {}
+     member = _routing_member(out)
+     if not isinstance(review, dict) or not isinstance(facts, dict) or member is None:
+@@ -2527,6 +2530,9 @@ def attach_shared_routing(result, peers=()):
+         universe = {'id': 'user:middle-earth-2026-11-01', 'name': 'Middle-earth', 'basis': 'user',
+                     'evidence': ['user:middle-earth-decision-2026-11-01'],
+                     'members': [dict(member, series_id=sid)]}
++    if author_world(review,facts):
++        universe={'id':'user:middle-earth-trilogy-2026-11-04','name':'Middle-earth','basis':'user',
++                  'evidence':[DECISION],'members':[dict(member,series_id=sid)]}
+     # General worlds use an explicit identity-bound world membership, never just a
+     # universe label. Providers/user-decision producers may retain this in the work.
+     world = work.get('verified_world')
+diff --git a/tests/test_entered_names.py b/tests/test_entered_names.py
+index 600148c..32ac88b 100644
+--- a/tests/test_entered_names.py
++++ b/tests/test_entered_names.py
+@@ -266,6 +266,26 @@ class EditNamesTests(ApproveFixture):
+         self.assertEqual(self.service.jobs.status()['jobs'],[],'no job');self.assertEqual(self.digest(sources),before,'sources unchanged')
+         self.assertEqual([p for p in self.sorted.rglob('*') if p.is_file()],[],'nothing in Sorted')
+ 
++    def test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder(self):
++        import destination_overrides
++        source=tone(self.audio/'Private author'/'Book.mp3',self.cover,title='Book',album='Book',artist='Private author')
++        row=self.start()[0];before=source.read_bytes();chosen=self.sorted/'Folder chosen by you';chosen.mkdir()
++        with connect(self.inv.database) as db:
++            selected=destination_overrides.choose(db,folder=str(chosen),identity=destination_overrides.current_identity(chosen),
++                book_key=entered_names.book_key(row),candidate_id=row['id'])
++        self.service._destination_changed()  # The normal Choose folder press invalidates its cached choices.
++        values={'title':'My entered title','author':'Private author','series':'My series','number':'3','universe':'My universe','collection':False}
++        saved=self.service.names_save(row['id'],row['revision'],values)
++        current=self.service.reviews._row('Audiobooks',row['id']);editor=self.service.names_editor(current['id'],current['revision'])
++        self.assertEqual({key:editor['fields'][key]['proposal'] for key in values},values)
++        preview=self.service.approval_preview(current['id'],current['revision'],names={})
++        self.assertEqual(preview['place'],{'series':'My series','number':'3','universe':'My universe','collection':False})
++        self.assertEqual(Path(preview['absolute']).parent,chosen)
++        self.assertEqual(Path(preview['absolute']).name,'My series - 3 - My entered title - Private author.m4b')
++        with connect(self.inv.database) as db:choice=destination_overrides.live(db,book_key=entered_names.book_key(current))
++        self.assertEqual(choice['override_id'],selected['override_id']);self.assertEqual(choice['folder'],str(chosen))
++        self.assertEqual(source.read_bytes(),before);self.assertEqual(self.service.jobs.status()['jobs'],[])
++
+     def test_a_collection_in_its_series_files_under_the_series_folder_and_the_row_carries_place_and_entered(self):
+         self.scp();row=self.row('1')
+         self.service.automatic._record(row,'Held',dict(self.research(row),reasons=['fixture hold']))  # researched: a collection
+diff --git a/tests/test_folder_structure.py b/tests/test_folder_structure.py
+index b97e7ab..c7d387c 100644
+--- a/tests/test_folder_structure.py
++++ b/tests/test_folder_structure.py
+@@ -1250,8 +1250,8 @@ class TolkienHeldTranslationTests(Base):
+                 approval=self.approved(row)
+                 self.assertEqual((approval['title'],approval['author']),(english,'Tolkien J. R. R.'))
+                 review=self.research.approved(row,ROOT)['review']
+-                self.assertEqual((review['series'],review['number'],review['canonical_author']),('Властелин колец',str(number),'Tolkien J. R. R.'))
+-                self.assertIn('\\Tolkien J. R. R\\Властелин колец\\',self.approved_to(row))
++                self.assertEqual((review['series'],review['number'],review['canonical_author']),('Lord of the Rings',str(number),'Tolkien J. R. R.'))
++                self.assertIn('\\Tolkien J. R. R\\Middle-earth\\Lord of the Rings\\',self.approved_to(row))
+                 self.assertIn(english,self.approved_to(row))
+         self.assertFalse(any('goodreads.com/book/show' in url for url in calls))
+         self.assertTrue(any('search-works?q=%D0%A5%D1%80%D0%B0%D0%BD%D0%B8%D1%82%D0%B5%D0%BB%D0%B8&' in url for url in calls),'the volume asked by its book title')
+@@ -1360,10 +1360,10 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
+             with self.subTest(album=album):
+                 result=self.lookup(books[album]);review=result['review'];number,title=english[album]
+                 self.assertEqual(result['reasons'],[],'identified by its files: research files it')
+-                self.assertEqual((review['canonical_author'],review['title'],review['series'],review['number']),('Tolkien J. R. R.',title,'Властелин колец',str(number)))
++                self.assertEqual((review['canonical_author'],review['title'],review['series'],review['number']),('Tolkien J. R. R.',title,'Lord of the Rings',str(number)))
+                 self.assertEqual(evidence_missing(result),set(),'the approval has evidence for every field its policy records')
+                 path=self.goes_to(books[album],result)
+-                self.assertIn('\\Middle-earth\\Властелин колец\\',path)
++                self.assertIn('\\Tolkien J. R. R\\Middle-earth\\Lord of the Rings\\',path)
+                 self.assertTrue(path.endswith(' - Tolkien J. R. R.m4b'),'the shared world never replaces the author credit')
+                 asked=len(calls);self.research.approved(books[album],ROOT)
+                 self.assertEqual(len(calls),asked,'Approve and its preview read the cache only')
+@@ -1400,7 +1400,7 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
+         books,calls=self.books()
+         control=self.lookup(books['Возвращение государя. Летопись третья'])
+         self.assertEqual(control['reasons'],[],'the numbers agree: filed with no question')
+-        self.assertEqual((control['review']['series'],control['review']['number'],control['review']['title']),('Властелин колец','3','The Return of the King'))
++        self.assertEqual((control['review']['series'],control['review']['number'],control['review']['title']),('Lord of the Rings','3','The Return of the King'))
+         for album,title_number,source_number in (('Хранители. Летопись первая',1,'2'),('Две твердыни. Летопись вторая',2,'1')):
+             with self.subTest(album=album):
+                 row=books[album];result=self.lookup(row);ask=result.get('ask') or {}
+diff --git a/tests/test_inline_series_frontend.js b/tests/test_inline_series_frontend.js
+index e668ef6..82038dc 100644
+--- a/tests/test_inline_series_frontend.js
++++ b/tests/test_inline_series_frontend.js
+@@ -62,6 +62,42 @@ const call=route=>posts.filter(p=>p.route===route).at(-1)?.data;
+  type('title','My explicit title');type('series','My series');type('number','2');await run('askPreview(askRows.get("cand-inline"),0)');answers['/api/candidate/approve']=data=>ok({queued:true,id:'q-title',position:1,blocker:{kind:'scan'}});await run('askPress(askRows.get("cand-inline"),"approve")');
+  assert.equal(call('/api/candidate/approve').title,'My explicit title');assert.deepEqual(call('/api/candidate/approve').names,{series:'My series',number:'2'});
+ 
++ // The normal Edit names entry must terminate an unusable reply and allow a fresh read.
++ run('askPendings.clear();askDone.clear();queueState.queued=[];queueState.running=null;namesState.clear();namesNotes.clear()');paint();
++ const beforeLoad=run('JSON.stringify(askDraft("cand-inline"))');
++ answers['/api/candidate/names']=()=>ok({editor:null});
++ run('namesRows.get("cand-inline").button.handlers.click({stopPropagation(){}})');await tick();await tick();
++ assert.equal(run('namesOpen("cand-inline")'),false,'a malformed successful response must not leave Loading these names forever');
++ assert.equal(run('namesNotes.get("cand-inline").text'),"Couldn't load this book's names. Press Edit names to try again.");
++ assert.equal(run('JSON.stringify(askDraft("cand-inline"))'),beforeLoad,'failed loading preserves the pre-existing title/series draft');
++ answers['/api/candidate/names']=()=>ok({editor:{fields:{title:{proposal:'Server title'},author:{proposal:'Schwab Victoria'},series:{proposal:'Server series'},number:{proposal:'1'},universe:{proposal:'Existing universe'},collection:{proposal:false}},remembered:[],entered:[],job:'none'}});
++ run('namesRows.get("cand-inline").button.handlers.click({stopPropagation(){}})');await tick();await tick();
++ assert.equal(run('namesOpen("cand-inline")'),true);assert.ok(run('namesRows.get("cand-inline").inputs.universe'),'Universe is reachable without optional suggestion lists');
++ assert.equal(run('namesValues(rows[0]).title'),'My explicit title','loading never resets a title entered before opening');
++ assert.equal(run('namesValues(rows[0]).series'),'My series','the inline series and full editor share one draft');
++ run('namesChangedField(rows[0],"title","Editor-only title");namesClose("cand-inline")');
++ assert.equal(input('title').value,'My explicit title','Discard restores the title draft that existed before opening');
++ const validNames=answers['/api/candidate/names'];let oldReply,newReply;
++ run('namesState.get("cand-inline").data=null');answers['/api/candidate/names']=()=>new Promise(resolve=>oldReply=resolve);
++ run('namesRows.get("cand-inline").button.handlers.click({stopPropagation(){}})');await tick();
++ run('namesClose("cand-inline",true)');answers['/api/candidate/names']=()=>new Promise(resolve=>newReply=resolve);
++ run('namesRows.get("cand-inline").button.handlers.click({stopPropagation(){}})');await tick();
++ const currentNames=await validNames();currentNames.json=async()=>({editor:{fields:{title:{proposal:'Fresh title'},author:{proposal:'Schwab Victoria'},series:{proposal:'Fresh series'},number:{proposal:'1'},universe:{proposal:'Fresh universe'},collection:{proposal:false}},remembered:[],entered:[],job:'none'}});
++ newReply(currentNames);await tick();await tick();oldReply(await validNames());await tick();await tick();
++ assert.equal(run('namesData("cand-inline").fields.universe.proposal'),'Fresh universe','a closed older request cannot overwrite a reopened editor');
++ run('namesClose("cand-inline",true);namesState.get("cand-inline").data=null');
++ answers['/api/candidate/names']=()=>new Promise(resolve=>oldReply=resolve);
++ run('namesRows.get("cand-inline").button.handlers.click({stopPropagation(){}})');await tick();row.revision+=1;paint();oldReply(await validNames());await tick();await tick();
++ assert.equal(run('namesOpen("cand-inline")'),false,'an answer for a stale revision ends loading and can be retried');
++ assert.equal(run('namesNotes.get("cand-inline").text'),"Couldn't load this book's names. Press Edit names to try again.");
++ // A read that never answers has the existing 30-second read deadline, then the same actionable retry.
++ const savedFetch=context.fetch,savedTimer=context.setTimeout;let deadline;
++ context.AbortController=AbortController;context.setTimeout=(callback,ms)=>{if(ms===30000)deadline=callback;return 0;};
++ context.fetch=(route,options)=>route==='/api/candidate/names'?new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted')))):savedFetch(route,options);
++ run('namesRows.get("cand-inline").button.handlers.click({stopPropagation(){}})');await tick();assert.equal(typeof deadline,'function');deadline();await tick();await tick();
++ assert.equal(run('namesOpen("cand-inline")'),false,'a stalled read cannot keep Loading these names visible indefinitely');
++ assert.equal(run('namesNotes.get("cand-inline").text'),"Couldn't load this book's names. Press Edit names to try again.");
++ context.fetch=savedFetch;context.setTimeout=savedTimer;
+  console.log('inline author/title/series draft, preview, approval and editor reuse: passed');
+ })().catch(error=>{console.error(error);process.exitCode=1;});
+ `;
+diff --git a/tests/test_shared_routing.py b/tests/test_shared_routing.py
+index 6c5f840..8cd0073 100644
+--- a/tests/test_shared_routing.py
++++ b/tests/test_shared_routing.py
+@@ -157,5 +157,78 @@ class SharedRoutingTests(unittest.TestCase):
+         self.assertEqual(facts, frozen_before)
+ 
+ 
++class TrilogyDecisionTests(unittest.TestCase):
++    TITLES=('The Fellowship of the Ring','The Two Towers','The Return of the King')
++
++    def result(self,number=1,local=False):
++        title=self.TITLES[number-1];work='local:accepted-fellowship' if local else 'fantlab:'+str(1666+number)
++        return {'work':{'id':work,'original_title':title,'verified_series':{'provider':'fantlab','name':'Властелин колец','number':str(number),'source_url':'https://fantlab.ru/work1693'}},
++                'review':{'title':title,'author':'Tolkien J. R. R.','canonical_author':'Tolkien J. R. R.','series':'Властелин колец','number':str(number),'universe':''},
++                'metadata_facts':{'source_fingerprint':'source-'+str(number),'work_ids':[work],'original_title':title,'authors':['Tolkien J. R. R.'],'series_state':'verified'},'evidence':[]}
++
++    def test_confirmed_three_books_get_the_decided_series_and_author_world_route(self):
++        from public_research import attach_shared_routing
++        from organization import plan
++        for number in (1,2,3):
++            result=attach_shared_routing(self.result(number,local=number==1))
++            self.assertEqual((result['review']['series'],result['review']['number'],result['review']['universe']),('Lord of the Rings',str(number),'Middle-earth'))
++            path=plan('C:\\private\\Sorted',result['review'],facts=result['metadata_facts'])['path']
++            self.assertTrue(path.startswith('C:\\private\\Sorted\\Tolkien J. R. R\\Middle-earth\\Lord of the Rings\\'),path)
++            self.assertIn('Lord of the Rings - '+str(number)+' - '+self.TITLES[number-1],path)
++
++    def test_chosen_return_folder_and_title_remain_authoritative(self):
++        from public_research import attach_shared_routing
++        from organization import plan
++        source=self.result(3);source['review']['title']='The Return of the King (my edition)'
++        source['metadata_facts']['destination_override']={'id':'saved-choice','folder':'C:\\private\\Sorted\\My chosen folder','identity':{'volume':1,'high':0,'low':2}}
++        result=attach_shared_routing(source);path=plan('C:\\private\\Sorted',result['review'],facts=result['metadata_facts'])['path']
++        self.assertTrue(path.startswith('C:\\private\\Sorted\\My chosen folder\\Lord of the Rings - 3 - The Return of the King (my edition)'),path)
++        self.assertEqual(source['review']['series'],'Властелин колец','the original cached/provider record is not mutated')
++
++    def test_similar_titles_other_authors_or_unproved_series_do_not_gain_the_exception(self):
++        from public_research import attach_shared_routing
++        controls=[]
++        for field,value in [('id','fantlab:999'),('original_title','Unrelated Tolkien novel')]:
++            source=self.result();source['work'][field]=value;source['metadata_facts']['work_ids']=[source['work']['id']];controls.append(source)
++        source=self.result();source['work']['verified_series']['source_url']='https://fantlab.ru/work999';controls.append(source)
++        source=self.result();source['review']['canonical_author']=source['review']['author']='Another Author';source['metadata_facts']['authors']=['Another Author'];controls.append(source)
++        for source in controls:
++            with self.subTest(source=source):
++                result=attach_shared_routing(source);self.assertNotEqual(result['review']['series'],'Lord of the Rings')
++
++    def test_old_pending_trilogy_is_replanned_but_started_or_finished_history_is_not_rewritten(self):
++        import json
++        from types import SimpleNamespace
++        from merge_service import MergeService
++        source=self.result(1,local=True)
++        manifest={'candidate_id':'candidate','candidate_revision':5,'metadata':source['review'],
++                  'metadata_facts':source['metadata_facts'],
++                  'evidence':{'metadata_fields':[{'field':'series','source_url':'https://fantlab.ru/work1693'}]}}
++        service=SimpleNamespace(reviews=SimpleNamespace(_row=lambda *args:{'revision':5,'fingerprint':'source-1'}))
++        job={'job_id':'pending','state':'pending','attempt_id':None,'output':None,'journal':'{}','manifest':json.dumps(manifest)}
++        before=copy.deepcopy(job)
++        self.assertTrue(MergeService._trilogy_stale(service,job));self.assertEqual(job,before,'the old immutable manifest stays in history')
++        for change in ({'state':'running'},{'state':'completed'},{'attempt_id':'already-started'},{'output':'{}'},{'journal':'{"publication_intent":{}}'}):
++            self.assertFalse(MergeService._trilogy_stale(service,dict(job,**change)))
++        service.reviews._row=lambda *args:{'revision':6,'fingerprint':'source-1'}
++        self.assertFalse(MergeService._trilogy_stale(service,job),'a stale candidate never gets a blind name replan')
++
++    def test_pending_revision_advance_requires_complete_current_source_receipts(self):
++        import json
++        from types import SimpleNamespace
++        from merge_service import MergeService,member_key
++        source=self.result(1,local=True);path='C:\\private\\source.mp3';key=member_key(path)
++        manifest={'candidate_id':'candidate','candidate_revision':4,'sources':[{'path':path,'sha256':'a'*64,'size':123,'modified':'456'}],
++                  'metadata':source['review'],'metadata_facts':source['metadata_facts'],
++                  'evidence':{'metadata_fields':[{'field':'series','source_url':'https://fantlab.ru/work1693'}]}}
++        row={'revision':5,'fingerprint':'new-records-same-files','members':[{'path':path,'size':123,'modified':456}]}
++        ctx={'track_order':[key],'included':[key],'source_hashes':{key:{'sha256':'a'*64,'size':123,'modified':'456'}}}
++        service=SimpleNamespace(reviews=SimpleNamespace(_row=lambda *args:row,_context=lambda *args:ctx))
++        job={'job_id':'pending','state':'pending','attempt_id':None,'output':None,'journal':'{}','manifest':json.dumps(manifest)}
++        self.assertTrue(MergeService._trilogy_stale(service,job),'same complete sources can replan after a name/review revision')
++        ctx['source_hashes'][key]['sha256']='b'*64
++        self.assertFalse(MergeService._trilogy_stale(service,job),'a changed source retains its existing safety admission')
++
++
+ if __name__ == '__main__':
+     unittest.main()
+diff --git a/web/app.js b/web/app.js
+index 0e36728..4be188f 100644
+--- a/web/app.js
++++ b/web/app.js
+@@ -3614,16 +3614,36 @@ async function namesToggle(id){
+   const row=rows.find(item=>item.id===id);if(!row)return;
+   if(namesOpen(id)){namesRows.get(id)?.inputs?.title?.focus?.({preventScroll:true});return;}  // open: focus moves to Title (1.7)
+   const state=namesState.get(id) || {draft:{},seq:0,previewKey:''};state.open=true;namesState.set(id,state);
++  state.openDraft={names:{...state.draft},ask:askDrafts.has(id)?{...askDrafts.get(id)}:null};
++  if(state.data && (state.loadedRevision!==row.revision || state.loadedFingerprint!==row.fingerprint))state.data=null;
+   renderRows(true);focusNames(id);
+   if(!state.data){
+-    try{const answer=await request('/api/candidate/names',{library:'Audiobooks',id,revision:row.revision},PRESS_TIMEOUT);state.data=answer?.editor || null;}
+-    catch(error){namesNotes.set(id,{text:error.httpStatus?serverSentence(error,'The names could not be read.'):lostLine(),warn:true});state.open=false;}
+-    renderRows(true);focusNames(id);namesPreview(id,0);
++    const ticket=(state.loadSeq || 0)+1;state.loadSeq=ticket;
++    const revision=row.revision,fingerprint=row.fingerprint;
++    const current=()=>namesState.get(id)===state && state.open && state.loadSeq===ticket;
++    try{
++      // This only loads editable names. Use the existing finite read bound, not the long destructive-press bound.
++      const answer=await request('/api/candidate/names',{library:'Audiobooks',id,revision},STATE_TIMEOUT);
++      if(!current())return;
++      const fresh=rows.find(item=>item.id===id),editor=answer?.editor;
++      const texts=['title','author','series','number','universe'];
++      if(!fresh || fresh.revision!==revision || fresh.fingerprint!==fingerprint || !editor ||
++          !texts.every(field=>typeof editor.fields?.[field]?.proposal==='string') || typeof editor.fields?.collection?.proposal!=='boolean')throw Error('Names response is stale or incomplete');
++      state.data={...editor,series:Array.isArray(editor.series)?editor.series:[],universes:Array.isArray(editor.universes)?editor.universes:[]};
++      state.loadedRevision=revision;state.loadedFingerprint=fingerprint;
++      namesNotes.delete(id);
++    }catch(error){
++      if(!current())return;
++      namesNotes.set(id,{text:"Couldn't load this book's names. Press Edit names to try again.",warn:true});state.open=false;
++    }
++    if(namesState.get(id)!==state || state.loadSeq!==ticket)return;
++    renderRows(true);focusNames(id);if(state.open && state.data)namesPreview(id,0);
+   }
+ }
+ function focusNames(id){const entry=namesRows.get(id),title=entry?.inputs?.title;(title || entry?.button)?.focus?.({preventScroll:true});}
+ function namesClose(id,keep=false){
+-  const state=namesState.get(id);if(!state)return;state.open=false;if(!keep){state.draft={};askDrafts.delete(id);state.preview=null;state.previewKey='';}
++  const state=namesState.get(id);if(!state)return;state.open=false;state.loadSeq=(state.loadSeq || 0)+1;
++  if(!keep){state.draft={...(state.openDraft?.names || {})};if(state.openDraft?.ask)askDrafts.set(id,{...state.openDraft.ask});else askDrafts.delete(id);state.preview=null;state.previewKey='';}
+   renderRows(true);namesRows.get(id)?.button?.focus?.({preventScroll:true});
+ }
+ // Fields stop clicks and keys reaching the row; Esc closes only an unchanged editor; Ctrl+Enter presses the row's Approve,
+diff --git a/tolkien_trilogy.py b/tolkien_trilogy.py
+new file mode 100644
+index 0000000..2b9598b
+--- /dev/null
++++ b/tolkien_trilogy.py
+@@ -0,0 +1,99 @@
++"""Sergei's 2026-11-04 names/route for the three confirmed, still-planned trilogy books.
++
++Catalog work/cycle identity, accepted original title, position, complete Tolkien
++credit and source fingerprint bind the decision. A title or author alone never
++establishes membership. Frozen publications are not rewritten by this module.
++"""
++import copy
++
++DECISION='user:tolkien-trilogy-2026-11-04'
++CYCLE='https://fantlab.ru/work1693'
++SERIES='Lord of the Rings'
++WORLD='Middle-earth'
++WORKS={'The Fellowship of the Ring':('fantlab:1667','1'),
++       'The Two Towers':('fantlab:1668','2'),
++       'The Return of the King':('fantlab:1669','3')}
++AUTHORS={'Tolkien J. R. R.','J. R. R. Tolkien','John Ronald Reuel Tolkien','Джон Рональд Руэл Толкин'}
++FIELDS=('title','author','canonical_author','series','number','universe')
++
++
++def _binding(review,facts):
++    return {'source_fingerprint':facts.get('source_fingerprint'),
++            'work_ids':copy.deepcopy(facts.get('work_ids')),
++            'authors':copy.deepcopy(facts.get('authors')),
++            'review':{field:review.get(field,'') for field in FIELDS}}
++
++
++def _confirmed(result):
++    work=result.get('work') or {};review=result.get('review') or {};facts=result.get('metadata_facts') or {}
++    expected=WORKS.get(work.get('original_title'));series=work.get('verified_series') or {}
++    identity=work.get('id');authors=facts.get('authors')
++    if not expected or not isinstance(identity,str) or not (identity==expected[0] or identity.startswith('local:')):return False
++    # Local work IDs are accepted only with the same verified catalog cycle,
++    # exact original work title and confirmed position, as the installed Fellowship.
++    return (facts.get('work_ids')==[identity] and bool(facts.get('source_fingerprint'))
++            and isinstance(authors,list) and len(authors)==1 and authors[0] in AUTHORS
++            and review.get('canonical_author')==authors[0] and facts.get('series_state')=='verified'
++            and series.get('source_url')==CYCLE and str(series.get('number'))==expected[1]
++            and str(review.get('number'))==expected[1]
++            and series.get('name') in ('Властелин колец','Властелин Колец',SERIES,'The Lord of the Rings')
++            and review.get('series') in ('Властелин колец','Властелин Колец',SERIES,'The Lord of the Rings'))
++
++
++def apply(result):
++    """Detached current decision; later explicit field choices and chosen folders win."""
++    out=copy.deepcopy(result);facts=out.get('metadata_facts')
++    if not isinstance(facts,dict):return out
++    facts.pop('trilogy_routing',None)
++    if not _confirmed(out):return out
++    review=out['review'];names=(out.get('approval') or {}).get('names') or {}
++    entered=set((facts.get('entered_names') or {}).get('fields') or [])
++    if 'series' not in names and 'series' not in entered:review['series']=SERIES
++    if not review.get('universe') and 'universe' not in names and 'universe' not in entered:review['universe']=WORLD
++    if review.get('series')==SERIES and review.get('universe')==WORLD:
++        facts['trilogy_routing']={'schema':'books-trilogy-routing-v1','decision':DECISION,
++                                  'catalog_cycle':CYCLE,'original_title':out['work']['original_title'],
++                                  'binding':_binding(review,facts)}
++        evidence=out.setdefault('evidence',[])
++        for field,value in (('series',SERIES),('universe',WORLD)):
++            item={'field':field,'cited_value':value,'source_url':'','reviewer_actor':'user',
++                  'reviewer_identity':'Sergei','basis':'Confirmed trilogy naming and author/world/series hierarchy, 2026-11-04.'}
++            if item not in evidence:evidence.append(item)
++    return out
++
++
++def author_world(review,facts):
++    """The pure planner's narrowly bound author/world exception, never a name guess."""
++    if not isinstance(facts,dict):return False
++    receipt=facts.get('trilogy_routing')
++    if not isinstance(receipt,dict) or set(receipt)!={'schema','decision','catalog_cycle','original_title','binding'}:return False
++    expected=WORKS.get(receipt.get('original_title'))
++    binding=_binding(review,facts);ids=facts.get('work_ids');authors=facts.get('authors')
++    return (receipt.get('schema')=='books-trilogy-routing-v1' and receipt.get('decision')==DECISION
++            and receipt.get('catalog_cycle')==CYCLE and receipt.get('binding')==binding
++            and bool(facts.get('source_fingerprint')) and bool(expected) and isinstance(ids,list) and len(ids)==1
++            and isinstance(ids[0],str) and (ids[0]==expected[0] or ids[0].startswith('local:'))
++            and isinstance(authors,list) and len(authors)==1 and authors[0] in AUTHORS
++            and review.get('canonical_author')==authors[0] and review.get('series')==SERIES
++            and review.get('universe')==WORLD and review.get('number')==expected[1])
++
++
++def pending_changed(manifest):
++    """Only an accepted, catalog-bound pending manifest needs the new naming plan.
++
++    The queue retains the old manifest and uses its existing set-aside/research
++    path. This function never edits a manifest, a saved name or a publication.
++    """
++    if not isinstance(manifest,dict):return False
++    review=manifest.get('metadata') or {};facts=manifest.get('metadata_facts') or {}
++    ids=facts.get('work_ids');original=facts.get('original_title')
++    if not isinstance(ids,list) or len(ids)!=1 or original not in WORKS:return False
++    fields=(manifest.get('evidence') or {}).get('metadata_fields') or []
++    citation=any(isinstance(item,dict) and item.get('field')=='series' and item.get('source_url')==CYCLE for item in fields)
++    if not citation:return False
++    result={'review':review,'metadata_facts':facts,
++            'work':{'id':ids[0],'original_title':original,'verified_series':{
++                'provider':'fantlab','name':review.get('series'),'number':review.get('number'),'source_url':CYCLE}}}
++    corrected=apply(result)
++    return bool((corrected.get('metadata_facts') or {}).get('trilogy_routing') and
++                (corrected['review']!=review or not author_world(review,facts)))

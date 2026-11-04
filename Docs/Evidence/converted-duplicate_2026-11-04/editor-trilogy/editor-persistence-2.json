@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder (test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder) ... ok\r\ntest_the_editor_reads_what_the_files_say_with_the_place_and_no_job (test_entered_names.EditNamesTests.test_the_editor_reads_what_the_files_say_with_the_place_and_no_job) ... FAIL\r\ntest_approve_with_the_editor_open_saves_the_names_and_the_job_carries_them (test_entered_names.EditNamesTests.test_approve_with_the_editor_open_saves_the_names_and_the_job_carries_them) ... ok\r\ntest_chosen_return_folder_and_title_remain_authoritative (test_shared_routing.TrilogyDecisionTests.test_chosen_return_folder_and_title_remain_authoritative) ... ok\r\ntest_confirmed_three_books_get_the_decided_series_and_author_world_route (test_shared_routing.TrilogyDecisionTests.test_confirmed_three_books_get_the_decided_series_and_author_world_route) ... ok\r\ntest_old_pending_trilogy_is_replanned_but_started_or_finished_history_is_not_rewritten (test_shared_routing.TrilogyDecisionTests.test_old_pending_trilogy_is_replanned_but_started_or_finished_history_is_not_rewritten) ... ok\r\ntest_pending_revision_advance_requires_complete_current_source_receipts (test_shared_routing.TrilogyDecisionTests.test_pending_revision_advance_requires_complete_current_source_receipts) ... ok\r\ntest_similar_titles_other_authors_or_unproved_series_do_not_gain_the_exception (test_shared_routing.TrilogyDecisionTests.test_similar_titles_other_authors_or_unproved_series_do_not_gain_the_exception) ... ok\r\n\r\n======================================================================\r\nFAIL: test_the_editor_reads_what_the_files_say_with_the_place_and_no_job (test_entered_names.EditNamesTests.test_the_editor_reads_what_the_files_say_with_the_place_and_no_job)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Worktrees\\Books Arranger\\converted-duplicate-20261104\\tests\\test_entered_names.py\", line 232, in test_the_editor_reads_what_the_files_say_with_the_place_and_no_job\r\n    self.assertEqual(fields,{'title':'Пртоколы SCP. Сейф №1','author':'Разные авторы','series':'','number':'','universe':'','collection':True})\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: {'tit[36 chars]r': '', 'series': '', 'number': '', 'universe'[20 chars]True} != {'tit[36 chars]r': 'Разные авторы', 'series': '', 'number': '[33 chars]True}\r\n- {'author': '',\r\n+ {'author': 'Разные авторы',\r\n   'collection': True,\r\n   'number': '',\r\n   'series': '',\r\n   'title': 'Пртоколы SCP. Сейф №1',\r\n   'universe': ''}\r\n\r\n----------------------------------------------------------------------\r\nRan 8 tests in 11.558s\r\n\r\nFAILED (failures=1)\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 76372,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 70,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 787,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 12286.251,
+  "outputBytes": 2943
+}

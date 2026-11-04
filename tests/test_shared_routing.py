@@ -157,5 +157,78 @@ class SharedRoutingTests(unittest.TestCase):
         self.assertEqual(facts, frozen_before)
 
 
+class TrilogyDecisionTests(unittest.TestCase):
+    TITLES=('The Fellowship of the Ring','The Two Towers','The Return of the King')
+
+    def result(self,number=1,local=False):
+        title=self.TITLES[number-1];work='local:accepted-fellowship' if local else 'fantlab:'+str(1666+number)
+        return {'work':{'id':work,'original_title':title,'verified_series':{'provider':'fantlab','name':'Властелин колец','number':str(number),'source_url':'https://fantlab.ru/work1693'}},
+                'review':{'title':title,'author':'Tolkien J. R. R.','canonical_author':'Tolkien J. R. R.','series':'Властелин колец','number':str(number),'universe':''},
+                'metadata_facts':{'source_fingerprint':'source-'+str(number),'work_ids':[work],'original_title':title,'authors':['Tolkien J. R. R.'],'series_state':'verified'},'evidence':[]}
+
+    def test_confirmed_three_books_get_the_decided_series_and_author_world_route(self):
+        from public_research import attach_shared_routing
+        from organization import plan
+        for number in (1,2,3):
+            result=attach_shared_routing(self.result(number,local=number==1))
+            self.assertEqual((result['review']['series'],result['review']['number'],result['review']['universe']),('Lord of the Rings',str(number),'Middle-earth'))
+            path=plan('C:\\private\\Sorted',result['review'],facts=result['metadata_facts'])['path']
+            self.assertTrue(path.startswith('C:\\private\\Sorted\\Tolkien J. R. R\\Middle-earth\\Lord of the Rings\\'),path)
+            self.assertIn('Lord of the Rings - '+str(number)+' - '+self.TITLES[number-1],path)
+
+    def test_chosen_return_folder_and_title_remain_authoritative(self):
+        from public_research import attach_shared_routing
+        from organization import plan
+        source=self.result(3);source['review']['title']='The Return of the King (my edition)'
+        source['metadata_facts']['destination_override']={'id':'saved-choice','folder':'C:\\private\\Sorted\\My chosen folder','identity':{'volume':1,'high':0,'low':2}}
+        result=attach_shared_routing(source);path=plan('C:\\private\\Sorted',result['review'],facts=result['metadata_facts'])['path']
+        self.assertTrue(path.startswith('C:\\private\\Sorted\\My chosen folder\\Lord of the Rings - 3 - The Return of the King (my edition)'),path)
+        self.assertEqual(source['review']['series'],'Властелин колец','the original cached/provider record is not mutated')
+
+    def test_similar_titles_other_authors_or_unproved_series_do_not_gain_the_exception(self):
+        from public_research import attach_shared_routing
+        controls=[]
+        for field,value in [('id','fantlab:999'),('original_title','Unrelated Tolkien novel')]:
+            source=self.result();source['work'][field]=value;source['metadata_facts']['work_ids']=[source['work']['id']];controls.append(source)
+        source=self.result();source['work']['verified_series']['source_url']='https://fantlab.ru/work999';controls.append(source)
+        source=self.result();source['review']['canonical_author']=source['review']['author']='Another Author';source['metadata_facts']['authors']=['Another Author'];controls.append(source)
+        for source in controls:
+            with self.subTest(source=source):
+                result=attach_shared_routing(source);self.assertNotEqual(result['review']['series'],'Lord of the Rings')
+
+    def test_old_pending_trilogy_is_replanned_but_started_or_finished_history_is_not_rewritten(self):
+        import json
+        from types import SimpleNamespace
+        from merge_service import MergeService
+        source=self.result(1,local=True)
+        manifest={'candidate_id':'candidate','candidate_revision':5,'metadata':source['review'],
+                  'metadata_facts':source['metadata_facts'],
+                  'evidence':{'metadata_fields':[{'field':'series','source_url':'https://fantlab.ru/work1693'}]}}
+        service=SimpleNamespace(reviews=SimpleNamespace(_row=lambda *args:{'revision':5,'fingerprint':'source-1'}))
+        job={'job_id':'pending','state':'pending','attempt_id':None,'output':None,'journal':'{}','manifest':json.dumps(manifest)}
+        before=copy.deepcopy(job)
+        self.assertTrue(MergeService._trilogy_stale(service,job));self.assertEqual(job,before,'the old immutable manifest stays in history')
+        for change in ({'state':'running'},{'state':'completed'},{'attempt_id':'already-started'},{'output':'{}'},{'journal':'{"publication_intent":{}}'}):
+            self.assertFalse(MergeService._trilogy_stale(service,dict(job,**change)))
+        service.reviews._row=lambda *args:{'revision':6,'fingerprint':'source-1'}
+        self.assertFalse(MergeService._trilogy_stale(service,job),'a stale candidate never gets a blind name replan')
+
+    def test_pending_revision_advance_requires_complete_current_source_receipts(self):
+        import json
+        from types import SimpleNamespace
+        from merge_service import MergeService,member_key
+        source=self.result(1,local=True);path='C:\\private\\source.mp3';key=member_key(path)
+        manifest={'candidate_id':'candidate','candidate_revision':4,'sources':[{'path':path,'sha256':'a'*64,'size':123,'modified':'456'}],
+                  'metadata':source['review'],'metadata_facts':source['metadata_facts'],
+                  'evidence':{'metadata_fields':[{'field':'series','source_url':'https://fantlab.ru/work1693'}]}}
+        row={'revision':5,'fingerprint':'new-records-same-files','members':[{'path':path,'size':123,'modified':456}]}
+        ctx={'track_order':[key],'included':[key],'source_hashes':{key:{'sha256':'a'*64,'size':123,'modified':'456'}}}
+        service=SimpleNamespace(reviews=SimpleNamespace(_row=lambda *args:row,_context=lambda *args:ctx))
+        job={'job_id':'pending','state':'pending','attempt_id':None,'output':None,'journal':'{}','manifest':json.dumps(manifest)}
+        self.assertTrue(MergeService._trilogy_stale(service,job),'same complete sources can replan after a name/review revision')
+        ctx['source_hashes'][key]['sha256']='b'*64
+        self.assertFalse(MergeService._trilogy_stale(service,job),'a changed source retains its existing safety admission')
+
+
 if __name__ == '__main__':
     unittest.main()

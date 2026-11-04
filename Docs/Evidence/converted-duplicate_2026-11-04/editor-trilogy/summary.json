@@ -1,0 +1,111 @@
+{
+  "schema": "books-editor-trilogy-focused-v1",
+  "baseline_head": "0877140addd3d6050df57729ee292cc3f704bb69",
+  "frozen_at": "2026-11-04T20:21:00.747Z",
+  "files": [
+    {
+      "path": "merge_service.py",
+      "size": 430690,
+      "sha256": "bc9c5899262c202e838599a27bbdaeb13df768bd6d4e8541e98d718eff2d9af5",
+      "lf_sha256": "b487303575003a0eaf945952aafcba9373c89f0920e8d0c81c30cb81c475d210"
+    },
+    {
+      "path": "organization.py",
+      "size": 9902,
+      "sha256": "ce7ffe5a4723471b086ca397eb7a850bd71c1b466b0095d91156194ca5cf4df3",
+      "lf_sha256": "a513ec62362781031f99004834d2208414db247a7cdcd6bba693b7d265b25e85"
+    },
+    {
+      "path": "public_research.py",
+      "size": 203478,
+      "sha256": "cc6b873ebed4e690adc99a2f33dcde2cf6b7cd159e99facfdddce366645bfa0b",
+      "lf_sha256": "d1a3abb457710b36812c1a086e7a8fb33bd5fe7e533d25e72aeaa8b11873b2b0"
+    },
+    {
+      "path": "tolkien_trilogy.py",
+      "size": 6159,
+      "sha256": "742ab80b66c980224ee6f34745db296e65ac049483b821dd14720eb2407574d6",
+      "lf_sha256": "742ab80b66c980224ee6f34745db296e65ac049483b821dd14720eb2407574d6"
+    },
+    {
+      "path": "web/app.js",
+      "size": 524916,
+      "sha256": "cc9bed62296b3b21b65c95f8721572d6f3ca9e441846e45127b79c80600f86f2",
+      "lf_sha256": "ba9acc9b048d6af8f020f16b86ec9f55ec0c6c86ea235f7d92c83e66ef01c986"
+    },
+    {
+      "path": "tests/test_entered_names.py",
+      "size": 42672,
+      "sha256": "6ed744c7bedcdc528ada16dce3255c2236c627d007aa4a0d7f5f2cc7a5fdc43f",
+      "lf_sha256": "512919ad187e303a9fcd46663e22e2a39f31cb92e6ec8637a6365b8e7df5c49b"
+    },
+    {
+      "path": "tests/test_folder_structure.py",
+      "size": 147811,
+      "sha256": "a84decb1224a8f302f709c4ae6dcb36c7a23b3030acc10c07c45e57b69867e5b",
+      "lf_sha256": "1187e14e436c3cea6cbcd8eff6a7576e5a1e26e8633bbcabb6fc3d27d1b33dc6"
+    },
+    {
+      "path": "tests/test_inline_series_frontend.js",
+      "size": 16511,
+      "sha256": "002b7b6c7127ceffdfcfc0a668318cca1e6d264f692aa987be4721b80cc768d1",
+      "lf_sha256": "d92dab39a3fafbc5f71270444764a8c086457b195010d5c18ee9fd13616039e0"
+    },
+    {
+      "path": "tests/test_shared_routing.py",
+      "size": 15583,
+      "sha256": "29d3856191bf9ccc1a051c965b65fd5d53eac89d8fe921c98743d9c470cedc49",
+      "lf_sha256": "6cee5b037685033b7f75d9f8b02b29fb64e62de8ba66de3d55e63e7d8105f1e8"
+    }
+  ],
+  "patch": {
+    "path": "Docs/Evidence/converted-duplicate_2026-11-04/editor-trilogy/source.patch",
+    "size": 35763,
+    "sha256": "32a63c8bf258a570e47ea69c0585483d6738df1460d60a47771ac9472543467c"
+  },
+  "duplicate_core_changed": false,
+  "baseline_observations": [
+    {
+      "command": "node tests/test_inline_series_frontend.js",
+      "exit_code": 1,
+      "observation": "Malformed successful response left namesOpen=true and Loading these names indefinitely.",
+      "tool_chunk": "7ad172"
+    },
+    {
+      "command": "Python isolated TrilogyDecisionTests before tolkien_trilogy implementation",
+      "exit_code": 1,
+      "tests": 3,
+      "failures": 2,
+      "observation": "Old Russian series and computed path failed expected Lord of the Rings / author-world route.",
+      "tool_chunk": "72507c"
+    }
+  ],
+  "corrected_results": [
+    {
+      "file": "editor-trilogy-1.json",
+      "tests": 34,
+      "pass": true
+    },
+    {
+      "file": "editor-persistence-3.json",
+      "tests": 8,
+      "pass": true
+    }
+  ],
+  "unique_python_cases": 37,
+  "direct_frontend_scripts": [
+    {
+      "command": "node tests/test_inline_series_frontend.js",
+      "exit_code": 0
+    },
+    {
+      "command": "node tests/test_0242_frontend.js",
+      "exit_code": 0
+    },
+    {
+      "command": "node tests/test_odd_names_frontend.js",
+      "exit_code": 0
+    }
+  ],
+  "limits": "Focused private fixtures only; no full entry/build/native/hidden gate, Z access, live data mutation or app action. Baseline observations are saved from actual tool output, not presented as raw owned receipts. Failed intermediate fixture/regression receipts retained. No scratch cleanup yet: root is active for remaining duplicate work."
+}

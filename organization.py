@@ -51,6 +51,8 @@ def _plan(output_root,review,*,collection_fallback='legacy',facts=None):
                 'accepted_routing':{'author':author,'cycle':cycle,'universe':'','number':number,'collection':True,'multi_author_cycle':False}}
     folders=[]
     if universe:
+        from tolkien_trilogy import author_world
+        if author_world(review,facts):folders.append(safe_name(author))
         folders.append(safe_name(universe))
         if cycle:folders.append(safe_name(cycle))
     elif cycle:

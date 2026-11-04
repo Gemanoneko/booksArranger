@@ -1,0 +1,29 @@
+test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder (test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder) ... ok
+test_the_editor_reads_what_the_files_say_with_the_place_and_no_job (test_entered_names.EditNamesTests.test_the_editor_reads_what_the_files_say_with_the_place_and_no_job) ... FAIL
+test_approve_with_the_editor_open_saves_the_names_and_the_job_carries_them (test_entered_names.EditNamesTests.test_approve_with_the_editor_open_saves_the_names_and_the_job_carries_them) ... ok
+test_chosen_return_folder_and_title_remain_authoritative (test_shared_routing.TrilogyDecisionTests.test_chosen_return_folder_and_title_remain_authoritative) ... ok
+test_confirmed_three_books_get_the_decided_series_and_author_world_route (test_shared_routing.TrilogyDecisionTests.test_confirmed_three_books_get_the_decided_series_and_author_world_route) ... ok
+test_old_pending_trilogy_is_replanned_but_started_or_finished_history_is_not_rewritten (test_shared_routing.TrilogyDecisionTests.test_old_pending_trilogy_is_replanned_but_started_or_finished_history_is_not_rewritten) ... ok
+test_pending_revision_advance_requires_complete_current_source_receipts (test_shared_routing.TrilogyDecisionTests.test_pending_revision_advance_requires_complete_current_source_receipts) ... ok
+test_similar_titles_other_authors_or_unproved_series_do_not_gain_the_exception (test_shared_routing.TrilogyDecisionTests.test_similar_titles_other_authors_or_unproved_series_do_not_gain_the_exception) ... ok
+
+======================================================================
+FAIL: test_the_editor_reads_what_the_files_say_with_the_place_and_no_job (test_entered_names.EditNamesTests.test_the_editor_reads_what_the_files_say_with_the_place_and_no_job)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_entered_names.py", line 232, in test_the_editor_reads_what_the_files_say_with_the_place_and_no_job
+    self.assertEqual(fields,{'title':'Пртоколы SCP. Сейф №1','author':'Разные авторы','series':'','number':'','universe':'','collection':True})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'tit[36 chars]r': '', 'series': '', 'number': '', 'universe'[20 chars]True} != {'tit[36 chars]r': 'Разные авторы', 'series': '', 'number': '[33 chars]True}
+- {'author': '',
++ {'author': 'Разные авторы',
+   'collection': True,
+   'number': '',
+   'series': '',
+   'title': 'Пртоколы SCP. Сейф №1',
+   'universe': ''}
+
+----------------------------------------------------------------------
+Ran 8 tests in 11.558s
+
+FAILED (failures=1)

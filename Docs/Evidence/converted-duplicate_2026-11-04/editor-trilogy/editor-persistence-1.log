@@ -1,0 +1,17 @@
+test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder (test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder) ... FAIL
+test_the_editor_reads_what_the_files_say_with_the_place_and_no_job (test_entered_names.EditNamesTests.test_the_editor_reads_what_the_files_say_with_the_place_and_no_job) ... ok
+test_approve_with_the_editor_open_saves_the_names_and_the_job_carries_them (test_entered_names.EditNamesTests.test_approve_with_the_editor_open_saves_the_names_and_the_job_carries_them) ... ok
+
+======================================================================
+FAIL: test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder (test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_entered_names.py", line 282, in test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder
+    self.assertEqual(Path(preview['absolute']).parent,chosen)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Windo[131 chars]rocessing/tmpu3nlowdn/Audiobooks Sorted/My universe/My series') != Windo[131 chars]rocessing/tmpu3nlowdn/Audiobooks Sorted/Folder chosen by you')
+
+----------------------------------------------------------------------
+Ran 3 tests in 11.719s
+
+FAILED (failures=1)

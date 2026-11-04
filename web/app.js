@@ -3614,16 +3614,36 @@ async function namesToggle(id){
   const row=rows.find(item=>item.id===id);if(!row)return;
   if(namesOpen(id)){namesRows.get(id)?.inputs?.title?.focus?.({preventScroll:true});return;}  // open: focus moves to Title (1.7)
   const state=namesState.get(id) || {draft:{},seq:0,previewKey:''};state.open=true;namesState.set(id,state);
+  state.openDraft={names:{...state.draft},ask:askDrafts.has(id)?{...askDrafts.get(id)}:null};
+  if(state.data && (state.loadedRevision!==row.revision || state.loadedFingerprint!==row.fingerprint))state.data=null;
   renderRows(true);focusNames(id);
   if(!state.data){
-    try{const answer=await request('/api/candidate/names',{library:'Audiobooks',id,revision:row.revision},PRESS_TIMEOUT);state.data=answer?.editor || null;}
-    catch(error){namesNotes.set(id,{text:error.httpStatus?serverSentence(error,'The names could not be read.'):lostLine(),warn:true});state.open=false;}
-    renderRows(true);focusNames(id);namesPreview(id,0);
+    const ticket=(state.loadSeq || 0)+1;state.loadSeq=ticket;
+    const revision=row.revision,fingerprint=row.fingerprint;
+    const current=()=>namesState.get(id)===state && state.open && state.loadSeq===ticket;
+    try{
+      // This only loads editable names. Use the existing finite read bound, not the long destructive-press bound.
+      const answer=await request('/api/candidate/names',{library:'Audiobooks',id,revision},STATE_TIMEOUT);
+      if(!current())return;
+      const fresh=rows.find(item=>item.id===id),editor=answer?.editor;
+      const texts=['title','author','series','number','universe'];
+      if(!fresh || fresh.revision!==revision || fresh.fingerprint!==fingerprint || !editor ||
+          !texts.every(field=>typeof editor.fields?.[field]?.proposal==='string') || typeof editor.fields?.collection?.proposal!=='boolean')throw Error('Names response is stale or incomplete');
+      state.data={...editor,series:Array.isArray(editor.series)?editor.series:[],universes:Array.isArray(editor.universes)?editor.universes:[]};
+      state.loadedRevision=revision;state.loadedFingerprint=fingerprint;
+      namesNotes.delete(id);
+    }catch(error){
+      if(!current())return;
+      namesNotes.set(id,{text:"Couldn't load this book's names. Press Edit names to try again.",warn:true});state.open=false;
+    }
+    if(namesState.get(id)!==state || state.loadSeq!==ticket)return;
+    renderRows(true);focusNames(id);if(state.open && state.data)namesPreview(id,0);
   }
 }
 function focusNames(id){const entry=namesRows.get(id),title=entry?.inputs?.title;(title || entry?.button)?.focus?.({preventScroll:true});}
 function namesClose(id,keep=false){
-  const state=namesState.get(id);if(!state)return;state.open=false;if(!keep){state.draft={};askDrafts.delete(id);state.preview=null;state.previewKey='';}
+  const state=namesState.get(id);if(!state)return;state.open=false;state.loadSeq=(state.loadSeq || 0)+1;
+  if(!keep){state.draft={...(state.openDraft?.names || {})};if(state.openDraft?.ask)askDrafts.set(id,{...state.openDraft.ask});else askDrafts.delete(id);state.preview=null;state.previewKey='';}
   renderRows(true);namesRows.get(id)?.button?.focus?.({preventScroll:true});
 }
 // Fields stop clicks and keys reaching the row; Esc closes only an unchanged editor; Ctrl+Enter presses the row's Approve,

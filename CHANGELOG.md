@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.25.0] - 2026-11-04
+
+### Fixed
+
+- Finish loading Edit names and make series and universe changes available through the existing editor while preserving saved titles and chosen folders.
+- Use the confirmed Lord of the Rings series and planned destination for the pending Tolkien trilogy without changing finished audiobooks.
+
 ## [v0.24.5] - 2026-11-03
 
 ### Fixed

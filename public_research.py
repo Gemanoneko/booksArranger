@@ -2447,6 +2447,8 @@ def _routing_series_identity(result):
     """A provider series identity, never a coincidental title or a book-page URL."""
     review = result.get('review') or {}; facts = result.get('metadata_facts') or {}; work = result.get('work') or {}
     series = work.get('verified_series') or {}
+    from tolkien_trilogy import author_world,CYCLE
+    if author_world(review,facts):return CYCLE
     if facts.get('series_state') != 'verified' or series.get('name') != review.get('series') or str(series.get('number')) != review.get('number'):
         return None
     url = text(series.get('source_url'))
@@ -2476,7 +2478,8 @@ def attach_shared_routing(result, peers=()):
     """
     import local_identity
     from shared_routing import build, RoutingEvidenceError
-    out = copy.deepcopy(result)
+    from tolkien_trilogy import apply as trilogy_decision,author_world,DECISION
+    out = trilogy_decision(result)
     review = out.get('review'); facts = out.get('metadata_facts'); work = out.get('work') or {}
     member = _routing_member(out)
     if not isinstance(review, dict) or not isinstance(facts, dict) or member is None:
@@ -2527,6 +2530,9 @@ def attach_shared_routing(result, peers=()):
         universe = {'id': 'user:middle-earth-2026-11-01', 'name': 'Middle-earth', 'basis': 'user',
                     'evidence': ['user:middle-earth-decision-2026-11-01'],
                     'members': [dict(member, series_id=sid)]}
+    if author_world(review,facts):
+        universe={'id':'user:middle-earth-trilogy-2026-11-04','name':'Middle-earth','basis':'user',
+                  'evidence':[DECISION],'members':[dict(member,series_id=sid)]}
     # General worlds use an explicit identity-bound world membership, never just a
     # universe label. Providers/user-decision producers may retain this in the work.
     world = work.get('verified_world')
