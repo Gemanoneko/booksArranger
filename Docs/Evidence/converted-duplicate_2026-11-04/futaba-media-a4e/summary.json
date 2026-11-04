@@ -1,0 +1,89 @@
+{
+  "source_commit": "a4e43d05e8a456dc3999b309b4f767dc45fc31e3",
+  "origin_main_same_at_archive": true,
+  "private_source": "git archive of source commit",
+  "frozen_summary_sha256": {
+    "png_chapters": "510a50874008eac7ff151990b6aa574774f2f969f25c211d683f9b825d590c18",
+    "source_decode_diagnostic": "0019246f3dce4cff2a6062884453189fcc614d37c9b08393ba0edaf7562ef95e"
+  },
+  "source_files": [
+    {
+      "lane": "png-chapters",
+      "path": "m4b_preservation.py",
+      "sha256": "d8e74a70ac65ca3c769541b712cb04c2c953559bf0d759a070ff5620065cd254",
+      "frozen_sha256": "d8e74a70ac65ca3c769541b712cb04c2c953559bf0d759a070ff5620065cd254",
+      "match": true
+    },
+    {
+      "lane": "png-chapters",
+      "path": "tests/test_m4b_preservation.py",
+      "sha256": "312ea3b18348a96be64acdbcb4c2a06497d5c6896a91ecb3970dfc756dd703b3",
+      "frozen_sha256": "312ea3b18348a96be64acdbcb4c2a06497d5c6896a91ecb3970dfc756dd703b3",
+      "match": true
+    },
+    {
+      "lane": "source-decode-diagnostic",
+      "path": "audio_pipeline.py",
+      "sha256": "467cb6c581fa4dce3908e52ce46524c85d3d68984ea64ae36edf1a6f11bcc7a0",
+      "frozen_sha256": "467cb6c581fa4dce3908e52ce46524c85d3d68984ea64ae36edf1a6f11bcc7a0",
+      "match": true
+    },
+    {
+      "lane": "source-decode-diagnostic",
+      "path": "tests/test_mp3_tag_repair.py",
+      "sha256": "31835cb874557096447f0140372033d3a93fa80b51deaf4824da85c0977ab378",
+      "frozen_sha256": "31835cb874557096447f0140372033d3a93fa80b51deaf4824da85c0977ab378",
+      "match": true
+    }
+  ],
+  "unittest": {
+    "ran": 120,
+    "passed": 119,
+    "skipped": 1,
+    "skip_reason": "Explicit private fixture opt-in required",
+    "failed": 0
+  },
+  "owned": {
+    "ok": true,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "forced": false,
+    "timedOut": false,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 126,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 481,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "elapsedMs": 7541.273300000001
+  },
+  "evidence": [
+    {
+      "name": "owned.mjs",
+      "sha256": "65be8b65999e795ad07384386d60a30b40d1a5cbb934de9a8ca72eaffe861993"
+    },
+    {
+      "name": "focused.py",
+      "sha256": "6355f26a0fdfa18e9eab83bc7a257714a6bc2b99081a922aadf7ec4de2fc121f"
+    },
+    {
+      "name": "media-119.json",
+      "sha256": "fa6b2d6f1dc30f46ba527d0075ed04bebf372c9bc5895bba7b2fd1d50b8e3ade"
+    },
+    {
+      "name": "media-119.log",
+      "sha256": "0cda5478521d3416b6edec46cee25e5ef61a2e9379a545039638c683848e26f4"
+    }
+  ],
+  "scope": "Whole test_m4b_preservation and test_mp3_tag_repair on pinned source; no actual live Z source read, UI, packaged build, full or hidden check."
+}

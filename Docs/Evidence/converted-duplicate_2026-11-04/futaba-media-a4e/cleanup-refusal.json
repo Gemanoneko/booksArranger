@@ -1,0 +1,10 @@
+{
+  "tool": ".claude/skills/studio-disk-hygiene/scripts/plan-cleanup.mjs",
+  "mode": "plan",
+  "target": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/tool-ignored-png-media-qa-025-20261104",
+  "exit_code": 1,
+  "error": "plan-cleanup refused: Protected path: C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\tool-ignored-png-media-qa-025-20261104\\src\\.claude",
+  "manifest_created": false,
+  "alternate_removal_attempted": false,
+  "scratch_preserved": true
+}
