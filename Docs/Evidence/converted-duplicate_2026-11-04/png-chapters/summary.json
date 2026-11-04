@@ -1,0 +1,89 @@
+{
+  "base": "87b568143a5f803154c2564cae0487cc83fe0f6c",
+  "source": "C:/Antigravity Projects/Worktrees/Books Arranger/m4b-chapter-image-025-20261104",
+  "files": [
+    {
+      "name": "m4b_preservation.py",
+      "bytes": 52419,
+      "sha256": "d8e74a70ac65ca3c769541b712cb04c2c953559bf0d759a070ff5620065cd254"
+    },
+    {
+      "name": "tests/test_m4b_preservation.py",
+      "bytes": 71424,
+      "sha256": "312ea3b18348a96be64acdbcb4c2a06497d5c6896a91ecb3970dfc756dd703b3"
+    }
+  ],
+  "patch": {
+    "path": "implementation.patch",
+    "bytes": 19254,
+    "sha256": "7dce44913fe86a2d143fe94a06410541841c38d93c04968c63b3eddc7f40565c"
+  },
+  "proof": {
+    "baseline": "Two PNG-positive fixtures refuse Unsupported chapter image sample entry on baseline implementation",
+    "final": "102 cases PASS in6.677s; final-module.json: ok/closed/outputComplete true, native active0/unsignaled0/zero true",
+    "real_png": "Generated AAC-LC44100 stereo plus two PNG chapter samples and one real text chapter passes production _preserve_single_m4b, including compressed packet/configuration/presentation equality, complete native PCM, chapter presentation, unchanged traks/mdat and source bytes",
+    "negatives": "JPEG unchanged; unknown entries, PNG signature/CRC/extent/header/critical/order/short-read/byte-budget and container/reference/address corruption refused"
+  },
+  "limits": [
+    "No live sources were opened by this lane",
+    "Actual source stsd shape is pending primary Ender typed probes",
+    "PNG checking proves a bounded static envelope; compressed image pixels are not decoded or visually validated",
+    "Separate 8MiB/image and32MiB total PNG read cap; metadata read cap unchanged",
+    "No corrupted2MiB source repair, Apple Books device sync, app launch, release or full-entry clearance claimed"
+  ],
+  "sources": [
+    "https://developer.apple.com/documentation/quicktime-file-format/video_sample_description",
+    "https://www.ffmpeg.org/doxygen/8.1/isom__tags_8c_source.html",
+    "https://www.w3.org/TR/2025/REC-png-3-20250624/"
+  ],
+  "retained": [
+    {
+      "path": "baseline.json",
+      "sha256": "dcb929ea8d903de117848ee5e36e6092881f02d7fd1a69f27dea53f702d868c3"
+    },
+    {
+      "path": "baseline.log",
+      "sha256": "7f2bccdc7a8aa2ebb3e64f02c0705973aad7815cbaf8aa69da863bb775b0ae8a"
+    },
+    {
+      "path": "corrected-focused.json",
+      "sha256": "d5ba2deff8e73b840f09882aa34e6a3ab94425ea24e4a15e050a1ccb859562c8"
+    },
+    {
+      "path": "corrected-focused.log",
+      "sha256": "ede6af81bd7a43f9b8ecebaaaa9497435c57498ee271243de66c016086f2cd01"
+    },
+    {
+      "path": "corrected-module.json",
+      "sha256": "bd5466be9029e4a46b9d28bb9191c4c7de3e294e489b6486290db9fa84c95791"
+    },
+    {
+      "path": "corrected-module.log",
+      "sha256": "172167e68bdcf0b146b759810bc7cf0def01e969e310c8bd438e9c183fe4ead0"
+    },
+    {
+      "path": "real-png.json",
+      "sha256": "4f5a955a967067f99785133c6afaceef092b73fecaf4e0cdcbef6e1f06e460bf"
+    },
+    {
+      "path": "real-png.log",
+      "sha256": "8ca390e4a7bceba28e5aa42f5f746f79cb74c458bc111db69d076594e4b9b51c"
+    },
+    {
+      "path": "final-module.json",
+      "sha256": "e05c7e4c945043689a27aa0a452bce0e570a3d8ba9527e57d39b64615798faf7"
+    },
+    {
+      "path": "final-module.log",
+      "sha256": "9974b815787a240fe71ff1437951cfda64fdd70672126e7756a76fdfddb185ce"
+    },
+    {
+      "path": "owned.mjs",
+      "sha256": "72c55065b58801b86238ad027959f7ecd6764ed0d34077b66d8e6eb27a3a6c4b"
+    },
+    {
+      "path": "focused.py",
+      "sha256": "bab9c396f945495bc4e9e519d0453d2c5164f6e22397e766c2720f724443a197"
+    }
+  ]
+}

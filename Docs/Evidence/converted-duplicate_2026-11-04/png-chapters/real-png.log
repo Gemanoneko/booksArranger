@@ -1,0 +1,6 @@
+test_real_aac_png_chapter_graph_passes_complete_preservation_pipeline (test_m4b_preservation.SilenceRepairDecodeTests.test_real_aac_png_chapter_graph_passes_complete_preservation_pipeline) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.641s
+
+OK

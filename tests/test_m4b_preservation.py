@@ -2,6 +2,7 @@
 import hashlib
 import struct
 import unittest
+import zlib
 from m4b_preservation import Refused,boxes,build,plan,stream_candidate,verify_candidate
 
 def atom(kind,payload):return struct.pack('>I4s',8+len(payload),kind)+payload
@@ -68,24 +69,36 @@ def change_movie(source,function):
     delta=len(movie)-len(old.raw);movie=relocate(movie,delta)
     return top[b'ftyp'].raw+movie+top[b'mdat'].raw
 
-def add_chapter_graph(source,video=True,bad_field=False):
+def png_chunk(kind,payload):
+    return struct.pack('>I',len(payload))+kind+payload+struct.pack('>I',zlib.crc32(kind+payload))
+
+
+def png_image():
+    return (b'\x89PNG\r\n\x1a\n'+png_chunk(b'IHDR',struct.pack('>IIBBBBB',1,1,8,2,0,0,0))+
+            png_chunk(b'IDAT',zlib.compress(b'\0\x20\x40\x60'))+png_chunk(b'IEND',b''))
+
+
+def add_chapter_graph(source,video=True,bad_field=False,image_kind=b'mjpg',image_samples=None):
     top=unpack(source);movie=top[b'moov'];audio=next(b for b in boxes(movie.payload) if b.kind==b'trak')
-    text_payload=b'chapter';video_payload=b'opaque-jpeg'
+    text_payload=b'chapter';image_samples=(b'opaque-jpeg',) if image_samples is None else image_samples
+    video_payload=b''.join(image_samples)
     def table(kind,rows):return atom(kind,bytes(4)+struct.pack('>I',len(rows))+b''.join(rows))
-    def track(identity,handler,entry,media,scale,duration,offset):
+    def track(identity,handler,entry,media,scale,duration,offset,sizes=None):
         tkhd=bytearray(84);tkhd[:4]=b'\0\0\0\3';struct.pack_into('>I',tkhd,12,identity);struct.pack_into('>I',tkhd,20,36)
         mdhd=bytearray(24);struct.pack_into('>II',mdhd,12,scale,duration)
-        stbl=atom(b'stbl',table(b'stsd',[entry])+table(b'stts',[struct.pack('>II',1,duration)])+table(b'stsc',[struct.pack('>III',1,1,1)])+atom(b'stsz',bytes(4)+struct.pack('>II',len(media),1))+table(b'stco',[struct.pack('>I',offset)]))
+        sizes=(len(media),) if sizes is None else sizes;count=len(sizes)
+        size_table=struct.pack('>II',len(media),1) if count==1 else struct.pack('>II',0,count)+b''.join(struct.pack('>I',n) for n in sizes)
+        stbl=atom(b'stbl',table(b'stsd',[entry])+table(b'stts',[struct.pack('>II',count,duration//count)])+table(b'stsc',[struct.pack('>III',1,count,1)])+atom(b'stsz',bytes(4)+size_table)+table(b'stco',[struct.pack('>I',offset)]))
         dinf=atom(b'dinf',table(b'dref',[atom(b'url ',b'\0\0\0\1')]))
         minf=atom(b'minf',atom(b'nmhd',bytes(4))+dinf+stbl)
         return atom(b'trak',atom(b'tkhd',bytes(tkhd))+atom(b'mdia',atom(b'mdhd',bytes(mdhd))+atom(b'hdlr',bytes(8)+handler+bytes(12))+minf))
     text_entry=atom(b'text',bytes(6)+b'\0\1'+bytes(43))
-    image_entry=atom(b'mjpg',bytes(6)+b'\0\1'+bytes(70)+atom(b'fiel',b'\2\0' if bad_field else b'\1\0'))
+    image_entry=atom(image_kind,bytes(6)+b'\0\1'+bytes(70)+atom(b'fiel',b'\2\0' if bad_field else b'\1\0'))
     refs=struct.pack('>II',3,2) if video else struct.pack('>I',3)
     linked=build(b'trak',audio.payload+atom(b'tref',atom(b'chap',refs)))
     def movie_at(offset):
         chapters=track(3,b'text',text_entry,text_payload,1000,60,offset)
-        if video:chapters+=track(2,b'vide',image_entry,video_payload,44100,3072,offset+len(text_payload))
+        if video:chapters+=track(2,b'vide',image_entry,video_payload,44100,3072,offset+len(text_payload),tuple(map(len,image_samples)))
         return build(b'moov',b''.join(linked if b.kind==b'trak' else b.raw for b in boxes(movie.payload))+chapters)
     tentative=movie_at(0);delta=len(tentative)-len(movie.raw)
     data_offset=len(top[b'ftyp'].raw)+len(tentative)+8
@@ -149,6 +162,56 @@ class M4BPreservationTests(unittest.TestCase):
     def test_changed_decode_duration_refused(self):
         source=bytearray(fixture());at=source.index(b'stts')+16;struct.pack_into('>I',source,at,1025);self.refuse(bytes(source))
     def test_unknown_chapter_image_extension_refused(self):self.refuse(add_chapter_graph(fixture(),bad_field=True))
+    def test_png_chapter_images_and_each_payload_preserved_byte_exact(self):
+        image=png_image();source=add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(image,image))
+        p,candidate,receipt=self.transform(source)
+        self.assertEqual([(t['handler'],t['codec'],t['samples']) for t in p.tracks],[(b'soun',b'mp4a',3),(b'text',b'text',1),(b'vide',b'png ',2)])
+        self.assertEqual(unpack(candidate)[b'mdat'].raw,unpack(source)[b'mdat'].raw)
+        verified=verify_candidate(p,lambda a,n:source[a:a+n],len(candidate),lambda a,n:candidate[a:a+n])
+        self.assertTrue(verified['all_retained_bytes_verified']);self.assertEqual(verified['sha256'],receipt['sha256'])
+        broken=bytearray(candidate);broken[candidate.index(image)+40]^=1
+        with self.assertRaisesRegex(Refused,'Candidate changed retained source bytes'):
+            verify_candidate(p,lambda a,n:source[a:a+n],len(broken),lambda a,n:bytes(broken[a:a+n]))
+    def test_png_fixed_size_sample_preserved(self):self.transform(add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(png_image(),)))
+    def test_jpeg_sample_entries_still_preserved(self):
+        for kind in (b'mjpg',b'jpeg'):self.transform(add_chapter_graph(fixture(),image_kind=kind))
+    def test_unknown_image_sample_entries_still_refused(self):
+        for kind in (b'PNG ',b'MNG ',b'avc1'):
+            with self.subTest(kind=kind):self.refuse(add_chapter_graph(fixture(),image_kind=kind,image_samples=(png_image(),)))
+    def test_png_signature_extent_crc_and_terminal_chunk_refused(self):
+        image=png_image();bad_crc=bytearray(image);bad_crc[29]^=1
+        invalid=(b'opaque-jpeg',image[:8],image[:-1],image+b'junk',bytes(bad_crc),image.replace(b'IDAT',b'JDAT',1))
+        for payload in invalid:
+            with self.subTest(payload=payload.hex()):self.refuse(add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(payload,)))
+    def test_every_png_sample_is_checked(self):
+        self.refuse(add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(png_image(),b'bad-second-image')))
+    def test_png_short_reads_and_per_image_and_total_read_bounds(self):
+        from unittest.mock import patch
+        image=png_image();source=add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(image,))
+        start=source.index(image)
+        def read(at,count):return source[at:at+count-(at==start)]
+        with self.assertRaisesRegex(Refused,'Short PNG chapter image read'):plan(len(source),read,{'title':'x'})
+        with patch('m4b_preservation.MAX_COVER',len(image)-1):
+            with self.assertRaisesRegex(Refused,'PNG chapter image read bound'):plan(len(source),lambda a,n:source[a:a+n],{'title':'x'})
+        padded=image[:33]+png_chunk(b'tEXt',b'Note\0'+b'x'*6000)+image[33:]
+        source=add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(padded,padded))
+        with patch('m4b_preservation.MAX_MOOV',10000):
+            with self.assertRaisesRegex(Refused,'PNG chapter image read bound'):plan(len(source),lambda a,n:source[a:a+n],{'title':'x'})
+    def test_png_idat_chunks_must_be_contiguous_even_if_first_is_empty(self):
+        image=png_image();broken=image[:33]+png_chunk(b'IDAT',b'')+png_chunk(b'tEXt',b'Note\0x')+image[33:]
+        self.refuse(add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(broken,)))
+    def test_png_header_and_critical_chunk_shapes_refused(self):
+        signature=b'\x89PNG\r\n\x1a\n';image=png_image();end=png_chunk(b'IEND',b'')
+        for header in (struct.pack('>IIBBBBB',0,1,8,2,0,0,0),struct.pack('>IIBBBBB',1,1,4,2,0,0,0),struct.pack('>IIBBBBB',1,1,8,2,1,0,0)):
+            self.refuse(add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(signature+png_chunk(b'IHDR',header)+image[33:],)))
+        for payload in (image[:33]+end,image[:33]+png_chunk(b'IHDR',image[16:29])+image[33:],image[:-12]+png_chunk(b'ABCD',b'')+end):
+            self.refuse(add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(payload,)))
+    def test_png_retains_existing_container_and_reference_guards(self):
+        source=add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(png_image(),))
+        self.refuse(source[:-1]);self.refuse(source+atom(b'moof',b''))
+        self.refuse(source.replace(b'chap'+struct.pack('>II',3,2),b'chap'+struct.pack('>II',3,3),1))
+        broken=bytearray(source);at=broken.rindex(b'stco')+12;struct.pack_into('>I',broken,at,0);self.refuse(bytes(broken))
+        self.refuse(add_chapter_graph(fixture(),bad_field=True,image_kind=b'png ',image_samples=(png_image(),)))
     def test_unreferenced_chapter_video_refused(self):
         source=add_chapter_graph(fixture()).replace(b'chap'+struct.pack('>II',3,2),b'chap'+struct.pack('>II',3,3),1);self.refuse(source)
     def test_duplicate_approved_tag_refused(self):
@@ -549,6 +612,33 @@ class SilenceRepairDecodeTests(unittest.TestCase):
                 with self.subTest(channels=channels,rate=rate):
                     self.assertEqual(done.returncode,0,done.stderr);self.assertEqual(len(done.stdout),8*1024*channels*8)
                     self.assertTrue(all(value==0.0 for value in memoryview(done.stdout).cast('d')))
+    def test_real_aac_png_chapter_graph_passes_complete_preservation_pipeline(self):
+        import audio_pipeline as pipeline
+        full=self.root/'full.m4b';source=self.root/'source00000.m4b';cover=self.root/'cover.png'
+        pipeline.run_owned([self.ffmpeg,'-hide_banner','-v','error','-xerror','-nostdin','-n','-f','lavfi','-i','sine=frequency=997:sample_rate=44100:duration=0.5',
+            '-ac','2','-c:a','aac','-b:a','64000','-movflags','+faststart',str(full)],self.root,self.stop,60)
+        top=unpack(full.read_bytes());gap=sum(b.size for kind,b in top.items() if kind not in (b'ftyp',b'moov',b'mdat'))
+        base=top[b'ftyp'].raw+relocate(top[b'moov'].raw,-gap)+top[b'mdat'].raw
+        image=png_image();raw_source=add_chapter_graph(base,image_kind=b'png ',image_samples=(image,image)).replace(b'chapter',b'\0\5First',1)
+        source.write_bytes(raw_source);cover.write_bytes(image)
+        raw=pipeline.probe(source,self.root,self.stop);duration,profile=pipeline.audio_info(raw)
+        stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
+        encoding={'mode':'copy','codec':'aac','sample_rate':int(profile[1]),'channels':profile[2],'channel_layout':stream.get('channel_layout')}
+        facts=source.stat();chapters=pipeline.source_chapters(source,self.root,self.stop,duration)
+        self.assertEqual([chapter['title'] for chapter in chapters],['First'])
+        manifest={'sources':[{'path':str(source),'sha256':pipeline.digest(source),'size':facts.st_size,'modified':str(facts.st_mtime_ns)}],
+            'metadata':{'title':'Private PNG chapters','canonical_author':'Fixture Author'},'source_chapters':chapters,
+            'cover':{'path':str(cover),'sha256':pipeline.digest(cover)}}
+        output,validation=pipeline._preserve_single_m4b(manifest,self.root,source.name,[duration],cover,self.stop,lambda *_:None,encoding,
+            {'title':'Private PNG chapters','artist':'Fixture Author','album_artist':'Fixture Author','media_type':'2'})
+        self.assertTrue(validation['metadata_preservation']['pcm_verified'])
+        self.assertTrue(validation['metadata_preservation']['all_retained_bytes_verified'])
+        self.assertGreater(validation['native_pcm_evidence']['sample_count'],0)
+        self.assertEqual(validation['chapters'],chapters);self.assertIn('decoder_configuration',validation['copied_audio_evidence'])
+        candidate=output.read_bytes()
+        self.assertEqual(unpack(candidate)[b'mdat'].raw,unpack(raw_source)[b'mdat'].raw)
+        self.assertEqual([b.raw for b in boxes(unpack(candidate)[b'moov'].payload) if b.kind==b'trak'],[b.raw for b in boxes(unpack(raw_source)[b'moov'].payload) if b.kind==b'trak'])
+        self.assertEqual(source.read_bytes(),raw_source)
     def test_real_aac_cut_inside_final_frames_is_proven(self):
         import audio_pipeline,m4b_preservation,m4b_repair
         for channels,cut in ((1,3),(2,700)):

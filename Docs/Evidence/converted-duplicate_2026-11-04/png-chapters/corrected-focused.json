@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_approved_artwork_changes_only_covr_metadata (test_m4b_preservation.M4BPreservationTests.test_approved_artwork_changes_only_covr_metadata) ... ok\r\ntest_auxiliary_offsets_refused (test_m4b_preservation.M4BPreservationTests.test_auxiliary_offsets_refused) ... ok\r\ntest_cancellation_does_not_modify_source (test_m4b_preservation.M4BPreservationTests.test_cancellation_does_not_modify_source) ... ok\r\ntest_changed_decode_duration_refused (test_m4b_preservation.M4BPreservationTests.test_changed_decode_duration_refused) ... ok\r\ntest_co64_and_signed_composition_table_preserved (test_m4b_preservation.M4BPreservationTests.test_co64_and_signed_composition_table_preserved) ... ok\r\ntest_duplicate_approved_tag_refused (test_m4b_preservation.M4BPreservationTests.test_duplicate_approved_tag_refused) ... ok\r\ntest_duplicate_movie_and_eof_size_refused (test_m4b_preservation.M4BPreservationTests.test_duplicate_movie_and_eof_size_refused) ... ok\r\ntest_empty_wide_placeholder_before_mdat_preserves_all_original_offsets (test_m4b_preservation.M4BPreservationTests.test_empty_wide_placeholder_before_mdat_preserves_all_original_offsets) ... ok\r\ntest_every_png_sample_is_checked (test_m4b_preservation.M4BPreservationTests.test_every_png_sample_is_checked) ... ok\r\ntest_exact_aac_roll_preroll_groups_preserved (test_m4b_preservation.M4BPreservationTests.test_exact_aac_roll_preroll_groups_preserved) ... ok\r\ntest_external_data_reference_refused (test_m4b_preservation.M4BPreservationTests.test_external_data_reference_refused) ... ok\r\ntest_fragment_and_unknown_top_level_offset_box_refused (test_m4b_preservation.M4BPreservationTests.test_fragment_and_unknown_top_level_offset_box_refused) ... ok\r\ntest_independent_reread_checks_all_retained_bytes (test_m4b_preservation.M4BPreservationTests.test_independent_reread_checks_all_retained_bytes) ... ok\r\ntest_invalid_or_oversized_approval_refused (test_m4b_preservation.M4BPreservationTests.test_invalid_or_oversized_approval_refused) ... ok\r\ntest_jpeg_sample_entries_still_preserved (test_m4b_preservation.M4BPreservationTests.test_jpeg_sample_entries_still_preserved) ... ok\r\ntest_metadata_free_reservation_is_retained_byte_exact (test_m4b_preservation.M4BPreservationTests.test_metadata_free_reservation_is_retained_byte_exact) ... ok\r\ntest_non1000_clock_and_nonzero_empty_edits_remain_byte_exact (test_m4b_preservation.M4BPreservationTests.test_non1000_clock_and_nonzero_empty_edits_remain_byte_exact) ... ok\r\ntest_outside_mdat_chunk_refused (test_m4b_preservation.M4BPreservationTests.test_outside_mdat_chunk_refused) ... ok\r\ntest_overlapping_chunks_refused (test_m4b_preservation.M4BPreservationTests.test_overlapping_chunks_refused) ... ok\r\ntest_png_chapter_images_and_each_payload_preserved_byte_exact (test_m4b_preservation.M4BPreservationTests.test_png_chapter_images_and_each_payload_preserved_byte_exact) ... ok\r\ntest_png_fixed_size_sample_preserved (test_m4b_preservation.M4BPreservationTests.test_png_fixed_size_sample_preserved) ... ok\r\ntest_png_header_and_critical_chunk_shapes_refused (test_m4b_preservation.M4BPreservationTests.test_png_header_and_critical_chunk_shapes_refused) ... ok\r\ntest_png_retains_existing_container_and_reference_guards (test_m4b_preservation.M4BPreservationTests.test_png_retains_existing_container_and_reference_guards) ... ok\r\ntest_png_signature_extent_crc_and_terminal_chunk_refused (test_m4b_preservation.M4BPreservationTests.test_png_signature_extent_crc_and_terminal_chunk_refused) ... ok\r\ntest_quicktime_text_and_chapter_thumbnail_reference_graph_preserved (test_m4b_preservation.M4BPreservationTests.test_quicktime_text_and_chapter_thumbnail_reference_graph_preserved) ... ok\r\ntest_reread_rejects_corrupt_audio_metadata_padding_and_extent (test_m4b_preservation.M4BPreservationTests.test_reread_rejects_corrupt_audio_metadata_padding_and_extent) ... ok\r\ntest_reread_rejects_partial_writer_and_cancellation (test_m4b_preservation.M4BPreservationTests.test_reread_rejects_partial_writer_and_cancellation) ... ok\r\ntest_short_read_refused (test_m4b_preservation.M4BPreservationTests.test_short_read_refused) ... ok\r\ntest_text_only_chapter_graph_preserved (test_m4b_preservation.M4BPreservationTests.test_text_only_chapter_graph_preserved) ... ok\r\ntest_unapproved_gapless_freeform_and_legacy_chpl_preserved (test_m4b_preservation.M4BPreservationTests.test_unapproved_gapless_freeform_and_legacy_chpl_preserved) ... ok\r\ntest_unicode_tag_growth_and_shrink_do_not_move_original_offsets (test_m4b_preservation.M4BPreservationTests.test_unicode_tag_growth_and_shrink_do_not_move_original_offsets) ... ok\r\ntest_unknown_chapter_image_extension_refused (test_m4b_preservation.M4BPreservationTests.test_unknown_chapter_image_extension_refused) ... ok\r\ntest_unknown_image_sample_entries_still_refused (test_m4b_preservation.M4BPreservationTests.test_unknown_image_sample_entries_still_refused) ... ok\r\ntest_unknown_metadata_structural_box_remains_refused (test_m4b_preservation.M4BPreservationTests.test_unknown_metadata_structural_box_remains_refused) ... ok\r\ntest_unknown_roll_group_type_count_distance_and_reference_refused (test_m4b_preservation.M4BPreservationTests.test_unknown_roll_group_type_count_distance_and_reference_refused) ... ok\r\ntest_unreferenced_chapter_video_refused (test_m4b_preservation.M4BPreservationTests.test_unreferenced_chapter_video_refused) ... ok\r\ntest_wide_payload_extended_header_and_wrong_successor_refused (test_m4b_preservation.M4BPreservationTests.test_wide_payload_extended_header_and_wrong_successor_refused) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 37 tests in 0.017s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 64316,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 15,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 245.57000000000002,
+  "outputBytes": 5633
+}

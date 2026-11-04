@@ -1,0 +1,51 @@
+test_png_chapter_images_and_each_payload_preserved_byte_exact (test_m4b_preservation.M4BPreservationTests.test_png_chapter_images_and_each_payload_preserved_byte_exact) ... ERROR
+test_png_fixed_size_sample_preserved (test_m4b_preservation.M4BPreservationTests.test_png_fixed_size_sample_preserved) ... ERROR
+
+======================================================================
+ERROR: test_png_chapter_images_and_each_payload_preserved_byte_exact (test_m4b_preservation.M4BPreservationTests.test_png_chapter_images_and_each_payload_preserved_byte_exact)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\tests\test_m4b_preservation.py", line 167, in test_png_chapter_images_and_each_payload_preserved_byte_exact
+    p,candidate,receipt=self.transform(source)
+                        ~~~~~~~~~~~~~~^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\tests\test_m4b_preservation.py", line 120, in transform
+    p=plan(len(source),read,tags or {'title':'Approved title'},cover)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\m4b_preservation.py", line 589, in plan
+    else:track=validate_track(track_box,checked,remaining_chunks,source_size if silence else None)
+               ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\m4b_preservation.py", line 213, in validate_track
+    codec=sample_description(one(stbl,b'stsd').payload,handler)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\m4b_preservation.py", line 143, in sample_description
+    need(entry.kind in (b'mjpg',b'jpeg') and len(p)>=78,'Unsupported chapter image sample entry')
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\m4b_preservation.py", line 59, in need
+    if not value:raise Refused(reason)
+                 ^^^^^^^^^^^^^^^^^^^^^
+m4b_preservation.Refused: Unsupported chapter image sample entry
+
+======================================================================
+ERROR: test_png_fixed_size_sample_preserved (test_m4b_preservation.M4BPreservationTests.test_png_fixed_size_sample_preserved)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\tests\test_m4b_preservation.py", line 175, in test_png_fixed_size_sample_preserved
+    def test_png_fixed_size_sample_preserved(self):self.transform(add_chapter_graph(fixture(),image_kind=b'png ',image_samples=(png_image(),)))
+                                                   ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\tests\test_m4b_preservation.py", line 120, in transform
+    p=plan(len(source),read,tags or {'title':'Approved title'},cover)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\m4b_preservation.py", line 589, in plan
+    else:track=validate_track(track_box,checked,remaining_chunks,source_size if silence else None)
+               ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\m4b_preservation.py", line 213, in validate_track
+    codec=sample_description(one(stbl,b'stsd').payload,handler)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\m4b_preservation.py", line 143, in sample_description
+    need(entry.kind in (b'mjpg',b'jpeg') and len(p)>=78,'Unsupported chapter image sample entry')
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\m4b-chapter-image-025-20261104\m4b_preservation.py", line 59, in need
+    if not value:raise Refused(reason)
+                 ^^^^^^^^^^^^^^^^^^^^^
+m4b_preservation.Refused: Unsupported chapter image sample entry
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.004s
+
+FAILED (errors=2)

@@ -12,6 +12,7 @@ kind, and only those exact damage shapes are accepted; everything else is refuse
 """
 import hashlib
 import struct
+import zlib
 from dataclasses import dataclass
 
 MAX_MOOV=32*1024*1024
@@ -140,13 +141,48 @@ def sample_description(payload,handler):
         sub=boxes(p[28:]);profile(sub,{b'esds',b'btrt',b'chan'})
         esds=one(sub,b'esds');full(esds.payload);need(len(esds.payload)>4,'Missing decoder description')
     elif handler==b'vide':
-        need(entry.kind in (b'mjpg',b'jpeg') and len(p)>=78,'Unsupported chapter image sample entry')
+        # Apple's QuickTime video sample description names PNG with exactly 'png '.
+        # It remains a referenced chapter image track, with the same unchanged tables.
+        need(entry.kind in (b'mjpg',b'jpeg',b'png ') and len(p)>=78,'Unsupported chapter image sample entry')
         extensions=boxes(p[78:]);profile(extensions,{b'fiel'})
         need(len(extensions)<=1 and all(b.payload==bytes((1,0)) for b in extensions),'Unknown chapter image field extension')
     else:
         # 51 bytes, or QuickTime 7's 52 with one trailing empty (zero-length) font-name byte.
         need(handler==b'text' and entry.kind==b'text' and (len(p)==51 or len(p)==52 and p[51]==0),'Unsupported chapter text entry')
     return entry.kind
+
+
+def png_sample(data):
+    """Bounded static PNG envelope, not a pixel-decoding or visual-validity proof.
+
+    W3C PNG sections 5 and 11: signature, complete CRC-protected chunks, legal IHDR,
+    ordered critical chunks and an exact terminal IEND. Compressed pixels and ancillary
+    metadata are preserved unchanged; no decompression/allocation follows dimensions.
+    """
+    need(isinstance(data,bytes) and 57<=len(data)<=MAX_COVER and data[:8]==b'\x89PNG\r\n\x1a\n','Invalid PNG chapter image signature/size')
+    at=8;count=0;palette=False;image_seen=False;image_bytes=0;image_closed=False;color=None;depth=None
+    while at<len(data):
+        need(count<MAX_BOXES and at+12<=len(data),'PNG chapter image chunk bound')
+        size=u32(data,at);kind=data[at+4:at+8];end=at+12+size
+        need(end<=len(data) and all(65<=c<=90 or 97<=c<=122 for c in kind) and 65<=kind[2]<=90,'PNG chapter image chunk extent/type')
+        need(zlib.crc32(data[at+4:end-4])==u32(data,end-4),'PNG chapter image chunk CRC')
+        payload=data[at+8:end-4]
+        if count==0:
+            need(kind==b'IHDR' and size==13,'PNG chapter image header')
+            width,height,depth,color,compression,filtering,interlace=struct.unpack('>IIBBBBB',payload)
+            need(0<width<2**31 and 0<height<2**31 and depth in {0:(1,2,4,8,16),2:(8,16),3:(1,2,4,8),4:(8,16),6:(8,16)}.get(color,()) and compression==filtering==0 and interlace in (0,1),'PNG chapter image header values')
+        elif kind==b'PLTE':
+            need(not palette and not image_seen and color not in (0,4) and 0<size<=768 and size%3==0 and (color!=3 or size//3<=2**depth),'PNG chapter image palette')
+            palette=True
+        elif kind==b'IDAT':
+            need(not image_closed and (color!=3 or palette),'PNG chapter image data order/palette');image_seen=True;image_bytes+=size
+        elif kind==b'IEND':
+            need(size==0 and image_bytes>0 and end==len(data),'PNG chapter image end/data');return
+        else:
+            need(kind[0]&32 and kind not in (b'acTL',b'fcTL',b'fdAT'),'Unsupported PNG chapter image critical/animation chunk')
+            if image_seen:image_closed=True
+        at=end;count+=1
+    need(False,'PNG chapter image missing end')
 
 def aac_lc_layout(esds_payload):
     """(sampling_index, channels) for a plain 2-byte AAC-LC AudioSpecificConfig, else refused.
@@ -188,7 +224,7 @@ def silent_aac_frame(channels):
     put(7,3);bits.extend([0]*(-len(bits)%8))
     return bytes(int(''.join(map(str,bits[i:i+8])),2) for i in range(0,len(bits),8))
 
-def validate_track(box,mdat_extents,chunk_budget,eof=None):
+def validate_track(box,mdat_extents,chunk_budget,eof=None,image_read=None):
     # free/skip carry no semantics at any level (QuickTime 7 writers leave them inside trak).
     parts=boxes(box.payload);profile(parts,{b'tkhd',b'edts',b'mdia',b'tref',b'udta',b'free',b'skip'})
     tkhd=one(parts,b'tkhd').payload
@@ -262,6 +298,11 @@ def validate_track(box,mdat_extents,chunk_budget,eof=None):
                 if position+size>eof:cut.append(j)
                 position+=size
         need(length>0 and any(lo<=start<end<=hi for lo,hi in mdat_extents),'Chunk outside retained mdat')
+        if codec==b'png ':
+            need(image_read is not None,'PNG chapter image reader required');position=start
+            for j in range(sample,sample+count):
+                size=fixed or u32(sizes,12+4*j)
+                png_sample(image_read(position,size));position+=size
         spans.append((start,end));sample+=count
     need(sample==samples,'Unmapped samples')
     refs=[];tref=one(parts,b'tref',True);chap_boxes=0
@@ -534,6 +575,13 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
         nonlocal header_reads
         need(0<=offset<=source_size and 0<=count<=MAX_MOOV and offset+count<=source_size and header_reads+count<=MAX_MOOV+65536,'Metadata read bound')
         data=read_at(offset,count);need(isinstance(data,bytes) and len(data)==count,'Short protected read');header_reads+=count;return data
+    image_reads=0
+    def read_image(offset,count):
+        nonlocal image_reads
+        # Separate from metadata reads: at most 8 MiB per image / 32 MiB total. Every
+        # sample is already proven inside retained mdat; do not decode PNG dimensions.
+        need(0<=offset<=source_size and 0<count<=MAX_COVER and offset+count<=source_size and image_reads+count<=MAX_MOOV,'PNG chapter image read bound')
+        data=read_at(offset,count);need(isinstance(data,bytes) and len(data)==count,'Short PNG chapter image read');image_reads+=count;return data
     def is_box(at):
         if source_size-at<8:return False
         head=read(at,8);size=u32(head,0);kind=head[4:8]
@@ -586,7 +634,7 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
         fixed=profile_zero_chapter_count(track_box,checked,remaining_chunks,read)
         if fixed:
             track,facts=fixed;profile_notes.append(facts)
-        else:track=validate_track(track_box,checked,remaining_chunks,source_size if silence else None)
+        else:track=validate_track(track_box,checked,remaining_chunks,source_size if silence else None,read_image)
         remaining_chunks-=len(track['spans']);tracks.append(track)
     ids=[t['id'] for t in tracks];need(len(set(ids))==len(ids),'Duplicate track identity')
     audio=[t for t in tracks if t['handler']==b'soun'];need(len(audio)==1,'Exactly one audio track required')
