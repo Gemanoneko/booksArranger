@@ -6,6 +6,7 @@ They exercise actual owned cancellation/disposition, not codec correctness.
 from sorted_fixture import library_is_sorted  # 0.21.3: fixtures publish inside their library
 import errno
 import copy
+import concurrent.futures
 import base64
 import contextlib
 import ctypes
@@ -16,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import sqlite3
 from types import SimpleNamespace
@@ -23,7 +25,8 @@ import threading
 import time
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import native_io
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from audio_jobs import AudioJobs
 from audio_pipeline import Paused, copy_owned, create_private, generated_artifacts, plan_generated, run_owned
@@ -495,6 +498,127 @@ class WorkingLifecycleTests(unittest.TestCase):
         self.life.terminal(self.job_id,attempt)
         self.assertEqual(list(stage.iterdir()),[])
         self.assertEqual(self.source.read_bytes(),self.original)
+
+
+@unittest.skipUnless(os.name=='nt','Windows process snapshot APIs required')
+class OwnedPrimaryThreadTests(unittest.TestCase):
+    def api(self, **fields):
+        values={'process':55,'thread':77,'flags':0,'suspend_count':1}|fields
+        def capture(process, flags, context, out):
+            ctypes.cast(out,ctypes.POINTER(wintypes.HANDLE))[0]=wintypes.HANDLE(101)
+            return 0
+        def marker(allocator, out):
+            ctypes.cast(out,ctypes.POINTER(wintypes.HANDLE))[0]=wintypes.HANDLE(202)
+            return 0
+        def walk(snapshot, kind, marker, out, size):
+            status=api.walk_results.pop(0)
+            if status==0:
+                entry=ctypes.cast(out,ctypes.POINTER(native_io.ProcessThreadEntry)).contents
+                for name,value in values.items():setattr(entry,name,value)
+            return status
+        api=SimpleNamespace(GetProcessId=Mock(return_value=55),GetCurrentProcess=Mock(return_value=404),
+            PssCaptureSnapshot=Mock(side_effect=capture),PssWalkMarkerCreate=Mock(side_effect=marker),
+            PssWalkSnapshot=Mock(side_effect=walk),PssWalkMarkerFree=Mock(return_value=0),
+            PssFreeSnapshot=Mock(return_value=0),OpenThread=Mock(return_value=303),
+            GetProcessIdOfThread=Mock(return_value=55),ResumeThread=Mock(return_value=1),
+            CloseHandle=Mock(return_value=1),walk_results=[0,259])
+        return api
+
+    def test_process_snapshot_abi_is_shared_and_matches_windows_sdk(self):
+        entry=native_io.ProcessThreadEntry
+        self.assertEqual(ctypes.sizeof(entry),120)
+        self.assertEqual([entry.process.offset,entry.thread.offset,entry.flags.offset,entry.suspend_count.offset],[16,20,104,108])
+        self.assertIs(native_io.kernel.PssWalkSnapshot.argtypes[3]._type_,entry)
+        self.assertIs(native_io.kernel.PssCaptureSnapshot.restype,wintypes.DWORD)
+
+    def test_owned_snapshot_is_freed_before_the_sole_thread_resumes(self):
+        api=self.api()
+        def resume(thread):
+            api.PssWalkMarkerFree.assert_called_once();api.PssFreeSnapshot.assert_called_once()
+            return 1
+        api.ResumeThread.side_effect=resume
+        with patch.object(native_io,'kernel',api):native_io.resume_owned_primary(55,505)
+        self.assertEqual(api.PssCaptureSnapshot.call_args.args[:3],(505,0x80,0))
+        api.GetProcessId.assert_called_once_with(505)
+        api.OpenThread.assert_called_once_with(0x42,False,77)
+        self.assertEqual(api.PssFreeSnapshot.call_args.args[0],404)
+        api.GetProcessIdOfThread.assert_called_once_with(303)
+        api.CloseHandle.assert_called_once_with(303)
+
+    def test_wrong_snapshot_identity_thread_count_or_suspension_never_resumes(self):
+        for fields in ({'process':99},{'thread':0},{'flags':1},{'suspend_count':0},{'suspend_count':2}):
+            with self.subTest(fields=fields):
+                api=self.api(**fields)
+                with patch.object(native_io,'kernel',api),self.assertRaises(BoundaryError):native_io.resume_owned_primary(55,505)
+                api.OpenThread.assert_not_called();api.ResumeThread.assert_not_called()
+                api.PssWalkMarkerFree.assert_called_once();api.PssFreeSnapshot.assert_called_once()
+        for results in ([259],[5],[0,0],[0,5]):
+            with self.subTest(walk=results):
+                api=self.api();api.walk_results=list(results)
+                with patch.object(native_io,'kernel',api),self.assertRaises(BoundaryError):native_io.resume_owned_primary(55,505)
+                api.OpenThread.assert_not_called();api.ResumeThread.assert_not_called()
+                api.PssWalkMarkerFree.assert_called_once();api.PssFreeSnapshot.assert_called_once()
+
+    def test_capture_marker_and_cleanup_failures_never_resume(self):
+        for name in ('GetProcessId','PssCaptureSnapshot','PssWalkMarkerCreate','PssWalkMarkerFree','PssFreeSnapshot','OpenThread','GetProcessIdOfThread'):
+            with self.subTest(api=name):
+                api=self.api();failed=getattr(api,name);failed.side_effect=None
+                failed.return_value=0 if name in ('GetProcessId','OpenThread','GetProcessIdOfThread') else 5
+                with patch.object(native_io,'kernel',api),self.assertRaises(BoundaryError):native_io.resume_owned_primary(55,505)
+                api.ResumeThread.assert_not_called()
+                if name not in ('GetProcessId','PssCaptureSnapshot'):api.PssFreeSnapshot.assert_called_once()
+
+    def test_an_unexpected_previous_suspend_count_is_refused_and_the_handle_closes(self):
+        for count in (0,2,0xffffffff):
+            with self.subTest(count=count):
+                api=self.api();api.ResumeThread.return_value=count
+                with patch.object(native_io,'kernel',api),self.assertRaises(BoundaryError):native_io.resume_owned_primary(55,505)
+                api.CloseHandle.assert_called_once_with(303)
+
+    def test_private_child_is_assigned_before_resume_without_any_system_thread_scan(self):
+        with tempfile.TemporaryDirectory(prefix='books-primary-') as directory:
+            marker=Path(directory)/'ran.txt'
+            child=subprocess.Popen([sys.executable,'-I','-B','-c','import pathlib,sys;pathlib.Path(sys.argv[1]).write_text("owned")',str(marker)],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=0x08000000|4)
+            child._books_suspended=True;owner=native_io.OwnedProcessJob(child)
+            original=native_io.kernel.ResumeThread
+            def resume(thread):
+                self.assertFalse(marker.exists())
+                member=wintypes.BOOL()
+                native_io.kernel.IsProcessInJob.argtypes=[wintypes.HANDLE,wintypes.HANDLE,ctypes.POINTER(wintypes.BOOL)]
+                native_io.kernel.IsProcessInJob.restype=wintypes.BOOL
+                self.assertTrue(native_io.kernel.IsProcessInJob(int(child._handle),owner.handle,ctypes.byref(member)))
+                self.assertTrue(member.value)
+                return original(thread)
+            try:
+                with (patch.object(native_io.kernel,'CreateToolhelp32Snapshot',side_effect=AssertionError('System thread scan')),
+                      patch.object(native_io.kernel,'ResumeThread',side_effect=resume)):
+                    with owner:child.communicate(timeout=5)
+                self.assertEqual(child.returncode,0);self.assertEqual(marker.read_text(),'owned')
+            finally:
+                if child.poll() is None:child.kill();child.wait(timeout=5)
+                child.stdout.close();child.stderr.close()
+
+    def test_snapshot_refusal_terminates_the_still_suspended_owned_child(self):
+        with tempfile.TemporaryDirectory(prefix='books-primary-refused-') as directory:
+            marker=Path(directory)/'must-not-run.txt'
+            child=subprocess.Popen([sys.executable,'-I','-B','-c','import pathlib,sys;pathlib.Path(sys.argv[1]).write_text("unsafe")',str(marker)],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=0x08000000|4)
+            child._books_suspended=True;owner=native_io.OwnedProcessJob(child)
+            try:
+                with patch.object(native_io.kernel,'PssCaptureSnapshot',return_value=5),self.assertRaises(BoundaryError):
+                    with owner:self.fail('Refused child entered the runner')
+                child.wait(timeout=5)
+                self.assertNotEqual(child.returncode,0);self.assertFalse(marker.exists());self.assertIsNone(owner.handle)
+            finally:
+                if child.poll() is None:child.kill();child.wait(timeout=5)
+                child.stdout.close();child.stderr.close()
+
+    def test_two_concurrent_owned_private_children_finish_and_close(self):
+        with tempfile.TemporaryDirectory(prefix='books-primary-parallel-') as directory:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                calls=[pool.submit(run_owned,[sys.executable,'-I','-B','-c','print("private-owned")'],directory,threading.Event(),10) for _ in range(2)]
+                self.assertEqual([call.result(15).strip() for call in calls],[b'private-owned']*2)
 
 
 if __name__=='__main__':unittest.main()

@@ -1,0 +1,336 @@
+{
+  "base_head": "cc5ea7f9deb3b2843cb75b1392e24314532a0f2a",
+  "candidate": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101",
+  "files": [
+    {
+      "path": "native_io.py",
+      "size": 45123,
+      "sha256": "fed91fd457dca820ba5c23bddd2a5a7d6dd32e15443c20bc6c401723fb309950",
+      "lf_sha256": "fed91fd457dca820ba5c23bddd2a5a7d6dd32e15443c20bc6c401723fb309950",
+      "crlf_count": 0
+    },
+    {
+      "path": "tests/test_attempt_working_lifecycle.py",
+      "size": 40223,
+      "sha256": "e1bd75bed51f5d8ffa0620aca89ba79664944d4aa70e5ff560ecb3352ce9177f",
+      "lf_sha256": "046b4ed264b2504dac686bb4be659622e9869ab986276df5bd88a296f21f5472",
+      "crlf_count": 624
+    }
+  ],
+  "patch_sha256": "6ff570e5a7b338d3ec43d739a8ba2ad14b568069efe5b01161ab077563329b41",
+  "cause": "Each media launch recovered its primary thread by taking a system-wide TH32CS_SNAPTHREAD snapshot and iterating machine threads. The cost scales with host load and thread count.",
+  "fix": "Capture only the already-retained, Job-assigned child process with documented PSS_CAPTURE_THREADS. Validate retained process PID, one nonterminated thread, suspend count1, native thread owner, and ResumeThread previous count1. Free marker and local-owner snapshot before resume; fail closed on every native/API/cleanup error.",
+  "official_references": [
+    "https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot",
+    "https://learn.microsoft.com/en-us/windows/win32/api/processsnapshot/nf-processsnapshot-psscapturesnapshot",
+    "https://learn.microsoft.com/en-us/windows/win32/api/processsnapshot/nf-processsnapshot-psswalksnapshot",
+    "https://learn.microsoft.com/en-us/windows/win32/api/processsnapshot/nf-processsnapshot-pssfreesnapshot",
+    "https://learn.microsoft.com/en-us/windows/win32/api/processsnapshot/nf-processsnapshot-psswalkmarkercreate"
+  ],
+  "sdk_layout": "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um/processsnapshot.h lines323-349; x64 PSS_THREAD_ENTRY120bytes, PID16/TID20/flags104/suspend108",
+  "api_support": "PssCaptureSnapshot and associated APIs support Windows8.1 / Server2012R2 or later; current pinned QA/packaged Windows runtime exercised successfully.",
+  "prototype_observation": {
+    "samples": 5,
+    "capture_min_seconds": 0.00013720000424655154,
+    "capture_max_seconds": 0.00020509999740170315,
+    "old_resume_min_seconds": 0.1429089000012027,
+    "old_resume_max_seconds": 0.14916169999924023,
+    "same_children": true,
+    "sole_thread_suspend_count": 1,
+    "all_child_exit_codes": 0,
+    "provenance": "Exact prototype tool output in this diagnostic turn, source retained as pss-prototype.py"
+  },
+  "safety": {
+    "cases": 37,
+    "seconds": 14.478,
+    "new_primary_cases": 8,
+    "closed": true,
+    "outputComplete": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 21,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 966,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "owned_ms": 15124.1222
+  },
+  "comparison": {
+    "baseline": {
+      "children": [
+        {
+          "worker": 12,
+          "code": 0,
+          "seconds": 71.96137199999794
+        },
+        {
+          "worker": 7,
+          "code": 0,
+          "seconds": 72.86532169999555
+        },
+        {
+          "worker": 9,
+          "code": 0,
+          "seconds": 72.96569339999405
+        },
+        {
+          "worker": 8,
+          "code": 0,
+          "seconds": 73.76831989999482
+        },
+        {
+          "worker": 1,
+          "code": 0,
+          "seconds": 77.58230509999703
+        },
+        {
+          "worker": 0,
+          "code": 0,
+          "seconds": 78.18440839999676
+        },
+        {
+          "worker": 11,
+          "code": 0,
+          "seconds": 80.99488579999888
+        },
+        {
+          "worker": 3,
+          "code": 0,
+          "seconds": 92.63273549999576
+        },
+        {
+          "worker": 5,
+          "code": 0,
+          "seconds": 93.83615029999783
+        },
+        {
+          "worker": 10,
+          "code": 0,
+          "seconds": 96.1424801999965
+        },
+        {
+          "worker": 6,
+          "code": 0,
+          "seconds": 96.944522400001
+        },
+        {
+          "worker": 4,
+          "code": 0,
+          "seconds": 99.0487221000003
+        },
+        {
+          "worker": 2,
+          "code": 0,
+          "seconds": 113.88389549999556
+        }
+      ],
+      "seconds": 113.9840691999998,
+      "target": {
+        "pass": true,
+        "seconds": 62.93758279999747,
+        "case": "test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start",
+        "stats": {
+          "Popen": {
+            "count": 53,
+            "seconds": 0.5643291999804205,
+            "max": 0.013114400004269555
+          },
+          "CreateToolhelp32Snapshot": {
+            "count": 45,
+            "seconds": 8.235406799976772,
+            "max": 0.21281949999684002
+          },
+          "resume_owned_primary": {
+            "count": 45,
+            "seconds": 14.136830000032205,
+            "max": 0.36924840000574477
+          },
+          "run_owned": {
+            "count": 24,
+            "seconds": 14.88493080000626,
+            "max": 0.883989299996756
+          },
+          "state": {
+            "count": 214,
+            "seconds": 40.23691509998025,
+            "max": 0.5764337000000523
+          },
+          "resume_press": {
+            "count": 1,
+            "seconds": 0.030579900005250238,
+            "max": 0.030579900005250238
+          },
+          "_after_completed": {
+            "count": 2,
+            "seconds": 22.686356500002148,
+            "max": 16.37795349999942
+          },
+          "_work_attempt": {
+            "count": 2,
+            "seconds": 50.3261155999935,
+            "max": 32.27142269999604
+          }
+        }
+      }
+    },
+    "corrected": {
+      "children": [
+        {
+          "worker": 12,
+          "code": 0,
+          "seconds": 67.06500989999768
+        },
+        {
+          "worker": 7,
+          "code": 0,
+          "seconds": 67.56701109999995
+        },
+        {
+          "worker": 10,
+          "code": 0,
+          "seconds": 69.07095359999948
+        },
+        {
+          "worker": 8,
+          "code": 0,
+          "seconds": 71.78057109999645
+        },
+        {
+          "worker": 9,
+          "code": 0,
+          "seconds": 72.18218109999725
+        },
+        {
+          "worker": 1,
+          "code": 0,
+          "seconds": 74.28705819999595
+        },
+        {
+          "worker": 0,
+          "code": 0,
+          "seconds": 74.68843650000053
+        },
+        {
+          "worker": 11,
+          "code": 0,
+          "seconds": 78.39843799999653
+        },
+        {
+          "worker": 3,
+          "code": 0,
+          "seconds": 85.21617759999936
+        },
+        {
+          "worker": 5,
+          "code": 0,
+          "seconds": 85.21633799999836
+        },
+        {
+          "worker": 4,
+          "code": 0,
+          "seconds": 86.82084709999617
+        },
+        {
+          "worker": 6,
+          "code": 0,
+          "seconds": 88.92542369999865
+        },
+        {
+          "worker": 2,
+          "code": 0,
+          "seconds": 96.14562959999603
+        }
+      ],
+      "seconds": 96.24583480000001,
+      "target": {
+        "pass": true,
+        "seconds": 58.068350599998666,
+        "case": "test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start",
+        "stats": {
+          "Popen": {
+            "count": 53,
+            "seconds": 0.5034885999848484,
+            "max": 0.016448100002889987
+          },
+          "resume_owned_primary": {
+            "count": 45,
+            "seconds": 0.011216400031116791,
+            "max": 0.000560200001928024
+          },
+          "run_owned": {
+            "count": 24,
+            "seconds": 7.29809240000759,
+            "max": 0.41589160000148695
+          },
+          "state": {
+            "count": 181,
+            "seconds": 38.94873909998569,
+            "max": 0.37525909999385476
+          },
+          "resume_press": {
+            "count": 1,
+            "seconds": 0.04238769999938086,
+            "max": 0.04238769999938086
+          },
+          "_after_completed": {
+            "count": 2,
+            "seconds": 28.23236650000763,
+            "max": 14.764829700005066
+          },
+          "_work_attempt": {
+            "count": 2,
+            "seconds": 47.1885284999953,
+            "max": 24.25216079999518
+          }
+        }
+      }
+    }
+  },
+  "comparison_owner": {
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 4022,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 7570,
+        "incompleteQueries": 57,
+        "firstIncomplete": {
+          "assigned": 35,
+          "listed": 34,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 18,
+          "listed": 16,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    },
+    "owned_ms": 210753.0349
+  },
+  "unchanged_wait_source_sha256": "cb69463f3c8f405873a464008839e6cb772a90db9ea984ef299fb2510ec0b3a0",
+  "unchanged_wait_deadline_seconds": 60,
+  "limits": [
+    "Both sustained target cases passed their original wait deadline. The baseline whole case took62.938s and corrected58.068s; these include fixture preparation and are not wait-duration measurements.",
+    "Recovery time dropped14.1368s to.0112s across45launches and owned codec call time14.8849s to7.2981s. End-to-end reduction was only4.869s because inline post-completion increased22.686s to28.232s and status reads stayed near39-40s.",
+    "Both arms used12 sustained peer fixture processes with identical rotated case lists and8s target stagger; all26 child exits were0. The same outer owner retained earlier handles into the corrected arm, so the measurement is a controlled practical comparison, not an isolated benchmark or statistical guarantee.",
+    "The full-run60s failure was not reproduced by the single matched cohort. No full-gate or hidden check was run and no deadline or runner graph was changed."
+  ]
+}

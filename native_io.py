@@ -57,6 +57,24 @@ if os.name=='nt':
     kernel.OpenThread.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD];kernel.OpenThread.restype=wintypes.HANDLE
     kernel.ResumeThread.argtypes=[wintypes.HANDLE];kernel.ResumeThread.restype=wintypes.DWORD
     kernel.GetProcessIdOfThread.argtypes=[wintypes.HANDLE];kernel.GetProcessIdOfThread.restype=wintypes.DWORD
+    class ProcessThreadEntry(ctypes.Structure):
+        # PSS_THREAD_ENTRY from processsnapshot.h, shared by concurrent callers.
+        _fields_=[('exit_status',wintypes.DWORD),('teb',ctypes.c_void_p),
+                  ('process',wintypes.DWORD),('thread',wintypes.DWORD),
+                  ('affinity',ctypes.c_size_t),('priority',ctypes.c_int),('base_priority',ctypes.c_int),
+                  ('last_argument',ctypes.c_void_p),('last_syscall',wintypes.WORD),
+                  ('created',wintypes.FILETIME),('exited',wintypes.FILETIME),
+                  ('kernel_time',wintypes.FILETIME),('user_time',wintypes.FILETIME),
+                  ('start_address',ctypes.c_void_p),('captured',wintypes.FILETIME),
+                  ('flags',wintypes.DWORD),('suspend_count',wintypes.WORD),
+                  ('context_size',wintypes.WORD),('context',ctypes.c_void_p)]
+    kernel.GetProcessId.argtypes=[wintypes.HANDLE];kernel.GetProcessId.restype=wintypes.DWORD
+    kernel.GetCurrentProcess.argtypes=[];kernel.GetCurrentProcess.restype=wintypes.HANDLE
+    kernel.PssCaptureSnapshot.argtypes=[wintypes.HANDLE,wintypes.DWORD,wintypes.DWORD,ctypes.POINTER(wintypes.HANDLE)];kernel.PssCaptureSnapshot.restype=wintypes.DWORD
+    kernel.PssWalkMarkerCreate.argtypes=[ctypes.c_void_p,ctypes.POINTER(wintypes.HANDLE)];kernel.PssWalkMarkerCreate.restype=wintypes.DWORD
+    kernel.PssWalkSnapshot.argtypes=[wintypes.HANDLE,ctypes.c_int,wintypes.HANDLE,ctypes.POINTER(ProcessThreadEntry),wintypes.DWORD];kernel.PssWalkSnapshot.restype=wintypes.DWORD
+    kernel.PssWalkMarkerFree.argtypes=[wintypes.HANDLE];kernel.PssWalkMarkerFree.restype=wintypes.DWORD
+    kernel.PssFreeSnapshot.argtypes=[wintypes.HANDLE,wintypes.HANDLE];kernel.PssFreeSnapshot.restype=wintypes.DWORD
     class FileInfo(ctypes.Structure):
         _fields_=[('attributes',wintypes.DWORD),('creation',wintypes.FILETIME),('access',wintypes.FILETIME),('write',wintypes.FILETIME),('volume',wintypes.DWORD),('size_high',wintypes.DWORD),('size_low',wintypes.DWORD),('links',wintypes.DWORD),('index_high',wintypes.DWORD),('index_low',wintypes.DWORD)]
 
@@ -502,7 +520,7 @@ class OwnedProcessJob:
             self.__exit__(None,None,None)
             raise BoundaryError('Cannot establish owned media-process cancellation on this host')
         if getattr(self.process,'_books_suspended',False):
-            try:resume_owned_primary(self.process.pid)
+            try:resume_owned_primary(self.process.pid,int(self.process._handle))
             except BaseException:self.__exit__(None,None,None);raise
         return self
     def __exit__(self,*_):
@@ -547,20 +565,38 @@ class OwnedProcessJob:
             for process in processes:kernel.CloseHandle(process)
             kernel.CloseHandle(self.handle);self.handle=None
 
-def resume_owned_primary(pid):
-    """Resume only the sole primary thread of our newly suspended owned process."""
-    snapshot=kernel.CreateToolhelp32Snapshot(4,0)
-    if snapshot==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot inspect owned suspended primary thread')
-    ids=[]
+def resume_owned_primary(pid,process_handle=None):
+    """Inspect only the retained owned process, then resume its sole suspended thread.
+
+    Toolhelp's thread snapshot always scans the whole machine. PSS_CAPTURE_THREADS
+    captures this process only and never clones its address space.
+    """
+    if pid<=0 or not process_handle:
+        raise BoundaryError('Owned process must have exactly one suspended primary thread and a retained process handle')
+    if kernel.GetProcessId(process_handle)!=pid:raise BoundaryError('Owned process handle identity differs')
+    snapshot=wintypes.HANDLE();marker=wintypes.HANDLE();thread=None
+    if kernel.PssCaptureSnapshot(process_handle,0x80,0,ctypes.byref(snapshot)):
+        raise BoundaryError('Cannot capture owned process threads')
     try:
-        entry=ThreadEntry();entry.size=ctypes.sizeof(entry);found=kernel.Thread32First(snapshot,ctypes.byref(entry))
-        while found:
-            if entry.process==pid:ids.append(entry.thread)
-            found=kernel.Thread32Next(snapshot,ctypes.byref(entry))
-    finally:kernel.CloseHandle(snapshot)
-    if len(ids)!=1:raise BoundaryError('Owned process must have exactly one suspended primary thread')
-    thread=kernel.OpenThread(0x42,False,ids[0])
-    if not thread:raise BoundaryError('Cannot open owned suspended primary thread')
-    try:
+        try:
+            if kernel.PssWalkMarkerCreate(None,ctypes.byref(marker)):
+                raise BoundaryError('Cannot create owned thread snapshot marker')
+            try:
+                entry=ProcessThreadEntry()
+                if kernel.PssWalkSnapshot(snapshot,3,marker,ctypes.byref(entry),ctypes.sizeof(entry)):
+                    raise BoundaryError('Cannot inspect owned suspended primary thread')
+                if entry.process!=pid or not entry.thread or entry.flags or entry.suspend_count!=1:
+                    raise BoundaryError('Owned primary thread identity or suspension differs')
+                thread_id=entry.thread
+                if kernel.PssWalkSnapshot(snapshot,3,marker,ctypes.byref(entry),ctypes.sizeof(entry))!=259:
+                    raise BoundaryError('Owned process must have exactly one suspended primary thread')
+                thread=kernel.OpenThread(0x42,False,thread_id)
+                if not thread:raise BoundaryError('Cannot open owned suspended primary thread')
+            finally:
+                if kernel.PssWalkMarkerFree(marker):raise BoundaryError('Owned thread snapshot marker did not close')
+        finally:
+            if kernel.PssFreeSnapshot(kernel.GetCurrentProcess(),snapshot):
+                raise BoundaryError('Owned process thread snapshot did not close')
         if kernel.GetProcessIdOfThread(thread)!=pid or kernel.ResumeThread(thread)!=1:raise BoundaryError('Cannot safely resume owned primary thread')
-    finally:kernel.CloseHandle(thread)
+    finally:
+        if thread is not None and not kernel.CloseHandle(thread):raise BoundaryError('Owned primary thread handle did not close')

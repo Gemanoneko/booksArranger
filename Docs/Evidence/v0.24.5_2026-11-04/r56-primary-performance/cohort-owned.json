@@ -1,0 +1,47 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "baseline {\"children\": [{\"worker\": 12, \"code\": 0, \"seconds\": 71.96137199999794}, {\"worker\": 7, \"code\": 0, \"seconds\": 72.86532169999555}, {\"worker\": 9, \"code\": 0, \"seconds\": 72.96569339999405}, {\"worker\": 8, \"code\": 0, \"seconds\": 73.76831989999482}, {\"worker\": 1, \"code\": 0, \"seconds\": 77.58230509999703}, {\"worker\": 0, \"code\": 0, \"seconds\": 78.18440839999676}, {\"worker\": 11, \"code\": 0, \"seconds\": 80.99488579999888}, {\"worker\": 3, \"code\": 0, \"seconds\": 92.63273549999576}, {\"worker\": 5, \"code\": 0, \"seconds\": 93.83615029999783}, {\"worker\": 10, \"code\": 0, \"seconds\": 96.1424801999965}, {\"worker\": 6, \"code\": 0, \"seconds\": 96.944522400001}, {\"worker\": 4, \"code\": 0, \"seconds\": 99.0487221000003}, {\"worker\": 2, \"code\": 0, \"seconds\": 113.88389549999556}], \"seconds\": 113.9840691999998, \"target\": {\"pass\": true, \"seconds\": 62.93758279999747, \"case\": \"test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start\", \"stats\": {\"Popen\": {\"count\": 53, \"seconds\": 0.5643291999804205, \"max\": 0.013114400004269555}, \"CreateToolhelp32Snapshot\": {\"count\": 45, \"seconds\": 8.235406799976772, \"max\": 0.21281949999684002}, \"resume_owned_primary\": {\"count\": 45, \"seconds\": 14.136830000032205, \"max\": 0.36924840000574477}, \"run_owned\": {\"count\": 24, \"seconds\": 14.88493080000626, \"max\": 0.883989299996756}, \"state\": {\"count\": 214, \"seconds\": 40.23691509998025, \"max\": 0.5764337000000523}, \"resume_press\": {\"count\": 1, \"seconds\": 0.030579900005250238, \"max\": 0.030579900005250238}, \"_after_completed\": {\"count\": 2, \"seconds\": 22.686356500002148, \"max\": 16.37795349999942}, \"_work_attempt\": {\"count\": 2, \"seconds\": 50.3261155999935, \"max\": 32.27142269999604}}}}\r\ncorrected {\"children\": [{\"worker\": 12, \"code\": 0, \"seconds\": 67.06500989999768}, {\"worker\": 7, \"code\": 0, \"seconds\": 67.56701109999995}, {\"worker\": 10, \"code\": 0, \"seconds\": 69.07095359999948}, {\"worker\": 8, \"code\": 0, \"seconds\": 71.78057109999645}, {\"worker\": 9, \"code\": 0, \"seconds\": 72.18218109999725}, {\"worker\": 1, \"code\": 0, \"seconds\": 74.28705819999595}, {\"worker\": 0, \"code\": 0, \"seconds\": 74.68843650000053}, {\"worker\": 11, \"code\": 0, \"seconds\": 78.39843799999653}, {\"worker\": 3, \"code\": 0, \"seconds\": 85.21617759999936}, {\"worker\": 5, \"code\": 0, \"seconds\": 85.21633799999836}, {\"worker\": 4, \"code\": 0, \"seconds\": 86.82084709999617}, {\"worker\": 6, \"code\": 0, \"seconds\": 88.92542369999865}, {\"worker\": 2, \"code\": 0, \"seconds\": 96.14562959999603}], \"seconds\": 96.24583480000001, \"target\": {\"pass\": true, \"seconds\": 58.068350599998666, \"case\": \"test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start\", \"stats\": {\"Popen\": {\"count\": 53, \"seconds\": 0.5034885999848484, \"max\": 0.016448100002889987}, \"resume_owned_primary\": {\"count\": 45, \"seconds\": 0.011216400031116791, \"max\": 0.000560200001928024}, \"run_owned\": {\"count\": 24, \"seconds\": 7.29809240000759, \"max\": 0.41589160000148695}, \"state\": {\"count\": 181, \"seconds\": 38.94873909998569, \"max\": 0.37525909999385476}, \"resume_press\": {\"count\": 1, \"seconds\": 0.04238769999938086, \"max\": 0.04238769999938086}, \"_after_completed\": {\"count\": 2, \"seconds\": 28.23236650000763, \"max\": 14.764829700005066}, \"_work_attempt\": {\"count\": 2, \"seconds\": 47.1885284999953, \"max\": 24.25216079999518}}}}\r\n",
+  "err": "",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 56464,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4022,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 7570,
+      "incompleteQueries": 57,
+      "firstIncomplete": {
+        "assigned": 35,
+        "listed": 34,
+        "capacity": 8192,
+        "query_ok": true
+      },
+      "lastIncomplete": {
+        "assigned": 18,
+        "listed": 16,
+        "capacity": 8192,
+        "query_ok": true
+      }
+    }
+  },
+  "elapsedMs": 210753.0349,
+  "outputBytes": 3281
+}
