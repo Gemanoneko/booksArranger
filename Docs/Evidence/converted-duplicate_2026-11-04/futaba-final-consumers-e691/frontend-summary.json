@@ -1,0 +1,105 @@
+{
+  "deadlineMs": 600000,
+  "results": [
+    {
+      "script": "test_attention_frontend.js",
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 32,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      },
+      "elapsedMs": 512.9643
+    },
+    {
+      "script": "test_refused_retry_frontend.js",
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 17,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      },
+      "elapsedMs": 248.3845
+    },
+    {
+      "script": "test_retry_frontend.js",
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 18,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      },
+      "elapsedMs": 263.1489
+    },
+    {
+      "script": "test_inline_series_frontend.js",
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 16,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      },
+      "elapsedMs": 233.1380999999999
+    }
+  ]
+}

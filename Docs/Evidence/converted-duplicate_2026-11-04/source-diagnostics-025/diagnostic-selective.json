@@ -1,0 +1,1350 @@
+{
+  "started_utc": "2026-11-04T21:12:54.103868+00:00",
+  "prior_diagnostic_sha256": "f986460f9f5345ff4dc9b0ff0065ea3be45565878c006565ccff80b4b0591b06",
+  "first_source_already_complete": {
+    "title": "Самые страшные русские народные сказки",
+    "path": "Z:\\Audiobooks\\Сборники\\Caмыe cтpaшныe pyccкиe нapoдныe cкaзки.m4b",
+    "expected_size": 2097152,
+    "boxes": [
+      {
+        "kind": "ftyp",
+        "offset": 0,
+        "declared_size": 28,
+        "header_base64": "AAAAHGZ0eXBNNEEgAAAAAQ=="
+      },
+      {
+        "kind": "moov",
+        "offset": 28,
+        "declared_size": 774300,
+        "header_base64": "AAvQnG1vb3YAAABsbXZoZA=="
+      },
+      {
+        "kind": "wide",
+        "offset": 774328,
+        "declared_size": 8,
+        "header_base64": "AAAACHdpZGUEeNE3bWRhdA=="
+      },
+      {
+        "kind": "mdat",
+        "offset": 774336,
+        "declared_size": 75026743,
+        "header_base64": "BHjRN21kYXQhAANAaBwhDA=="
+      }
+    ],
+    "native_before": {
+      "size": 2097152,
+      "modified": 1669535513951212300,
+      "dev": 760290819,
+      "ino": 11640561051989089412,
+      "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+      "identity_api_error": 87,
+      "identity": [
+        760290819,
+        2710279322,
+        974036100
+      ],
+      "links": 1,
+      "attributes": 32
+    },
+    "metadata_bytes_read": 774356,
+    "moov_sha256": "c99c12d3313e31c403f5c854fc2987e12478b74d790f15285d529be21ca2b574",
+    "tracks": [
+      {
+        "handler": "soun",
+        "tkhd_base64": "AAAAAd+lUbffpVHWAAAAAQAAAAAAIzd9AAAAAAAAAAAAAAAAAQAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAA",
+        "tref_base64": "AAAAEGNoYXAAAAADAAAAAg==",
+        "tables": {
+          "stsd": {
+            "bytes": 95,
+            "base64": "AAAAAAAAAAEAAABXbXA0YQAAAAAAAAABAAAAAAAAAAAAAgAQAAAAAKxEAAAAAAAzZXNkcwAAAAADgICAIgAAAASAgIAUQBQAGAAAAu4AAALuAAWAgIACEhAGgICAAQI="
+          },
+          "stts": {
+            "entry_count": 1,
+            "prefix_base64": "AAAAAAAAAAEAAoceAAAEAA==",
+            "bytes": 16
+          },
+          "stsc": {
+            "entry_count": 18,
+            "prefix_base64": "AAAAAAAAABIAAAABAAAAKwAAAAEAAAADAAAAAgAAAAEAAAAEAAAAKwAAAAEAAAFKAAAAKgAAAAEAAAFLAAAAKwAAAAEAAAIFAAAAEgAAAAEAAAIGAAAAKwAAAAEAAAK7AAAACQAAAAEAAAK8AAAAKwAAAAEAAAQBAAAAKQAAAAE=",
+            "bytes": 224
+          },
+          "stsz": {
+            "fixed_sample_size": 0,
+            "sample_count": 165662,
+            "first_sample_sizes": [
+              6,
+              10,
+              95,
+              312,
+              314,
+              272,
+              311,
+              466,
+              416,
+              420,
+              439,
+              612,
+              689,
+              641,
+              512,
+              544,
+              530,
+              496,
+              458,
+              429,
+              457,
+              485,
+              588,
+              550,
+              504,
+              514,
+              453,
+              447,
+              406,
+              435,
+              477,
+              758
+            ],
+            "bytes": 662660
+          },
+          "stco": {
+            "entry_count": 3857,
+            "prefix_base64": "AAAAAAAADxEAC9DIAAwhhAAMg1MAEBFwABB0MAAQ18AAETs/ABGUygAR5yIAEjx6ABKQtQAS7bgAE0oOABOmjQAUAnYAFGJbABS8NQAVF4sAFXFGABXQZwAWKo4AFoRhABbjAwAXPlIAF5pVABf2yQAYVwEAGK7oABkL7AAZaEs=",
+            "bytes": 15436
+          }
+        }
+      },
+      {
+        "handler": "vide",
+        "tkhd_base64": "AAAAAd+lUbffpVHWAAAAAgAAAAAAIzd9AAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAIAAAACAAAA",
+        "tref_base64": "",
+        "tables": {
+          "stsd": {
+            "bytes": 104,
+            "base64": "AAAAAAAAAAEAAABgbWpwZwAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAIAAgAASAAAAEgAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABj//wAAAApmaWVsAQA="
+          },
+          "stts": {
+            "entry_count": 1,
+            "prefix_base64": "AAAAAAAAAAEAAAABChxugA==",
+            "bytes": 16
+          },
+          "stsc": {
+            "entry_count": 1,
+            "prefix_base64": "AAAAAAAAAAEAAAABAAAAAQAAAAE=",
+            "bytes": 20
+          },
+          "stsz": {
+            "fixed_sample_size": 231720,
+            "sample_count": 1,
+            "first_sample_sizes": [
+              231720
+            ],
+            "bytes": 12
+          },
+          "stco": {
+            "entry_count": 1,
+            "prefix_base64": "AAAAAAAAAAEADIgd",
+            "bytes": 12
+          }
+        }
+      },
+      {
+        "handler": "text",
+        "tkhd_base64": "AAAAAN+lUbffpVHWAAAAAwAAAAAAIzd9AAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAA",
+        "tref_base64": "",
+        "tables": {
+          "stsd": {
+            "bytes": 67,
+            "base64": "AAAAAAAAAAEAAAA7dGV4dAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          "stts": {
+            "entry_count": 8,
+            "prefix_base64": "AAAAAAAAAAgAAAABANvMAAAAAAEAfUL/AAAAAQB58IAAAAABANr4gAAAAAEAlCqAAAAAAQO7SIAAAAABAPdXgAAAAAECJ6wA",
+            "bytes": 72
+          },
+          "stsc": {
+            "entry_count": 1,
+            "prefix_base64": "AAAAAAAAAAEAAAABAAAAAQAAAAE=",
+            "bytes": 20
+          },
+          "stsz": {
+            "fixed_sample_size": 0,
+            "sample_count": 8,
+            "first_sample_sizes": [
+              43,
+              45,
+              56,
+              41,
+              42,
+              67,
+              33,
+              24
+            ],
+            "bytes": 44
+          },
+          "stco": {
+            "entry_count": 8,
+            "prefix_base64": "AAAAAAAAAAgAEBFFAHGxzwCqThQA4gNGAUJJJQGEcPADJKOVA5JOCQ==",
+            "bytes": 40
+          }
+        }
+      }
+    ],
+    "structure_error": "Top-level extent invalid",
+    "native_after": {
+      "size": 2097152,
+      "modified": 1669535513951212300,
+      "dev": 760290819,
+      "ino": 11640561051989089412,
+      "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+      "identity_api_error": 87,
+      "identity": [
+        760290819,
+        2710279322,
+        974036100
+      ],
+      "links": 1,
+      "attributes": 32
+    },
+    "strict_decode_error": {
+      "class": "ValidationError",
+      "message": "[in#0/mov,mp4,m4a,3gp,3g2,mj2 @ 00000205f3ae3e80] corrupt input packet in stream 0\r\n[in#0/mov,mp4,m4a,3gp,3g2,mj2 @ 00000205f3ae3e80] Task finished with error code: -1094995529 (Invalid data found when processing input)\r\n[in#0/mov,mp4,m4a,3gp,3g2,mj2 @ 00000205f3ae3e80] Terminating thread with return code -1094995529 (Invalid data found when processing input)\r\n"
+    },
+    "native_after_decode": {
+      "size": 2097152,
+      "modified": 1669535513951212300,
+      "dev": 760290819,
+      "ino": 11640561051989089412,
+      "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+      "identity_api_error": 87,
+      "identity": [
+        760290819,
+        2710279322,
+        974036100
+      ],
+      "links": 1,
+      "attributes": 32
+    }
+  },
+  "m4b": [
+    {
+      "title": "Последняя глава",
+      "path": "Z:\\Audiobooks\\Сборники\\Splatterpunk Stories\\Splatterpunk stories 4 (Шокирующие истории 4) - Последняя глава.m4b",
+      "expected_size": 962089355,
+      "boxes": [
+        {
+          "kind": "ftyp",
+          "offset": 0,
+          "declared_size": 24,
+          "header_base64": "AAAAGGZ0eXBtcDQyAAAAAQ=="
+        },
+        {
+          "kind": "moov",
+          "offset": 24,
+          "declared_size": 9487299,
+          "header_base64": "AJDDw21vb3YAAABsbXZoZA=="
+        },
+        {
+          "kind": "wide",
+          "offset": 9487323,
+          "declared_size": 8,
+          "header_base64": "AAAACHdpZGU4x42obWRhdA=="
+        },
+        {
+          "kind": "mdat",
+          "offset": 9487331,
+          "declared_size": 952602024,
+          "header_base64": "OMeNqG1kYXQAAAAId2lkZQ=="
+        }
+      ],
+      "metadata_bytes_read": 2454,
+      "native_before": {
+        "size": 962089355,
+        "modified": 1717535621558306700,
+        "dev": 760290819,
+        "ino": 14345942342352078468,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          3340174989,
+          1679918724
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "tracks": [
+        {
+          "handler": "soun",
+          "tkhd_base64": "AAAAAdDRcUHQ0a7MAAAAAQAAAAABZUqYAAAAAAAAAAAAAAAAAQAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAA",
+          "tref_base64": "AAAAEGNoYXAAAAADAAAAAg==",
+          "tables": {
+            "stsd": {
+              "bytes": 95,
+              "base64": "AAAAAAAAAAEAAABXbXA0YQAAAAAAAAABAAAAAAAAAAAAAgAQAAAAAKxEAAAAAAAzZXNkcwAAAAADgICAIgAAAASAgIAUQBUAGAAAAu4AAALuAAWAgIACEhAGgICAAQI="
+            },
+            "stts": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAGaU7AAAEAA==",
+              "bytes": 16
+            },
+            "stsc": {
+              "entry_count": 158249,
+              "prefix_base64": "AAAAAAACaikAAAABAAAADgAAAAEAAAACAAAABwAAAAEAAAADAAAADgAAAAEAAAAEAAAABwAAAAEAAAAFAAAADgAAAAEAAAAGAAAABwAAAAEAAAAHAAAADgAAAAEAAAAIAAAABwAAAAEAAAAJAAAADgAAAAEAAAAKAAAABwAAAAE=",
+              "bytes": 1898996
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 1680699,
+              "first_sample_sizes": [
+                7,
+                112,
+                654,
+                579,
+                574,
+                559,
+                564,
+                576,
+                574,
+                580,
+                579,
+                585,
+                580,
+                584,
+                569,
+                563,
+                576,
+                595,
+                577,
+                567,
+                564,
+                583,
+                578,
+                582,
+                565,
+                569,
+                578,
+                557,
+                574,
+                571,
+                578,
+                577
+              ],
+              "bytes": 6722808
+            },
+            "stco": {
+              "entry_count": 158261,
+              "prefix_base64": "AAAAAAACajUAkMP7AJDfvgCQ72kAkQ61AJEeewCRQ3QAkVVUAJF1swCRhaoAkaesAJG3nwCR26wAke29AJIMjgCSHQcAkjulAJJMVACSa30AknoZAJKVqQCSpbcAksI0AJLRPACS7/4Akv58AJMbtgCTKsYAk0fpAJNXDgCTdMA=",
+              "bytes": 633052
+            }
+          }
+        },
+        {
+          "handler": "vide",
+          "tkhd_base64": "AAAAD9DRcbrQ0XG+AAAAAgAAAAABZUqYAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAH0AAAB9AAA",
+          "tref_base64": "",
+          "tables": {
+            "stsd": {
+              "bytes": 94,
+              "base64": "AAAAAAAAAAEAAABWcG5nIAAAAAAAAAABAAEAAWFwcGwAAAAAAAACAAH0AfQASAAAAEgAAAAAAAAAAQNQTkcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACD//w=="
+            },
+            "stts": {
+              "entry_count": 18,
+              "prefix_base64": "AAAAAAAAABIAAAABAAiQFAAAAAEACpzGAAAAAQAM0SQAAAABAAXOlwAAAAEAEL6SAAAAAQALqAQAAAABABWCKQAAAAEADZOGAAAAAQAlE8EAAAABAAStTgAAAAEAFf+8AAAAAQAq2aYAAAABAA1Z6wAAAAEAGGIFAAAAAQAWtKY=",
+              "bytes": 152
+            },
+            "stsc": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAAAABAAAAAQAAAAE=",
+              "bytes": 20
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 18,
+              "first_sample_sizes": [
+                450952,
+                353624,
+                425529,
+                418475,
+                402860,
+                260311,
+                358944,
+                251471,
+                414965,
+                542970,
+                283202,
+                442649,
+                168878,
+                363007,
+                179473,
+                436508,
+                366610,
+                321876
+              ],
+              "bytes": 84
+            },
+            "stco": {
+              "entry_count": 18,
+              "prefix_base64": "AAAAAAAAABI49f5wOPzf+DkCRVA5CMOJOQ8mNDkVS+A5GUS3OR6+1zkilSY5KOobOTEzFTk1hVc5PEZwOT7aHjlEZB05RyEuOU3KSjlTYlw=",
+              "bytes": 80
+            }
+          }
+        },
+        {
+          "handler": "text",
+          "tkhd_base64": "AAAADtDRcb7Q0XG+AAAAAwAAAAABZUqYAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAEAAAAB",
+          "tref_base64": "",
+          "tables": {
+            "stsd": {
+              "bytes": 67,
+              "base64": "AAAAAAAAAAEAAAA7dGV4dAAAAAAAAAABAAAABAAAAAH///////8AAAAAAAAAAAAAAAAAEAANAAAAAAANAAAAAAAAAA=="
+            },
+            "stts": {
+              "entry_count": 18,
+              "prefix_base64": "AAAAAAAAABIAAAABAAiQFAAAAAEACpzGAAAAAQAM0SQAAAABAAXOlwAAAAEAEL6SAAAAAQALqAQAAAABABWCKQAAAAEADZOGAAAAAQAlE8EAAAABAAStTgAAAAEAFf+8AAAAAQAq2aYAAAABAA1Z6wAAAAEAGGIFAAAAAQAWtKY=",
+              "bytes": 152
+            },
+            "stsc": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAAAABAAAAAQAAAAE=",
+              "bytes": 20
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 18,
+              "first_sample_sizes": [
+                100,
+                109,
+                76,
+                85,
+                100,
+                90,
+                114,
+                74,
+                90,
+                55,
+                80,
+                61,
+                69,
+                65,
+                76,
+                75,
+                83,
+                97
+              ],
+              "bytes": 84
+            },
+            "stco": {
+              "entry_count": 18,
+              "prefix_base64": "AAAAAAAAABI5WEuwOVhMFDlYTIE5WEzNOVhNIjlYTYY5WE3gOVhOUjlYTpw5WE72OVhPLTlYT305WE+6OVhP/zlYUEA5WFCMOVhQ1zlYUSo=",
+              "bytes": 80
+            }
+          }
+        }
+      ],
+      "native_after": {
+        "size": 962089355,
+        "modified": 1717535621558306700,
+        "dev": 760290819,
+        "ino": 14345942342352078468,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          3340174989,
+          1679918724
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "title": "Splatterpunk stories 3",
+      "path": "Z:\\Audiobooks\\Сборники\\Splatterpunk Stories\\Splatterpunk stories 3 (Шокирующие истории 3).m4b",
+      "expected_size": 851541486,
+      "boxes": [
+        {
+          "kind": "ftyp",
+          "offset": 0,
+          "declared_size": 24,
+          "header_base64": "AAAAGGZ0eXBtcDQyAAAAAQ=="
+        },
+        {
+          "kind": "moov",
+          "offset": 24,
+          "declared_size": 8607982,
+          "header_base64": "AINY7m1vb3YAAABsbXZoZA=="
+        },
+        {
+          "kind": "wide",
+          "offset": 8608006,
+          "declared_size": 8,
+          "header_base64": "AAAACHdpZGUyPiTgbWRhdA=="
+        },
+        {
+          "kind": "mdat",
+          "offset": 8608014,
+          "declared_size": 842933472,
+          "header_base64": "Mj4k4G1kYXQAAAAId2lkZQ=="
+        }
+      ],
+      "metadata_bytes_read": 2422,
+      "native_before": {
+        "size": 851541486,
+        "modified": 1717536373373387500,
+        "dev": 760290819,
+        "ino": 15263616159740743076,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          3553837574,
+          4114763172
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "tracks": [
+        {
+          "handler": "soun",
+          "tkhd_base64": "AAAAAc7rE2LO61ayAAAAAQAAAAABRw3pAAAAAAAAAAAAAAAAAQAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAA",
+          "tref_base64": "AAAAEGNoYXAAAAADAAAAAg==",
+          "tables": {
+            "stsd": {
+              "bytes": 95,
+              "base64": "AAAAAAAAAAEAAABXbXA0YQAAAAAAAAABAAAAAAAAAAAAAgAQAAAAAKxEAAAAAAAzZXNkcwAAAAADgICAIgAAAASAgIAUQBUAGAAAAu4AAALuAAWAgIACEhAGgICAAQI="
+            },
+            "stts": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAF3mgAAAEAA==",
+              "bytes": 16
+            },
+            "stsc": {
+              "entry_count": 144897,
+              "prefix_base64": "AAAAAAACNgEAAAABAAAADgAAAAEAAAACAAAACAAAAAEAAAADAAAADgAAAAEAAAAEAAAABwAAAAEAAAAFAAAADgAAAAEAAAAGAAAABwAAAAEAAAAHAAAADgAAAAEAAAAIAAAABwAAAAEAAAAJAAAADgAAAAEAAAAKAAAABwAAAAE=",
+              "bytes": 1738772
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 1538464,
+              "first_sample_sizes": [
+                7,
+                7,
+                16,
+                40,
+                50,
+                129,
+                93,
+                105,
+                104,
+                88,
+                74,
+                147,
+                206,
+                422,
+                866,
+                678,
+                629,
+                644,
+                683,
+                705,
+                700,
+                671,
+                675,
+                680,
+                679,
+                676,
+                688,
+                666,
+                761,
+                754,
+                738,
+                708
+              ],
+              "bytes": 6153868
+            },
+            "stco": {
+              "entry_count": 144905,
+              "prefix_base64": "AAAAAAACNgkAg1kmAINe9gCDdL4Ag5t4AIOuDgCD09oAg+kfAIQQGQCEIwcAhEedAIRZXQCEesoAhItZAISrGgCEuo0AhNTEAITpYACFB8IAhRdAAIU1bwCFRkYAhWSSAIV0DACFkW0AhaF3AIW+PwCF0SoAhe64AIX7DACGEa8=",
+              "bytes": 579628
+            }
+          }
+        },
+        {
+          "handler": "vide",
+          "tkhd_base64": "AAAAD87rFeHO6xXnAAAAAgAAAAABRw3pAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAIAAAAB80jm",
+          "tref_base64": "",
+          "tables": {
+            "stsd": {
+              "bytes": 94,
+              "base64": "AAAAAAAAAAEAAABWcG5nIAAAAAAAAAABAAEAAWFwcGwAAAAAAAACAAIAAfMASAAAAEgAAAAAAAAAAQNQTkcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACD//w=="
+            },
+            "stts": {
+              "entry_count": 18,
+              "prefix_base64": "AAAAAAAAABIAAAABABoDcgAAAAEAA6i7AAAAAQAdO+YAAAABAAJ0CgAAAAEADY8+AAAAAQAJ9xoAAAABABkMSAAAAAEAHo5JAAAAAQAHsJwAAAABACFRDgAAAAEACGjWAAAAAQAQAwYAAAABABIBKQAAAAEAHP2gAAAAAQAddyk=",
+              "bytes": 152
+            },
+            "stsc": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAAAABAAAAAQAAAAE=",
+              "bytes": 20
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 18,
+              "first_sample_sizes": [
+                410439,
+                239459,
+                376763,
+                146420,
+                407322,
+                471463,
+                115728,
+                422723,
+                358795,
+                347859,
+                399796,
+                308680,
+                534568,
+                449840,
+                305312,
+                293378,
+                248357,
+                172685
+              ],
+              "bytes": 84
+            },
+            "stco": {
+              "entry_count": 18,
+              "prefix_base64": "AAAAAAAAABIyZcZjMmwJqjJvsQ0ydXDIMnesvDJ949YyhRV9MobZjTKNTNAyksZbMpgVLjKeLuIyouSqMqsM0jKx6gIytpKiMrsMpDK+1sk=",
+              "bytes": 80
+            }
+          }
+        },
+        {
+          "handler": "text",
+          "tkhd_base64": "AAAADs7rFebO6xXnAAAAAwAAAAABRw3pAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAEAAAAB",
+          "tref_base64": "",
+          "tables": {
+            "stsd": {
+              "bytes": 67,
+              "base64": "AAAAAAAAAAEAAAA7dGV4dAAAAAAAAAABAAAABAAAAAH///////8AAAAAAAAAAAAAAAAAEAANAAAAAAANAAAAAAAAAA=="
+            },
+            "stts": {
+              "entry_count": 18,
+              "prefix_base64": "AAAAAAAAABIAAAABABoDcgAAAAEAA6i7AAAAAQAdO+YAAAABAAJ0CgAAAAEADY8+AAAAAQAJ9xoAAAABABkMSAAAAAEAHo5JAAAAAQAHsJwAAAABACFRDgAAAAEACGjWAAAAAQAQAwYAAAABABIBKQAAAAEAHP2gAAAAAQAddyk=",
+              "bytes": 152
+            },
+            "stsc": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAAAABAAAAAQAAAAE=",
+              "bytes": 20
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 18,
+              "first_sample_sizes": [
+                69,
+                74,
+                78,
+                76,
+                56,
+                46,
+                73,
+                57,
+                62,
+                55,
+                58,
+                54,
+                53,
+                98,
+                67,
+                66,
+                67,
+                67
+              ],
+              "bytes": 84
+            },
+            "stco": {
+              "entry_count": 18,
+              "prefix_base64": "AAAAAAAAABIywXlWMsF5mzLBeeUywXozMsF6fzLBercywXrlMsF7LjLBe2cywXulMsF73DLBfBYywXxMMsF8gTLBfOMywX0mMsF9aDLBfas=",
+              "bytes": 80
+            }
+          }
+        }
+      ],
+      "native_after": {
+        "size": 851541486,
+        "modified": 1717536373373387500,
+        "dev": 760290819,
+        "ino": 15263616159740743076,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          3553837574,
+          4114763172
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "title": "Сборник рассказов японских авторов Сад Камней",
+      "path": "Z:\\Audiobooks\\Сборники\\Сборник рассказов японских авторов Сад Камней.m4b",
+      "expected_size": 290973142,
+      "boxes": [
+        {
+          "kind": "ftyp",
+          "offset": 0,
+          "declared_size": 28,
+          "header_base64": "AAAAHGZ0eXBNNEEgAAAAAQ=="
+        },
+        {
+          "kind": "moov",
+          "offset": 28,
+          "declared_size": 4307331,
+          "header_base64": "AEG5g21vb3YAAABsbXZoZA=="
+        },
+        {
+          "kind": "wide",
+          "offset": 4307359,
+          "declared_size": 8,
+          "header_base64": "AAAACHdpZGURFiwvbWRhdA=="
+        },
+        {
+          "kind": "mdat",
+          "offset": 4307367,
+          "declared_size": 286665775,
+          "header_base64": "ERYsL21kYXQAAAAId2lkZQ=="
+        }
+      ],
+      "metadata_bytes_read": 2222,
+      "native_before": {
+        "size": 290973142,
+        "modified": 1486041908733420700,
+        "dev": 760290819,
+        "ino": 8128105,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128105
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "tracks": [
+        {
+          "handler": "soun",
+          "tkhd_base64": "AAAAAdGcemnRnN6LAAAAAQAAAAAAn20UAAAAAAAAAAAAAAAAAQAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAA",
+          "tref_base64": "AAAAEGNoYXAAAAADAAAAAg==",
+          "tables": {
+            "stsd": {
+              "bytes": 95,
+              "base64": "AAAAAAAAAAEAAABXbXA0YQAAAAAAAAABAAAAAAAAAAAAAgAQAAAAAKxEAAAAAAAzZXNkcwAAAAADgICAIgAAAASAgIAUQBUAGAAAAfQAAAH0AAWAgIACEhAGgICAAQI="
+            },
+            "stts": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAC3F1AAAEAA==",
+              "bytes": 16
+            },
+            "stsc": {
+              "entry_count": 70477,
+              "prefix_base64": "AAAAAAABE00AAAABAAAAHAAAAAEAAAACAAAADgAAAAEAAAADAAAABwAAAAEAAAAEAAAADgAAAAEAAAAFAAAACQAAAAEAAAAGAAAADgAAAAEAAAAHAAAABwAAAAEAAAAIAAAADgAAAAEAAAAJAAAACAAAAAEAAAAKAAAADgAAAAE=",
+              "bytes": 845732
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 749941,
+              "first_sample_sizes": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                32,
+                296,
+                309,
+                235
+              ],
+              "bytes": 2999776
+            },
+            "stco": {
+              "entry_count": 70479,
+              "prefix_base64": "AAAAAAABE08AQbm/AEG6gwBBx8wAQc+cAEHffgBB6cgAQfjCAEIAIQBCDtUAQhbaAEIkggBCLD8AQjmHAEI/9gBCTNYAQlQTAEJgngBCZwcAQnYVAEJ98wBCjo4AQpbJAEKmpwBCrvAAQr78AELJVQBC2TMAQuFFAELx3QBC+04=",
+              "bytes": 281924
+            }
+          }
+        },
+        {
+          "handler": "vide",
+          "tkhd_base64": "AAAAD9Gce6bRnHuoAAAAAgAAAAAAn20ZAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAIAAAACAAAA",
+          "tref_base64": "",
+          "tables": {
+            "stsd": {
+              "bytes": 94,
+              "base64": "AAAAAAAAAAEAAABWcG5nIAAAAAAAAAABAAEAAWFwcGwAAAAAAAACAAIAAgAASAAAAEgAAAAAAAAAAQNQTkcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACD//w=="
+            },
+            "stts": {
+              "entry_count": 11,
+              "prefix_base64": "AAAAAAAAAAsAAAABABVyDwAAAAEAE1HkAAAAAQAIGKEAAAABABemTgAAAAEABacZAAAAAQATxyQAAAABAAk2DgAAAAEABSgfAAAAAQAO9XgAAAABABEhsAAAAAEADwal",
+              "bytes": 96
+            },
+            "stsc": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAAAABAAAAAQAAAAE=",
+              "bytes": 20
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 11,
+              "first_sample_sizes": [
+                310627,
+                499008,
+                484691,
+                237000,
+                246096,
+                356945,
+                315986,
+                433437,
+                551875,
+                353282,
+                319923
+              ],
+              "bytes": 56
+            },
+            "stco": {
+              "entry_count": 11,
+              "prefix_base64": "AAAAAAAAAAsRGTCZER3t/BElizwRLPCPETCOVxE0T6cROcH4ET6UShFFMWcRTZ0qEVMBLA==",
+              "bytes": 52
+            }
+          }
+        },
+        {
+          "handler": "text",
+          "tkhd_base64": "AAAADtGce6jRnHuoAAAAAwAAAAAAn20ZAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAEAAAAB",
+          "tref_base64": "",
+          "tables": {
+            "stsd": {
+              "bytes": 67,
+              "base64": "AAAAAAAAAAEAAAA7dGV4dAAAAAAAAAABAAAABAAAAAH///////8AAAAAAAAAAAAAAAAAEAANAAAAAAANAAAAAAAAAA=="
+            },
+            "stts": {
+              "entry_count": 11,
+              "prefix_base64": "AAAAAAAAAAsAAAABABVyDwAAAAEAE1HkAAAAAQAIGKEAAAABABemTgAAAAEABacZAAAAAQATxyQAAAABAAk2DgAAAAEABSgfAAAAAQAO9XgAAAABABEhsAAAAAEADwal",
+              "bytes": 96
+            },
+            "stsc": {
+              "entry_count": 1,
+              "prefix_base64": "AAAAAAAAAAEAAAABAAAAAQAAAAE=",
+              "bytes": 20
+            },
+            "stsz": {
+              "fixed_sample_size": 0,
+              "sample_count": 11,
+              "first_sample_sizes": [
+                74,
+                74,
+                77,
+                76,
+                59,
+                69,
+                58,
+                56,
+                77,
+                82,
+                57
+              ],
+              "bytes": 56
+            },
+            "stco": {
+              "entry_count": 11,
+              "prefix_base64": "AAAAAAAAAAsRV+LfEVfjKRFX43MRV+PAEVfkDBFX5EcRV+SMEVfkxhFX5P4RV+VLEVflnQ==",
+              "bytes": 52
+            }
+          }
+        }
+      ],
+      "native_after": {
+        "size": 290973142,
+        "modified": 1486041908733420700,
+        "dev": 760290819,
+        "ino": 8128105,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128105
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    }
+  ],
+  "koontz": [
+    {
+      "index": 1,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\01.mp3",
+      "expected_size": 20603053,
+      "native_before": {
+        "size": 20603053,
+        "modified": 1726213305598553100,
+        "dev": 760290819,
+        "ino": 8128231,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128231
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 20603053,
+        "modified": 1726213305598553100,
+        "dev": 760290819,
+        "ino": 8128231,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128231
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 2,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\02.mp3",
+      "expected_size": 11482846,
+      "native_before": {
+        "size": 11482846,
+        "modified": 1726213305566565300,
+        "dev": 760290819,
+        "ino": 8128251,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128251
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 11482846,
+        "modified": 1726213305566565300,
+        "dev": 760290819,
+        "ino": 8128251,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128251
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 3,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\03.mp3",
+      "expected_size": 8780269,
+      "native_before": {
+        "size": 8780269,
+        "modified": 1726213305552193100,
+        "dev": 760290819,
+        "ino": 8128232,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128232
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 8780269,
+        "modified": 1726213305552193100,
+        "dev": 760290819,
+        "ino": 8128232,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128232
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 4,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\04.mp3",
+      "expected_size": 10636336,
+      "native_before": {
+        "size": 10636336,
+        "modified": 1726213305561725600,
+        "dev": 760290819,
+        "ino": 8128249,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128249
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 10636336,
+        "modified": 1726213305561725600,
+        "dev": 760290819,
+        "ino": 8128249,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128249
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 5,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\05.mp3",
+      "expected_size": 11512870,
+      "native_before": {
+        "size": 11512870,
+        "modified": 1726213305584514900,
+        "dev": 760290819,
+        "ino": 8128254,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128254
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 11512870,
+        "modified": 1726213305584514900,
+        "dev": 760290819,
+        "ino": 8128254,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128254
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 6,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\06.mp3",
+      "expected_size": 17204086,
+      "native_before": {
+        "size": 17204086,
+        "modified": 1726213305595527100,
+        "dev": 760290819,
+        "ino": 8128211,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128211
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 17204086,
+        "modified": 1726213305595527100,
+        "dev": 760290819,
+        "ino": 8128211,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128211
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 7,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\07.mp3",
+      "expected_size": 8854912,
+      "native_before": {
+        "size": 8854912,
+        "modified": 1726213305553979900,
+        "dev": 760290819,
+        "ino": 8128234,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128234
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 8854912,
+        "modified": 1726213305553979900,
+        "dev": 760290819,
+        "ino": 8128234,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128234
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 8,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\08.mp3",
+      "expected_size": 19724434,
+      "native_before": {
+        "size": 19724434,
+        "modified": 1726213305597120700,
+        "dev": 760290819,
+        "ino": 8128200,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128200
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 19724434,
+        "modified": 1726213305597120700,
+        "dev": 760290819,
+        "ino": 8128200,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128200
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 9,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\09.mp3",
+      "expected_size": 7345372,
+      "native_before": {
+        "size": 7345372,
+        "modified": 1726213305366699000,
+        "dev": 760290819,
+        "ino": 8128218,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128218
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 7345372,
+        "modified": 1726213305366699000,
+        "dev": 760290819,
+        "ino": 8128218,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128218
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 10,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\10.mp3",
+      "expected_size": 11474923,
+      "native_before": {
+        "size": 11474923,
+        "modified": 1726213305565643600,
+        "dev": 760290819,
+        "ino": 8128248,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128248
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 11474923,
+        "modified": 1726213305565643600,
+        "dev": 760290819,
+        "ino": 8128248,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128248
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 11,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\11.mp3",
+      "expected_size": 11964064,
+      "native_before": {
+        "size": 11964064,
+        "modified": 1726213305587541600,
+        "dev": 760290819,
+        "ino": 8128181,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128181
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode": "passed",
+      "native_after": {
+        "size": 11964064,
+        "modified": 1726213305587541600,
+        "dev": 760290819,
+        "ino": 8128181,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128181
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    },
+    {
+      "index": 12,
+      "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\12.mp3",
+      "expected_size": 15490216,
+      "native_before": {
+        "size": 15490216,
+        "modified": 1726213305592632600,
+        "dev": 760290819,
+        "ino": 8128178,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128178
+        ],
+        "links": 1,
+        "attributes": 32
+      },
+      "strict_decode_error": {
+        "class": "ValidationError",
+        "message": "[mp3float @ 00000276a8d5bd40] Header missing\r\n[aist#0:0/mp3 @ 00000276a5f8f040] [dec:mp3float @ 00000276a8d58f00] Error submitting packet to decoder: Invalid data found when processing input\r\n[aist#0:0/mp3 @ 00000276a5f8f040] [dec:mp3float @ 00000276a8d58f00] Error processing packet in decoder: Invalid data found when processing input\r\n[aist#0:0/mp3 @ 00000276a5f8f040] [dec:mp3float @ 00000276a8d58f00] Task finished with error code: -1094995529 (Invalid data found when processing input)\r\n[aist#0:0/mp3 @ 00000276a5f8f040] [dec:mp3float @ 00000276a8d58f00] Terminating thread with return code -1094995529 (Invalid data found when processing input)\r\n"
+      },
+      "native_after": {
+        "size": 15490216,
+        "modified": 1726213305592632600,
+        "dev": 760290819,
+        "ino": 8128178,
+        "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+        "identity_api_error": 87,
+        "identity": [
+          760290819,
+          0,
+          8128178
+        ],
+        "links": 1,
+        "attributes": 32
+      }
+    }
+  ],
+  "complete": true,
+  "elapsed_seconds": 7.9939148999983445,
+  "metadata_bytes_read": 781454
+}

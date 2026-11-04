@@ -1,0 +1,71 @@
+{
+  "authorization": "Explicit user approval relayed by Jane for exact bounded read-only Z source set; original cap admission stopped safely; selective continuation authorized by Jane within identical cumulative caps.",
+  "files": [
+    {
+      "path": "diagnostic.json",
+      "bytes": 8994,
+      "sha256": "f986460f9f5345ff4dc9b0ff0065ea3be45565878c006565ccff80b4b0591b06"
+    },
+    {
+      "path": "diagnostic-selective.json",
+      "bytes": 43008,
+      "sha256": "367de43629db04e5abc78254a80c79b7eef579e52fc78e664e3dd45dab552fb4"
+    },
+    {
+      "path": "owned.json",
+      "bytes": 1478,
+      "sha256": "0a9a44172e5172da3682d39bf6187c055e7ea7f6fef91bdbab0084baf562f429"
+    },
+    {
+      "path": "owned.log",
+      "bytes": 763,
+      "sha256": "45ba359fb4003185c6b0afc5ccd7d8dc66268c850efa9166b27ce8ec93acce7a"
+    },
+    {
+      "path": "owned-selective.json",
+      "bytes": 17838,
+      "sha256": "e5a3761d95ec81148e5a12d42dba014c4f9155de21270a01a69013e51c14d67b"
+    },
+    {
+      "path": "owned-selective.log",
+      "bytes": 15525,
+      "sha256": "97f262368c97d5420b83c748b57b8e50da367f613541daf21a4590889e59c2dd"
+    },
+    {
+      "path": "diagnose.py",
+      "bytes": 9730,
+      "sha256": "50b9d2518bd88335244e1bec4ba0e7f06ce0c0d07569ed3830927617320ae47e"
+    },
+    {
+      "path": "selective.py",
+      "bytes": 13258,
+      "sha256": "c9d4bc58191a952887d974b3af12c10d431a26acc2c99907560ecd64f0bb836b"
+    },
+    {
+      "path": "owned.mjs",
+      "bytes": 1849,
+      "sha256": "8f8b579ce76377496434c8d23833435ed9a8cdcf5c5b4feaa6db561b9119778a"
+    },
+    {
+      "path": "owned-selective.mjs",
+      "bytes": 1883,
+      "sha256": "9891bf88ef7f1d7dee3aa1d82039914b49b428416e7319abe176ffcdcbbe73e4"
+    }
+  ],
+  "access": "No Z writes, live DB changes, shell/app/focus actions. Native read handles held with before/after identity/size/time proof. No whole source hash or audio copy.",
+  "bounds": {
+    "owned_ms": 600000,
+    "metadata_per_file": 8388608,
+    "metadata_total": 33554432,
+    "actual_metadata_cumulative": 781454,
+    "koontz_visited_count": 12,
+    "koontz_visited_logical_extents": 155073381
+  },
+  "results": {
+    "fairy_tales": "Confirmed incomplete source: actual2097152, mdat offset774336 declared75026743 => required extent75801079, missing at least73703927 bytes. Fresh strict decode corrupt input packet stream0; cannot reconstruct absent audio.",
+    "png": "Three native-stable files: exact png VisualSampleEntry86 bytes/78-byte payload/no extensions; dimensions500x500,512x499,512x512; sample counts18,18,11. Selective metadata reader skipped large audio sample tables.",
+    "koontz": "Strict decode01–11 passed;12.mp3 failed Header missing / Invalid data found. Stopped before13–57. Source12 native identity, size15490216 and timestamp unchanged."
+  },
+  "ownership": "Both retained process owners closed/outputComplete/native complete+zero. Initial731ms cap refusal and selective8335ms success preserved. Full moov copy and temporary decoder stdout/stderr excluded from durable evidence as redundant.",
+  "cleanup": "Exact owned scratch leaf to be removed with approved scoped studio-sweep after this copied evidence is hash-verified."
+}

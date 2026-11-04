@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "Traceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\source-diagnostics-025-20261104\\diagnose.py\", line 92, in <module>\r\n    moov=read(at+header,size-header);(root/('moov-'+str(index)+'.bin')).write_bytes(moov)\r\n  File \"C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\source-diagnostics-025-20261104\\diagnose.py\", line 77, in read\r\n    if item.get('metadata_bytes_read',0)+count>8*1024*1024 or total_read+count>32*1024*1024:raise RuntimeError('Approved metadata byte cap reached')\r\n                                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nRuntimeError: Approved metadata byte cap reached\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 73932,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 6,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 45,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 731.6201,
+  "outputBytes": 763
+}

@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const root='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/source-diagnostics-025-20261104';
+const source='C:/Antigravity Projects/Worktrees/Books Arranger/converted-duplicate-20261104';
+const python='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime/python/python.exe';
+for(const part of ['temp','profile'])fs.mkdirSync(path.join(root,part),{recursive:true});
+if(fs.existsSync(root+'/owned-followup.json'))throw Error('Single diagnostic result already exists; do not duplicate');
+const env={SystemRoot:process.env.SystemRoot,WINDIR:process.env.WINDIR,PATH:'C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime/ffmpeg;C:/Program Files/nodejs;C:/Windows/System32',TEMP:root+'/temp',TMP:root+'/temp',TMPDIR:root+'/temp',USERPROFILE:root+'/profile',APPDATA:root+'/profile',LOCALAPPDATA:root+'/profile',PYTHONHOME:'',PYTHONPATH:'',PYTHONIOENCODING:'utf-8',NODE_OPTIONS:'',NODE_PATH:''};
+const {runOwned}=await import(pathToFileURL('C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs').href);
+const result=await runOwned(python,['-I','-B',root+'/followup.py'],{cwd:root,env,timeoutMs:600000,maxBytes:2097152,koffiRoot:'C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-ownership/node_modules/koffi'});
+fs.writeFileSync(root+'/owned-followup.json',JSON.stringify(result,null,2),{flag:'wx'});fs.writeFileSync(root+'/owned-followup.log',(result.out||'')+(result.err||''),{flag:'wx'});
+console.log(JSON.stringify({ok:result.ok,code:result.code,closed:result.closed,outputComplete:result.outputComplete,native:result.native,elapsedMs:result.elapsedMs}));
+console.log((result.out||'')+(result.err||''));process.exitCode=result.ok?0:1;

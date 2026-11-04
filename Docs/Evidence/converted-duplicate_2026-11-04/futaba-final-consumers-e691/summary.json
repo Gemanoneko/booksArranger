@@ -1,0 +1,282 @@
+{
+  "source_commit": "e6912eb7e43cac35bf26a7a662bc9dc95c0e1d2d",
+  "frozen_summary_sha256": "e9305a418ff46060acf6b03cb89fa3156dbe599c444fb602b967222ccd3446b1",
+  "private_source": "git archive of committed source",
+  "source_files": [
+    {
+      "path": "audio_jobs.py",
+      "raw_sha256": "1e4b2cb8ed007749fae1c0a79e14385258efb694ed8d7565a1589ce891a95e45",
+      "lf_sha256": "2d4852a4b5b1750accf820adb85c244b3e88d179e86611f7ccc2ebc0ce69c713",
+      "match": true
+    },
+    {
+      "path": "failed_m4b_retry.py",
+      "raw_sha256": "ad6ffcc9f7d4fb1f95fddca87e30b80d1837d70d96a1ae43d07ec35b935048e1",
+      "lf_sha256": "c94342c153c1e2278d7d6260714857c92b6f03915f29328e3db7192bc5756a2f",
+      "match": true
+    },
+    {
+      "path": "merge_service.py",
+      "raw_sha256": "3a08a6ff3bf2b3b8fbe919fdc221a561f41d99bb0aea5b2b3ecf1290a33b363b",
+      "lf_sha256": "d3605b348ef2a3a8ea73e847b28af8e05b333448452ad1c7a6d637599d77d381",
+      "match": true
+    },
+    {
+      "path": "review_backend.py",
+      "raw_sha256": "5df34317472776fdff4b2ec86441b0ee013e143be50dcf815f2b81b878892b22",
+      "lf_sha256": "cfce11b6322e40d07c59289874aadc9eaa8eec38cea6c867af4167392a77abf5",
+      "match": true
+    },
+    {
+      "path": "scripts/build-inputs.json",
+      "raw_sha256": "b195a0e1013f747d6e41273454fdce10dc6a1f75d121323363ce90fad3a45390",
+      "lf_sha256": "fe6c5eda4bafd4f340b959db4ec9ef3c45129000c478fa1627c621444d3199ba",
+      "match": true
+    },
+    {
+      "path": "tests/test_attention_failure_policy.py",
+      "raw_sha256": "d12cf9dbc27e00d8ae4b20091319f8423aedfbd524e3942db7c00a2a68347258",
+      "lf_sha256": "229573d33bf5caa85af15b61e6c6f3f3cef6aac0d43a4c6afe422775734eeff3",
+      "match": true
+    },
+    {
+      "path": "tests/test_attention_frontend.js",
+      "raw_sha256": "2093fb9b8a56eac725db1014b56684a1579e8457e7eaa0d25fd8657143a6bd80",
+      "lf_sha256": "34a430d24badb97a49453cf61fa43bc0dc75308139240f4c912efdfbe4c13f89",
+      "match": true
+    },
+    {
+      "path": "tests/test_automatic_media.py",
+      "raw_sha256": "03cbee286d66a46405e149f50f98dccc26c8f676cace6be1b58a21e527b2c69a",
+      "lf_sha256": "143972af48bdb6c475133f8acfec921e7e6279a0e7ca6ded1a79c2b62ac34b2d",
+      "match": true
+    },
+    {
+      "path": "tests/test_lock_timing.py",
+      "raw_sha256": "752067629f09fb5c8087933313076811159d55c2df0df4bc432135e1eb473882",
+      "lf_sha256": "011b2ebb6c316bc5a1d187f754210eee005e46000f1a556f5cf9bf4dc25dd30d",
+      "match": true
+    },
+    {
+      "path": "tests/test_refused_retry_frontend.js",
+      "raw_sha256": "28705377a24c6041fa089907c46b1a6bfce441098ebc8f1c0a2b1afd7833f521",
+      "lf_sha256": "d9ace9b2a7b227536bb6cef5033ae773c85a976c290b55e41e9c4add2e5ec6af",
+      "match": true
+    },
+    {
+      "path": "web/app.js",
+      "raw_sha256": "b0379f5008c130e448899584132e5e1c183511a4040a72b92a52764c46b74bb7",
+      "lf_sha256": "425822888f72924af58ec5a10d62175da38c2995dc28c3bb7782d9abe6e4baf1",
+      "match": true
+    },
+    {
+      "path": "web_server.py",
+      "raw_sha256": "fb50cd109bccd3770577a0e583d64fd2b9ca9acb8889ac3286bb5b18bc88f376",
+      "lf_sha256": "1695f1abc4a9d0470e4847800826103ba1cef2841de44ef9098401cac6edd233",
+      "match": true
+    }
+  ],
+  "python": {
+    "ran": 107,
+    "passed": 107,
+    "failed": 0,
+    "owned": {
+      "ok": true,
+      "code": 0,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 756,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 10466,
+          "incompleteQueries": 2,
+          "firstIncomplete": {
+            "assigned": 6,
+            "listed": 5,
+            "capacity": 8192,
+            "query_ok": true
+          },
+          "lastIncomplete": {
+            "assigned": 5,
+            "listed": 4,
+            "capacity": 8192,
+            "query_ok": true
+          }
+        }
+      },
+      "elapsedMs": 167503.51960000003
+    }
+  },
+  "frontend": {
+    "deadlineMs": 600000,
+    "results": [
+      {
+        "script": "test_attention_frontend.js",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 32,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 512.9643
+      },
+      {
+        "script": "test_refused_retry_frontend.js",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 17,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 248.3845
+      },
+      {
+        "script": "test_retry_frontend.js",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 18,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 263.1489
+      },
+      {
+        "script": "test_inline_series_frontend.js",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 16,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 233.1380999999999
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "name": "owned.mjs",
+      "sha256": "14456af0f82baa931d0a11f8cbba54aa43bd0cdf63d9ce91a84d4f051d91a149"
+    },
+    {
+      "name": "focused.py",
+      "sha256": "8d3601b542a3c7c3f9c0168653284ee91af90351ecf978758569230599ed847f"
+    },
+    {
+      "name": "frontend-owned.mjs",
+      "sha256": "2e9008c59440c50c88b47771a36d45b801ab3116f49b95d65abbc6fae7b8c64a"
+    },
+    {
+      "name": "final-consumers-83.json",
+      "sha256": "d2cfe8c672e5c389bad1a2deb54512820d3fda71c73cd568762576d6c0ec8b7f"
+    },
+    {
+      "name": "final-consumers-83.log",
+      "sha256": "a1f5c0f12f487eb9e6e69cfd94560b53a5bf274b64792075831ca47074a5209f"
+    },
+    {
+      "name": "frontend-summary.json",
+      "sha256": "de848a1ca33c0b1844d969ce37dd173f5575b3e2f93fa619fae68a00d53d93df"
+    },
+    {
+      "name": "test_attention_frontend.json",
+      "sha256": "62a2f499a18431910e0a726c444b6da345dea526cbf0fc0f1b1117e799e93f77"
+    },
+    {
+      "name": "test_attention_frontend.log",
+      "sha256": "b45d5c4de81b320ff998906b5d2e18be5e528091d5a44c40d2dba97852bc50f9"
+    },
+    {
+      "name": "test_refused_retry_frontend.json",
+      "sha256": "05de6d008fa912e795283aa45d82bde7fdf2a816d983c38d0ab017f87b8a6244"
+    },
+    {
+      "name": "test_refused_retry_frontend.log",
+      "sha256": "93c6d9d04fa2c7fbed4f9d2240bbe77a55a3078024838eab9c54ef4d2c36c90e"
+    },
+    {
+      "name": "test_retry_frontend.json",
+      "sha256": "6ed0a335400f27122aa199fef1c734e36656a8ef62696bee8a588bf6fdae9e90"
+    },
+    {
+      "name": "test_retry_frontend.log",
+      "sha256": "237c3d7950a06d25bd57d6b555c72c4f31ad6e4a89f56502af9791dc02ef1c72"
+    },
+    {
+      "name": "test_inline_series_frontend.json",
+      "sha256": "0c09a5c313e86245d2e340442a217ab82db2bf4203af09e4d9c443857f606652"
+    },
+    {
+      "name": "test_inline_series_frontend.log",
+      "sha256": "8ef8d103b7dec515e4ce97af5ccb3f1b88c1ce4f8a8828f4accea8091a6bd9cd"
+    }
+  ],
+  "limits": "Focused source QA only; full and native packaged gates separate; no Z/live/focus."
+}

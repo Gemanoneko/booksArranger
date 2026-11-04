@@ -1,0 +1,45 @@
+{
+  "captured_utc": "2026-11-04T19:25:05.360792+00:00",
+  "access": "Read-only SQLite SELECT and pure current-source capability/binding methods. No service constructor, status(), native file check, Z access or app action.",
+  "capability": {
+    "schema": "books-cleanup-identity-retry-v1",
+    "allowed": true,
+    "cleanup_id": "bc5f1302-fdee-4621-9823-522a0a9ad2a1",
+    "diagnostic": null,
+    "output_path": "Z:\\Audiobooks Sorted\\Brom\\Похититель детей - Brom.m4b",
+    "phase": null,
+    "running": false
+  },
+  "binding_matches_enrollment": true,
+  "completed_job_manifest_matches": true,
+  "completed_output_matches": true,
+  "global_cleanup_states": [
+    {
+      "state": "completed",
+      "n": 753
+    },
+    {
+      "state": "needs_attention",
+      "n": 2
+    }
+  ],
+  "retained_producer_checkpoints": 0,
+  "installed_source_matches": {
+    "source_cleanup.py": {
+      "normalized_sha256": "1fb4e55c199f44f61c1082c144cb2ce4f3dd3456b86cdaf5b09edb7f5d5d106c",
+      "main_normalized_equal": true
+    },
+    "native_io.py": {
+      "normalized_sha256": "fed91fd457dca820ba5c23bddd2a5a7d6dd32e15443c20bc6c401723fb309950",
+      "main_normalized_equal": true
+    },
+    "merge_service.py": {
+      "normalized_sha256": "f4fcc528eff7a5691fa5d2b2cadfdf7847945348d07172ec6165e6219603783c",
+      "main_normalized_equal": true
+    },
+    "web_server.py": {
+      "normalized_sha256": "d16f6d6883a949773d803e31df00875d9692d7c8bc9b3d48070a16a2f27dd94f",
+      "main_normalized_equal": true
+    }
+  }
+}

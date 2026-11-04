@@ -1,0 +1,281 @@
+{
+  "schema": "books-residual-evidence-files-v1",
+  "source_commit": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+  "files": [
+    {
+      "sha256": "a14c37e38dad6d3c936ebf29167d879dcf78c73ebf481b0010b5c08fceb869b9",
+      "path": "Docs/BooksArranger_FinalConsumer_FocusedQA_2026-11-04.md",
+      "size": 1532
+    },
+    {
+      "sha256": "1c7eacc9203b4f176fff86242a82d389f41a86d8b0e10041e90476c1ac515274",
+      "path": "Docs/BooksArranger_Precheck90f_FocusedQA_2026-11-05.md",
+      "size": 878
+    },
+    {
+      "sha256": "a2426cf4ab28e8ee6c61661f0ae20a9a9a3ac056ff0ea769040ee2811d4a483b",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/cleanup-ownership-review.json",
+      "size": 342880
+    },
+    {
+      "sha256": "d2cfe8c672e5c389bad1a2deb54512820d3fda71c73cd568762576d6c0ec8b7f",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/final-consumers-83.json",
+      "size": 20066
+    },
+    {
+      "sha256": "a1f5c0f12f487eb9e6e69cfd94560b53a5bf274b64792075831ca47074a5209f",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/final-consumers-83.log",
+      "size": 18939
+    },
+    {
+      "sha256": "8d3601b542a3c7c3f9c0168653284ee91af90351ecf978758569230599ed847f",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/focused.py",
+      "size": 962
+    },
+    {
+      "sha256": "2e9008c59440c50c88b47771a36d45b801ab3116f49b95d65abbc6fae7b8c64a",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/frontend-owned.mjs",
+      "size": 2174
+    },
+    {
+      "sha256": "de848a1ca33c0b1844d969ce37dd173f5575b3e2f93fa619fae68a00d53d93df",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/frontend-summary.json",
+      "size": 2334
+    },
+    {
+      "sha256": "14456af0f82baa931d0a11f8cbba54aa43bd0cdf63d9ce91a84d4f051d91a149",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/owned.mjs",
+      "size": 1956
+    },
+    {
+      "sha256": "6bcde52b6401e837ed8200c9c5650bf7824c9b28d759f462c5ba6303da1a0a93",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/studio-sweep-apply.json",
+      "size": 1104
+    },
+    {
+      "sha256": "389cb503b3fc29247beb50fbd0fc3f5e796289f0f4315c29d75b2e6ba4274728",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/studio-sweep-dryrun.json",
+      "size": 908
+    },
+    {
+      "sha256": "be97f60b1ac7fd13d15035bd0f73ce7a7452c1b0c3ac7928475b59ece6421c71",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/summary.json",
+      "size": 8684
+    },
+    {
+      "sha256": "62a2f499a18431910e0a726c444b6da345dea526cbf0fc0f1b1117e799e93f77",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/test_attention_frontend.json",
+      "size": 900
+    },
+    {
+      "sha256": "b45d5c4de81b320ff998906b5d2e18be5e528091d5a44c40d2dba97852bc50f9",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/test_attention_frontend.log",
+      "size": 217
+    },
+    {
+      "sha256": "0c09a5c313e86245d2e340442a217ab82db2bf4203af09e4d9c443857f606652",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/test_inline_series_frontend.json",
+      "size": 768
+    },
+    {
+      "sha256": "8ef8d103b7dec515e4ce97af5ccb3f1b88c1ce4f8a8828f4accea8091a6bd9cd",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/test_inline_series_frontend.log",
+      "size": 77
+    },
+    {
+      "sha256": "05de6d008fa912e795283aa45d82bde7fdf2a816d983c38d0ab017f87b8a6244",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/test_refused_retry_frontend.json",
+      "size": 786
+    },
+    {
+      "sha256": "93c6d9d04fa2c7fbed4f9d2240bbe77a55a3078024838eab9c54ef4d2c36c90e",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/test_refused_retry_frontend.log",
+      "size": 103
+    },
+    {
+      "sha256": "6ed0a335400f27122aa199fef1c734e36656a8ef62696bee8a588bf6fdae9e90",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/test_retry_frontend.json",
+      "size": 786
+    },
+    {
+      "sha256": "237c3d7950a06d25bd57d6b555c72c4f31ad6e4a89f56502af9791dc02ef1c72",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/futaba-final-consumers-e691/test_retry_frontend.log",
+      "size": 103
+    },
+    {
+      "sha256": "5354f7a7a2d8fdbf3b9cc8225849baf1cf07c75ed2e1000895250727ae342c96",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/koontz-stopped-readonly/snapshot.json",
+      "size": 878769
+    },
+    {
+      "sha256": "8709977595c3b4d17701902f89ef0e17fd6937417144aab5fff52f5b2c944e05",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/m4b-unsupported-readonly/first-title.json",
+      "size": 10770
+    },
+    {
+      "sha256": "eef2fda21193bcb09ebaff234c0a8937a4c49b4b8df4e672978c07eef18d9b5b",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/m4b-unsupported-readonly/snapshot.json",
+      "size": 640349
+    },
+    {
+      "sha256": "50b9d2518bd88335244e1bec4ba0e7f06ce0c0d07569ed3830927617320ae47e",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/diagnose.py",
+      "size": 9730
+    },
+    {
+      "sha256": "367de43629db04e5abc78254a80c79b7eef579e52fc78e664e3dd45dab552fb4",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/diagnostic-selective.json",
+      "size": 43008
+    },
+    {
+      "sha256": "f986460f9f5345ff4dc9b0ff0065ea3be45565878c006565ccff80b4b0591b06",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/diagnostic.json",
+      "size": 8994
+    },
+    {
+      "sha256": "260ad9e5374ca7340446229c01842058340e19fe11fb01334269585bd8d2edbb",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/followup-cleanup.json",
+      "size": 1166
+    },
+    {
+      "sha256": "813cca3f09dce79df49eacc073c15d84bb6b0fd9ae5a4540f970b79bcb5c76c5",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/followup-ranges.json.gz",
+      "size": 9435
+    },
+    {
+      "sha256": "5df6044dbd592f6f032107be9cd77c1e3599918132450137483d8bf22b4b340e",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/followup.json",
+      "size": 2239
+    },
+    {
+      "sha256": "fc998ab594eab6767cede17e72f6864753ed270573d142f1892efade7ccba527",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/followup.py",
+      "size": 5653
+    },
+    {
+      "sha256": "fd32ff7ab605920b32b935b2e208f18c146bed082324e86d82a54bf9c89efc11",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned-followup.json",
+      "size": 2911
+    },
+    {
+      "sha256": "2646d05513073fce92fd26f827f74e1da0ab6505946c15487ec829c881a3ad7d",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned-followup.log",
+      "size": 2039
+    },
+    {
+      "sha256": "358dbf0be00386e626721afe86058bbc168623b2ac6e9c5ccec2c6edebd4e6ea",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned-followup.mjs",
+      "size": 1876
+    },
+    {
+      "sha256": "e5a3761d95ec81148e5a12d42dba014c4f9155de21270a01a69013e51c14d67b",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned-selective.json",
+      "size": 17838
+    },
+    {
+      "sha256": "97f262368c97d5420b83c748b57b8e50da367f613541daf21a4590889e59c2dd",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned-selective.log",
+      "size": 15525
+    },
+    {
+      "sha256": "9891bf88ef7f1d7dee3aa1d82039914b49b428416e7319abe176ffcdcbbe73e4",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned-selective.mjs",
+      "size": 1883
+    },
+    {
+      "sha256": "0a9a44172e5172da3682d39bf6187c055e7ea7f6fef91bdbab0084baf562f429",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned.json",
+      "size": 1478
+    },
+    {
+      "sha256": "45ba359fb4003185c6b0afc5ccd7d8dc66268c850efa9166b27ce8ec93acce7a",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned.log",
+      "size": 763
+    },
+    {
+      "sha256": "8f8b579ce76377496434c8d23833435ed9a8cdcf5c5b4feaa6db561b9119778a",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/owned.mjs",
+      "size": 1849
+    },
+    {
+      "sha256": "c9d4bc58191a952887d974b3af12c10d431a26acc2c99907560ecd64f0bb836b",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/selective.py",
+      "size": 13258
+    },
+    {
+      "sha256": "9ff133c343189e8944f7f1aa9ded5103da966ca577891848709e67bd5220d5bf",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-04/source-diagnostics-025/summary.json",
+      "size": 3275
+    },
+    {
+      "sha256": "8c04d986ca094f6b1c08d0150f3f8fa8e1ef2e859562dec861d7f39d86757f3f",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-05/futaba-precheck-90f/cleanup-ownership-review.json",
+      "size": 361922
+    },
+    {
+      "sha256": "ecb5d8a6c26623bb90970d90d7a970f5e935d893ef17865cadcb196ddc1792e7",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-05/futaba-precheck-90f/owned-node.mjs",
+      "size": 1932
+    },
+    {
+      "sha256": "7ae6927c330fee7d75b19f2a668e300820a224556aa5fe7dd34bb87e00e4058b",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-05/futaba-precheck-90f/precheck-1.json",
+      "size": 833
+    },
+    {
+      "sha256": "e4d9426d17f69eb8816a76aecbc936b4db94e28263cb4b5262195cdfb754e75d",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-05/futaba-precheck-90f/precheck-1.log",
+      "size": 150
+    },
+    {
+      "sha256": "2d25ce21d44836b487f91db776e3ce559c3fa0ef5f14f4f1abb394a541a76236",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-05/futaba-precheck-90f/source-diff.patch",
+      "size": 1414
+    },
+    {
+      "sha256": "ac9f74705b6fb363f75bf5c15179636fff6a0b10be0b847373a9e913ef59ea6b",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-05/futaba-precheck-90f/studio-sweep-apply.json",
+      "size": 1101
+    },
+    {
+      "sha256": "bb9139fbd060673ca73693ad5fc72ab58b31bbd152fba9f663abcd5c83b27ad0",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-05/futaba-precheck-90f/studio-sweep-dryrun.json",
+      "size": 905
+    },
+    {
+      "sha256": "24de169668d4113d485e74135594b44cf03f7dbefdd8273dd8a8ee8d31bff613",
+      "path": "Docs/Evidence/converted-duplicate_2026-11-05/futaba-precheck-90f/summary.json",
+      "size": 1656
+    },
+    {
+      "sha256": "801800f5475fd86b1ff073254757fa3b80a55dae40f1ecb3edf1c36a9cee55fe",
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/held-book-readonly/diagnosis.md",
+      "size": 5714
+    },
+    {
+      "sha256": "2e495bc0a60423664a494ca091ed6939697cd774836cbdc060502161f40c88f2",
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/held-book-readonly/eligibility.json",
+      "size": 1568
+    },
+    {
+      "sha256": "c71094350ddf7f8c05645cb84208efd5922abb478651a7a15bf5e38a1d59c962",
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/held-book-readonly/snapshot.json",
+      "size": 703828
+    },
+    {
+      "sha256": "af428c09320c358b4253c6a088108148b626d71279b5aecf4ace248f771a6b49",
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/held-book-readonly/summary.json",
+      "size": 3533
+    },
+    {
+      "sha256": "d53224c7a3c55b09e47d4bf592c87564da10e47d81b149b403afcdf5bcead7f6",
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/name-taken-mccammon-readonly/snapshot.json",
+      "size": 180447
+    },
+    {
+      "sha256": "3888fa8a996f23b34cd722197e4d0c31e149c6cd1d165e8729f172af2d112f2d",
+      "path": "Docs/Evidence/v0.24.5_2026-11-04/name-taken-mccammon-readonly/summary.json",
+      "size": 6951
+    }
+  ]
+}

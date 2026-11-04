@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\source-diagnostics-025-20261104",
+   "reason": "Explicit approved exact12.mp3 bounded metadata followup complete nativezero; six unique files copied and SHAverified; Sergei required removal of diagnostic temporaries",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\source-diagnostics-025-20261104",
+   "isDir": true,
+   "before": {
+    "files": 6,
+    "bytes": 24153
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 6,
+    "bytes": 24153
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 6,
+    "bytes": 24153
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 103962607616,
+   "after": 103962648576
+  }
+ ],
+ "removedFiles": 6,
+ "removedBytes": 24153,
+ "keptCount": 0
+}

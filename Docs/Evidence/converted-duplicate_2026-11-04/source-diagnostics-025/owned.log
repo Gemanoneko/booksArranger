@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\source-diagnostics-025-20261104\diagnose.py", line 92, in <module>
+    moov=read(at+header,size-header);(root/('moov-'+str(index)+'.bin')).write_bytes(moov)
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\source-diagnostics-025-20261104\diagnose.py", line 77, in read
+    if item.get('metadata_bytes_read',0)+count>8*1024*1024 or total_read+count>32*1024*1024:raise RuntimeError('Approved metadata byte cap reached')
+                                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Approved metadata byte cap reached

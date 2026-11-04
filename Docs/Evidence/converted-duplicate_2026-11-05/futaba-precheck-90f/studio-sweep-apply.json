@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\f90",
+   "reason": "Sergei requested cleanup of created temporary files; Futaba reviewed exact disposable 90f focused QA archive, evidence retained in Docs",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\f90",
+   "isDir": true,
+   "before": {
+    "files": 1801,
+    "bytes": 52490846
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 1801,
+    "bytes": 52490846
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 1801,
+    "bytes": 52490846
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 97051226112,
+   "after": 97107034112
+  }
+ ],
+ "removedFiles": 1801,
+ "removedBytes": 52490846,
+ "keptCount": 0
+}

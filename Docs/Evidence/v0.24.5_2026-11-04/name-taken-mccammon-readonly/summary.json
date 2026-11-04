@@ -1,0 +1,204 @@
+{
+  "captured_utc": "2026-11-04T19:49:28.003803+00:00",
+  "snapshot_sha256": "d53224c7a3c55b09e47d4bf592c87564da10e47d81b149b403afcdf5bcead7f6",
+  "snapshot_bytes": 180447,
+  "job": {
+    "job_id": "1e864859-2aa7-43be-8433-12206921b4b4",
+    "state": "completed",
+    "created": "2026-10-25T21:49:15.952860+00:00",
+    "updated": "2026-10-25T21:54:28.258182+00:00"
+  },
+  "output": {
+    "final_path": "Z:\\Audiobooks Sorted\\McCammon Robert R\\Неисповедимый путь 2 - McCammon Robert R.m4b",
+    "sha256": "db8a8cf5293fd58ba9e93ec9035e23b57191b27d7cf072e7a38f27e3b2248af7",
+    "size": 366180883
+  },
+  "cleanup": {
+    "id": "5dcdf1d1-72e8-48ca-b031-4e1021a385e5",
+    "state": "completed",
+    "reason": "",
+    "created": "2026-10-25T21:55:18.875877+00:00",
+    "updated": "2026-10-25T21:55:38.665458+00:00"
+  },
+  "members": [
+    {
+      "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+      "state": "removed"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "f5c131c1-100b-40fc-95c3-89b16589a425",
+      "revision": 5,
+      "sources": [
+        {
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "path_is_NFC": false,
+          "size": 358935459,
+          "modified": 1597607122565653100,
+          "seen": 6,
+          "missing": 0
+        }
+      ],
+      "source_hashes": {
+        "6411408e-824f-5701-b100-2c8b61f3e5aa": {
+          "sha256": "86f64dfa8488be0741545633f9608c43f49477b3563046a37dc13207b5ad1ec8",
+          "size": 358935459,
+          "modified": "1597607122565653100",
+          "dev": 760290819,
+          "ino": 8061748
+        }
+      },
+      "duplicate_review": null,
+      "automatic_state": "Queued",
+      "automatic_attempted": "2026-10-25T21:54:07.510663+00:00",
+      "reasons": [],
+      "held_history": [],
+      "scan_outcomes": [
+        {
+          "root": "Z:\\Audiobooks",
+          "generation": 6,
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "directory": 0,
+          "outcome": "success",
+          "error": "",
+          "time": "2026-10-22T17:06:54.824221+00:00",
+          "details": ""
+        },
+        {
+          "root": "Z:\\Audiobooks",
+          "generation": 5,
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "directory": 0,
+          "outcome": "success",
+          "error": "",
+          "time": "2026-10-10T21:10:37.938689+00:00",
+          "details": ""
+        },
+        {
+          "root": "Z:\\Audiobooks",
+          "generation": 4,
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "directory": 0,
+          "outcome": "success",
+          "error": "",
+          "time": "2026-10-09T20:42:02.812891+00:00",
+          "details": ""
+        },
+        {
+          "root": "Z:\\Audiobooks",
+          "generation": 3,
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "directory": 0,
+          "outcome": "success",
+          "error": "",
+          "time": "2026-10-09T20:22:02.322383+00:00",
+          "details": ""
+        }
+      ]
+    },
+    {
+      "id": "0b15dc8c-7b0f-4ea5-bd62-0fd1743370b4",
+      "revision": 11,
+      "sources": [
+        {
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "path_is_NFC": true,
+          "size": 358935459,
+          "modified": 1579958012000000000,
+          "seen": 6,
+          "missing": 0
+        }
+      ],
+      "source_hashes": {
+        "942be2e8-a7d8-51ac-8031-3c73ab0a3518": {
+          "sha256": "86f64dfa8488be0741545633f9608c43f49477b3563046a37dc13207b5ad1ec8",
+          "size": 358935459,
+          "modified": "1579958012000000000",
+          "dev": 760290819,
+          "ino": 8062027
+        }
+      },
+      "duplicate_review": null,
+      "automatic_state": "Held",
+      "automatic_attempted": "2026-11-04T18:07:30.111792+00:00",
+      "reasons": [
+        "An audiobook already exists at this path. Review it or choose a different reviewed destination."
+      ],
+      "held_history": [
+        {
+          "at": "2026-10-25T21:57:48.297078+00:00",
+          "reasons": [
+            "Identical verified recording already arranged — duplicate sources preserved"
+          ]
+        },
+        {
+          "at": "2026-11-01T07:45:58.870628+00:00",
+          "reasons": [
+            "An audiobook already exists at this path. Review it or choose a different reviewed destination."
+          ]
+        },
+        {
+          "at": "2026-11-02T11:44:03.545009+00:00",
+          "reasons": [
+            "An audiobook already exists at this path. Review it or choose a different reviewed destination."
+          ]
+        },
+        {
+          "at": "2026-11-03T18:02:46.722453+00:00",
+          "reasons": [
+            "An audiobook already exists at this path. Review it or choose a different reviewed destination."
+          ]
+        },
+        {
+          "at": "2026-11-04T18:07:30.111664+00:00",
+          "reasons": [
+            "An audiobook already exists at this path. Review it or choose a different reviewed destination."
+          ]
+        }
+      ],
+      "scan_outcomes": [
+        {
+          "root": "Z:\\Audiobooks",
+          "generation": 6,
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "directory": 0,
+          "outcome": "success",
+          "error": "",
+          "time": "2026-10-22T17:06:55.015862+00:00",
+          "details": ""
+        },
+        {
+          "root": "Z:\\Audiobooks",
+          "generation": 5,
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "directory": 0,
+          "outcome": "success",
+          "error": "",
+          "time": "2026-10-10T21:10:38.085390+00:00",
+          "details": ""
+        },
+        {
+          "root": "Z:\\Audiobooks",
+          "generation": 4,
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "directory": 0,
+          "outcome": "success",
+          "error": "",
+          "time": "2026-10-09T20:42:02.834132+00:00",
+          "details": ""
+        },
+        {
+          "root": "Z:\\Audiobooks",
+          "generation": 3,
+          "path": "Z:\\Audiobooks\\Robert R. McCammon\\Неисповедимый путь 2.m4b",
+          "directory": 0,
+          "outcome": "success",
+          "error": "",
+          "time": "2026-10-09T20:22:02.334658+00:00",
+          "details": ""
+        }
+      ]
+    }
+  ]
+}

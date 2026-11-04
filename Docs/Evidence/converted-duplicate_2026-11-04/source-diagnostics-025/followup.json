@@ -1,0 +1,81 @@
+{
+  "path": "Z:\\Audiobooks\\Unsorted\\Кунц Дин - Странный Томас 03, Брат Томас [Пожилой Ксеноморф]\\12.mp3",
+  "expected_native": {
+    "size": 15490216,
+    "modified": 1726213305592632600,
+    "dev": 760290819,
+    "ino": 8128178,
+    "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+    "identity_api_error": 87,
+    "identity": [
+      760290819,
+      0,
+      8128178
+    ],
+    "links": 1,
+    "attributes": 32
+  },
+  "prior_visited_extents": 155073381,
+  "native_before": {
+    "size": 15490216,
+    "modified": 1726213305592632600,
+    "dev": 760290819,
+    "ino": 8128178,
+    "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+    "identity_api_error": 87,
+    "identity": [
+      760290819,
+      0,
+      8128178
+    ],
+    "links": 1,
+    "attributes": 32
+  },
+  "head_sha256": "c1f42a8d8adbe269e83d3670400aceb9827295b5c850abfd9de96ba91d2a6bc0",
+  "tail_sha256": "df9dab42018e0c4d9b1e0b876d8863e705b5d6d26c3ba8b9a1861fec6be4e24a",
+  "leading_id3": {
+    "major": 3,
+    "revision": 0,
+    "flags": 0,
+    "declared_payload": 7702,
+    "audio_start": 7712,
+    "contains_iTunSMPB": false,
+    "contains_XMP": true
+  },
+  "terminal_id3v1": true,
+  "terminal_ape_marker": false,
+  "frame_error": {
+    "offset": 1118600,
+    "reason": "Noncontiguous/unsupported MPEG Layer III header",
+    "raw_base64": "MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTQ=="
+  },
+  "frame_headers": 2664,
+  "audio_end": 15490088,
+  "final_header_position": 1118600,
+  "configuration": [
+    3,
+    44100,
+    2
+  ],
+  "headers_contiguous_to_metadata": false,
+  "encoder_seek_markers": [],
+  "native_after": {
+    "size": 15490216,
+    "modified": 1726213305592632600,
+    "dev": 760290819,
+    "ino": 8128178,
+    "identity_method": "BY_HANDLE_FILE_INFORMATION64",
+    "identity_api_error": 87,
+    "identity": [
+      760290819,
+      0,
+      8128178
+    ],
+    "links": 1,
+    "attributes": 32
+  },
+  "read_bytes": 271684,
+  "elapsed_seconds": 0.09160080000583548,
+  "range_count": 2372,
+  "ranges_sha256": "813cca3f09dce79df49eacc073c15d84bb6b0fd9ae5a4540f970b79bcb5c76c5"
+}

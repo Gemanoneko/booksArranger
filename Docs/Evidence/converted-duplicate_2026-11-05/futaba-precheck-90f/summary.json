@@ -1,0 +1,56 @@
+{
+  "source_commit": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+  "base_commit": "0ec4971169a70d57a407ae1a9ef6bf96227724d4",
+  "frozen_node_summary_sha256": "9a1c22e0bae49d2b9ee5fd68a7632e3dc098d23d8c8da2d16d9daf074dd624fd",
+  "changed_non_docs": [
+    "tests/test_precheck_frontend.js"
+  ],
+  "source_file": {
+    "path": "tests/test_precheck_frontend.js",
+    "raw_sha256": "b47b4fd7794c45a6c6e3dcd0b0fb782327fc656722747ff0b19279a53c5f2314",
+    "frozen_sha256": "b47b4fd7794c45a6c6e3dcd0b0fb782327fc656722747ff0b19279a53c5f2314"
+  },
+  "result": {
+    "ok": true,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "forced": false,
+    "timedOut": false,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 4,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 14,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "elapsedMs": 257.6574
+  },
+  "evidence": [
+    {
+      "name": "owned-node.mjs",
+      "sha256": "ecb5d8a6c26623bb90970d90d7a970f5e935d893ef17865cadcb196ddc1792e7"
+    },
+    {
+      "name": "precheck-1.json",
+      "sha256": "7ae6927c330fee7d75b19f2a668e300820a224556aa5fe7dd34bb87e00e4058b"
+    },
+    {
+      "name": "precheck-1.log",
+      "sha256": "e4d9426d17f69eb8816a76aecbc936b4db94e28263cb4b5262195cdfb754e75d"
+    },
+    {
+      "name": "source-diff.patch",
+      "sha256": "2d25ce21d44836b487f91db776e3ce559c3fa0ef5f14f4f1abb394a541a76236"
+    }
+  ],
+  "scope": "One previously failed precheck frontend script only; no full/hidden/live/Z/focus."
+}

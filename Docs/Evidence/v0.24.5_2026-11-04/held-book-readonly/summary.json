@@ -1,0 +1,112 @@
+{
+  "captured_utc": "2026-11-04T19:23:30.932747+00:00",
+  "snapshot_sha256": "c71094350ddf7f8c05645cb84208efd5922abb478651a7a15bf5e38a1d59c962",
+  "snapshot_size": 703828,
+  "job": {
+    "job_id": "c60f052d-aac1-4dc2-b9c1-2a8484928a44",
+    "state": "completed",
+    "stage": "completed",
+    "created": "2026-10-27T11:21:37.925698+00:00",
+    "updated": "2026-10-29T01:15:43.999335+00:00"
+  },
+  "candidate_id": "bda0de7c-2b26-4a10-b26a-b2ffcdb9b0ee",
+  "cleanup": {
+    "id": "bc5f1302-fdee-4621-9823-522a0a9ad2a1",
+    "state": "needs_attention",
+    "reason": "Cannot refresh protected file identity",
+    "created": "2026-10-29T01:52:08.598121+00:00",
+    "updated": "2026-10-29T01:54:45.276736+00:00"
+  },
+  "manifest_sources": 37,
+  "manifest_source_bytes": 2102929304,
+  "members": {
+    "removal_intended": 1,
+    "backup_verified": 36
+  },
+  "removal_intended": [
+    {
+      "cleanup_id": "bc5f1302-fdee-4621-9823-522a0a9ad2a1",
+      "path": "Z:\\Audiobooks\\Unsorted\\Бром - Похититель детей [Александр Аравушкин]\\01.mp3",
+      "backup": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\data\\source-recovery\\bc5f1302-fdee-4621-9823-522a0a9ad2a1\\00000.mp3",
+      "facts": "{\"attributes\":32,\"dev\":760290819,\"identity\":[760290819,0,8588459],\"identity_api_error\":87,\"identity_method\":\"BY_HANDLE_FILE_INFORMATION64\",\"ino\":8588459,\"links\":1,\"modified\":1726213794383105500,\"size\":17132434}",
+      "state": "removal_intended",
+      "restore_intent": "",
+      "backup_facts": "{\"attributes\":32,\"dev\":133335364132330000,\"identity\":[2803554832,150667264,2600],\"identity_api_error\":0,\"identity_method\":\"FileIdInfo128\",\"ino\":647110971457800744,\"links\":1,\"modified\":1726213794383105500,\"size\":17132434}"
+    }
+  ],
+  "holds": [],
+  "retirements": 0,
+  "output": {
+    "final_path": "Z:\\Audiobooks Sorted\\Brom\\Похититель детей - Brom.m4b",
+    "sha256": "950e7fe489b2b0f71bede1f6b9f513b501a99de330bb1101e9436a655308acec",
+    "size": 1996889421
+  },
+  "cleanup_binding_revision": 5,
+  "current_context_revision": 5,
+  "current_group_summary": [
+    {
+      "root": "Z:\\Audiobooks",
+      "id": "bda0de7c-2b26-4a10-b26a-b2ffcdb9b0ee",
+      "revision": 5,
+      "superseded": 0
+    }
+  ],
+  "job_counts": [
+    {
+      "state": "completed",
+      "stage": "completed",
+      "n": 757
+    },
+    {
+      "state": "needs attention",
+      "stage": "checking",
+      "n": 95
+    },
+    {
+      "state": "needs attention",
+      "stage": "checking sources",
+      "n": 85
+    },
+    {
+      "state": "needs attention",
+      "stage": "queued",
+      "n": 26
+    },
+    {
+      "state": "pending",
+      "stage": "queued",
+      "n": 447
+    }
+  ],
+  "scan_jobs": [
+    {
+      "root": "Z:\\Audiobooks",
+      "label": "Audiobooks",
+      "generation": 6,
+      "state": "completed",
+      "checked": 7362,
+      "reused": 7346,
+      "errors": 0,
+      "current": ""
+    },
+    {
+      "root": "Z:\\OLD_Audiobooks",
+      "label": "Audiobooks",
+      "generation": 1,
+      "state": "completed",
+      "checked": 4124,
+      "reused": 0,
+      "errors": 0,
+      "current": ""
+    }
+  ],
+  "settings_tables": [
+    "automatic_candidates",
+    "automatic_errors",
+    "automatic_manual_drafts",
+    "automatic_restarts",
+    "automatic_result_revision",
+    "automatic_runs",
+    "pause_attribution"
+  ]
+}
