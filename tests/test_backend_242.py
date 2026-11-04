@@ -65,7 +65,7 @@ class PrivateCatalog(unittest.TestCase):
         service = MergeService.__new__(MergeService)
         service.inventory = SimpleNamespace(database=self.db, worker=None, roots={'Audiobooks': self.source}, output_root=self.output)
         service.draining = False
-        service.reviews = SimpleNamespace(_row=self.stored_row, _source_root=lambda row: self.source)
+        service.reviews = SimpleNamespace(_row=self.stored_row, _source_root=lambda row: self.source, page_local=threading.local())
         return service
 
 

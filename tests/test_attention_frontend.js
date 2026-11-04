@@ -231,7 +231,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
   context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
   context.fixture=attentionRow('bad-source','other',{}, {attention:{group:'other',originals_untouched:true,remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/Audio/Железная.mp3'}}});
-  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Stopped — source audio check failed');assert.equal(sourceText.hint,'The source failed its full audio check. Check or replace that file with an intact copy.');
+  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Source audio needs replacement');assert.equal(sourceText.hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
   assert.match(run('technicalText(fixture)'),/Z:\/Audio\/Железная.mp3/);
   for(const [code,group,status,hint] of [
     ['source_decode_failed','other','Stopped — source audio check failed','12.mp3 failed its full audio check. Check or replace that file with an intact copy.'],

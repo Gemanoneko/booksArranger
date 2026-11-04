@@ -40,11 +40,13 @@ class ReplacementTests(unittest.TestCase):
         self.parent_output=self.record(self.parent_id,self.old[0]);self.new_output=self.record(self.new_id,self.final)
         self.insert_job(self.parent_manifest,self.parent_output)
         with connect(self.db) as db:
-            db.execute('CREATE TABLE book_groups(id TEXT PRIMARY KEY,revision INTEGER,review TEXT)')
+            import groups
+            groups.setup(db)  # Navigation reads the same persisted candidate shape as Inventory.
             db.execute('CREATE TABLE candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
             db.execute('CREATE TABLE owned_artifacts(path TEXT PRIMARY KEY,job_id TEXT,kind TEXT,sha256 TEXT,size INTEGER)')
             db.execute('CREATE TABLE storage_cleanup_jobs(job_id TEXT PRIMARY KEY,output_hash TEXT,state TEXT,reason TEXT,updated TEXT)')
-            db.execute('INSERT INTO book_groups VALUES(?,?,?)',(self.candidate,1,'review'))
+            db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence,review) VALUES(?,?,?,?,?,?,?)',
+                       (self.candidate,str(self.library),self.candidate,1,'sources',json.dumps({'members':self.sources}),json.dumps(self.parent_manifest['metadata'])))
             db.execute('INSERT INTO candidate_context VALUES(?,?,?)',(self.candidate,1,'context'))
             self.parent_row=self.store.raw_job(db,self.parent_id)
             group=dict(db.execute('SELECT * FROM book_groups').fetchone());context=dict(db.execute('SELECT * FROM candidate_context').fetchone())

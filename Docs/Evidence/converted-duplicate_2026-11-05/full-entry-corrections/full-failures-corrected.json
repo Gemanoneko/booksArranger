@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_verified_current_inspector_tags_cover_and_folder_target_agree (test_replacement_jobs.ReplacementTests.test_verified_current_inspector_tags_cover_and_folder_target_agree) ... ok\r\ntest_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3 (test_destination_override.ChooseTests.test_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3)\r\nSenua 0.24.0 D1r3 and Judy's two checks, while the renamed file is in the new folder and the move is not ... ok\r\ntest_moved_book_resolves_for_delete_book_and_the_current_audiobook_view (test_destination_override.ChooseTests.test_moved_book_resolves_for_delete_book_and_the_current_audiobook_view) ... ok\r\ntest_interrupted_sweep_retains_its_selection_and_retries (test_source_folders.SourceFolderTests.test_interrupted_sweep_retains_its_selection_and_retries) ... ok\r\ntest_general_current_peer_omits_author_folder_but_keeps_author_credit (test_backend_242.SharedPeerConsumerTests.test_general_current_peer_omits_author_folder_but_keeps_author_credit) ... ok\r\ntest_general_world_collects_two_distinct_series_by_confirmed_world_identity (test_backend_242.SharedPeerConsumerTests.test_general_world_collects_two_distinct_series_by_confirmed_world_identity) ... ok\r\ntest_peer_result_change_invalidates_cache_even_if_attempt_timestamp_does_not_change (test_backend_242.SharedPeerConsumerTests.test_peer_result_change_invalidates_cache_even_if_attempt_timestamp_does_not_change) ... ok\r\ntest_same_name_with_a_different_stable_series_id_does_not_join (test_backend_242.SharedPeerConsumerTests.test_same_name_with_a_different_stable_series_id_does_not_join) ... ok\r\ntest_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority (test_backend_242.SharedPeerConsumerTests.test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority) ... ok\r\ntest_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names (test_integration_242.IntegrationTests.test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 10 tests in 2.191s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 42168,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 191,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 3004.8737,
+  "outputBytes": 2178
+}

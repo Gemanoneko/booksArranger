@@ -273,7 +273,7 @@ def merge_double(fix, finished=True, computed=None):
              '_move_root', '_override_stale', 'destination_view', '_chosen_folders', '_chosen_root', '_job_manifest', '_mover', 'run_move',
              '_after_move', 'cancel_move', '_publication_location', '_all_source_roots', '_destination_changed', '_start_move_recovery',
              '_move_to_chosen', '_approval_destination', '_move_running', '_unfinished_move', '_renamed_waiting', 'open_folder', 'OVERRIDE_REPLANNED', 'OVERRIDE_UNAVAILABLE',
-             'FOLDER_UNAVAILABLE')
+             '_source_directories', 'FOLDER_UNAVAILABLE')
     Double = type('Double', (), {name: MergeService.__dict__[name] for name in names})
     double = Double()
     row = {'id': fix.candidate, 'revision': 1, 'title_clue': 'Book', 'members': [{'path': str(fix.library / 'a.mp3')}], 'metadata': {}}
@@ -290,6 +290,10 @@ def merge_double(fix, finished=True, computed=None):
     double._validated_outputs = {}
     with connect(fix.db) as db:
         db.execute('CREATE TABLE IF NOT EXISTS owned_artifacts(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER)')
+        import groups
+        groups.setup(db)
+        db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence) VALUES(?,?,?,?,?,?)',
+                   (fix.candidate,str(fix.library),fix.candidate,1,'fp',json.dumps({'members':row['members']})))
     double.verified = []
     double._publication_verified = lambda record: double.verified.append(record)
     double.invalidate_status = lambda: None
@@ -545,7 +549,7 @@ class ChooseTests(fixture.MoveFixture):
         self.assertEqual(final, str(self.other / self.old.name))
         replacements = SimpleNamespace(representative=lambda jobs, candidate: ({'job_id': self.job_id, 'state': 'completed', 'manifest': dict(self.manifest, cover={'path': 'c.jpg', 'sha256': '0' * 64}), 'output': self.output}, None))
         current = CurrentAudiobooks((str(self.library), str(self.sorted)), self.base / 'repairs', replacements, bindings=self.bindings)
-        jobs = [{'job_id': self.job_id}]
+        jobs = [{'job_id': self.job_id, 'manifest': self.manifest}]
         self.assertEqual(current.describe(jobs, self.candidate)['state'], 'unavailable')  # outside every root it knows
         current.chosen_roots = merge._chosen_folders
         found = current.describe(jobs, self.candidate)

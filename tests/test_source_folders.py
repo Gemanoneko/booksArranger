@@ -402,8 +402,12 @@ class SourceFolderTests(unittest.TestCase):
 
     def test_interrupted_sweep_retains_its_selection_and_retries(self):
         self.old_run();prior=self.storage.folder_status(self.job_id)
-        with patch.object(self.storage,'protected_output',side_effect=InterruptedError('closing')):
+        # Both ordinary and cleanup-only tasks enter protected_cleanup now.
+        # Inject the production stop checkpoint, not the ordinary-owner wrapper.
+        before_files={str(path):path.read_bytes() for path in self.library.rglob('*') if path.is_file()}
+        with patch.object(self.storage,'guard',side_effect=InterruptedError('closing')):
             with self.assertRaises(InterruptedError):self.storage.sweep_folders(self.job_id)
+        self.assertEqual({str(path):path.read_bytes() for path in self.library.rglob('*') if path.is_file()},before_files)
         self.assertIsNone(self.sweep_marker())
         self.assertEqual(self.storage.folder_status(self.job_id)['state'],prior['state'])
         self.assertEqual(self.storage.sweep_folders(self.job_id),'completed')

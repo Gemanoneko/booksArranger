@@ -1,0 +1,141 @@
+diff --git a/tests/test_attention_frontend.js b/tests/test_attention_frontend.js
+index 21f52c9..1ff8e5b 100644
+--- a/tests/test_attention_frontend.js
++++ b/tests/test_attention_frontend.js
+@@ -231,7 +231,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
+   context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
+   context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
+   context.fixture=attentionRow('bad-source','other',{}, {attention:{group:'other',originals_untouched:true,remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/Audio/Железная.mp3'}}});
+-  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Stopped — source audio check failed');assert.equal(sourceText.hint,'The source failed its full audio check. Check or replace that file with an intact copy.');
++  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Source audio needs replacement');assert.equal(sourceText.hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
+   assert.match(run('technicalText(fixture)'),/Z:\/Audio\/Железная.mp3/);
+   for(const [code,group,status,hint] of [
+     ['source_decode_failed','other','Stopped — source audio check failed','12.mp3 failed its full audio check. Check or replace that file with an intact copy.'],
+diff --git a/tests/test_backend_242.py b/tests/test_backend_242.py
+index 7ebd853..9b9d624 100644
+--- a/tests/test_backend_242.py
++++ b/tests/test_backend_242.py
+@@ -65,7 +65,7 @@ class PrivateCatalog(unittest.TestCase):
+         service = MergeService.__new__(MergeService)
+         service.inventory = SimpleNamespace(database=self.db, worker=None, roots={'Audiobooks': self.source}, output_root=self.output)
+         service.draining = False
+-        service.reviews = SimpleNamespace(_row=self.stored_row, _source_root=lambda row: self.source)
++        service.reviews = SimpleNamespace(_row=self.stored_row, _source_root=lambda row: self.source, page_local=threading.local())
+         return service
+ 
+ 
+diff --git a/tests/test_destination_override.py b/tests/test_destination_override.py
+index 3999062..3580068 100644
+--- a/tests/test_destination_override.py
++++ b/tests/test_destination_override.py
+@@ -273,7 +273,7 @@ def merge_double(fix, finished=True, computed=None):
+              '_move_root', '_override_stale', 'destination_view', '_chosen_folders', '_chosen_root', '_job_manifest', '_mover', 'run_move',
+              '_after_move', 'cancel_move', '_publication_location', '_all_source_roots', '_destination_changed', '_start_move_recovery',
+              '_move_to_chosen', '_approval_destination', '_move_running', '_unfinished_move', '_renamed_waiting', 'open_folder', 'OVERRIDE_REPLANNED', 'OVERRIDE_UNAVAILABLE',
+-             'FOLDER_UNAVAILABLE')
++             '_source_directories', 'FOLDER_UNAVAILABLE')
+     Double = type('Double', (), {name: MergeService.__dict__[name] for name in names})
+     double = Double()
+     row = {'id': fix.candidate, 'revision': 1, 'title_clue': 'Book', 'members': [{'path': str(fix.library / 'a.mp3')}], 'metadata': {}}
+@@ -290,6 +290,10 @@ def merge_double(fix, finished=True, computed=None):
+     double._validated_outputs = {}
+     with connect(fix.db) as db:
+         db.execute('CREATE TABLE IF NOT EXISTS owned_artifacts(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER)')
++        import groups
++        groups.setup(db)
++        db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence) VALUES(?,?,?,?,?,?)',
++                   (fix.candidate,str(fix.library),fix.candidate,1,'fp',json.dumps({'members':row['members']})))
+     double.verified = []
+     double._publication_verified = lambda record: double.verified.append(record)
+     double.invalidate_status = lambda: None
+@@ -545,7 +549,7 @@ class ChooseTests(fixture.MoveFixture):
+         self.assertEqual(final, str(self.other / self.old.name))
+         replacements = SimpleNamespace(representative=lambda jobs, candidate: ({'job_id': self.job_id, 'state': 'completed', 'manifest': dict(self.manifest, cover={'path': 'c.jpg', 'sha256': '0' * 64}), 'output': self.output}, None))
+         current = CurrentAudiobooks((str(self.library), str(self.sorted)), self.base / 'repairs', replacements, bindings=self.bindings)
+-        jobs = [{'job_id': self.job_id}]
++        jobs = [{'job_id': self.job_id, 'manifest': self.manifest}]
+         self.assertEqual(current.describe(jobs, self.candidate)['state'], 'unavailable')  # outside every root it knows
+         current.chosen_roots = merge._chosen_folders
+         found = current.describe(jobs, self.candidate)
+diff --git a/tests/test_integration_242.py b/tests/test_integration_242.py
+index ea2b9c2..7f158ba 100644
+--- a/tests/test_integration_242.py
++++ b/tests/test_integration_242.py
+@@ -178,10 +178,11 @@ class IntegrationTests(unittest.TestCase):
+             with connect(database) as db:return dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone())
+         def names_rows():
+             with connect(database) as db:return [dict(value) for value in db.execute('SELECT * FROM names_entries ORDER BY rowid')]
+-        merge=object.__new__(MergeService);merge.draining=False;merge.inventory=SimpleNamespace(database=database);merge.jobs=jobs
++        merge=object.__new__(MergeService);merge.draining=False;merge.inventory=SimpleNamespace(database=database,group_lock=threading.RLock());merge.jobs=jobs
++        merge.operation_lock=threading.RLock()
+         def current_context(value):
+             with connect(database) as db:return json.loads(db.execute('SELECT data FROM candidate_context WHERE id=?',(value['id'],)).fetchone()[0])
+-        merge.reviews=SimpleNamespace(_row=lambda *a:row,_context=current_context,_source_root=lambda value:tmp)
++        merge.reviews=SimpleNamespace(_row=lambda *a:row,_context=current_context,_source_root=lambda value:tmp,lock=threading.RLock())
+         merge.automatic=SimpleNamespace(research=object(),requeue=Mock(),request_start=Mock())
+         merge._his_revision=lambda *a:2;merge._names_book=lambda *a:(row,tmp,merge.automatic.research)
+         merge._names_state=lambda *a:({'title':'Old approved title','author':'Writer'},'',{key:{'value':value} for key,value in entered_names.book_values(database,row).items()},None)
+diff --git a/tests/test_iron_skazka_frontend.js b/tests/test_iron_skazka_frontend.js
+index f58c88f..92926d5 100644
+--- a/tests/test_iron_skazka_frontend.js
++++ b/tests/test_iron_skazka_frontend.js
+@@ -31,7 +31,7 @@ function text(row){context.fixture=row;return run('attentionText(fixture)');}
+     shown=text(queuedRow);assert.equal(shown.status,'Waiting for retry checks');assert.equal(shown.hint,hint);
+     context.fixture=queuedRow;assert.equal(run('rowAction(fixture).label'),'Waiting for retry checks');assert.equal(run('rowAction(fixture).data.allowed'),false);
+   }
+-  shown=text(iron({group:'other',remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/a.mp3'}},{retry:undefined}));assert.equal(shown.status,'Source audio needs replacement');
++  shown=text(iron({group:'other',remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/a.mp3'}},{retry:undefined}));assert.equal(shown.status,'Source audio needs replacement');assert.equal(shown.hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
+ 
+   // Сказка K0: Convert… opens the confirmation; nothing is sent by opening it.
+   const k0=skazka();shown=text(k0);assert.equal(shown.status,'Stopped — needs your confirmation');assert.equal(shown.hint,"The app can't tell where this conversion ran.");assert.ok(!shown.warn);
+diff --git a/tests/test_replacement_jobs.py b/tests/test_replacement_jobs.py
+index 1c5af48..8e03e9a 100644
+--- a/tests/test_replacement_jobs.py
++++ b/tests/test_replacement_jobs.py
+@@ -40,11 +40,13 @@ class ReplacementTests(unittest.TestCase):
+         self.parent_output=self.record(self.parent_id,self.old[0]);self.new_output=self.record(self.new_id,self.final)
+         self.insert_job(self.parent_manifest,self.parent_output)
+         with connect(self.db) as db:
+-            db.execute('CREATE TABLE book_groups(id TEXT PRIMARY KEY,revision INTEGER,review TEXT)')
++            import groups
++            groups.setup(db)  # Navigation reads the same persisted candidate shape as Inventory.
+             db.execute('CREATE TABLE candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
+             db.execute('CREATE TABLE owned_artifacts(path TEXT PRIMARY KEY,job_id TEXT,kind TEXT,sha256 TEXT,size INTEGER)')
+             db.execute('CREATE TABLE storage_cleanup_jobs(job_id TEXT PRIMARY KEY,output_hash TEXT,state TEXT,reason TEXT,updated TEXT)')
+-            db.execute('INSERT INTO book_groups VALUES(?,?,?)',(self.candidate,1,'review'))
++            db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence,review) VALUES(?,?,?,?,?,?,?)',
++                       (self.candidate,str(self.library),self.candidate,1,'sources',json.dumps({'members':self.sources}),json.dumps(self.parent_manifest['metadata'])))
+             db.execute('INSERT INTO candidate_context VALUES(?,?,?)',(self.candidate,1,'context'))
+             self.parent_row=self.store.raw_job(db,self.parent_id)
+             group=dict(db.execute('SELECT * FROM book_groups').fetchone());context=dict(db.execute('SELECT * FROM candidate_context').fetchone())
+diff --git a/tests/test_source_folders.py b/tests/test_source_folders.py
+index 00b3372..5b99954 100644
+--- a/tests/test_source_folders.py
++++ b/tests/test_source_folders.py
+@@ -402,8 +402,12 @@ class SourceFolderTests(unittest.TestCase):
+ 
+     def test_interrupted_sweep_retains_its_selection_and_retries(self):
+         self.old_run();prior=self.storage.folder_status(self.job_id)
+-        with patch.object(self.storage,'protected_output',side_effect=InterruptedError('closing')):
++        # Both ordinary and cleanup-only tasks enter protected_cleanup now.
++        # Inject the production stop checkpoint, not the ordinary-owner wrapper.
++        before_files={str(path):path.read_bytes() for path in self.library.rglob('*') if path.is_file()}
++        with patch.object(self.storage,'guard',side_effect=InterruptedError('closing')):
+             with self.assertRaises(InterruptedError):self.storage.sweep_folders(self.job_id)
++        self.assertEqual({str(path):path.read_bytes() for path in self.library.rglob('*') if path.is_file()},before_files)
+         self.assertIsNone(self.sweep_marker())
+         self.assertEqual(self.storage.folder_status(self.job_id)['state'],prior['state'])
+         self.assertEqual(self.storage.sweep_folders(self.job_id),'completed')
+diff --git a/web/app.js b/web/app.js
+index f6c085c..b0c9cd1 100644
+--- a/web/app.js
++++ b/web/app.js
+@@ -2426,7 +2426,7 @@ function attentionText(row){
+   }
+   const changed=readmissionOf(row)?.queued_next===true?null:sourceChangedText(a);if(changed)return changed;  // ruling 75b, before the "replace it" line
+   const media=mediaFailureText(a);if(media)return media;
+-  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Stopped — source audio check failed',hint:'The source failed its full audio check. Check or replace that file with an intact copy.',warn:true};
++  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",warn:true};
+   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
+   const readmission=readmissionOf(row);
+   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):readmission.origin==='automatic'?AUTO_QUEUED_HINT:'The book is checked again before it runs.'};

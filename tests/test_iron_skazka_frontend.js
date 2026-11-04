@@ -31,7 +31,7 @@ function text(row){context.fixture=row;return run('attentionText(fixture)');}
     shown=text(queuedRow);assert.equal(shown.status,'Waiting for retry checks');assert.equal(shown.hint,hint);
     context.fixture=queuedRow;assert.equal(run('rowAction(fixture).label'),'Waiting for retry checks');assert.equal(run('rowAction(fixture).data.allowed'),false);
   }
-  shown=text(iron({group:'other',remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/a.mp3'}},{retry:undefined}));assert.equal(shown.status,'Source audio needs replacement');
+  shown=text(iron({group:'other',remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/a.mp3'}},{retry:undefined}));assert.equal(shown.status,'Source audio needs replacement');assert.equal(shown.hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
 
   // Сказка K0: Convert… opens the confirmation; nothing is sent by opening it.
   const k0=skazka();shown=text(k0);assert.equal(shown.status,'Stopped — needs your confirmation');assert.equal(shown.hint,"The app can't tell where this conversion ran.");assert.ok(!shown.warn);

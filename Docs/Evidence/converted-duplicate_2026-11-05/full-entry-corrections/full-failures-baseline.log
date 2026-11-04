@@ -1,0 +1,174 @@
+test_verified_current_inspector_tags_cover_and_folder_target_agree (test_replacement_jobs.ReplacementTests.test_verified_current_inspector_tags_cover_and_folder_target_agree) ... ERROR
+test_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3 (test_destination_override.ChooseTests.test_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3)
+Senua 0.24.0 D1r3 and Judy's two checks, while the renamed file is in the new folder and the move is not ... ERROR
+test_moved_book_resolves_for_delete_book_and_the_current_audiobook_view (test_destination_override.ChooseTests.test_moved_book_resolves_for_delete_book_and_the_current_audiobook_view) ... FAIL
+test_interrupted_sweep_retains_its_selection_and_retries (test_source_folders.SourceFolderTests.test_interrupted_sweep_retains_its_selection_and_retries) ... FAIL
+test_general_current_peer_omits_author_folder_but_keeps_author_credit (test_backend_242.SharedPeerConsumerTests.test_general_current_peer_omits_author_folder_but_keeps_author_credit) ... ERROR
+test_general_world_collects_two_distinct_series_by_confirmed_world_identity (test_backend_242.SharedPeerConsumerTests.test_general_world_collects_two_distinct_series_by_confirmed_world_identity) ... ERROR
+test_peer_result_change_invalidates_cache_even_if_attempt_timestamp_does_not_change (test_backend_242.SharedPeerConsumerTests.test_peer_result_change_invalidates_cache_even_if_attempt_timestamp_does_not_change) ... ERROR
+test_same_name_with_a_different_stable_series_id_does_not_join (test_backend_242.SharedPeerConsumerTests.test_same_name_with_a_different_stable_series_id_does_not_join) ... ERROR
+test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority (test_backend_242.SharedPeerConsumerTests.test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority) ... 
+  test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority (test_backend_242.SharedPeerConsumerTests.test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority) (cause='fingerprint') ... ERROR
+  test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority (test_backend_242.SharedPeerConsumerTests.test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority) (cause='rules') ... ERROR
+  test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority (test_backend_242.SharedPeerConsumerTests.test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority) (cause='names') ... ERROR
+test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names (test_integration_242.IntegrationTests.test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names) ... ERROR
+
+======================================================================
+ERROR: test_verified_current_inspector_tags_cover_and_folder_target_agree (test_replacement_jobs.ReplacementTests.test_verified_current_inspector_tags_cover_and_folder_target_agree)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_replacement_jobs.py", line 374, in test_verified_current_inspector_tags_cover_and_folder_target_agree
+    inspected=self.service.inspect('Audiobooks','candidates',self.candidate)['inspector'];created=inspected['sections'][-1]
+              ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 5295, in inspect
+    directories=self._source_directories(library,view,identity);sections=[];completed=None;ready=False
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 5241, in _source_directories
+    row=db.execute('SELECT root,evidence FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()
+        ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: no such column: root
+
+======================================================================
+ERROR: test_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3 (test_destination_override.ChooseTests.test_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3)
+Senua 0.24.0 D1r3 and Judy's two checks, while the renamed file is in the new folder and the move is not
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_destination_override.py", line 429, in test_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3
+    self.assertEqual(merge.open_folder('Audiobooks', 'candidates', self.candidate, 'output'), {'opened': True, 'directory': str(self.other)})
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 5352, in open_folder
+    self._source_directories(library,view,identity)  # catalog-only identity check; navigation never regroups
+    ^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Double' object has no attribute '_source_directories'
+
+======================================================================
+ERROR: test_general_current_peer_omits_author_folder_but_keeps_author_credit (test_backend_242.SharedPeerConsumerTests.test_general_current_peer_omits_author_folder_but_keeps_author_credit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 411, in test_general_current_peer_omits_author_folder_but_keeps_author_credit
+    result = self.routed()
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 408, in routed
+    return self.merge._shared_result(self.one, self.first)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3049, in _shared_result
+    catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'page_local'
+
+======================================================================
+ERROR: test_general_world_collects_two_distinct_series_by_confirmed_world_identity (test_backend_242.SharedPeerConsumerTests.test_general_world_collects_two_distinct_series_by_confirmed_world_identity)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 452, in test_general_world_collects_two_distinct_series_by_confirmed_world_identity
+    result = self.routed()
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 408, in routed
+    return self.merge._shared_result(self.one, self.first)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3049, in _shared_result
+    catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'page_local'
+
+======================================================================
+ERROR: test_peer_result_change_invalidates_cache_even_if_attempt_timestamp_does_not_change (test_backend_242.SharedPeerConsumerTests.test_peer_result_change_invalidates_cache_even_if_attempt_timestamp_does_not_change)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 437, in test_peer_result_change_invalidates_cache_even_if_attempt_timestamp_does_not_change
+    self.assertTrue(resolve(self.routed()['review'], self.routed()['metadata_facts'])['multi_author_series'])
+                            ~~~~~~~~~~~^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 408, in routed
+    return self.merge._shared_result(self.one, self.first)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3049, in _shared_result
+    catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'page_local'
+
+======================================================================
+ERROR: test_same_name_with_a_different_stable_series_id_does_not_join (test_backend_242.SharedPeerConsumerTests.test_same_name_with_a_different_stable_series_id_does_not_join)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 421, in test_same_name_with_a_different_stable_series_id_does_not_join
+    result = self.routed()
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 408, in routed
+    return self.merge._shared_result(self.one, self.first)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3049, in _shared_result
+    catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'page_local'
+
+======================================================================
+ERROR: test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority (test_backend_242.SharedPeerConsumerTests.test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority) (cause='fingerprint')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 433, in test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority
+    result = self.routed()
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 408, in routed
+    return self.merge._shared_result(self.one, self.first)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3049, in _shared_result
+    catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'page_local'
+
+======================================================================
+ERROR: test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority (test_backend_242.SharedPeerConsumerTests.test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority) (cause='rules')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 433, in test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority
+    result = self.routed()
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 408, in routed
+    return self.merge._shared_result(self.one, self.first)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3049, in _shared_result
+    catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'page_local'
+
+======================================================================
+ERROR: test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority (test_backend_242.SharedPeerConsumerTests.test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority) (cause='names')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 433, in test_stale_fingerprint_rules_and_conflicting_local_names_cannot_supply_peer_authority
+    result = self.routed()
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_backend_242.py", line 408, in routed
+    return self.merge._shared_result(self.one, self.first)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3049, in _shared_result
+    catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'page_local'
+
+======================================================================
+ERROR: test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names (test_integration_242.IntegrationTests.test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_integration_242.py", line 204, in test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names
+    answer=f.merge.names_save(f.row['id'],2,{'title':'A newly chosen title'},fingerprint='files')
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3319, in names_save
+    for lock in (self.operation_lock,self.reviews.lock,self.inventory.group_lock):
+                 ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'MergeService' object has no attribute 'operation_lock'
+
+======================================================================
+FAIL: test_moved_book_resolves_for_delete_book_and_the_current_audiobook_view (test_destination_override.ChooseTests.test_moved_book_resolves_for_delete_book_and_the_current_audiobook_view)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_destination_override.py", line 552, in test_moved_book_resolves_for_delete_book_and_the_current_audiobook_view
+    self.assertIn(found["state"], ("verifying", "verified"), found)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'unavailable' not found in ('verifying', 'verified') : {'state': 'unavailable', 'reason': "'manifest'", 'identity': '01bf3397c7a6c9e7040488319bdd7749a40e36e721efbe2350f4b8bad0488dff'}
+
+======================================================================
+FAIL: test_interrupted_sweep_retains_its_selection_and_retries (test_source_folders.SourceFolderTests.test_interrupted_sweep_retains_its_selection_and_retries)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_source_folders.py", line 406, in test_interrupted_sweep_retains_its_selection_and_retries
+    with self.assertRaises(InterruptedError):self.storage.sweep_folders(self.job_id)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+AssertionError: InterruptedError not raised
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.893s
+
+FAILED (failures=2, errors=10)

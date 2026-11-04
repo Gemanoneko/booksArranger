@@ -1,0 +1,215 @@
+{
+  "baseline": "e6912eb7e43cac35bf26a7a662bc9dc95c0e1d2d",
+  "files": [
+    {
+      "path": "tests/test_replacement_jobs.py",
+      "bytes": 42197,
+      "sha256": "37486d7f5f1b3e36d29a55f25a21f0557d33c28272e12a145333f51f0891f962",
+      "lf_sha256": "b9c4cf4bc248d57b3072692496efa8f0115e489607af1b539c7969ba09c9af04",
+      "baseline_lf_sha256": "898b95337a66dae81fb860e1b174a9a83b378e997009b73f0a2aa1db55c3d525"
+    },
+    {
+      "path": "tests/test_destination_override.py",
+      "bytes": 47116,
+      "sha256": "5a53927513cd9070a062587f07287587b4ab3c85beaf4f65b7ea5d3075e225d4",
+      "lf_sha256": "2ec79cae7d56b2706a05f0a3516aeeb1acccb0b1dde2a2a451c495075609ea8a",
+      "baseline_lf_sha256": "36baa760a9aea0ed77c7641ebc13a3cb05e1f8f4194303af9efdac2043df9b52"
+    },
+    {
+      "path": "tests/test_backend_242.py",
+      "bytes": 35988,
+      "sha256": "0847d1f9cefa2583b26c18937655877f1b13bc1e52d299d83cfcd063da18c3c9",
+      "lf_sha256": "766473c4a70c730033dc1fa50000f5b3e771a8ced3da1da7d10c9472bfcf4798",
+      "baseline_lf_sha256": "5cb8c0513f2f6c3663bfdd95bd316bb7d1053930e779ed4ca690ad54d25537e5"
+    },
+    {
+      "path": "tests/test_integration_242.py",
+      "bytes": 23771,
+      "sha256": "fb6fcbb40558d6748523f4fa0961423e96a81d2ab451f8e97fd79116142c51e0",
+      "lf_sha256": "7293249ee2e9029e5d3a30307d343cda63a746d64304f6c1b09dac7a0cc3f8e6",
+      "baseline_lf_sha256": "fe9307ac63dcccfde3ec8fcfc5874abd2dd0a7c3c7689d2f661ce01e138a4bdc"
+    },
+    {
+      "path": "tests/test_source_folders.py",
+      "bytes": 39884,
+      "sha256": "eb1fcbd74a2a88a26572a3a29f5a2e4dd9c7bfa11020f1fe2850f05d3af2141d",
+      "lf_sha256": "1c7c18c818412d3e2c0085a40d68ffcafc208e99888451a2d73447d6b36a1547",
+      "baseline_lf_sha256": "3a8ff8f14000636aba019b4f4f82a6a0e83d2eb9b29ca8ca593ce8ec25cfe97e"
+    },
+    {
+      "path": "tests/test_attention_frontend.js",
+      "bytes": 33618,
+      "sha256": "85256039ab8b90ba71b7a75610d993ebec6c3bdbf2a61ef531e0c7cca34ae148",
+      "lf_sha256": "6ba5d78dce7783180a9d1178f27dc8528c09ce999dd5cf092e6ea45004d8a4f1",
+      "baseline_lf_sha256": "34a430d24badb97a49453cf61fa43bc0dc75308139240f4c912efdfbe4c13f89"
+    },
+    {
+      "path": "tests/test_iron_skazka_frontend.js",
+      "bytes": 13547,
+      "sha256": "fdaf2612a64f6c89ee58d378164f8891f33d86858f41f935eb7a9990d76ec40d",
+      "lf_sha256": "6f6f91756c15b6a2fe80773bdcacf234939f813bfa27a574cf941b247ea914b8",
+      "baseline_lf_sha256": "850b1e39f166d1050ad1d618b72b71398dc20150b9ea108fd54ea3e8428c2f7f"
+    },
+    {
+      "path": "web/app.js",
+      "bytes": 527109,
+      "sha256": "f5f20fb45eec0d7029e5c7a1aae7e00cd996de7dc521fbe48d458d6c91d09b70",
+      "lf_sha256": "98f777b8634259d84611a43c9c80b73c646a0bb4cd4462beb807c540d43ace4a",
+      "baseline_lf_sha256": "425822888f72924af58ec5a10d62175da38c2995dc28c3bb7782d9abe6e4baf1"
+    }
+  ],
+  "patch_sha256": "322c0416b22556eb966c34d1bf4e5a8568fd714f2a5d177583d8103f4b8c78ea",
+  "production_change": "Only web/app.js legacy untyped single-MP3 replace_source status/hint restored. Typed books-media-failure-v1 exact filename/check labels keep precedence and remain unchanged. No SQL/cleanup/ownership/admission guard modified.",
+  "classification": [
+    {
+      "group": "replacement inspector missing root",
+      "cause": "Fixture hand-created book_groups(id,revision,review). Actual groups.setup creates root/evidence/superseded; Inventory._candidate_row queries root. Fixture now uses real groups.setup and explicit complete candidate row."
+    },
+    {
+      "group": "destination navigation/current view",
+      "cause": "Explicit Double omitted new _source_directories method; now includes real method and persisted groups.setup row. Current publication input omitted manifest; now supplies actual frozen manifest. Moved/native-bound and renamed-waiting target assertions unchanged."
+    },
+    {
+      "group": "cleanup sweep interruption",
+      "cause": "Test injected the old protected_output wrapper, which now delegates to typed protected_cleanup and is not called by run_folders. Inject actual production self.guard; interruption propagates, library bytes unchanged, prior selection retained, no marker recorded, later safe retry completes. Navigation _source_directories is only consumed by inspect/open_folder."
+    },
+    {
+      "group": "shared peers and names save",
+      "cause": "Minimal __new__ fixtures omitted ReviewBackend.page_local and three admission RLocks. Fixtures now reproduce exact constructor state, no optional/getattr/noop product fallback. All stale/CAS/rollback assertions remain."
+    },
+    {
+      "group": "legacy frontend",
+      "cause": "Untyped existing proven single-MP3 replacement remedy accidentally adopted generic new status. Restore established status and full-check replacement hint; typed multi-track/newM4B labels unaffected."
+    },
+    {
+      "group": "five Tolkien old expectations",
+      "cause": "Assigned independently to media Ender by Jane. Not edited or included in this delta."
+    }
+  ],
+  "results": {
+    "baseline": "e691 full failure exact indexed evidence retained separately; owned focused baseline reproduced all own Python categories:10 methods,2failures+10errors including subcases,normal nativezero2.747s.",
+    "corrected": "Same10methods PASS nativezero3.005s; all affected modules + actual Inventory concurrency suite172/172 PASS46.636s (owned47.546s).",
+    "frontend": "Iron/Skazka,attention,refused_retry,retry scripts all PASS in separately owned bounded calls.",
+    "guards": "No sourceZ/app/live writes/focus/Explorer. Real dispatch is mocked; actual catalog and native private files used. timeout600000 unchanged. No full/hidden gate repeated."
+  },
+  "lock_proof": {
+    "MergeService.operation_lock": "threading.RLock at merge_service.py214",
+    "CandidateReviewService.lock": "threading.RLock at review_backend.py111",
+    "Inventory.group_lock": "threading.RLock at scanner.py139",
+    "trilogy": "_trilogy_stale called by _plan_stale, does not call names_save. Existing full integration names-save pending replan/CAS/rollback and real HTTP busy/retry tests passed."
+  },
+  "commands": [
+    "node owned.mjs full-failures-baseline test_replacement_jobs.ReplacementTests.test_verified_current_inspector_tags_cover_and_folder_target_agree test_destination_override.ChooseTests.test_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3 test_destination_override.ChooseTests.test_moved_book_resolves_for_delete_book_and_the_current_audiobook_view test_source_folders.SourceFolderTests.test_interrupted_sweep_retains_its_selection_and_retries test_backend_242.SharedPeerConsumerTests test_integration_242.IntegrationTests.test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names",
+    "node owned.mjs full-failures-corrected [same explicit selectors]",
+    "node owned.mjs full-affected-modules test_replacement_jobs test_destination_override test_source_folders test_backend_242 test_integration_242 test_lock_timing.SourceFolderDispatchTests",
+    "node owned-node.mjs <unique-result-name> tests/test_<iron_skazka|attention|refused_retry|retry>_frontend.js"
+  ],
+  "graph": "Existing test modules/scripts only; no new discovery helper, selector, weight, build input or workflow change.",
+  "evidence": [
+    {
+      "path": "attention-corrected.json",
+      "bytes": 901,
+      "sha256": "0f8380c279caf9a4635adebd496c37d4608428cacd5d48ecbce7e64e841e594f"
+    },
+    {
+      "path": "attention-corrected.log",
+      "bytes": 217,
+      "sha256": "b45d5c4de81b320ff998906b5d2e18be5e528091d5a44c40d2dba97852bc50f9"
+    },
+    {
+      "path": "baseline-files.json",
+      "bytes": 1983,
+      "sha256": "c9375c57201a366cbcf596879e05b3797cf0d505645b2c6ceccad7d34f29612a"
+    },
+    {
+      "path": "edit.py",
+      "bytes": 6205,
+      "sha256": "3dffdcf237f41fa44f4feb2cb7b6c507056871c1873443802f8e93b9529822a4"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 963,
+      "sha256": "d319dab291b29b0e1ec9b385eac985dab8ee22b0811ab0d0fb75710acd1e2c2f"
+    },
+    {
+      "path": "freeze.py",
+      "bytes": 6029,
+      "sha256": "64cd4f8f66267dce7da5dfcc278a1d9808ae284ad9a584445329504f36dd5e31"
+    },
+    {
+      "path": "full-affected-modules.json",
+      "bytes": 32048,
+      "sha256": "844504161aaa06b59a8a8a4345b53f33cbf31145b21eecfdc101b31a3fdf9f1a"
+    },
+    {
+      "path": "full-affected-modules.log",
+      "bytes": 30991,
+      "sha256": "dd00bc7c55e926fe8468f7cf8dabf16b5969d4c0e386d33b70273a1958a54067"
+    },
+    {
+      "path": "full-failures-baseline.json",
+      "bytes": 18289,
+      "sha256": "c36b43142b97a883686a627e2a57c07c6cab37fac386e357a35e0676458fbbd2"
+    },
+    {
+      "path": "full-failures-baseline.log",
+      "bytes": 17008,
+      "sha256": "4a277b400449501c947411104745358b698c2a7998f815301ffc5e35dd2d14b9"
+    },
+    {
+      "path": "full-failures-corrected.json",
+      "bytes": 2895,
+      "sha256": "e3b330b7900ca339559b062c056c99ccc0d1b129ef55da468b077cff4b43df79"
+    },
+    {
+      "path": "full-failures-corrected.log",
+      "bytes": 2178,
+      "sha256": "c50ed12b48be9d25131a3ae09669f54df9edcedbda467f2f164727ad77ba4fd3"
+    },
+    {
+      "path": "iron-corrected.json",
+      "bytes": 923,
+      "sha256": "c9cf825526736929e5cfe83a372ad5257c28545aa33bee682010921d23eec5d7"
+    },
+    {
+      "path": "iron-corrected.log",
+      "bytes": 230,
+      "sha256": "6e697565d0faf1dca25c91d8eaca5eb0bfe3d2bc8b40123b52b06aa31edb9a33"
+    },
+    {
+      "path": "owned-node.mjs",
+      "bytes": 1957,
+      "sha256": "3464ae1fecc02b5881292989e9c421666b76179ebb871691ebbc8f6af587c22c"
+    },
+    {
+      "path": "owned.mjs",
+      "bytes": 1981,
+      "sha256": "5fdf990e48db5096506c5ebf59354934bc4bea15f214f297be8c981d4edacd4d"
+    },
+    {
+      "path": "refused-retry-corrected.json",
+      "bytes": 786,
+      "sha256": "b00fb2e793cac887626d2fa0fbb5a9891377da8a3de998577c3e7c2342368ee5"
+    },
+    {
+      "path": "refused-retry-corrected.log",
+      "bytes": 103,
+      "sha256": "93c6d9d04fa2c7fbed4f9d2240bbe77a55a3078024838eab9c54ef4d2c36c90e"
+    },
+    {
+      "path": "retry-corrected.json",
+      "bytes": 786,
+      "sha256": "fb1f53687a91e200ee81f4f694cf495e2d9eedc02472929b626a27b6a5c59c5c"
+    },
+    {
+      "path": "retry-corrected.log",
+      "bytes": 103,
+      "sha256": "237c3d7950a06d25bd57d6b555c72c4f31ad6e4a89f56502af9791dc02ef1c72"
+    },
+    {
+      "path": "source.patch",
+      "bytes": 12468,
+      "sha256": "322c0416b22556eb966c34d1bf4e5a8568fd714f2a5d177583d8103f4b8c78ea"
+    }
+  ]
+}

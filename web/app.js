@@ -2426,7 +2426,7 @@ function attentionText(row){
   }
   const changed=readmissionOf(row)?.queued_next===true?null:sourceChangedText(a);if(changed)return changed;  // ruling 75b, before the "replace it" line
   const media=mediaFailureText(a);if(media)return media;
-  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Stopped — source audio check failed',hint:'The source failed its full audio check. Check or replace that file with an intact copy.',warn:true};
+  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",warn:true};
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):readmission.origin==='automatic'?AUTO_QUEUED_HINT:'The book is checked again before it runs.'};

@@ -178,10 +178,11 @@ class IntegrationTests(unittest.TestCase):
             with connect(database) as db:return dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone())
         def names_rows():
             with connect(database) as db:return [dict(value) for value in db.execute('SELECT * FROM names_entries ORDER BY rowid')]
-        merge=object.__new__(MergeService);merge.draining=False;merge.inventory=SimpleNamespace(database=database);merge.jobs=jobs
+        merge=object.__new__(MergeService);merge.draining=False;merge.inventory=SimpleNamespace(database=database,group_lock=threading.RLock());merge.jobs=jobs
+        merge.operation_lock=threading.RLock()
         def current_context(value):
             with connect(database) as db:return json.loads(db.execute('SELECT data FROM candidate_context WHERE id=?',(value['id'],)).fetchone()[0])
-        merge.reviews=SimpleNamespace(_row=lambda *a:row,_context=current_context,_source_root=lambda value:tmp)
+        merge.reviews=SimpleNamespace(_row=lambda *a:row,_context=current_context,_source_root=lambda value:tmp,lock=threading.RLock())
         merge.automatic=SimpleNamespace(research=object(),requeue=Mock(),request_start=Mock())
         merge._his_revision=lambda *a:2;merge._names_book=lambda *a:(row,tmp,merge.automatic.research)
         merge._names_state=lambda *a:({'title':'Old approved title','author':'Writer'},'',{key:{'value':value} for key,value in entered_names.book_values(database,row).items()},None)
