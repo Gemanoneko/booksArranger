@@ -6,6 +6,9 @@ from pathlib import Path
 from manifest_compatibility import equivalent_manifest
 
 REASONS={
+    # 0.25.0 exact PNG chapter-image cohort. Admission still proves the entire
+    # current native source/profile and unchanged reviewed manifest before CAS.
+    'M4B preservation requires review: Unsupported chapter image sample entry',
     # Exact zero-count text writer quirk; every original track byte is preserved.
     'M4B preservation requires review: Sample size table',
     'Remux changed the decoder configuration or relative audio packet timing',

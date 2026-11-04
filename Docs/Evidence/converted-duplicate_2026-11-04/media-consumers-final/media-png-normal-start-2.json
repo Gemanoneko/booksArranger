@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_normal_start_readmits_old_png_chapter_refusal_with_current_proof (test_automatic_media.AutomaticMediaTests.test_normal_start_readmits_old_png_chapter_refusal_with_current_proof) ... FAIL\r\ntest_exact_single_source_decode_failure_exposes_retained_path (test_attention_failure_policy.SourceRemedyTests.test_exact_single_source_decode_failure_exposes_retained_path) ... ok\r\ntest_invalid_m4b_is_distinct_from_unsupported_chapter_image (test_attention_failure_policy.SourceRemedyTests.test_invalid_m4b_is_distinct_from_unsupported_chapter_image) ... ok\r\ntest_typed_multisource_decode_is_bound_to_exact_frozen_member (test_attention_failure_policy.SourceRemedyTests.test_typed_multisource_decode_is_bound_to_exact_frozen_member) ... ok\r\n\r\n======================================================================\r\nFAIL: test_normal_start_readmits_old_png_chapter_refusal_with_current_proof (test_automatic_media.AutomaticMediaTests.test_normal_start_readmits_old_png_chapter_refusal_with_current_proof)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Worktrees\\Books Arranger\\converted-duplicate-20261104\\tests\\test_automatic_media.py\", line 187, in test_normal_start_readmits_old_png_chapter_refusal_with_current_proof\r\n    self.service.automatic.start();self.service.automatic.thread.join(90);self.assertFalse(self.service.automatic.thread.is_alive(),'Private normal Start did not finish')\r\n                                                                          ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: True is not false : Private normal Start did not finish\r\n\r\n----------------------------------------------------------------------\r\nRan 4 tests in 96.461s\r\n\r\nFAILED (failures=1)\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 43924,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 74,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 6188,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 97182.3714,
+  "outputBytes": 1847
+}

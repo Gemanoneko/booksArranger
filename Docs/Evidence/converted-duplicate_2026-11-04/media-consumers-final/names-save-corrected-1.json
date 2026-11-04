@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "NAMES_READ_TIMING {'request': 0.0, 'response': 0.092473, 'worker_release': 0.092528}\r\n",
+  "err": "test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas (test_lock_timing.SourceFolderDispatchTests.test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas) ... ERROR\r\ntest_edit_names_http_read_does_not_wait_for_unrelated_grouping (test_lock_timing.SourceFolderDispatchTests.test_edit_names_http_read_does_not_wait_for_unrelated_grouping) ... ok\r\ntest_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder (test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder) ... ok\r\n\r\n======================================================================\r\nERROR: test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas (test_lock_timing.SourceFolderDispatchTests.test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Worktrees\\Books Arranger\\converted-duplicate-20261104\\tests\\test_lock_timing.py\", line 107, in test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas\r\n    self.assertEqual(saved['series']['value'],'S');self.assertEqual(saved['universe']['value'],'W');self.assertEqual(saved['title']['value'],'B')\r\n                     ~~~~~~~~~~~~~~~^^^^^^^^^\r\nTypeError: string indices must be integers, not 'str'\r\n\r\n----------------------------------------------------------------------\r\nRan 3 tests in 2.234s\r\n\r\nFAILED (errors=1)\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 79844,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 16,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 187,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 2942.9034,
+  "outputBytes": 1597
+}

@@ -69,6 +69,63 @@ class SourceFolderDispatchTests(unittest.TestCase):
         self.assertEqual(response[0],400);self.assertEqual(response[1]['code'],'folder_access_denied')
         self.assertEqual(response[1]['folder'],str(self.sources[0].parent));self.assertNotIn('drive',response[1]['error'])
 
+    def test_edit_names_http_read_does_not_wait_for_unrelated_grouping(self):
+        from test_merge_http import MergeHTTPTests
+        route=MergeHTTPTests();route.setUp();self.addCleanup(route.tearDown);route.server.inventory=self.inv;route.server.merge=self.service
+        row=self.inv.candidates('Audiobooks')['rows'][0]
+        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
+        entered=threading.Event();release=threading.Event();answered=threading.Event();responses=[];marks={};scope=[]
+        approval_before=dict(self.service.__dict__.get('_approval_results',{}));peers_before=dict(self.service.__dict__.get('_shared_peers',{}))
+        def worker():
+            with self.inv.group_lock,self.service.reviews.lock,self.service.operation_lock:entered.set();release.wait(5)
+        def request():
+            marks['request']=time.monotonic();responses.append(route.call('/api/candidate/names',{'library':'Audiobooks','id':row['id'],'revision':row['revision']}));marks['response']=time.monotonic();scope.append(getattr(self.service.reviews.page_local,'catalog_only',False));answered.set()
+        holder=threading.Thread(target=worker);caller=threading.Thread(target=request)
+        holder.start();self.assertTrue(entered.wait(2));caller.start();prompt=answered.wait(.5);marks['worker_release']=time.monotonic();release.set();holder.join(5);caller.join(5)
+        self.assertFalse(holder.is_alive());self.assertFalse(caller.is_alive())
+        print('NAMES_READ_TIMING '+str({key:round(value-marks['request'],6) for key,value in marks.items()}))
+        self.assertEqual(responses[0][0],200,responses);self.assertIn('series',responses[0][1]['editor']['fields']);self.assertIn('universe',responses[0][1]['editor']['fields'])
+        self.assertTrue(prompt,'Edit names waited for an unrelated grouping/source worker')
+        self.assertEqual(scope,[False]);self.assertEqual(self.service.__dict__.get('_approval_results',{}),approval_before);self.assertEqual(self.service.__dict__.get('_shared_peers',{}),peers_before)
+
+    def test_output_folder_and_gone_source_fallback_do_not_wait_for_grouping(self):
+        row=self.inv.candidates('Audiobooks')['rows'][0];source_folder=self.sources[0].parent
+        source_folder.rename(self.audio/'Kept private source');output=self.audio/'Sorted';output.mkdir();final=output/'book.m4b';final.write_bytes(b'private recorded output')
+        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
+        entered=threading.Event();release=threading.Event();done=threading.Event();answers=[];opened=[]
+        def worker():
+            with self.inv.group_lock,self.service.reviews.lock:entered.set();release.wait(5)
+        def navigate():
+            for kind in ('output','source'):answers.append(self.service.open_folder('Audiobooks','candidates',row['id'],kind))
+            done.set()
+        state={'state':'verified','path':str(final),'identity':'private-key'}
+        with patch.object(self.service.publications,'describe',return_value=state),patch.object(self.service.publications,'publication',return_value={}),patch.object(self.service.publications,'protected',side_effect=lambda value:contextlib.nullcontext((None,'private-key'))),patch.object(self.service,'dispatch_folder',side_effect=opened.append):
+            holder=threading.Thread(target=worker);caller=threading.Thread(target=navigate);holder.start();self.assertTrue(entered.wait(2));caller.start();prompt=done.wait(.5);release.set();holder.join(5);caller.join(5)
+        self.assertFalse(holder.is_alive());self.assertFalse(caller.is_alive());self.assertTrue(prompt)
+        self.assertEqual(opened,[str(output),str(output)]);self.assertTrue(answers[0]['opened']);self.assertEqual(answers[1]['fallback'],'output')
+
+    def test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas(self):
+        from test_merge_http import MergeHTTPTests
+        route=MergeHTTPTests();route.setUp();self.addCleanup(route.tearDown);route.server.inventory=self.inv;route.server.merge=self.service
+        row=self.inv.candidates('Audiobooks')['rows'][0]
+        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
+        entered=threading.Event();release=threading.Event();answered=threading.Event();responses=[]
+        values={'title':'B','author':'A','series':'S','number':'1','universe':'W','collection':False}
+        payload={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'names':values}
+        def worker():
+            with self.inv.group_lock,self.service.reviews.lock,self.service.operation_lock:entered.set();release.wait(5)
+        def save():responses.append(route.call('/api/candidate/names-save',payload));answered.set()
+        holder=threading.Thread(target=worker);caller=threading.Thread(target=save);holder.start();self.assertTrue(entered.wait(2));caller.start();prompt=answered.wait(.5)
+        release.set();holder.join(5);caller.join(5);self.assertFalse(holder.is_alive());self.assertFalse(caller.is_alive())
+        self.assertTrue(prompt,'Save must answer explicitly while unrelated book work holds its admission locks')
+        self.assertEqual(responses[0][0],409,responses);self.assertEqual(responses[0][1]['code'],'busy');self.assertIsNone(responses[0][1]['row'])
+        response=route.call('/api/candidate/names-save',payload);self.assertEqual(response[0],200,response)
+        import entered_names
+        current=self.service.reviews._row('Audiobooks',row['id']);saved=entered_names.book_values(self.inv.database,current)
+        self.assertEqual(saved['series'],'S');self.assertEqual(saved['universe'],'W');self.assertEqual(saved['title'],'B')
+        with connect(self.inv.database) as db:db.execute('UPDATE book_groups SET revision=revision+1 WHERE id=?',(row['id'],))
+        self.assertEqual(route.call('/api/candidate/names-save',payload)[0],409)
+
 
 class SlowLookup:
     """Every publication lookup sleeps `seconds` first (the live catalog's 433 relocations took 19 s in all)."""

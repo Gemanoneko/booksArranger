@@ -822,6 +822,9 @@ class MergeService:
         summary=self.attention_summary(retry=False)
         try:summary=self.stale_attention(summary,raw_jobs,set(totals.get('converted_ids') or ()))
         except (sqlite3.Error,OSError):pass
+        current_media=summary.get(current['job_id'],{}).get('media_failure') if current else None
+        if current_media and progress and progress.get('reason'):progress['reason']=current_media['hint']
+        if current and current['state']=='needs attention' and progress and progress.get('reason') and not current_media:progress['reason']='The media check stopped. Open Technical details for the recorded failure.'
         counts,cleanable=attention_counts(summary)
         try:needs,coverage=self._todo()
         except (sqlite3.Error,OSError,ValueError):needs,coverage={},dict(self.NO_COVERAGE)
@@ -833,6 +836,7 @@ class MergeService:
             'current_job_origin':job_origin(current['manifest']) if current else 'unknown',
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
             'current_task_kind':current['manifest'].get('task_kind') if current else None,
+            'current_media_failure':copy.deepcopy(current_media),
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
@@ -3021,15 +3025,17 @@ class MergeService:
         retained_stamp=record_digest(retained) if retained else None
         key=(row['id'],row['revision'],row['fingerprint'],title,author,chosen,json.dumps(names,sort_keys=True,ensure_ascii=False) if names else None,retained_stamp,self._approval_stamp())
         cache=self.__dict__.setdefault('_approval_results',{})
-        kept=cache.get(key)
+        catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+        kept=cache.get(key) if not catalog_only else None
         if kept is not None:return row,copy.deepcopy(kept)
         extra={'chosen':chosen} if chosen is not None else {}
         if names:extra['names']=names
         if retained is not None:extra['retained']=retained
         result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author,**extra)
         result=self._shared_result(row,result)
-        if len(cache)>=4096:cache.clear()
-        cache[key]=copy.deepcopy(result)
+        if not catalog_only:
+            if len(cache)>=4096:cache.clear()
+            cache[key]=copy.deepcopy(result)
         return row,result
 
     def _shared_result(self,row,result):
@@ -3040,7 +3046,8 @@ class MergeService:
         if not sid and not world:return attach_shared_routing(result)
         stamp=self._approval_stamp();key=(sid,world,stamp)
         cache=self.__dict__.setdefault('_shared_peers',{})
-        peers=cache.get(key)
+        catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
+        peers=cache.get(key) if not catalog_only else None
         if peers is None:
             peers=[]
             with connect(self.inventory.database) as db:
@@ -3063,8 +3070,9 @@ class MergeService:
                     if (rebuilt.get('work') or {}).get('id')!=(prior.get('work') or {}).get('id'):continue
                     peers.append(rebuilt)
                 except (ValueError,KeyError,TypeError):continue  # insufficient peer evidence cannot omit an author
-            if len(cache)>=64:cache.clear()
-            cache[key]=copy.deepcopy(peers)
+            if not catalog_only:
+                if len(cache)>=64:cache.clear()
+                cache[key]=copy.deepcopy(peers)
         own=(result.get('work') or {}).get('id')
         return attach_shared_routing(result,[peer for peer in peers if (peer.get('work') or {}).get('id')!=own])
 
@@ -3261,6 +3269,9 @@ class MergeService:
         return cache[key]
 
     def names_editor(self,id,revision):
+        with self.reviews.catalog_snapshot():return self._names_editor(id,revision)
+
+    def _names_editor(self,id,revision):
         """Edit names, opened (Judy 1.1 item 7: one read for one row): {'fields': {title, author, series, number, universe,
         collection}: {'proposal', 'basis'}, 'read': what the files say, 'remembered': [{id, field, from, to}], 'universes',
         'series' (the pick-lists), 'job': the job state (1.3), 'place', 'entered'}. Read-only."""
@@ -3301,6 +3312,16 @@ class MergeService:
                 'job':job['state'],'place':place,'destination':destination,'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row)),'applies':1}
 
     def names_save(self,id,revision,values,fingerprint=None):
+        # Do not leave a Save request queued invisibly behind another book's
+        # long source check. A later explicit retry keeps every fresh-row/CAS
+        # guard below and the editor retains its draft after this known refusal.
+        with contextlib.ExitStack() as admission:
+            for lock in (self.operation_lock,self.reviews.lock,self.inventory.group_lock):
+                if not lock.acquire(blocking=False):raise self.NamesRefused('busy','Another book is being checked. Try Save again shortly. Your entered names are kept.')
+                admission.callback(lock.release)
+            return self._names_save(id,revision,values,fingerprint)
+
+    def _names_save(self,id,revision,values,fingerprint=None):
         """Edit names, Save (Judy 1.3 to 1.5): records the values as Sergei's lasting names and touches no file. The book's
         job follows (1.4): a queued job that has not started is set aside and its book checked again with the new names
         ('replanned'); a Stopped one runs with them at its next attempt (the queue's claim check); a finished audiobook keeps
@@ -4719,7 +4740,7 @@ class MergeService:
                 step='unknown'
                 streams_check()
                 child=self.jobs.enqueue(fresh,repair_context=(parent,tuple(group),tuple(context)),retry_context=(parent,tuple(group),tuple(context)) if routed else None)
-                return result|{'requeued':True,'job_id':child,'parent_job_id':parent['job_id'],'reason':'Source-preserving M4B repair admitted as new work'}
+                return result|{'retryable':False,'retry_at':None,'requeued':True,'job_id':child,'parent_job_id':parent['job_id'],'reason':'Source-preserving M4B repair admitted as new work'}
         except InterruptedError:raise
         except (OSError,sqlite3.Error) as error:
             return result|{'reason':'Failed M4B retained: '+str(error),'cause':'file_problem'}
@@ -5328,7 +5349,7 @@ class MergeService:
                 try:return dict(self.open_folder(library,view,identity,'output'),fallback='output')
                 except ValueError:raise FolderOpenRefused(directory,FileNotFoundError()) from None
         elif folder_kind=='output' and view=='candidates':
-            self.reviews._row(library,identity)
+            self._source_directories(library,view,identity)  # catalog-only identity check; navigation never regroups
             try:
                 jobs=self.jobs.status()['jobs'];current=self.publications.describe(jobs,identity)
                 if current['state']!='verified':

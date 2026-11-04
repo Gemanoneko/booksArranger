@@ -2,6 +2,7 @@
 import errno
 import contextlib
 import copy
+from pathlib import Path
 import hashlib
 import json
 import math
@@ -51,6 +52,7 @@ def _failure_details(error, stage, now=None):
     if isinstance(error, OSError) and type(getattr(error, 'winerror', None)) is int:
         details['winerror'] = error.winerror  # typed, so a drive or share that went away is told apart (UNREACHABLE)
     if isinstance(getattr(error,'chapter_diagnostic',None),dict):details['chapter_diagnostic']=copy.deepcopy(error.chapter_diagnostic)
+    if isinstance(getattr(error,'source_diagnostic',None),dict):details['source_diagnostic']=copy.deepcopy(error.source_diagnostic)
     if getattr(error, 'tag_repair_checked', False) is True:
         details['tag_repair_checked'] = True  # an MP3 decode failure from a version with the trailing-tag repair
     return details
@@ -71,9 +73,45 @@ def source_remedy(row,journal,manifest):
     """
     failure=journal.get('failure',{}) if isinstance(journal,dict) else {}
     sources=manifest.get('sources') if isinstance(manifest,dict) else None
+    if not isinstance(failure,dict) or row.get('output') or not isinstance(journal,dict) or 'publication_intent' in journal or failure.get('stage')!='checking sources':return None
+    diagnostic=failure.get('source_diagnostic')
+    if failure.get('exception_class')=='SourceDecodeError' and isinstance(diagnostic,dict):
+        frozen=json.dumps(manifest,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+        if row.get('manifest_hash')!=hashlib.sha256(frozen.encode('utf8')).hexdigest():return None
+        index=diagnostic.get('source_index');count=diagnostic.get('source_count');path=diagnostic.get('source_path')
+        if diagnostic.get('schema')!='source-decode-failed-v1' or diagnostic.get('code')!='source_decode_failed':return None
+        if not isinstance(sources,list) or type(index)is not int or type(count)is not int or count!=len(sources) or not 0<=index<count:return None
+        if not isinstance(sources[index],dict) or path!=sources[index].get('path') or not isinstance(path,str) or not path:return None
+        if not isinstance(diagnostic.get('detail'),str) or len(diagnostic['detail'])>2000:return None
+        return {'kind':'replace_source','cause':'source_decode_failed','path':path,'sha256':sources[index].get('sha256'),'source_index':index,'source_count':count,'original_retained':True}
     if failure.get('exception_class')!='ValidationError' or failure.get('stage')!='checking sources' or not str(row.get('reason') or '').startswith('Full audio decode failed: '):return None
     if not isinstance(sources,list) or len(sources)!=1 or not isinstance(sources[0],dict) or not str(sources[0].get('path','')).lower().endswith('.mp3'):return None
     return {'kind':'replace_source','cause':'source_decode_failed','path':sources[0]['path'],'sha256':sources[0].get('sha256'),'original_retained':True}
+
+
+def media_failure(row,journal,manifest,group,remedy=None,repair=None):
+    """Display facts from an exact producer shape; never admission or repair rights."""
+    if group in {'checking','retry','repair'} or row.get('output') or 'publication_intent' in journal:return None
+    failure=journal.get('failure') or {};sources=manifest.get('sources') or []
+    if not isinstance(failure,dict):return None
+    if failure.get('stage')!='checking sources':return None
+    code=None;path=None
+    if remedy and remedy.get('kind')=='replace_source':
+        path=remedy['path'];code='invalid_m4b_source' if Path(path).suffix.lower() in {'.m4b','.m4a'} else 'source_decode_failed'
+    elif len(sources)==1 and Path(sources[0].get('path','')).suffix.lower()=='.m4b' and failure.get('exception_class')=='ValidationError':
+        reason=row.get('reason') or '';checked=(repair or {}).get('reason') or ''
+        if reason.startswith('Full audio decode failed: ') or reason=='M4B preservation requires review: Top-level extent invalid':code='invalid_m4b_source'
+        elif group=='unsupported' and (checked=='Unsupported chapter image sample entry' or reason=='M4B preservation requires review: Unsupported chapter image sample entry'):code='m4b_feature_unsupported'
+        if code:path=sources[0]['path']
+    if not code:return None
+    filename=Path(path).name
+    status={'m4b_feature_unsupported':"Can't convert — M4B feature unsupported",'invalid_m4b_source':'Stopped — M4B source failed check','source_decode_failed':'Stopped — source audio check failed'}[code]
+    hint=(filename+' has a chapter image the app cannot preserve yet. Try again after an app update.' if code=='m4b_feature_unsupported' else
+          filename+' failed its media check. Replace it with an intact copy.' if code=='invalid_m4b_source' else
+          filename+' failed its full audio check. Check or replace that file with an intact copy.')
+    return {'schema':'books-media-failure-v1','code':code,'source_path':path,'filename':filename,'status':status,'hint':hint,
+            'source_index':remedy.get('source_index') if remedy else 0,'source_count':len(sources),
+            'next_step':'app_update' if code=='m4b_feature_unsupported' else 'intact_source'}
 
 
 def tag_repair_retry(row):
@@ -87,7 +125,8 @@ def tag_repair_retry(row):
             return False
         if any(key in manifest for key in ('retry_intent', 'm4b_repair', 'replacement_id', 'replacement_parent_job_id')):
             return False
-        return source_remedy(row, journal, manifest) is not None and 'tag_repair_checked' not in journal['failure']
+        sources=manifest.get('sources') or []
+        return len(sources)==1 and str(sources[0].get('path','')).lower().endswith('.mp3') and source_remedy(row, journal, manifest) is not None and 'tag_repair_checked' not in journal['failure']
     except (KeyError, TypeError, ValueError, AttributeError):
         return False
 
@@ -943,6 +982,10 @@ class AudioJobs:
             remedy=source_remedy(row,journal,manifest)
             if remedy and tag_repair_retry(row):remedy=dict(remedy,kind='tag_repair',cause='legacy_decode_failed')
             if remedy and value['originals_untouched']:value['remedy']=remedy
+            media=media_failure(row,journal,manifest,group,remedy,repair)
+            if media:
+                value['media_failure']=media
+                if media['code']=='invalid_m4b_source':value['group']='other'
             if check in ('pending', 'unavailable', 'passed'):
                 value['precheck'] = check
                 if check == 'unavailable':

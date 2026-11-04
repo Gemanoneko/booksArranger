@@ -1,0 +1,15 @@
+test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas (test_lock_timing.SourceFolderDispatchTests.test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas) ... FAIL
+
+======================================================================
+FAIL: test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas (test_lock_timing.SourceFolderDispatchTests.test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_lock_timing.py", line 102, in test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas
+    self.assertTrue(prompt,'Save must answer explicitly while unrelated book work holds its admission locks')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : Save must answer explicitly while unrelated book work holds its admission locks
+
+----------------------------------------------------------------------
+Ran 1 test in 1.320s
+
+FAILED (failures=1)

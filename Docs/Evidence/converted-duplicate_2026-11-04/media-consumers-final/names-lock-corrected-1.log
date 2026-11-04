@@ -1,0 +1,8 @@
+NAMES_READ_TIMING {'request': 0.0, 'response': 0.101386, 'worker_release': 0.101427}
+test_edit_names_http_read_does_not_wait_for_unrelated_grouping (test_lock_timing.SourceFolderDispatchTests.test_edit_names_http_read_does_not_wait_for_unrelated_grouping) ... ok
+test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder (test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 1.478s
+
+OK

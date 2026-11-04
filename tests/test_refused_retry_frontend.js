@@ -35,7 +35,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   // Observed case: unsupported_file. No Retry anywhere, the UI's words, both raw facts only in Technical detail.
   const refused=refusedRow('u','unsupported_file');paint([refused]);
   let tr=rowOf('u');
-  assert.equal(statusCell(tr).textContent,"Can't convert — M4B not supported");
+  assert.equal(statusCell(tr).textContent,"Can't convert — M4B feature unsupported");
   assert.equal(statusCell(tr).children[0].textContent,"Retry was refused: the app doesn't support how this M4B is built. Nothing to do for now. Originals are untouched.");
   assert.ok(statusCell(tr).children[0].classes.has('retry-refused'),'--warning, the existing refused mechanism');
   assert.ok(![...actionButtons(tr)].some(button=>/Retry|Repair/.test(button.textContent)),'no Retry, not even disabled');
@@ -44,7 +44,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(techOf(tr),'Technical detail: Failed M4B retained: Unsupported structural box; earlier failure: '+M4B_REASON);
   context.fixture=refused;run('select(fixture,true);controls()');
   assert.equal(get('retry-block').hidden,true,'the details panel has no Retry either');
-  assert.equal(get('automatic-result-status').textContent,"Can't convert — M4B not supported");
+  assert.equal(get('automatic-result-status').textContent,"Can't convert — M4B feature unsupported");
   assert.equal(get('automatic-technical').textContent,'Technical detail: Failed M4B retained: Unsupported structural box; earlier failure: '+M4B_REASON);
   assert.equal(run('attentionText('+JSON.stringify(refusedRow('v','unsupported_file',{},{attention:{group:'unsupported',cause:null,originals_untouched:false}}))+').hint'),
     "Retry was refused: the app doesn't support how this M4B is built. Nothing to do for now.",'the sentence only where the app confirms it');
@@ -92,7 +92,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(run('attentionText('+JSON.stringify(refusedRow('t','unsupported_file',{stale:true,app_version:''},{attention:{group:'retry',cause:null,originals_untouched:true}}))+').hint'),
     'Retry was refused before the app was updated. It may work now.');
   assert.equal(run('candidateStatus('+JSON.stringify(refusedRow('t','unsupported_file',{stale:true},{attention:{group:'unsupported',cause:null,originals_untouched:true}}))+')'),
-    "Can't convert — M4B not supported",'refused again by this build\'s own check: the group says so');
+    "Can't convert — M4B feature unsupported",'refused again by this build\'s own check: the group says so');
 
   // Selection: the tick stays; the bulk count leaves the refused book out and says so.
   paint([m4bRow('a'),m4bRow('b'),refused]);
@@ -110,7 +110,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   tr=rowOf('x');
   assert.equal(document.activeElement,actionButtons(tr)[1],'View metadata of the same row, never the page or a neighbour');
   assert.equal(document.activeElement.textContent,'Edit names');
-  assert.equal(statusCell(tr).textContent,"Can't convert — M4B not supported",'the status changed in place');
+  assert.equal(statusCell(tr).textContent,"Can't convert — M4B feature unsupported",'the status changed in place');
   assert.match(statusCell(tr).children[0].textContent,/^Retry was refused: the app doesn't support/);
   // The same from the details panel's Retry.
   paint([m4bRow('z')]);run('select(rows[0],true);controls()');
@@ -133,9 +133,9 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   for(let i=0;i<5;i++)await tick();
   assert.equal(searched.length,1,'re-read once');assert.match(searched[0],/search=Title%20h/);
   tr=rowOf('h');assert.ok(tr,'still in place');
-  assert.equal(statusCell(tr).textContent,"Can't convert — M4B not supported",'never a stale Queued');
+  assert.equal(statusCell(tr).textContent,"Can't convert — M4B feature unsupported",'never a stale Queued');
   await run('loadList(listContext(),"Audiobooks",view,filters[view],0,"",retryEpoch,false)');for(let i=0;i<5;i++)await tick();
-  assert.equal(searched.length,1,'one re-read per hold');assert.equal(statusCell(rowOf('h')).textContent,"Can't convert — M4B not supported");
+  assert.equal(searched.length,1,'one re-read per hold');assert.equal(statusCell(rowOf('h')).textContent,"Can't convert — M4B feature unsupported");
   context.fetch=listFetch;run('heldRow=null;attentionGroup="all"');
 
   context.setTimeout=()=>0;

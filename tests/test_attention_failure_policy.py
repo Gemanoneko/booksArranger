@@ -180,6 +180,60 @@ class RationalPresentationTests(unittest.TestCase):
 
 
 class SourceRemedyTests(unittest.TestCase):
+    def test_real_worker_persists_twelfth_of_57_source_and_exposes_bound_remedy(self):
+        import copy,uuid
+        from audio_pipeline import SourceDecodeError
+        with tempfile.TemporaryDirectory() as directory:
+            base=Path(directory)
+            sources=[{'path':str(base/(str(i).zfill(2)+'.mp3')),'sha256':'a'*64,'fingerprint':{'size':1,'modified':1}} for i in range(1,58)]
+            manifest={'job_id':str(uuid.uuid4()),'candidate_id':str(uuid.uuid4()),'candidate_revision':1,'sources':sources,'metadata':{'title':'Whole book'},'destination':str(base/'whole.m4b'),'profile':'fixture','evidence':{},'cover':{}}
+            frozen=copy.deepcopy(manifest)
+            def runner(actual,stop,checkpoint):
+                checkpoint('checking sources',{})
+                cause=ValidationError('Controlled native Header missing');cause.tag_repair_checked=True
+                raise SourceDecodeError(actual['sources'][11]['path'],11,len(actual['sources']),cause)
+            queue=AudioJobs(base/'catalog.sqlite3',runner,lambda value:True,lambda record:False)
+            try:
+                queue.enqueue(manifest);queue.resume();queue._thread.join(5);self.assertFalse(queue._thread.is_alive())
+                row=queue._rows('SELECT * FROM audio_jobs WHERE job_id=?',(manifest['job_id'],))[0]
+                self.assertEqual(json.loads(row['manifest']),frozen);self.assertIsNone(row['output']);self.assertEqual(row['state'],'needs attention')
+                journal=json.loads(row['journal']);failure=journal['failure'];self.assertEqual(failure['stage'],'checking sources');self.assertNotIn('publication_intent',journal)
+                self.assertEqual(failure['source_diagnostic']['source_index'],11);self.assertEqual(failure['source_diagnostic']['source_count'],57);self.assertTrue(failure['tag_repair_checked'])
+                summary=queue.attention_summary(job_ids=[manifest['job_id']],retry=False)[manifest['job_id']]
+                self.assertEqual(summary['remedy']['path'],sources[11]['path']);self.assertEqual(summary['media_failure']['filename'],'12.mp3')
+                self.assertEqual(summary['media_failure']['code'],'source_decode_failed');self.assertNotIn('retry',summary)
+            finally:queue.close()
+
+    def test_typed_multisource_decode_is_bound_to_exact_frozen_member(self):
+        import copy
+        from audio_jobs import _failure_details,source_remedy,media_failure,tag_repair_retry
+        from audio_pipeline import SourceDecodeError,ValidationError
+        sources=[{'path':'Z:/private/'+str(i).zfill(2)+'.mp3','sha256':'a'*64} for i in range(1,58)]
+        manifest={'sources':sources};cause=ValidationError('Header missing');cause.tag_repair_checked=True
+        error=SourceDecodeError(sources[11]['path'],11,57,cause);failure=_failure_details(error,'checking sources')
+        self.assertTrue(failure['tag_repair_checked']);self.assertEqual(failure['source_diagnostic'],error.to_dict())
+        row={'reason':str(error),'state':'needs attention','output':None,'manifest_hash':__import__('hashlib').sha256(json.dumps(manifest,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()};journal={'failure':failure}
+        remedy=source_remedy(row,journal,manifest);self.assertEqual((remedy['path'],remedy['source_index'],remedy['source_count']),(sources[11]['path'],11,57))
+        media=media_failure(row,journal,manifest,'other',remedy);self.assertEqual((media['code'],media['filename']),('source_decode_failed','12.mp3'))
+        for patch in ({'source_index':True},{'source_index':57},{'source_count':56},{'source_path':sources[0]['path']},{'schema':'untrusted'},{'detail':None}):
+            changed=copy.deepcopy(journal);changed['failure']['source_diagnostic'].update(patch)
+            self.assertIsNone(source_remedy(row,changed,manifest))
+        for stage in ('checking output','publishing','creating'):
+            changed=copy.deepcopy(journal);changed['failure']['stage']=stage;self.assertIsNone(source_remedy(row,changed,manifest))
+        self.assertIsNone(source_remedy(row,dict(journal,publication_intent={}),manifest))
+        self.assertIsNone(source_remedy(dict(row,output='{}'),journal,manifest))
+        self.assertIsNone(source_remedy(dict(row,manifest_hash='0'*64),journal,manifest))
+        raw=dict(row,manifest=__import__('json').dumps(manifest),journal=__import__('json').dumps(journal));self.assertFalse(tag_repair_retry(raw))
+
+    def test_invalid_m4b_is_distinct_from_unsupported_chapter_image(self):
+        from audio_jobs import media_failure
+        manifest={'sources':[{'path':'Z:/private/source.m4b'}]};journal={'failure':{'exception_class':'ValidationError','stage':'checking sources'}}
+        invalid=media_failure({'reason':'Full audio decode failed: corrupt input packet'},journal,manifest,'unsupported')
+        feature=media_failure({'reason':'M4B preservation requires review: Unsupported chapter image sample entry'},journal,manifest,'unsupported')
+        self.assertEqual(invalid['code'],'invalid_m4b_source');self.assertEqual(feature['code'],'m4b_feature_unsupported')
+        self.assertIsNone(media_failure({'reason':'Unknown failure'},journal,manifest,'other'))
+        self.assertIsNone(media_failure({'reason':'M4B preservation requires review: Unsupported chapter image sample entry'},journal,manifest,'checking'))
+
     def test_exact_single_source_decode_failure_exposes_retained_path(self):
         from audio_jobs import source_remedy
         row={'reason':'Full audio decode failed: Header missing'}

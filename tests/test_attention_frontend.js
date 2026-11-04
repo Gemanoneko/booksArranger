@@ -34,7 +34,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   const unsupported=attentionRow('c','unsupported',{},{retry:undefined}),other=attentionRow('d','other',{},{retry:undefined}),repair=damaged('r');
   const status=row=>run('candidateStatus('+JSON.stringify(row)+')');
   assert.equal(status(retry),'Stopped — ready to retry');assert.equal(status(space),'Stopped — not enough disk space');
-  assert.equal(status(unsupported),"Can't convert — M4B not supported");assert.equal(status(other),'Stopped — see details');assert.equal(status(repair),'Damaged — can repair');
+  assert.equal(status(unsupported),"Can't convert — M4B feature unsupported");assert.equal(status(other),'Stopped — see details');assert.equal(status(repair),'Damaged — can repair');
   assert.equal(status(blocked({},{attention:undefined})),'Stopped — see details','older data without a class: raw text never prints (Judy 2026-10-24)');
 
   // Rows: short status, hint line, technical detail on hover; Retry or Repair first, only with API data.
@@ -147,7 +147,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
 
   // Group strip: live counts with Can repair, pressed state and a group request.
   backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,queued:5,attention_counts:{retry:121,repair:2,other:1,unsupported:0}}};run('state='+JSON.stringify(backend)+';controls()');
-  assert.equal(get('attention-groups').hidden,false);assert.equal(get('group-all').textContent,'All · 124');assert.equal(get('group-repair').textContent,'Can repair · 2');assert.equal(get('group-unsupported').textContent,'M4B not supported · 0');
+  assert.equal(get('attention-groups').hidden,false);assert.equal(get('group-all').textContent,'All · 124');assert.equal(get('group-repair').textContent,'Can repair · 2');assert.equal(get('group-unsupported').textContent,'M4B feature unsupported · 0');
   assert.equal(get('group-all').getAttribute('aria-pressed'),'true');assert.equal(get('retry-all').hidden,true,'never in All');
   assert.equal(get('retry-all-status').textContent,'Repair queued: The chapter list points to a missing part. Repair removes that pointer.','the repair line stays while the filter does');
   const second=attentionRow('e','retry');inventoryRows=[retry,second];const before=calls.length;await get('group-retry').handlers.click();
@@ -231,8 +231,20 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
   context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
   context.fixture=attentionRow('bad-source','other',{}, {attention:{group:'other',originals_untouched:true,remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/Audio/Железная.mp3'}}});
-  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Source audio needs replacement');assert.equal(sourceText.hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",'Judy 2026-10-25, Delete book spec section 7');
+  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Stopped — source audio check failed');assert.equal(sourceText.hint,'The source failed its full audio check. Check or replace that file with an intact copy.');
   assert.match(run('technicalText(fixture)'),/Z:\/Audio\/Железная.mp3/);
+  for(const [code,group,status,hint] of [
+    ['source_decode_failed','other','Stopped — source audio check failed','12.mp3 failed its full audio check. Check or replace that file with an intact copy.'],
+    ['invalid_m4b_source','other','Stopped — M4B source failed check','source.m4b failed its media check. Replace it with an intact copy.'],
+    ['m4b_feature_unsupported','unsupported',"Can't convert — M4B feature unsupported",'source.m4b has a chapter image the app cannot preserve yet. Try again after an app update.']]){
+    context.fixture=attentionRow('typed-media',group,{}, {reason:'Header missing — RAW DIAGNOSTIC',attention:{group,originals_untouched:true,media_failure:{schema:'books-media-failure-v1',code,filename:code==='source_decode_failed'?'12.mp3':'source.m4b',status,hint}}});
+    assert.equal(run('candidateStatus(fixture)'),status);assert.equal(run('attentionText(fixture).hint'),hint+' Original kept.');
+    context.mediaActivity={kind:'conversion',state:'attention',media_failure:context.fixture.creation.job.attention.media_failure};
+    assert.equal(run('activityLabel(mediaActivity)'),status);assert.equal(run('activityStep(mediaActivity,false)'),hint,'Jobs uses the same typed cause without raw decoder text');
+    assert.match(run('technicalText(fixture)'),/RAW DIAGNOSTIC/);assert.doesNotMatch(run('attentionText(fixture).hint'),/RAW DIAGNOSTIC/);assert.equal(run('rowAction(fixture)'),null,'no unsupported repair action');
+  }
+  context.fixture.creation.job.attention.media_failure={schema:'untrusted',code:'source_decode_failed',filename:'guess.mp3',status:'Guess',hint:'Guess'};
+  assert.equal(run('candidateStatus(fixture)'),"Can't convert — M4B feature unsupported",'untrusted typed copy is ignored');
   context.fixture=attentionRow('reacquire','reacquire',{}, {attention:{group:'reacquire',reacquire:{state:'required',certainty:'uncertain',reason:'Measured damaged audio',repair_limit:'Cannot preserve speech',originals:[{path:'Z:/shared/one.mp3'}],source_presence:'unavailable'}},retry:{allowed:true}});
   assert.equal(run('attentionText(fixture).status'),'Need to reacquire');
   assert.match(run('attentionText(fixture).hint'),/risking missing audio/);

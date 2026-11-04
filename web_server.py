@@ -81,6 +81,8 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
         row = {'id': kind, 'kind': kind, 'subject': jobs['current_title'], 'step': step,
                'state': ACTIVITY_STATES.get(jobs.get('state'), 'running'), 'reason': progress.get('reason', '')} | _measure(progress, unit)
         if jobs.get('current_task_kind')=='duplicate_source_cleanup':row['task_kind']='duplicate_source_cleanup'
+        media=jobs.get('current_media_failure')
+        if isinstance(media,dict) and media.get('schema')=='books-media-failure-v1':row['media_failure']=media
         if kind == 'conversion':
             row.update(step_index=CONVERSION_STEPS.get(step, 1), step_count=4)
         if type(progress.get('started')) is int:
@@ -1280,6 +1282,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:result=self.server.merge.names_forget(id,revision,self.text_value(data['entry_id'],64))
             except ValueError as error:
                 code=getattr(error,'code',None) or ('changed' if 'Candidate changed' in str(error) else 'refused')
+                if code=='busy':self.response(409,{'error':str(error),'code':code,'row':None});return
                 try:row=reviews.enrich(reviews._row(library,id))
                 except ValueError:row=None
                 self.response(409,{'error':str(error),'code':code,'row':row});return

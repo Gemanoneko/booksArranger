@@ -153,6 +153,44 @@ class AutomaticMediaTests(unittest.TestCase):
         with connect(self.inv.database) as db:self.assertEqual(dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()),before)
         self.assertTrue(self.service._output_valid(parent['output']))
         self.assertEqual(self.service.state()['converted_total'],1)
+
+    def test_normal_start_readmits_old_png_chapter_refusal_with_current_proof(self):
+        import hashlib,m4b_preservation
+        from scanner import connect
+        from test_m4b_preservation import unpack,relocate,png_image,add_chapter_graph
+        from audio_pipeline import run_owned
+        for source in self.sources:source.unlink()
+        full=self.base/'png-full.m4b';stop=threading.Event()
+        run_owned([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-n','-f','lavfi','-i','sine=frequency=997:sample_rate=44100:duration=0.5','-ac','2','-c:a','aac','-b:a','64000','-movflags','+faststart','-metadata','title=A Book','-metadata','album=A Book','-metadata','artist=John Writer',str(full)],self.base,stop,30)
+        top=unpack(full.read_bytes());gap=sum(b.size for kind,b in top.items() if kind not in (b'ftyp',b'moov',b'mdat'))
+        base=top[b'ftyp'].raw+relocate(top[b'moov'].raw,-gap)+top[b'mdat'].raw
+        folder=self.audio/'PNG';folder.mkdir();source=folder/'book.m4b'
+        source.write_bytes(add_chapter_graph(base,image_kind=b'png ',image_samples=(png_image(),png_image())).replace(b'chapter',b'\0\5First',1))
+        before=source.read_bytes()
+        # This normal Start owns one PNG book; the MP3 setup catalog must not
+        # leave unrelated missing-file candidates waiting for metadata.
+        self.service.close();roots=dict(self.inv.roots);fetch=self.client.fetch
+        self.inv=Inventory(self.base/'png-catalog.sqlite3',roots);self.inv.launch('Audiobooks');finish_scan(self.inv)
+        self.service=MergeService(self.inv,self.base/'png-cache');self.client=PublicClient(self.inv.database,fetch=fetch)
+        row=next(row for row in self.service.reviews.page()['rows'] if any(m['path']==str(source) for m in row['members']))
+        research=PublicResearch(self.client).lookup(row,str(self.audio));self.assertEqual(research['reasons'],[])
+        real=m4b_preservation.sample_description
+        def old_image_rule(payload,handler):
+            if handler==b'vide':raise m4b_preservation.Refused('Unsupported chapter image sample entry')
+            return real(payload,handler)
+        with patch.object(m4b_preservation,'sample_description',side_effect=old_image_rule):
+            _,parent_id=self.service.approve_automatic(row,research,stop,self.client);self.wait()
+        with connect(self.inv.database) as db:parent=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone())
+        self.assertEqual(parent['state'],'needs attention');self.assertEqual(parent['reason'],'M4B preservation requires review: Unsupported chapter image sample entry')
+        self.assertIsNone(parent['output']);self.assertEqual(source.read_bytes(),before)
+        self.service.automatic.research=PublicResearch(self.client)
+        self.service.automatic.start();self.service.automatic.thread.join(90);self.assertFalse(self.service.automatic.thread.is_alive(),'Private normal Start did not finish')
+        self.wait();jobs=self.service.jobs.status()['jobs'];children=[job for job in jobs if (job['manifest'].get('m4b_repair') or {}).get('parent_job_id')==parent_id]
+        self.assertEqual(len(children),1,jobs);child=children[0];self.assertEqual(child['state'],'completed',child)
+        self.assertTrue(child['output']['validation']['passed']);self.assertTrue(Path(child['output']['final_path']).exists())
+        with connect(self.inv.database) as db:self.assertEqual(dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()),parent)
+        image_tracks=[track for track in child['manifest']['m4b_repair']['source_profile']['tracks'] if track['handler']=='vide']
+        self.assertEqual([track['codec'] for track in image_tracks],['png '])
     def test_independent_catalog_to_actual_verified_publication_and_ready_without_manual_step(self):
         from test_public_work_identity import FallbackFixture,cap_fantlab
         fixture=FallbackFixture(self.cover);client=PublicClient(self.inv.database,fetch=fixture.fetch);cap_fantlab(self.inv.database,time.time())

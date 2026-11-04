@@ -1,0 +1,18 @@
+NAMES_READ_TIMING {'request': 0.0, 'response': 0.092473, 'worker_release': 0.092528}
+test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas (test_lock_timing.SourceFolderDispatchTests.test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas) ... ERROR
+test_edit_names_http_read_does_not_wait_for_unrelated_grouping (test_lock_timing.SourceFolderDispatchTests.test_edit_names_http_read_does_not_wait_for_unrelated_grouping) ... ok
+test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder (test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder) ... ok
+
+======================================================================
+ERROR: test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas (test_lock_timing.SourceFolderDispatchTests.test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_lock_timing.py", line 107, in test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas
+    self.assertEqual(saved['series']['value'],'S');self.assertEqual(saved['universe']['value'],'W');self.assertEqual(saved['title']['value'],'B')
+                     ~~~~~~~~~~~~~~~^^^^^^^^^
+TypeError: string indices must be integers, not 'str'
+
+----------------------------------------------------------------------
+Ran 3 tests in 2.234s
+
+FAILED (errors=1)

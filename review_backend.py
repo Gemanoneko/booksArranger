@@ -144,9 +144,22 @@ class CandidateReviewService:
             import reacquire_sources
             marker=reacquire_sources.marker(db,id)
             if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
-        row=self.inventory.candidate(library,id) if hasattr(self.inventory,'candidate') else next((r for r in self.inventory.candidates(library,limit=1000000)['rows'] if r['id']==id),None)
+        if getattr(self.page_local,'catalog_only',False) and hasattr(self.inventory,'_candidate_row'):
+            # Field loading is a view of the shown stored generation. It must
+            # not wait for a background approval's unrelated regroup. Save and
+            # publication never enter this thread-local read scope.
+            root=self.inventory.source_root_for_candidate(id)
+            with connect(self.inventory.database) as db:
+                db.execute('BEGIN');row=self.inventory._candidate_row(db,root,id)
+        else:row=self.inventory.candidate(library,id) if hasattr(self.inventory,'candidate') else next((r for r in self.inventory.candidates(library,limit=1000000)['rows'] if r['id']==id),None)
         if row is None or (revision is not None and row['revision']!=revision):raise ValueError('Candidate changed; reload evidence before reviewing')
         return row
+
+    @contextlib.contextmanager
+    def catalog_snapshot(self):
+        previous=getattr(self.page_local,'catalog_only',False);self.page_local.catalog_only=True
+        try:yield
+        finally:self.page_local.catalog_only=previous
 
     def _context(self,row):
         cached=getattr(self.page_local,'contexts',None)

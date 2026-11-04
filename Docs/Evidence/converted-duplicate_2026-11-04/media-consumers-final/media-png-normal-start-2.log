@@ -1,0 +1,18 @@
+test_normal_start_readmits_old_png_chapter_refusal_with_current_proof (test_automatic_media.AutomaticMediaTests.test_normal_start_readmits_old_png_chapter_refusal_with_current_proof) ... FAIL
+test_exact_single_source_decode_failure_exposes_retained_path (test_attention_failure_policy.SourceRemedyTests.test_exact_single_source_decode_failure_exposes_retained_path) ... ok
+test_invalid_m4b_is_distinct_from_unsupported_chapter_image (test_attention_failure_policy.SourceRemedyTests.test_invalid_m4b_is_distinct_from_unsupported_chapter_image) ... ok
+test_typed_multisource_decode_is_bound_to_exact_frozen_member (test_attention_failure_policy.SourceRemedyTests.test_typed_multisource_decode_is_bound_to_exact_frozen_member) ... ok
+
+======================================================================
+FAIL: test_normal_start_readmits_old_png_chapter_refusal_with_current_proof (test_automatic_media.AutomaticMediaTests.test_normal_start_readmits_old_png_chapter_refusal_with_current_proof)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_automatic_media.py", line 187, in test_normal_start_readmits_old_png_chapter_refusal_with_current_proof
+    self.service.automatic.start();self.service.automatic.thread.join(90);self.assertFalse(self.service.automatic.thread.is_alive(),'Private normal Start did not finish')
+                                                                          ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false : Private normal Start did not finish
+
+----------------------------------------------------------------------
+Ran 4 tests in 96.461s
+
+FAILED (failures=1)

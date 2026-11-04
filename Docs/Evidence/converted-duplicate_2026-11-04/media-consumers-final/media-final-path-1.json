@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_inline_author_title_series_are_one_book_local_press_waiting_for_start (test_entered_names.EditNamesTests.test_inline_author_title_series_are_one_book_local_press_waiting_for_start) ... FAIL\r\n\r\n======================================================================\r\nFAIL: test_inline_author_title_series_are_one_book_local_press_waiting_for_start (test_entered_names.EditNamesTests.test_inline_author_title_series_are_one_book_local_press_waiting_for_start)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Worktrees\\Books Arranger\\converted-duplicate-20261104\\tests\\test_entered_names.py\", line 338, in test_inline_author_title_series_are_one_book_local_press_waiting_for_start\r\n    self.assertTrue(preview['path'],ascii(preview))\r\n    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: '' is not true : {'path': '', 'absolute': '', 'taken': False, 'title': '\\u0423\\u044d\\u043b\\u0438\\u0445\\u043e\\u043b\\u043d', 'author': '\\u041e\\u043b\\u0435\\u0433 \\u042f\\u043a\\u043e\\u0432\\u043b\\u0435\\u0432, \\u0412\\u043b\\u0430\\u0434\\u0438\\u043c\\u0438\\u0440 \\u0422\\u043e\\u0440\\u0438\\u043d', 'collection': False, 'reason': 'Verified metadata exceeds the supported Windows output path length', 'series': {'name': '\\u041c\\u0438\\u0441\\u0442\\u0435\\u0440 \\u0412\\u0435\\u0447\\u043d\\u044b\\u0439 \\u041a\\u0430\\u043d\\u0443\\u043d', 'number': '1'}, 'place': {'universe': '', 'series': '\\u041c\\u0438\\u0441\\u0442\\u0435\\u0440 \\u0412\\u0435\\u0447\\u043d\\u044b\\u0439 \\u041a\\u0430\\u043d\\u0443\\u043d', 'number': '1', 'collection': False}, 'applies': 2}\r\n\r\n----------------------------------------------------------------------\r\nRan 1 test in 1.091s\r\n\r\nFAILED (failures=1)\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 82956,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 12,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 116,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 1834.5274,
+  "outputBytes": 1742
+}

@@ -1,0 +1,16 @@
+NAMES_READ_TIMING {'request': 0.0, 'worker_release': 0.504274, 'response': 0.630136}
+test_edit_names_http_read_does_not_wait_for_unrelated_grouping (test_lock_timing.SourceFolderDispatchTests.test_edit_names_http_read_does_not_wait_for_unrelated_grouping) ... FAIL
+
+======================================================================
+FAIL: test_edit_names_http_read_does_not_wait_for_unrelated_grouping (test_lock_timing.SourceFolderDispatchTests.test_edit_names_http_read_does_not_wait_for_unrelated_grouping)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_lock_timing.py", line 87, in test_edit_names_http_read_does_not_wait_for_unrelated_grouping
+    self.assertTrue(prompt,'Edit names waited for an unrelated grouping/source worker')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : Edit names waited for an unrelated grouping/source worker
+
+----------------------------------------------------------------------
+Ran 1 test in 1.240s
+
+FAILED (failures=1)

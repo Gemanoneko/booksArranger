@@ -1,0 +1,26 @@
+NAMES_READ_TIMING {'request': 0.0, 'response': 0.106829, 'worker_release': 0.106871}
+FOLDER_DISPATCH_TIMING {'request': 0.0, 'dispatch': 0.009757, 'worker_release': 0.009777, 'response': 0.009961}
+test_exact_single_source_decode_failure_exposes_retained_path (test_attention_failure_policy.SourceRemedyTests.test_exact_single_source_decode_failure_exposes_retained_path) ... ok
+test_invalid_m4b_is_distinct_from_unsupported_chapter_image (test_attention_failure_policy.SourceRemedyTests.test_invalid_m4b_is_distinct_from_unsupported_chapter_image) ... ok
+test_real_worker_persists_twelfth_of_57_source_and_exposes_bound_remedy (test_attention_failure_policy.SourceRemedyTests.test_real_worker_persists_twelfth_of_57_source_and_exposes_bound_remedy) ... ok
+test_typed_multisource_decode_is_bound_to_exact_frozen_member (test_attention_failure_policy.SourceRemedyTests.test_typed_multisource_decode_is_bound_to_exact_frozen_member) ... ok
+test_edit_names_http_read_does_not_wait_for_unrelated_grouping (test_lock_timing.SourceFolderDispatchTests.test_edit_names_http_read_does_not_wait_for_unrelated_grouping) ... ok
+test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas (test_lock_timing.SourceFolderDispatchTests.test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas) ... FAIL
+test_normal_http_source_folder_route_does_not_wait_for_book_work (test_lock_timing.SourceFolderDispatchTests.test_normal_http_source_folder_route_does_not_wait_for_book_work) ... ok
+test_output_folder_and_gone_source_fallback_do_not_wait_for_grouping (test_lock_timing.SourceFolderDispatchTests.test_output_folder_and_gone_source_fallback_do_not_wait_for_grouping) ... ok
+test_source_folder_dispatches_while_unrelated_worker_holds_group_lock (test_lock_timing.SourceFolderDispatchTests.test_source_folder_dispatches_while_unrelated_worker_holds_group_lock) ... ok
+test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder (test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder) ... ok
+
+======================================================================
+FAIL: test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas (test_lock_timing.SourceFolderDispatchTests.test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_lock_timing.py", line 126, in test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas
+    stale=dict(payload,revision=row['revision']-1);self.assertEqual(route.call('/api/candidate/names-save',stale)[0],409)
+                                                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 400 != 409
+
+----------------------------------------------------------------------
+Ran 10 tests in 3.648s
+
+FAILED (failures=1)

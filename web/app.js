@@ -1071,6 +1071,7 @@ function checkActivities(list,jobs){
 const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
 const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
 function activityLabel(row){
+  if(row.state==='attention' && row.media_failure?.schema==='books-media-failure-v1')return row.media_failure.status;
   if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
   if(row.kind==='chapter')return 'Checking source audio';
   if(row.kind==='admission')return row.state==='pausing'?'Pausing start checks…':'Checking pending audiobook work';
@@ -1082,6 +1083,7 @@ function activityLabel(row){
   return row.step==='researching'?'Researching books':'Scanning files';
 }
 function activityStep(row,finishing){
+  if(row.state==='attention' && row.media_failure?.schema==='books-media-failure-v1')return row.media_failure.hint;
   if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
   let step;
   if(row.kind==='chapter')return 'Checking the complete audio before correcting the final chapter end.';
@@ -1477,6 +1479,7 @@ function rowAction(row){
     return {...rowActions.startover,ready:attention.startover==='manual_draft'?STARTOVER_HELD_TIP:STARTOVER_CHANGED_TIP,data:{allowed:true,reason:''}};
   }
   if(refusal && refusalFix(refusal)==='update')return null;
+  if(mediaFailureText(attention))return null;
   const [kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair' || refusal?.kind==='repair'?['repair',job.repair]:['retry',job.retry];
   if(!data || typeof data!=='object' || typeof data.allowed!=='boolean')return null;
   if(kind==='retry' && attention?.remedy?.kind==='tag_repair')return {...rowActions.retry,ready:'Check this MP3 again with this app version and queue its audiobook job.',data};
@@ -2107,7 +2110,7 @@ function finishRetryAll(run){
   retryAllRun.ended=true;stripNote=retryReceiptText(run,false);
   setTimeout(async()=>{if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();},0);
 }
-const attentionLabels={all:'All',files_missing:'Missing files',title_author:'Title or author',author_unclear:'Author unclear',same_author:'Same author?',name_taken:'Name taken',part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear',retry:'Can retry',repair:'Can repair',reacquire:'Need to reacquire',checking:'Retry checks',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
+const attentionLabels={all:'All',files_missing:'Missing files',title_author:'Title or author',author_unclear:'Author unclear',same_author:'Same author?',name_taken:'Name taken',part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear',retry:'Can retry',repair:'Can repair',reacquire:'Need to reacquire',checking:'Retry checks',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B feature unsupported'};
 // All = the sum of these keys = the shortcut = the Jobs line (Judy 2026-10-24, section 2): the "Needs your answer" set first.
 const NEEDS_KEYS=['files_missing','title_author','author_unclear','same_author','name_taken','part_of_book','files_unclear','order_unclear'];  // 0.22.0 review (Judy, B3): three hold chips
 const attentionKeys=['all',...NEEDS_KEYS,'retry','repair','reacquire','checking','changed','audiobook','other','unsupported'];
@@ -2134,6 +2137,7 @@ function renderAttentionGroups(){
     if(button.textContent!==text)button.textContent=text;
     button.setAttribute('aria-pressed',String(attentionGroup===key));
     if(key==='all')button.title=`Show all ${total.toLocaleString()} books that need attention.`;
+    if(key==='unsupported')button.title='Show M4B books with a feature the app cannot preserve yet.';
     // A group at zero is hidden, except All and Can retry; it stays while selected or focused.
     button.hidden=key!=='all' && key!=='retry' && !(key==='reacquire' && !Number.isInteger(counts[key])) && value(key)===0 && attentionGroup!==key && active!==button;
   }
@@ -2367,14 +2371,14 @@ function recordingFacts(row){
   return facts;
 }
 const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],space:['Stopped — not enough disk space','Free up disk space, then retry.'],repair:['Damaged — can repair',''],
-  unsupported:["Can't convert — M4B not supported",'Nothing to do for now.'],other:['Stopped — see details','The conversion stopped. Select the row to read the technical message.'],
+  unsupported:["Can't convert — M4B feature unsupported",'Nothing to do for now.'],other:['Stopped — see details','The conversion stopped. Select the row to read the technical message.'],
   changed:['Original changed since checked','Recovery copies are kept until you decide.'],missing:['Audiobook missing','Recovery copies are kept until you decide.'],
   unverified:['Audiobook not verified','Recovery copies are kept until you decide.']};
 // A refused Retry or Repair (RefusedRetry spec, 2026-10-19). The server sends a typed cause and fix; these are the
 // words. Behaviour comes from the fix, copy from the cause, never from the server's English reason. A missing or
 // unknown cause reads as 'unknown', whose fix is 'update'.
 // {Verb} and {verb} follow the refusal's kind: Retry, or Repair for a refused Repair (follow-up, point 3b).
-const refusalCopy={unsupported_file:["Can't convert — M4B not supported","the app doesn't support how this M4B is built. Nothing to do for now."],
+const refusalCopy={unsupported_file:["Can't convert — M4B feature unsupported","the app doesn't support how this M4B is built. Nothing to do for now."],
   working_files:['Stopped — waiting for cleanup','working files from an earlier attempt are still present. {Verb} after they are cleared.'],
   source_changed:['Stopped — review changed',"the book's review or source files changed. Start over sends it back to automatic processing."],
   file_problem:['Stopped — check refused','the previous check stopped. Read the recorded reason before you {verb}.'],
@@ -2401,6 +2405,11 @@ function refusalFix(refusal){return ['update','wait','review','user'].includes(r
 function refusalCurrent(row){const refusal=refusalOf(row);return refusal && refusal.stale!==true?refusal:null;}
 // A stopped job, or a completed book whose recovery copies the 0.16.8 rule keeps (changed or audiobook).
 function attentionOf(row){const job=row?.creation?.job,a=job?.attention;return a && typeof a.group==='string' && (job.state==='Output needs attention' || keptGroup(a))?a:null;}
+function mediaFailureText(attention){
+  const value=attention?.media_failure;
+  if(value?.schema!=='books-media-failure-v1' || !['m4b_feature_unsupported','invalid_m4b_source','source_decode_failed'].includes(value.code) || typeof value.filename!=='string' || !value.filename || typeof value.status!=='string' || typeof value.hint!=='string')return null;
+  return {status:value.status,hint:value.hint+(attention.originals_untouched===true?' Original kept.':''),warn:true};
+}
 function attentionText(row){
   const cleanup=cleanupIdentityText(row);if(cleanup)return cleanup;
   const reacquire=attentionOf(row)?.reacquire;
@@ -2416,7 +2425,8 @@ function attentionText(row){
     return {status:'Queued destination needs review',hint:'This saved job uses a different destination. Retry checks the current book before creating a new job.',warn:true};
   }
   const changed=readmissionOf(row)?.queued_next===true?null:sourceChangedText(a);if(changed)return changed;  // ruling 75b, before the "replace it" line
-  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",warn:true};
+  const media=mediaFailureText(a);if(media)return media;
+  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Stopped — source audio check failed',hint:'The source failed its full audio check. Check or replace that file with an intact copy.',warn:true};
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):readmission.origin==='automatic'?AUTO_QUEUED_HINT:'The book is checked again before it runs.'};
@@ -2433,7 +2443,7 @@ function attentionText(row){
   if(a.precheck==='unavailable')return {status:precheckCopy.unavailable[0],hint:precheckCopy.unavailable[1],warn:true,clause};
   if(a.precheck==='pending')return {status:precheckCopy.pending[0],hint:precheckCopy.pending[1]};
   // Stale: the app was updated since the refusal; it is information, not an obstacle (muted). A book whose read-only
-  // check refuses again under this build is in M4B not supported and reads as that group. A row the dry run covers and
+  // check refuses again under this build is in M4B feature unsupported and reads as that group. A row the dry run covers and
   // passed is ready again and says why; "Stopped — try again" is left for rows the dry run does not cover.
   if(refusal && a.group!=='unsupported'){
     const version=typeof refusal.app_version==='string' && refusal.app_version?refusal.app_version:'';

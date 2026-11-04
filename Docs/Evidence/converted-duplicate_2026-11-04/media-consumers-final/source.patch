@@ -1,0 +1,620 @@
+--- a/audio_jobs.py
++++ b/audio_jobs.py
+@@ -2,6 +2,7 @@
+ import errno
+ import contextlib
+ import copy
++from pathlib import Path
+ import hashlib
+ import json
+ import math
+@@ -51,6 +52,7 @@
+     if isinstance(error, OSError) and type(getattr(error, 'winerror', None)) is int:
+         details['winerror'] = error.winerror  # typed, so a drive or share that went away is told apart (UNREACHABLE)
+     if isinstance(getattr(error,'chapter_diagnostic',None),dict):details['chapter_diagnostic']=copy.deepcopy(error.chapter_diagnostic)
++    if isinstance(getattr(error,'source_diagnostic',None),dict):details['source_diagnostic']=copy.deepcopy(error.source_diagnostic)
+     if getattr(error, 'tag_repair_checked', False) is True:
+         details['tag_repair_checked'] = True  # an MP3 decode failure from a version with the trailing-tag repair
+     return details
+@@ -71,9 +73,45 @@
+     """
+     failure=journal.get('failure',{}) if isinstance(journal,dict) else {}
+     sources=manifest.get('sources') if isinstance(manifest,dict) else None
++    if not isinstance(failure,dict) or row.get('output') or not isinstance(journal,dict) or 'publication_intent' in journal or failure.get('stage')!='checking sources':return None
++    diagnostic=failure.get('source_diagnostic')
++    if failure.get('exception_class')=='SourceDecodeError' and isinstance(diagnostic,dict):
++        frozen=json.dumps(manifest,ensure_ascii=False,sort_keys=True,separators=(',',':'))
++        if row.get('manifest_hash')!=hashlib.sha256(frozen.encode('utf8')).hexdigest():return None
++        index=diagnostic.get('source_index');count=diagnostic.get('source_count');path=diagnostic.get('source_path')
++        if diagnostic.get('schema')!='source-decode-failed-v1' or diagnostic.get('code')!='source_decode_failed':return None
++        if not isinstance(sources,list) or type(index)is not int or type(count)is not int or count!=len(sources) or not 0<=index<count:return None
++        if not isinstance(sources[index],dict) or path!=sources[index].get('path') or not isinstance(path,str) or not path:return None
++        if not isinstance(diagnostic.get('detail'),str) or len(diagnostic['detail'])>2000:return None
++        return {'kind':'replace_source','cause':'source_decode_failed','path':path,'sha256':sources[index].get('sha256'),'source_index':index,'source_count':count,'original_retained':True}
+     if failure.get('exception_class')!='ValidationError' or failure.get('stage')!='checking sources' or not str(row.get('reason') or '').startswith('Full audio decode failed: '):return None
+     if not isinstance(sources,list) or len(sources)!=1 or not isinstance(sources[0],dict) or not str(sources[0].get('path','')).lower().endswith('.mp3'):return None
+     return {'kind':'replace_source','cause':'source_decode_failed','path':sources[0]['path'],'sha256':sources[0].get('sha256'),'original_retained':True}
++
++
++def media_failure(row,journal,manifest,group,remedy=None,repair=None):
++    """Display facts from an exact producer shape; never admission or repair rights."""
++    if group in {'checking','retry','repair'} or row.get('output') or 'publication_intent' in journal:return None
++    failure=journal.get('failure') or {};sources=manifest.get('sources') or []
++    if not isinstance(failure,dict):return None
++    if failure.get('stage')!='checking sources':return None
++    code=None;path=None
++    if remedy and remedy.get('kind')=='replace_source':
++        path=remedy['path'];code='invalid_m4b_source' if Path(path).suffix.lower() in {'.m4b','.m4a'} else 'source_decode_failed'
++    elif len(sources)==1 and Path(sources[0].get('path','')).suffix.lower()=='.m4b' and failure.get('exception_class')=='ValidationError':
++        reason=row.get('reason') or '';checked=(repair or {}).get('reason') or ''
++        if reason.startswith('Full audio decode failed: ') or reason=='M4B preservation requires review: Top-level extent invalid':code='invalid_m4b_source'
++        elif group=='unsupported' and (checked=='Unsupported chapter image sample entry' or reason=='M4B preservation requires review: Unsupported chapter image sample entry'):code='m4b_feature_unsupported'
++        if code:path=sources[0]['path']
++    if not code:return None
++    filename=Path(path).name
++    status={'m4b_feature_unsupported':"Can't convert — M4B feature unsupported",'invalid_m4b_source':'Stopped — M4B source failed check','source_decode_failed':'Stopped — source audio check failed'}[code]
++    hint=(filename+' has a chapter image the app cannot preserve yet. Try again after an app update.' if code=='m4b_feature_unsupported' else
++          filename+' failed its media check. Replace it with an intact copy.' if code=='invalid_m4b_source' else
++          filename+' failed its full audio check. Check or replace that file with an intact copy.')
++    return {'schema':'books-media-failure-v1','code':code,'source_path':path,'filename':filename,'status':status,'hint':hint,
++            'source_index':remedy.get('source_index') if remedy else 0,'source_count':len(sources),
++            'next_step':'app_update' if code=='m4b_feature_unsupported' else 'intact_source'}
+ 
+ 
+ def tag_repair_retry(row):
+@@ -87,7 +125,8 @@
+             return False
+         if any(key in manifest for key in ('retry_intent', 'm4b_repair', 'replacement_id', 'replacement_parent_job_id')):
+             return False
+-        return source_remedy(row, journal, manifest) is not None and 'tag_repair_checked' not in journal['failure']
++        sources=manifest.get('sources') or []
++        return len(sources)==1 and str(sources[0].get('path','')).lower().endswith('.mp3') and source_remedy(row, journal, manifest) is not None and 'tag_repair_checked' not in journal['failure']
+     except (KeyError, TypeError, ValueError, AttributeError):
+         return False
+ 
+@@ -943,6 +982,10 @@
+             remedy=source_remedy(row,journal,manifest)
+             if remedy and tag_repair_retry(row):remedy=dict(remedy,kind='tag_repair',cause='legacy_decode_failed')
+             if remedy and value['originals_untouched']:value['remedy']=remedy
++            media=media_failure(row,journal,manifest,group,remedy,repair)
++            if media:
++                value['media_failure']=media
++                if media['code']=='invalid_m4b_source':value['group']='other'
+             if check in ('pending', 'unavailable', 'passed'):
+                 value['precheck'] = check
+                 if check == 'unavailable':
+--- a/failed_m4b_retry.py
++++ b/failed_m4b_retry.py
+@@ -6,6 +6,9 @@
+ from manifest_compatibility import equivalent_manifest
+ 
+ REASONS={
++    # 0.25.0 exact PNG chapter-image cohort. Admission still proves the entire
++    # current native source/profile and unchanged reviewed manifest before CAS.
++    'M4B preservation requires review: Unsupported chapter image sample entry',
+     # Exact zero-count text writer quirk; every original track byte is preserved.
+     'M4B preservation requires review: Sample size table',
+     'Remux changed the decoder configuration or relative audio packet timing',
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -822,6 +822,9 @@
+         summary=self.attention_summary(retry=False)
+         try:summary=self.stale_attention(summary,raw_jobs,set(totals.get('converted_ids') or ()))
+         except (sqlite3.Error,OSError):pass
++        current_media=summary.get(current['job_id'],{}).get('media_failure') if current else None
++        if current_media and progress and progress.get('reason'):progress['reason']=current_media['hint']
++        if current and current['state']=='needs attention' and progress and progress.get('reason') and not current_media:progress['reason']='The media check stopped. Open Technical details for the recorded failure.'
+         counts,cleanable=attention_counts(summary)
+         try:needs,coverage=self._todo()
+         except (sqlite3.Error,OSError,ValueError):needs,coverage={},dict(self.NO_COVERAGE)
+@@ -833,6 +836,7 @@
+             'current_job_origin':job_origin(current['manifest']) if current else 'unknown',
+             'current_title':current['manifest']['metadata'].get('title','') if current else '',
+             'current_task_kind':current['manifest'].get('task_kind') if current else None,
++            'current_media_failure':copy.deepcopy(current_media),
+             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
+             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
+             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
+@@ -3021,15 +3025,17 @@
+         retained_stamp=record_digest(retained) if retained else None
+         key=(row['id'],row['revision'],row['fingerprint'],title,author,chosen,json.dumps(names,sort_keys=True,ensure_ascii=False) if names else None,retained_stamp,self._approval_stamp())
+         cache=self.__dict__.setdefault('_approval_results',{})
+-        kept=cache.get(key)
++        catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
++        kept=cache.get(key) if not catalog_only else None
+         if kept is not None:return row,copy.deepcopy(kept)
+         extra={'chosen':chosen} if chosen is not None else {}
+         if names:extra['names']=names
+         if retained is not None:extra['retained']=retained
+         result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author,**extra)
+         result=self._shared_result(row,result)
+-        if len(cache)>=4096:cache.clear()
+-        cache[key]=copy.deepcopy(result)
++        if not catalog_only:
++            if len(cache)>=4096:cache.clear()
++            cache[key]=copy.deepcopy(result)
+         return row,result
+ 
+     def _shared_result(self,row,result):
+@@ -3040,7 +3046,8 @@
+         if not sid and not world:return attach_shared_routing(result)
+         stamp=self._approval_stamp();key=(sid,world,stamp)
+         cache=self.__dict__.setdefault('_shared_peers',{})
+-        peers=cache.get(key)
++        catalog_only=getattr(self.reviews.page_local,'catalog_only',False)
++        peers=cache.get(key) if not catalog_only else None
+         if peers is None:
+             peers=[]
+             with connect(self.inventory.database) as db:
+@@ -3063,8 +3070,9 @@
+                     if (rebuilt.get('work') or {}).get('id')!=(prior.get('work') or {}).get('id'):continue
+                     peers.append(rebuilt)
+                 except (ValueError,KeyError,TypeError):continue  # insufficient peer evidence cannot omit an author
+-            if len(cache)>=64:cache.clear()
+-            cache[key]=copy.deepcopy(peers)
++            if not catalog_only:
++                if len(cache)>=64:cache.clear()
++                cache[key]=copy.deepcopy(peers)
+         own=(result.get('work') or {}).get('id')
+         return attach_shared_routing(result,[peer for peer in peers if (peer.get('work') or {}).get('id')!=own])
+ 
+@@ -3261,6 +3269,9 @@
+         return cache[key]
+ 
+     def names_editor(self,id,revision):
++        with self.reviews.catalog_snapshot():return self._names_editor(id,revision)
++
++    def _names_editor(self,id,revision):
+         """Edit names, opened (Judy 1.1 item 7: one read for one row): {'fields': {title, author, series, number, universe,
+         collection}: {'proposal', 'basis'}, 'read': what the files say, 'remembered': [{id, field, from, to}], 'universes',
+         'series' (the pick-lists), 'job': the job state (1.3), 'place', 'entered'}. Read-only."""
+@@ -3301,6 +3312,16 @@
+                 'job':job['state'],'place':place,'destination':destination,'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row)),'applies':1}
+ 
+     def names_save(self,id,revision,values,fingerprint=None):
++        # Do not leave a Save request queued invisibly behind another book's
++        # long source check. A later explicit retry keeps every fresh-row/CAS
++        # guard below and the editor retains its draft after this known refusal.
++        with contextlib.ExitStack() as admission:
++            for lock in (self.operation_lock,self.reviews.lock,self.inventory.group_lock):
++                if not lock.acquire(blocking=False):raise self.NamesRefused('busy','Another book is being checked. Try Save again shortly. Your entered names are kept.')
++                admission.callback(lock.release)
++            return self._names_save(id,revision,values,fingerprint)
++
++    def _names_save(self,id,revision,values,fingerprint=None):
+         """Edit names, Save (Judy 1.3 to 1.5): records the values as Sergei's lasting names and touches no file. The book's
+         job follows (1.4): a queued job that has not started is set aside and its book checked again with the new names
+         ('replanned'); a Stopped one runs with them at its next attempt (the queue's claim check); a finished audiobook keeps
+@@ -4719,7 +4740,7 @@
+                 step='unknown'
+                 streams_check()
+                 child=self.jobs.enqueue(fresh,repair_context=(parent,tuple(group),tuple(context)),retry_context=(parent,tuple(group),tuple(context)) if routed else None)
+-                return result|{'requeued':True,'job_id':child,'parent_job_id':parent['job_id'],'reason':'Source-preserving M4B repair admitted as new work'}
++                return result|{'retryable':False,'retry_at':None,'requeued':True,'job_id':child,'parent_job_id':parent['job_id'],'reason':'Source-preserving M4B repair admitted as new work'}
+         except InterruptedError:raise
+         except (OSError,sqlite3.Error) as error:
+             return result|{'reason':'Failed M4B retained: '+str(error),'cause':'file_problem'}
+@@ -5328,7 +5349,7 @@
+                 try:return dict(self.open_folder(library,view,identity,'output'),fallback='output')
+                 except ValueError:raise FolderOpenRefused(directory,FileNotFoundError()) from None
+         elif folder_kind=='output' and view=='candidates':
+-            self.reviews._row(library,identity)
++            self._source_directories(library,view,identity)  # catalog-only identity check; navigation never regroups
+             try:
+                 jobs=self.jobs.status()['jobs'];current=self.publications.describe(jobs,identity)
+                 if current['state']!='verified':
+--- a/review_backend.py
++++ b/review_backend.py
+@@ -144,9 +144,22 @@
+             import reacquire_sources
+             marker=reacquire_sources.marker(db,id)
+             if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
+-        row=self.inventory.candidate(library,id) if hasattr(self.inventory,'candidate') else next((r for r in self.inventory.candidates(library,limit=1000000)['rows'] if r['id']==id),None)
++        if getattr(self.page_local,'catalog_only',False) and hasattr(self.inventory,'_candidate_row'):
++            # Field loading is a view of the shown stored generation. It must
++            # not wait for a background approval's unrelated regroup. Save and
++            # publication never enter this thread-local read scope.
++            root=self.inventory.source_root_for_candidate(id)
++            with connect(self.inventory.database) as db:
++                db.execute('BEGIN');row=self.inventory._candidate_row(db,root,id)
++        else:row=self.inventory.candidate(library,id) if hasattr(self.inventory,'candidate') else next((r for r in self.inventory.candidates(library,limit=1000000)['rows'] if r['id']==id),None)
+         if row is None or (revision is not None and row['revision']!=revision):raise ValueError('Candidate changed; reload evidence before reviewing')
+         return row
++
++    @contextlib.contextmanager
++    def catalog_snapshot(self):
++        previous=getattr(self.page_local,'catalog_only',False);self.page_local.catalog_only=True
++        try:yield
++        finally:self.page_local.catalog_only=previous
+ 
+     def _context(self,row):
+         cached=getattr(self.page_local,'contexts',None)
+--- a/scripts/build-inputs.json
++++ b/scripts/build-inputs.json
+@@ -3,7 +3,7 @@
+   "electronVersion": "44.4.5",
+   "builderVersion": "26.15.3",
+   "iconConverterVersion": "1.2.3",
+-  "packageLockSha256": "48ff09fc1d00712e3e87aa79e746a15d2755ae34615b925956a15d18f5684f55",
++  "packageLockSha256": "01d87e0d44a2b4485d5d674121fc1389cfa2092fd1b7a10c6ce7ca846f6c86a5",
+   "seedDirectory": "build-cache/pack-inputs",
+   "files": {
+     "electron/electron-v44.4.5-win32-x64.zip": {
+--- a/tests/test_attention_failure_policy.py
++++ b/tests/test_attention_failure_policy.py
+@@ -180,6 +180,60 @@
+ 
+ 
+ class SourceRemedyTests(unittest.TestCase):
++    def test_real_worker_persists_twelfth_of_57_source_and_exposes_bound_remedy(self):
++        import copy,uuid
++        from audio_pipeline import SourceDecodeError
++        with tempfile.TemporaryDirectory() as directory:
++            base=Path(directory)
++            sources=[{'path':str(base/(str(i).zfill(2)+'.mp3')),'sha256':'a'*64,'fingerprint':{'size':1,'modified':1}} for i in range(1,58)]
++            manifest={'job_id':str(uuid.uuid4()),'candidate_id':str(uuid.uuid4()),'candidate_revision':1,'sources':sources,'metadata':{'title':'Whole book'},'destination':str(base/'whole.m4b'),'profile':'fixture','evidence':{},'cover':{}}
++            frozen=copy.deepcopy(manifest)
++            def runner(actual,stop,checkpoint):
++                checkpoint('checking sources',{})
++                cause=ValidationError('Controlled native Header missing');cause.tag_repair_checked=True
++                raise SourceDecodeError(actual['sources'][11]['path'],11,len(actual['sources']),cause)
++            queue=AudioJobs(base/'catalog.sqlite3',runner,lambda value:True,lambda record:False)
++            try:
++                queue.enqueue(manifest);queue.resume();queue._thread.join(5);self.assertFalse(queue._thread.is_alive())
++                row=queue._rows('SELECT * FROM audio_jobs WHERE job_id=?',(manifest['job_id'],))[0]
++                self.assertEqual(json.loads(row['manifest']),frozen);self.assertIsNone(row['output']);self.assertEqual(row['state'],'needs attention')
++                journal=json.loads(row['journal']);failure=journal['failure'];self.assertEqual(failure['stage'],'checking sources');self.assertNotIn('publication_intent',journal)
++                self.assertEqual(failure['source_diagnostic']['source_index'],11);self.assertEqual(failure['source_diagnostic']['source_count'],57);self.assertTrue(failure['tag_repair_checked'])
++                summary=queue.attention_summary(job_ids=[manifest['job_id']],retry=False)[manifest['job_id']]
++                self.assertEqual(summary['remedy']['path'],sources[11]['path']);self.assertEqual(summary['media_failure']['filename'],'12.mp3')
++                self.assertEqual(summary['media_failure']['code'],'source_decode_failed');self.assertNotIn('retry',summary)
++            finally:queue.close()
++
++    def test_typed_multisource_decode_is_bound_to_exact_frozen_member(self):
++        import copy
++        from audio_jobs import _failure_details,source_remedy,media_failure,tag_repair_retry
++        from audio_pipeline import SourceDecodeError,ValidationError
++        sources=[{'path':'Z:/private/'+str(i).zfill(2)+'.mp3','sha256':'a'*64} for i in range(1,58)]
++        manifest={'sources':sources};cause=ValidationError('Header missing');cause.tag_repair_checked=True
++        error=SourceDecodeError(sources[11]['path'],11,57,cause);failure=_failure_details(error,'checking sources')
++        self.assertTrue(failure['tag_repair_checked']);self.assertEqual(failure['source_diagnostic'],error.to_dict())
++        row={'reason':str(error),'state':'needs attention','output':None,'manifest_hash':__import__('hashlib').sha256(json.dumps(manifest,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()};journal={'failure':failure}
++        remedy=source_remedy(row,journal,manifest);self.assertEqual((remedy['path'],remedy['source_index'],remedy['source_count']),(sources[11]['path'],11,57))
++        media=media_failure(row,journal,manifest,'other',remedy);self.assertEqual((media['code'],media['filename']),('source_decode_failed','12.mp3'))
++        for patch in ({'source_index':True},{'source_index':57},{'source_count':56},{'source_path':sources[0]['path']},{'schema':'untrusted'},{'detail':None}):
++            changed=copy.deepcopy(journal);changed['failure']['source_diagnostic'].update(patch)
++            self.assertIsNone(source_remedy(row,changed,manifest))
++        for stage in ('checking output','publishing','creating'):
++            changed=copy.deepcopy(journal);changed['failure']['stage']=stage;self.assertIsNone(source_remedy(row,changed,manifest))
++        self.assertIsNone(source_remedy(row,dict(journal,publication_intent={}),manifest))
++        self.assertIsNone(source_remedy(dict(row,output='{}'),journal,manifest))
++        self.assertIsNone(source_remedy(dict(row,manifest_hash='0'*64),journal,manifest))
++        raw=dict(row,manifest=__import__('json').dumps(manifest),journal=__import__('json').dumps(journal));self.assertFalse(tag_repair_retry(raw))
++
++    def test_invalid_m4b_is_distinct_from_unsupported_chapter_image(self):
++        from audio_jobs import media_failure
++        manifest={'sources':[{'path':'Z:/private/source.m4b'}]};journal={'failure':{'exception_class':'ValidationError','stage':'checking sources'}}
++        invalid=media_failure({'reason':'Full audio decode failed: corrupt input packet'},journal,manifest,'unsupported')
++        feature=media_failure({'reason':'M4B preservation requires review: Unsupported chapter image sample entry'},journal,manifest,'unsupported')
++        self.assertEqual(invalid['code'],'invalid_m4b_source');self.assertEqual(feature['code'],'m4b_feature_unsupported')
++        self.assertIsNone(media_failure({'reason':'Unknown failure'},journal,manifest,'other'))
++        self.assertIsNone(media_failure({'reason':'M4B preservation requires review: Unsupported chapter image sample entry'},journal,manifest,'checking'))
++
+     def test_exact_single_source_decode_failure_exposes_retained_path(self):
+         from audio_jobs import source_remedy
+         row={'reason':'Full audio decode failed: Header missing'}
+--- a/tests/test_attention_frontend.js
++++ b/tests/test_attention_frontend.js
+@@ -34,7 +34,7 @@
+   const unsupported=attentionRow('c','unsupported',{},{retry:undefined}),other=attentionRow('d','other',{},{retry:undefined}),repair=damaged('r');
+   const status=row=>run('candidateStatus('+JSON.stringify(row)+')');
+   assert.equal(status(retry),'Stopped — ready to retry');assert.equal(status(space),'Stopped — not enough disk space');
+-  assert.equal(status(unsupported),"Can't convert — M4B not supported");assert.equal(status(other),'Stopped — see details');assert.equal(status(repair),'Damaged — can repair');
++  assert.equal(status(unsupported),"Can't convert — M4B feature unsupported");assert.equal(status(other),'Stopped — see details');assert.equal(status(repair),'Damaged — can repair');
+   assert.equal(status(blocked({},{attention:undefined})),'Stopped — see details','older data without a class: raw text never prints (Judy 2026-10-24)');
+ 
+   // Rows: short status, hint line, technical detail on hover; Retry or Repair first, only with API data.
+@@ -147,7 +147,7 @@
+ 
+   // Group strip: live counts with Can repair, pressed state and a group request.
+   backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,queued:5,attention_counts:{retry:121,repair:2,other:1,unsupported:0}}};run('state='+JSON.stringify(backend)+';controls()');
+-  assert.equal(get('attention-groups').hidden,false);assert.equal(get('group-all').textContent,'All · 124');assert.equal(get('group-repair').textContent,'Can repair · 2');assert.equal(get('group-unsupported').textContent,'M4B not supported · 0');
++  assert.equal(get('attention-groups').hidden,false);assert.equal(get('group-all').textContent,'All · 124');assert.equal(get('group-repair').textContent,'Can repair · 2');assert.equal(get('group-unsupported').textContent,'M4B feature unsupported · 0');
+   assert.equal(get('group-all').getAttribute('aria-pressed'),'true');assert.equal(get('retry-all').hidden,true,'never in All');
+   assert.equal(get('retry-all-status').textContent,'Repair queued: The chapter list points to a missing part. Repair removes that pointer.','the repair line stays while the filter does');
+   const second=attentionRow('e','retry');inventoryRows=[retry,second];const before=calls.length;await get('group-retry').handlers.click();
+@@ -231,8 +231,20 @@
+   context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
+   context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
+   context.fixture=attentionRow('bad-source','other',{}, {attention:{group:'other',originals_untouched:true,remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/Audio/Железная.mp3'}}});
+-  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Source audio needs replacement');assert.equal(sourceText.hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",'Judy 2026-10-25, Delete book spec section 7');
++  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Stopped — source audio check failed');assert.equal(sourceText.hint,'The source failed its full audio check. Check or replace that file with an intact copy.');
+   assert.match(run('technicalText(fixture)'),/Z:\/Audio\/Железная.mp3/);
++  for(const [code,group,status,hint] of [
++    ['source_decode_failed','other','Stopped — source audio check failed','12.mp3 failed its full audio check. Check or replace that file with an intact copy.'],
++    ['invalid_m4b_source','other','Stopped — M4B source failed check','source.m4b failed its media check. Replace it with an intact copy.'],
++    ['m4b_feature_unsupported','unsupported',"Can't convert — M4B feature unsupported",'source.m4b has a chapter image the app cannot preserve yet. Try again after an app update.']]){
++    context.fixture=attentionRow('typed-media',group,{}, {reason:'Header missing — RAW DIAGNOSTIC',attention:{group,originals_untouched:true,media_failure:{schema:'books-media-failure-v1',code,filename:code==='source_decode_failed'?'12.mp3':'source.m4b',status,hint}}});
++    assert.equal(run('candidateStatus(fixture)'),status);assert.equal(run('attentionText(fixture).hint'),hint+' Original kept.');
++    context.mediaActivity={kind:'conversion',state:'attention',media_failure:context.fixture.creation.job.attention.media_failure};
++    assert.equal(run('activityLabel(mediaActivity)'),status);assert.equal(run('activityStep(mediaActivity,false)'),hint,'Jobs uses the same typed cause without raw decoder text');
++    assert.match(run('technicalText(fixture)'),/RAW DIAGNOSTIC/);assert.doesNotMatch(run('attentionText(fixture).hint'),/RAW DIAGNOSTIC/);assert.equal(run('rowAction(fixture)'),null,'no unsupported repair action');
++  }
++  context.fixture.creation.job.attention.media_failure={schema:'untrusted',code:'source_decode_failed',filename:'guess.mp3',status:'Guess',hint:'Guess'};
++  assert.equal(run('candidateStatus(fixture)'),"Can't convert — M4B feature unsupported",'untrusted typed copy is ignored');
+   context.fixture=attentionRow('reacquire','reacquire',{}, {attention:{group:'reacquire',reacquire:{state:'required',certainty:'uncertain',reason:'Measured damaged audio',repair_limit:'Cannot preserve speech',originals:[{path:'Z:/shared/one.mp3'}],source_presence:'unavailable'}},retry:{allowed:true}});
+   assert.equal(run('attentionText(fixture).status'),'Need to reacquire');
+   assert.match(run('attentionText(fixture).hint'),/risking missing audio/);
+--- a/tests/test_automatic_media.py
++++ b/tests/test_automatic_media.py
+@@ -153,6 +153,44 @@
+         with connect(self.inv.database) as db:self.assertEqual(dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()),before)
+         self.assertTrue(self.service._output_valid(parent['output']))
+         self.assertEqual(self.service.state()['converted_total'],1)
++
++    def test_normal_start_readmits_old_png_chapter_refusal_with_current_proof(self):
++        import hashlib,m4b_preservation
++        from scanner import connect
++        from test_m4b_preservation import unpack,relocate,png_image,add_chapter_graph
++        from audio_pipeline import run_owned
++        for source in self.sources:source.unlink()
++        full=self.base/'png-full.m4b';stop=threading.Event()
++        run_owned([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-n','-f','lavfi','-i','sine=frequency=997:sample_rate=44100:duration=0.5','-ac','2','-c:a','aac','-b:a','64000','-movflags','+faststart','-metadata','title=A Book','-metadata','album=A Book','-metadata','artist=John Writer',str(full)],self.base,stop,30)
++        top=unpack(full.read_bytes());gap=sum(b.size for kind,b in top.items() if kind not in (b'ftyp',b'moov',b'mdat'))
++        base=top[b'ftyp'].raw+relocate(top[b'moov'].raw,-gap)+top[b'mdat'].raw
++        folder=self.audio/'PNG';folder.mkdir();source=folder/'book.m4b'
++        source.write_bytes(add_chapter_graph(base,image_kind=b'png ',image_samples=(png_image(),png_image())).replace(b'chapter',b'\0\5First',1))
++        before=source.read_bytes()
++        # This normal Start owns one PNG book; the MP3 setup catalog must not
++        # leave unrelated missing-file candidates waiting for metadata.
++        self.service.close();roots=dict(self.inv.roots);fetch=self.client.fetch
++        self.inv=Inventory(self.base/'png-catalog.sqlite3',roots);self.inv.launch('Audiobooks');finish_scan(self.inv)
++        self.service=MergeService(self.inv,self.base/'png-cache');self.client=PublicClient(self.inv.database,fetch=fetch)
++        row=next(row for row in self.service.reviews.page()['rows'] if any(m['path']==str(source) for m in row['members']))
++        research=PublicResearch(self.client).lookup(row,str(self.audio));self.assertEqual(research['reasons'],[])
++        real=m4b_preservation.sample_description
++        def old_image_rule(payload,handler):
++            if handler==b'vide':raise m4b_preservation.Refused('Unsupported chapter image sample entry')
++            return real(payload,handler)
++        with patch.object(m4b_preservation,'sample_description',side_effect=old_image_rule):
++            _,parent_id=self.service.approve_automatic(row,research,stop,self.client);self.wait()
++        with connect(self.inv.database) as db:parent=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone())
++        self.assertEqual(parent['state'],'needs attention');self.assertEqual(parent['reason'],'M4B preservation requires review: Unsupported chapter image sample entry')
++        self.assertIsNone(parent['output']);self.assertEqual(source.read_bytes(),before)
++        self.service.automatic.research=PublicResearch(self.client)
++        self.service.automatic.start();self.service.automatic.thread.join(90);self.assertFalse(self.service.automatic.thread.is_alive(),'Private normal Start did not finish')
++        self.wait();jobs=self.service.jobs.status()['jobs'];children=[job for job in jobs if (job['manifest'].get('m4b_repair') or {}).get('parent_job_id')==parent_id]
++        self.assertEqual(len(children),1,jobs);child=children[0];self.assertEqual(child['state'],'completed',child)
++        self.assertTrue(child['output']['validation']['passed']);self.assertTrue(Path(child['output']['final_path']).exists())
++        with connect(self.inv.database) as db:self.assertEqual(dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent_id,)).fetchone()),parent)
++        image_tracks=[track for track in child['manifest']['m4b_repair']['source_profile']['tracks'] if track['handler']=='vide']
++        self.assertEqual([track['codec'] for track in image_tracks],['png '])
+     def test_independent_catalog_to_actual_verified_publication_and_ready_without_manual_step(self):
+         from test_public_work_identity import FallbackFixture,cap_fantlab
+         fixture=FallbackFixture(self.cover);client=PublicClient(self.inv.database,fetch=fixture.fetch);cap_fantlab(self.inv.database,time.time())
+--- a/tests/test_lock_timing.py
++++ b/tests/test_lock_timing.py
+@@ -68,6 +68,63 @@
+             response=route.call('/api/open-folder',{'library':'Audiobooks','view':'candidates','id':row['id']})
+         self.assertEqual(response[0],400);self.assertEqual(response[1]['code'],'folder_access_denied')
+         self.assertEqual(response[1]['folder'],str(self.sources[0].parent));self.assertNotIn('drive',response[1]['error'])
++
++    def test_edit_names_http_read_does_not_wait_for_unrelated_grouping(self):
++        from test_merge_http import MergeHTTPTests
++        route=MergeHTTPTests();route.setUp();self.addCleanup(route.tearDown);route.server.inventory=self.inv;route.server.merge=self.service
++        row=self.inv.candidates('Audiobooks')['rows'][0]
++        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
++        entered=threading.Event();release=threading.Event();answered=threading.Event();responses=[];marks={};scope=[]
++        approval_before=dict(self.service.__dict__.get('_approval_results',{}));peers_before=dict(self.service.__dict__.get('_shared_peers',{}))
++        def worker():
++            with self.inv.group_lock,self.service.reviews.lock,self.service.operation_lock:entered.set();release.wait(5)
++        def request():
++            marks['request']=time.monotonic();responses.append(route.call('/api/candidate/names',{'library':'Audiobooks','id':row['id'],'revision':row['revision']}));marks['response']=time.monotonic();scope.append(getattr(self.service.reviews.page_local,'catalog_only',False));answered.set()
++        holder=threading.Thread(target=worker);caller=threading.Thread(target=request)
++        holder.start();self.assertTrue(entered.wait(2));caller.start();prompt=answered.wait(.5);marks['worker_release']=time.monotonic();release.set();holder.join(5);caller.join(5)
++        self.assertFalse(holder.is_alive());self.assertFalse(caller.is_alive())
++        print('NAMES_READ_TIMING '+str({key:round(value-marks['request'],6) for key,value in marks.items()}))
++        self.assertEqual(responses[0][0],200,responses);self.assertIn('series',responses[0][1]['editor']['fields']);self.assertIn('universe',responses[0][1]['editor']['fields'])
++        self.assertTrue(prompt,'Edit names waited for an unrelated grouping/source worker')
++        self.assertEqual(scope,[False]);self.assertEqual(self.service.__dict__.get('_approval_results',{}),approval_before);self.assertEqual(self.service.__dict__.get('_shared_peers',{}),peers_before)
++
++    def test_output_folder_and_gone_source_fallback_do_not_wait_for_grouping(self):
++        row=self.inv.candidates('Audiobooks')['rows'][0];source_folder=self.sources[0].parent
++        source_folder.rename(self.audio/'Kept private source');output=self.audio/'Sorted';output.mkdir();final=output/'book.m4b';final.write_bytes(b'private recorded output')
++        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
++        entered=threading.Event();release=threading.Event();done=threading.Event();answers=[];opened=[]
++        def worker():
++            with self.inv.group_lock,self.service.reviews.lock:entered.set();release.wait(5)
++        def navigate():
++            for kind in ('output','source'):answers.append(self.service.open_folder('Audiobooks','candidates',row['id'],kind))
++            done.set()
++        state={'state':'verified','path':str(final),'identity':'private-key'}
++        with patch.object(self.service.publications,'describe',return_value=state),patch.object(self.service.publications,'publication',return_value={}),patch.object(self.service.publications,'protected',side_effect=lambda value:contextlib.nullcontext((None,'private-key'))),patch.object(self.service,'dispatch_folder',side_effect=opened.append):
++            holder=threading.Thread(target=worker);caller=threading.Thread(target=navigate);holder.start();self.assertTrue(entered.wait(2));caller.start();prompt=done.wait(.5);release.set();holder.join(5);caller.join(5)
++        self.assertFalse(holder.is_alive());self.assertFalse(caller.is_alive());self.assertTrue(prompt)
++        self.assertEqual(opened,[str(output),str(output)]);self.assertTrue(answers[0]['opened']);self.assertEqual(answers[1]['fallback'],'output')
++
++    def test_edit_names_save_has_finite_busy_reply_then_preserves_fresh_cas(self):
++        from test_merge_http import MergeHTTPTests
++        route=MergeHTTPTests();route.setUp();self.addCleanup(route.tearDown);route.server.inventory=self.inv;route.server.merge=self.service
++        row=self.inv.candidates('Audiobooks')['rows'][0]
++        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
++        entered=threading.Event();release=threading.Event();answered=threading.Event();responses=[]
++        values={'title':'B','author':'A','series':'S','number':'1','universe':'W','collection':False}
++        payload={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'names':values}
++        def worker():
++            with self.inv.group_lock,self.service.reviews.lock,self.service.operation_lock:entered.set();release.wait(5)
++        def save():responses.append(route.call('/api/candidate/names-save',payload));answered.set()
++        holder=threading.Thread(target=worker);caller=threading.Thread(target=save);holder.start();self.assertTrue(entered.wait(2));caller.start();prompt=answered.wait(.5)
++        release.set();holder.join(5);caller.join(5);self.assertFalse(holder.is_alive());self.assertFalse(caller.is_alive())
++        self.assertTrue(prompt,'Save must answer explicitly while unrelated book work holds its admission locks')
++        self.assertEqual(responses[0][0],409,responses);self.assertEqual(responses[0][1]['code'],'busy');self.assertIsNone(responses[0][1]['row'])
++        response=route.call('/api/candidate/names-save',payload);self.assertEqual(response[0],200,response)
++        import entered_names
++        current=self.service.reviews._row('Audiobooks',row['id']);saved=entered_names.book_values(self.inv.database,current)
++        self.assertEqual(saved['series'],'S');self.assertEqual(saved['universe'],'W');self.assertEqual(saved['title'],'B')
++        with connect(self.inv.database) as db:db.execute('UPDATE book_groups SET revision=revision+1 WHERE id=?',(row['id'],))
++        self.assertEqual(route.call('/api/candidate/names-save',payload)[0],409)
+ 
+ 
+ class SlowLookup:
+--- a/tests/test_refused_retry_frontend.js
++++ b/tests/test_refused_retry_frontend.js
+@@ -35,7 +35,7 @@
+   // Observed case: unsupported_file. No Retry anywhere, the UI's words, both raw facts only in Technical detail.
+   const refused=refusedRow('u','unsupported_file');paint([refused]);
+   let tr=rowOf('u');
+-  assert.equal(statusCell(tr).textContent,"Can't convert — M4B not supported");
++  assert.equal(statusCell(tr).textContent,"Can't convert — M4B feature unsupported");
+   assert.equal(statusCell(tr).children[0].textContent,"Retry was refused: the app doesn't support how this M4B is built. Nothing to do for now. Originals are untouched.");
+   assert.ok(statusCell(tr).children[0].classes.has('retry-refused'),'--warning, the existing refused mechanism');
+   assert.ok(![...actionButtons(tr)].some(button=>/Retry|Repair/.test(button.textContent)),'no Retry, not even disabled');
+@@ -44,7 +44,7 @@
+   assert.equal(techOf(tr),'Technical detail: Failed M4B retained: Unsupported structural box; earlier failure: '+M4B_REASON);
+   context.fixture=refused;run('select(fixture,true);controls()');
+   assert.equal(get('retry-block').hidden,true,'the details panel has no Retry either');
+-  assert.equal(get('automatic-result-status').textContent,"Can't convert — M4B not supported");
++  assert.equal(get('automatic-result-status').textContent,"Can't convert — M4B feature unsupported");
+   assert.equal(get('automatic-technical').textContent,'Technical detail: Failed M4B retained: Unsupported structural box; earlier failure: '+M4B_REASON);
+   assert.equal(run('attentionText('+JSON.stringify(refusedRow('v','unsupported_file',{},{attention:{group:'unsupported',cause:null,originals_untouched:false}}))+').hint'),
+     "Retry was refused: the app doesn't support how this M4B is built. Nothing to do for now.",'the sentence only where the app confirms it');
+@@ -92,7 +92,7 @@
+   assert.equal(run('attentionText('+JSON.stringify(refusedRow('t','unsupported_file',{stale:true,app_version:''},{attention:{group:'retry',cause:null,originals_untouched:true}}))+').hint'),
+     'Retry was refused before the app was updated. It may work now.');
+   assert.equal(run('candidateStatus('+JSON.stringify(refusedRow('t','unsupported_file',{stale:true},{attention:{group:'unsupported',cause:null,originals_untouched:true}}))+')'),
+-    "Can't convert — M4B not supported",'refused again by this build\'s own check: the group says so');
++    "Can't convert — M4B feature unsupported",'refused again by this build\'s own check: the group says so');
+ 
+   // Selection: the tick stays; the bulk count leaves the refused book out and says so.
+   paint([m4bRow('a'),m4bRow('b'),refused]);
+@@ -110,7 +110,7 @@
+   tr=rowOf('x');
+   assert.equal(document.activeElement,actionButtons(tr)[1],'View metadata of the same row, never the page or a neighbour');
+   assert.equal(document.activeElement.textContent,'Edit names');
+-  assert.equal(statusCell(tr).textContent,"Can't convert — M4B not supported",'the status changed in place');
++  assert.equal(statusCell(tr).textContent,"Can't convert — M4B feature unsupported",'the status changed in place');
+   assert.match(statusCell(tr).children[0].textContent,/^Retry was refused: the app doesn't support/);
+   // The same from the details panel's Retry.
+   paint([m4bRow('z')]);run('select(rows[0],true);controls()');
+@@ -133,9 +133,9 @@
+   for(let i=0;i<5;i++)await tick();
+   assert.equal(searched.length,1,'re-read once');assert.match(searched[0],/search=Title%20h/);
+   tr=rowOf('h');assert.ok(tr,'still in place');
+-  assert.equal(statusCell(tr).textContent,"Can't convert — M4B not supported",'never a stale Queued');
++  assert.equal(statusCell(tr).textContent,"Can't convert — M4B feature unsupported",'never a stale Queued');
+   await run('loadList(listContext(),"Audiobooks",view,filters[view],0,"",retryEpoch,false)');for(let i=0;i<5;i++)await tick();
+-  assert.equal(searched.length,1,'one re-read per hold');assert.equal(statusCell(rowOf('h')).textContent,"Can't convert — M4B not supported");
++  assert.equal(searched.length,1,'one re-read per hold');assert.equal(statusCell(rowOf('h')).textContent,"Can't convert — M4B feature unsupported");
+   context.fetch=listFetch;run('heldRow=null;attentionGroup="all"');
+ 
+   context.setTimeout=()=>0;
+--- a/web/app.js
++++ b/web/app.js
+@@ -1071,6 +1071,7 @@
+ const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
+ const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
+ function activityLabel(row){
++  if(row.state==='attention' && row.media_failure?.schema==='books-media-failure-v1')return row.media_failure.status;
+   if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
+   if(row.kind==='chapter')return 'Checking source audio';
+   if(row.kind==='admission')return row.state==='pausing'?'Pausing start checks…':'Checking pending audiobook work';
+@@ -1082,6 +1083,7 @@
+   return row.step==='researching'?'Researching books':'Scanning files';
+ }
+ function activityStep(row,finishing){
++  if(row.state==='attention' && row.media_failure?.schema==='books-media-failure-v1')return row.media_failure.hint;
+   if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
+   let step;
+   if(row.kind==='chapter')return 'Checking the complete audio before correcting the final chapter end.';
+@@ -1477,6 +1479,7 @@
+     return {...rowActions.startover,ready:attention.startover==='manual_draft'?STARTOVER_HELD_TIP:STARTOVER_CHANGED_TIP,data:{allowed:true,reason:''}};
+   }
+   if(refusal && refusalFix(refusal)==='update')return null;
++  if(mediaFailureText(attention))return null;
+   const [kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair' || refusal?.kind==='repair'?['repair',job.repair]:['retry',job.retry];
+   if(!data || typeof data!=='object' || typeof data.allowed!=='boolean')return null;
+   if(kind==='retry' && attention?.remedy?.kind==='tag_repair')return {...rowActions.retry,ready:'Check this MP3 again with this app version and queue its audiobook job.',data};
+@@ -2107,7 +2110,7 @@
+   retryAllRun.ended=true;stripNote=retryReceiptText(run,false);
+   setTimeout(async()=>{if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();},0);
+ }
+-const attentionLabels={all:'All',files_missing:'Missing files',title_author:'Title or author',author_unclear:'Author unclear',same_author:'Same author?',name_taken:'Name taken',part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear',retry:'Can retry',repair:'Can repair',reacquire:'Need to reacquire',checking:'Retry checks',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
++const attentionLabels={all:'All',files_missing:'Missing files',title_author:'Title or author',author_unclear:'Author unclear',same_author:'Same author?',name_taken:'Name taken',part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear',retry:'Can retry',repair:'Can repair',reacquire:'Need to reacquire',checking:'Retry checks',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B feature unsupported'};
+ // All = the sum of these keys = the shortcut = the Jobs line (Judy 2026-10-24, section 2): the "Needs your answer" set first.
+ const NEEDS_KEYS=['files_missing','title_author','author_unclear','same_author','name_taken','part_of_book','files_unclear','order_unclear'];  // 0.22.0 review (Judy, B3): three hold chips
+ const attentionKeys=['all',...NEEDS_KEYS,'retry','repair','reacquire','checking','changed','audiobook','other','unsupported'];
+@@ -2134,6 +2137,7 @@
+     if(button.textContent!==text)button.textContent=text;
+     button.setAttribute('aria-pressed',String(attentionGroup===key));
+     if(key==='all')button.title=`Show all ${total.toLocaleString()} books that need attention.`;
++    if(key==='unsupported')button.title='Show M4B books with a feature the app cannot preserve yet.';
+     // A group at zero is hidden, except All and Can retry; it stays while selected or focused.
+     button.hidden=key!=='all' && key!=='retry' && !(key==='reacquire' && !Number.isInteger(counts[key])) && value(key)===0 && attentionGroup!==key && active!==button;
+   }
+@@ -2367,14 +2371,14 @@
+   return facts;
+ }
+ const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],space:['Stopped — not enough disk space','Free up disk space, then retry.'],repair:['Damaged — can repair',''],
+-  unsupported:["Can't convert — M4B not supported",'Nothing to do for now.'],other:['Stopped — see details','The conversion stopped. Select the row to read the technical message.'],
++  unsupported:["Can't convert — M4B feature unsupported",'Nothing to do for now.'],other:['Stopped — see details','The conversion stopped. Select the row to read the technical message.'],
+   changed:['Original changed since checked','Recovery copies are kept until you decide.'],missing:['Audiobook missing','Recovery copies are kept until you decide.'],
+   unverified:['Audiobook not verified','Recovery copies are kept until you decide.']};
+ // A refused Retry or Repair (RefusedRetry spec, 2026-10-19). The server sends a typed cause and fix; these are the
+ // words. Behaviour comes from the fix, copy from the cause, never from the server's English reason. A missing or
+ // unknown cause reads as 'unknown', whose fix is 'update'.
+ // {Verb} and {verb} follow the refusal's kind: Retry, or Repair for a refused Repair (follow-up, point 3b).
+-const refusalCopy={unsupported_file:["Can't convert — M4B not supported","the app doesn't support how this M4B is built. Nothing to do for now."],
++const refusalCopy={unsupported_file:["Can't convert — M4B feature unsupported","the app doesn't support how this M4B is built. Nothing to do for now."],
+   working_files:['Stopped — waiting for cleanup','working files from an earlier attempt are still present. {Verb} after they are cleared.'],
+   source_changed:['Stopped — review changed',"the book's review or source files changed. Start over sends it back to automatic processing."],
+   file_problem:['Stopped — check refused','the previous check stopped. Read the recorded reason before you {verb}.'],
+@@ -2401,6 +2405,11 @@
+ function refusalCurrent(row){const refusal=refusalOf(row);return refusal && refusal.stale!==true?refusal:null;}
+ // A stopped job, or a completed book whose recovery copies the 0.16.8 rule keeps (changed or audiobook).
+ function attentionOf(row){const job=row?.creation?.job,a=job?.attention;return a && typeof a.group==='string' && (job.state==='Output needs attention' || keptGroup(a))?a:null;}
++function mediaFailureText(attention){
++  const value=attention?.media_failure;
++  if(value?.schema!=='books-media-failure-v1' || !['m4b_feature_unsupported','invalid_m4b_source','source_decode_failed'].includes(value.code) || typeof value.filename!=='string' || !value.filename || typeof value.status!=='string' || typeof value.hint!=='string')return null;
++  return {status:value.status,hint:value.hint+(attention.originals_untouched===true?' Original kept.':''),warn:true};
++}
+ function attentionText(row){
+   const cleanup=cleanupIdentityText(row);if(cleanup)return cleanup;
+   const reacquire=attentionOf(row)?.reacquire;
+@@ -2416,7 +2425,8 @@
+     return {status:'Queued destination needs review',hint:'This saved job uses a different destination. Retry checks the current book before creating a new job.',warn:true};
+   }
+   const changed=readmissionOf(row)?.queued_next===true?null:sourceChangedText(a);if(changed)return changed;  // ruling 75b, before the "replace it" line
+-  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",warn:true};
++  const media=mediaFailureText(a);if(media)return media;
++  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Stopped — source audio check failed',hint:'The source failed its full audio check. Check or replace that file with an intact copy.',warn:true};
+   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
+   const readmission=readmissionOf(row);
+   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):readmission.origin==='automatic'?AUTO_QUEUED_HINT:'The book is checked again before it runs.'};
+@@ -2433,7 +2443,7 @@
+   if(a.precheck==='unavailable')return {status:precheckCopy.unavailable[0],hint:precheckCopy.unavailable[1],warn:true,clause};
+   if(a.precheck==='pending')return {status:precheckCopy.pending[0],hint:precheckCopy.pending[1]};
+   // Stale: the app was updated since the refusal; it is information, not an obstacle (muted). A book whose read-only
+-  // check refuses again under this build is in M4B not supported and reads as that group. A row the dry run covers and
++  // check refuses again under this build is in M4B feature unsupported and reads as that group. A row the dry run covers and
+   // passed is ready again and says why; "Stopped — try again" is left for rows the dry run does not cover.
+   if(refusal && a.group!=='unsupported'){
+     const version=typeof refusal.app_version==='string' && refusal.app_version?refusal.app_version:'';
+--- a/web_server.py
++++ b/web_server.py
+@@ -81,6 +81,8 @@
+         row = {'id': kind, 'kind': kind, 'subject': jobs['current_title'], 'step': step,
+                'state': ACTIVITY_STATES.get(jobs.get('state'), 'running'), 'reason': progress.get('reason', '')} | _measure(progress, unit)
+         if jobs.get('current_task_kind')=='duplicate_source_cleanup':row['task_kind']='duplicate_source_cleanup'
++        media=jobs.get('current_media_failure')
++        if isinstance(media,dict) and media.get('schema')=='books-media-failure-v1':row['media_failure']=media
+         if kind == 'conversion':
+             row.update(step_index=CONVERSION_STEPS.get(step, 1), step_count=4)
+         if type(progress.get('started')) is int:
+@@ -1280,6 +1282,7 @@
+                 else:result=self.server.merge.names_forget(id,revision,self.text_value(data['entry_id'],64))
+             except ValueError as error:
+                 code=getattr(error,'code',None) or ('changed' if 'Candidate changed' in str(error) else 'refused')
++                if code=='busy':self.response(409,{'error':str(error),'code':code,'row':None});return
+                 try:row=reviews.enrich(reviews._row(library,id))
+                 except ValueError:row=None
+                 self.response(409,{'error':str(error),'code':code,'row':row});return

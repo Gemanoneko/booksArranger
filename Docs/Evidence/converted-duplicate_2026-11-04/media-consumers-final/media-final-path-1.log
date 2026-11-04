@@ -1,0 +1,15 @@
+test_inline_author_title_series_are_one_book_local_press_waiting_for_start (test_entered_names.EditNamesTests.test_inline_author_title_series_are_one_book_local_press_waiting_for_start) ... FAIL
+
+======================================================================
+FAIL: test_inline_author_title_series_are_one_book_local_press_waiting_for_start (test_entered_names.EditNamesTests.test_inline_author_title_series_are_one_book_local_press_waiting_for_start)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_entered_names.py", line 338, in test_inline_author_title_series_are_one_book_local_press_waiting_for_start
+    self.assertTrue(preview['path'],ascii(preview))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '' is not true : {'path': '', 'absolute': '', 'taken': False, 'title': '\u0423\u044d\u043b\u0438\u0445\u043e\u043b\u043d', 'author': '\u041e\u043b\u0435\u0433 \u042f\u043a\u043e\u0432\u043b\u0435\u0432, \u0412\u043b\u0430\u0434\u0438\u043c\u0438\u0440 \u0422\u043e\u0440\u0438\u043d', 'collection': False, 'reason': 'Verified metadata exceeds the supported Windows output path length', 'series': {'name': '\u041c\u0438\u0441\u0442\u0435\u0440 \u0412\u0435\u0447\u043d\u044b\u0439 \u041a\u0430\u043d\u0443\u043d', 'number': '1'}, 'place': {'universe': '', 'series': '\u041c\u0438\u0441\u0442\u0435\u0440 \u0412\u0435\u0447\u043d\u044b\u0439 \u041a\u0430\u043d\u0443\u043d', 'number': '1', 'collection': False}, 'applies': 2}
+
+----------------------------------------------------------------------
+Ran 1 test in 1.091s
+
+FAILED (failures=1)

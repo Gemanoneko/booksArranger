@@ -2,10 +2,17 @@
 
 ## [v0.25.0] - 2026-11-04
 
+### Added
+
+- Recognize a verified extra copy of an already converted recording and remove only that copy through protected source cleanup while keeping the finished audiobook.
+
 ### Fixed
 
 - Finish loading Edit names and make series and universe changes available through the existing editor while preserving saved titles and chosen folders.
 - Use the confirmed Lord of the Rings series and planned destination for the pending Tolkien trilogy without changing finished audiobooks.
+- Answer Open source folder promptly even while unrelated book work holds catalog locks, and end the busy state after a confirmed result or finite deadline.
+- Preserve supported PNG chapter images in M4B sources and admit previously refused books through the normal source check.
+- Identify the affected source and specific media check in stopped book details; invalid or damaged media remains protected until an intact source is available.
 
 ## [v0.24.5] - 2026-11-03
 
