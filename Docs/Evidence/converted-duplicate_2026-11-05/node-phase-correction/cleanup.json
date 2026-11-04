@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\node025fix",
+   "reason": "Ender canonical Node/frontend correction complete; all baseline failure and51passing command receipts, plan, patch and hashes preserved in versioned Docs; Sergei explicitly required cleanup of created temporaries; owned processes closed native complete zero, no active fixtures",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\node025fix",
+   "isDir": true,
+   "before": {
+    "files": 10,
+    "bytes": 262584
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 10,
+    "bytes": 262584
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 10,
+    "bytes": 262584
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 99614875648,
+   "after": 99614982144
+  }
+ ],
+ "removedFiles": 10,
+ "removedBytes": 262584,
+ "keptCount": 0
+}
