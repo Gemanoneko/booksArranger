@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\f25r2",
+   "reason": "Sergei requested cleanup of created temporary files; Futaba reviewed exact disposable 0ec focused QA archive, evidence retained in Docs",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\f25r2",
+   "isDir": true,
+   "before": {
+    "files": 1759,
+    "bytes": 48076234
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 1759,
+    "bytes": 48076234
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 1759,
+    "bytes": 48076234
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 99798708224,
+   "after": 99850977280
+  }
+ ],
+ "removedFiles": 1759,
+ "removedBytes": 48076234,
+ "keptCount": 0
+}
