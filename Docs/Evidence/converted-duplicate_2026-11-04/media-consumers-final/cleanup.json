@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\converted-duplicate-20261104",
+   "reason": "Ender final0.25.0 private-fixture task complete; Sergei explicitly required cleanup of all created temporaries; all unique failed and passing receipts/source patches copied to versioned tool Docs and hash-verified; native owners closed complete zero, no active fixtures",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\converted-duplicate-20261104",
+   "isDir": true,
+   "before": {
+    "files": 788,
+    "bytes": 24441392
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 788,
+    "bytes": 24441392
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 788,
+    "bytes": 24441392
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 104162816000,
+   "after": 104189108224
+  }
+ ],
+ "removedFiles": 788,
+ "removedBytes": 24441392,
+ "keptCount": 0
+}
