@@ -192,6 +192,18 @@ def operation(method):
     return locked
 
 
+class FolderOpenRefused(ValueError):
+    """A guarded, known navigation refusal; never an inferred drive failure."""
+    def __init__(self,directory,cause):
+        self.folder=str(directory)
+        code=getattr(cause,'winerror',None) or getattr(cause,'errno',None)
+        self.fix='Check your access to this folder, then try again.' if code in (5,13) else 'Check that this folder is available, then try again.'
+        self.code='folder_access_denied' if code in (5,13) else 'folder_unavailable'
+        super().__init__('Couldn’t open '+self.folder+'. '+self.fix)
+
+    def payload(self):return {'error':str(self),'code':self.code,'folder':self.folder,'fix':self.fix}
+
+
 class MergeService:
     draining=False # Set by a desktop Quit: the current book finishes, nothing new starts.
 
@@ -5195,7 +5207,23 @@ class MergeService:
 
     def _source_directories(self,library,view,identity):
         if view=='files':paths=[self._file_record(library,identity)['path']]
-        elif view=='candidates':paths=[m['path'] for m in self.reviews._row(library,identity)['members']]
+        elif view=='candidates':
+            if library!='Audiobooks':raise ValueError('Only Audiobooks have source folders')
+            # Navigation needs the shown catalog's paths, not a fresh grouping
+            # pass. candidate() may wait behind an approval's source/media work
+            # whenever any retirement advances the global catalog revision.
+            with connect(self.inventory.database) as db:
+                db.execute('BEGIN')
+                import reacquire_sources
+                marker=reacquire_sources.marker(db,identity)
+                if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
+                row=db.execute('SELECT root,evidence FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()
+                if not row:raise ValueError('Candidate no longer current')
+                roots=self.inventory.source_roots(library) if hasattr(self.inventory,'source_roots') else [self.inventory.roots[library]]
+                root=ordinary(row['root'])
+                if root not in [ordinary(value) for value in roots]:raise ValueError('Source folder is outside configured libraries')
+                paths=[m['path'] for m in json.loads(row['evidence'])['members']]
+                if not paths or any(not ordinary(path).is_relative_to(root) for path in paths):raise ValueError('Source folder correspondence changed')
         else:raise ValueError('Unknown inspection view')
         directories=sorted({str(Path(p).parent) for p in paths},key=str.casefold)
         return [{'id':str(uuid.uuid5(uuid.NAMESPACE_URL,library+'\x1f'+p)),'path':p} for p in directories]
@@ -5279,7 +5307,7 @@ class MergeService:
             'source_directory_count':len(directories),'output_folder_available':bool(view=='candidates' and current['state']=='verified'),'audiobook_ready':ready,
             'current_audiobook':self.current_audiobook(identity) if view=='candidates' else None}}
 
-    FOLDER_UNAVAILABLE='Folder unavailable. Connect the library drive and try again.'
+    FOLDER_UNAVAILABLE='Folder unavailable. Check that this folder is available, then try again.'
 
     def open_folder(self,library,view,identity,folder_kind='source',directory_id=None):
         """Open a book's source folder, or the folder that holds its converted file (folder_kind 'output'), in File
@@ -5298,7 +5326,7 @@ class MergeService:
                 directory=item['path']
             if view=='candidates' and not os.path.isdir(directory):
                 try:return dict(self.open_folder(library,view,identity,'output'),fallback='output')
-                except ValueError:raise ValueError(self.FOLDER_UNAVAILABLE) from None
+                except ValueError:raise FolderOpenRefused(directory,FileNotFoundError()) from None
         elif folder_kind=='output' and view=='candidates':
             self.reviews._row(library,identity)
             try:
@@ -5322,7 +5350,7 @@ class MergeService:
         if hasattr(self.inventory,'source_root_for_path'):root=self.inventory.source_root_for_path(directory,library)
         try:
             with DirectoryBoundary(root,directory):self.dispatch_folder(directory)
-        except (ValueError,OSError):raise ValueError(self.FOLDER_UNAVAILABLE) from None
+        except (ValueError,OSError) as error:raise FolderOpenRefused(directory,error) from error
         return {'opened':True}
 
     @staticmethod

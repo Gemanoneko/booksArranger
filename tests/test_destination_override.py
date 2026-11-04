@@ -668,7 +668,7 @@ class OpenFolderTests(unittest.TestCase):
 
     def test_gone_source_without_a_finished_book_says_unavailable(self):
         merge = self.double('C:\\definitely-gone-folder-0x1')
-        with self.assertRaisesRegex(ValueError, '^Folder unavailable. Connect the library drive and try again.$'):
+        with self.assertRaisesRegex(ValueError, 'Couldn’t open .*Check that this folder is available'):
             merge.open_folder('Audiobooks', 'candidates', 'id')
         self.assertEqual(merge.opened, [])
 

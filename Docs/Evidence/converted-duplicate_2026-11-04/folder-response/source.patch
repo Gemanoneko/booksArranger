@@ -1,0 +1,230 @@
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -190,6 +190,18 @@
+         finally:
+             with _BULK_LOCK:self._foreground_waiters-=1
+     return locked
++
++
++class FolderOpenRefused(ValueError):
++    """A guarded, known navigation refusal; never an inferred drive failure."""
++    def __init__(self,directory,cause):
++        self.folder=str(directory)
++        code=getattr(cause,'winerror',None) or getattr(cause,'errno',None)
++        self.fix='Check your access to this folder, then try again.' if code in (5,13) else 'Check that this folder is available, then try again.'
++        self.code='folder_access_denied' if code in (5,13) else 'folder_unavailable'
++        super().__init__('Couldn’t open '+self.folder+'. '+self.fix)
++
++    def payload(self):return {'error':str(self),'code':self.code,'folder':self.folder,'fix':self.fix}
+ 
+ 
+ class MergeService:
+@@ -5195,7 +5207,23 @@
+ 
+     def _source_directories(self,library,view,identity):
+         if view=='files':paths=[self._file_record(library,identity)['path']]
+-        elif view=='candidates':paths=[m['path'] for m in self.reviews._row(library,identity)['members']]
++        elif view=='candidates':
++            if library!='Audiobooks':raise ValueError('Only Audiobooks have source folders')
++            # Navigation needs the shown catalog's paths, not a fresh grouping
++            # pass. candidate() may wait behind an approval's source/media work
++            # whenever any retirement advances the global catalog revision.
++            with connect(self.inventory.database) as db:
++                db.execute('BEGIN')
++                import reacquire_sources
++                marker=reacquire_sources.marker(db,identity)
++                if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
++                row=db.execute('SELECT root,evidence FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()
++                if not row:raise ValueError('Candidate no longer current')
++                roots=self.inventory.source_roots(library) if hasattr(self.inventory,'source_roots') else [self.inventory.roots[library]]
++                root=ordinary(row['root'])
++                if root not in [ordinary(value) for value in roots]:raise ValueError('Source folder is outside configured libraries')
++                paths=[m['path'] for m in json.loads(row['evidence'])['members']]
++                if not paths or any(not ordinary(path).is_relative_to(root) for path in paths):raise ValueError('Source folder correspondence changed')
+         else:raise ValueError('Unknown inspection view')
+         directories=sorted({str(Path(p).parent) for p in paths},key=str.casefold)
+         return [{'id':str(uuid.uuid5(uuid.NAMESPACE_URL,library+'\x1f'+p)),'path':p} for p in directories]
+@@ -5279,7 +5307,7 @@
+             'source_directory_count':len(directories),'output_folder_available':bool(view=='candidates' and current['state']=='verified'),'audiobook_ready':ready,
+             'current_audiobook':self.current_audiobook(identity) if view=='candidates' else None}}
+ 
+-    FOLDER_UNAVAILABLE='Folder unavailable. Connect the library drive and try again.'
++    FOLDER_UNAVAILABLE='Folder unavailable. Check that this folder is available, then try again.'
+ 
+     def open_folder(self,library,view,identity,folder_kind='source',directory_id=None):
+         """Open a book's source folder, or the folder that holds its converted file (folder_kind 'output'), in File
+@@ -5298,7 +5326,7 @@
+                 directory=item['path']
+             if view=='candidates' and not os.path.isdir(directory):
+                 try:return dict(self.open_folder(library,view,identity,'output'),fallback='output')
+-                except ValueError:raise ValueError(self.FOLDER_UNAVAILABLE) from None
++                except ValueError:raise FolderOpenRefused(directory,FileNotFoundError()) from None
+         elif folder_kind=='output' and view=='candidates':
+             self.reviews._row(library,identity)
+             try:
+@@ -5322,7 +5350,7 @@
+         if hasattr(self.inventory,'source_root_for_path'):root=self.inventory.source_root_for_path(directory,library)
+         try:
+             with DirectoryBoundary(root,directory):self.dispatch_folder(directory)
+-        except (ValueError,OSError):raise ValueError(self.FOLDER_UNAVAILABLE) from None
++        except (ValueError,OSError) as error:raise FolderOpenRefused(directory,error) from error
+         return {'opened':True}
+ 
+     @staticmethod
+--- a/web_server.py
++++ b/web_server.py
+@@ -1126,7 +1126,10 @@
+             kind=data.get('folder_kind','source')
+             if kind not in {'source','output'}: raise ValueError('Invalid folder kind')
+             directory_id=None if data.get('directory_id') is None else self.uuid_value(data['directory_id'])
+-            self.response(200,self.server.merge.open_folder(library,view,identity,folder_kind=kind,directory_id=directory_id));return
++            from merge_service import FolderOpenRefused
++            try:answer=self.server.merge.open_folder(library,view,identity,folder_kind=kind,directory_id=directory_id)
++            except FolderOpenRefused as error:self.response(400,error.payload());return
++            self.response(200,answer);return
+         if path in {'/api/audiobook/pause','/api/audiobook/resume'}:
+             if data: raise ValueError('Audiobook job controls require an empty object')
+             # Ruling 35: Resume while a Pause or an earlier start is still settling is kept and made when it settles.
+--- a/web/app.js
++++ b/web/app.js
+@@ -29,7 +29,7 @@
+ const pressed=new Map(),PRESS_MEMORY=10*60*1000;let heldRow=null,retrySelectedConfirm=null,retrySelectedRun=false;
+ let listTicket=0,listPending='',paintedContext='',attentionGroup='all',retryAllRun=null,retryAllConfirm=null,stripNote='',listGeneration=0;
+ const rowRetries=new Map();
+-const pendingFolders=new Set(),folderMessages=new Map();
++const pendingFolders=new Set(),folderMessages=new Map(),folderAttempts=new Map();
+ // Start over, "Let the app handle it" and Clear working files (RefusedRetry follow-ups 2-4, Sergei 2026-10-19).
+ // restartResult: the panel note for a book whose press left it with no control (it now shows its Started over state).
+ let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=null;
+@@ -989,9 +989,23 @@
+ }));
+ function node(tag,text='',className=''){const element=document.createElement(tag);element.textContent=text;if(className)element.className=className;return element;}
+ function recordIdentity(row){return {library:row.library || $('library').value,view:row.kind==='candidate'?'candidates':'files',id:row.kind==='candidate'?row.id:row.record_id};}
+-function folderKey(row,kind='source',directory=null){return JSON.stringify([recordIdentity(row),kind,directory]);}
+-function folderState(row,button,status,kind='source',directory=null){const key=folderKey(row,kind,directory);button.disabled=ended || !recordIdentity(row).id || pendingFolders.has(key);status.textContent=pendingFolders.has(key)?'Opening folder…':folderMessages.get(key) || '';}
+-async function openFolder(row,button,status,folderKind='source',directoryId=null){const key=folderKey(row,folderKind,directoryId);if(ended || button.disabled || pendingFolders.has(key))return;pendingFolders.add(key);folderMessages.delete(key);folderState(row,button,status,folderKind,directoryId);try{const payload={...recordIdentity(row),folder_kind:folderKind};if(directoryId)payload.directory_id=directoryId;await request('/api/open-folder',payload);folderMessages.delete(key);}catch(error){folderMessages.set(key,error.message || 'Folder unavailable. Connect the library drive and try again.');}finally{pendingFolders.delete(key);folderState(row,button,status,folderKind,directoryId);}}
++function folderKey(row,kind='source',directory=null){return JSON.stringify([recordIdentity(row),kind,directory,row.revision ?? null,row.fingerprint ?? null]);}
++function folderState(row,button,status,kind='source',directory=null){const key=folderKey(row,kind,directory);button.disabled=ended || !recordIdentity(row).id || pendingFolders.has(key);status.textContent=folderMessages.get(key) || (pendingFolders.has(key)?'Opening folder…':'');}
++async function openFolder(row,button,status,folderKind='source',directoryId=null){
++  const key=folderKey(row,folderKind,directoryId);if(ended || button.disabled || pendingFolders.has(key))return;
++  const attempt={};folderAttempts.set(key,attempt);pendingFolders.add(key);folderMessages.delete(key);folderState(row,button,status,folderKind,directoryId);
++  const current=()=>folderAttempts.get(key)===attempt;
++  const waiting=setTimeout(()=>{if(current()){folderMessages.set(key,'Opening folder… Waiting for the app to respond.');folderState(row,button,status,folderKind,directoryId);}},3000);
++  const unknown='The app couldn’t confirm whether the folder opened. Check File Explorer, then press Open source folder if needed.';
++  try{
++    const payload={...recordIdentity(row),folder_kind:folderKind};if(directoryId)payload.directory_id=directoryId;
++    const answer=await request('/api/open-folder',payload,STATE_TIMEOUT);
++    if(!current())return;
++    if(answer?.opened!==true && answer?.dispatched!==true)throw Error(unknown);
++    folderMessages.delete(key);
++  }catch(error){if(current())folderMessages.set(key,error.httpStatus?error.message || 'Couldn’t open the folder. Check the folder and try again.':unknown);}
++  finally{clearTimeout(waiting);if(current()){folderAttempts.delete(key);pendingFolders.delete(key);folderState(row,button,status,folderKind,directoryId);}}
++}
+ async function viewMetadata(row,showFolders=false){if(ended)return;const same=selectedPath===row.path;select(row,!same);const identity=recordIdentity(row),sequence=++inspectSequence;inspectorIdentity=identity;$('metadata-inspector').hidden=false;$('details-heading').textContent=row.kind==='candidate'?'Book metadata':'File metadata';$('details-heading').scrollIntoView?.({block:'start',behavior:'auto'});$('details-heading').focus?.({preventScroll:true});$('inspect-status').textContent='Reading metadata and artwork…';try{const result=await request('/api/inspect',identity);if(sequence!==inspectSequence || selectedPath!==row.path || ended)return;if(!result.inspector || !Array.isArray(result.inspector.sections))throw Error('Metadata inspection unavailable');renderInspector(result.inspector,row,sequence);if(showFolders)$('source-folders').open=true;$('inspect-status').textContent='';}catch(error){if(sequence===inspectSequence)$('inspect-status').textContent=error.message;}}
+ function inspectedCandidateStatus(section,inspector,row){
+   if(section.kind==='created' || section.kind==='snapshot')return section.status || '';
+--- a/tests/test_lock_timing.py
++++ b/tests/test_lock_timing.py
+@@ -16,6 +16,58 @@
+ def finish_thread(thread):
+     finish(thread, 'A test thread')
+ from test_approve_as_is import ApproveFixture, tone
++
++
++class SourceFolderDispatchTests(unittest.TestCase):
++    """A catalog-only navigation press must not wait for unrelated grouping work."""
++    def setUp(self):
++        from test_merge_service import MergeTests
++        MergeTests.setUp(self)
++    def tearDown(self):
++        from test_merge_service import MergeTests
++        MergeTests.tearDown(self)
++    def test_source_folder_dispatches_while_unrelated_worker_holds_group_lock(self):
++        row=self.service.reviews._row('Audiobooks',self.inv.candidates('Audiobooks')['rows'][0]['id'])
++        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
++        entered=threading.Event();release=threading.Event();dispatched=threading.Event();errors=[];marks={}
++        def worker():
++            with self.inv.group_lock:entered.set();release.wait(5)
++        def open_folder():
++            marks['request']=time.monotonic()
++            try:self.service.open_folder('Audiobooks','candidates',row['id'])
++            except Exception as error:errors.append(error)
++            finally:marks['response']=time.monotonic()
++        def dispatch(path):
++            self.assertEqual(path,str(self.sources[0].parent));marks['dispatch']=time.monotonic();dispatched.set()
++        holder=threading.Thread(target=worker);opener=threading.Thread(target=open_folder)
++        with patch.object(self.service,'dispatch_folder',side_effect=dispatch):
++            holder.start();self.assertTrue(entered.wait(2));opener.start()
++            prompt=dispatched.wait(.5)
++            marks['worker_release']=time.monotonic();release.set();holder.join(5);opener.join(5)
++        self.assertFalse(holder.is_alive());self.assertFalse(opener.is_alive());self.assertEqual(errors,[])
++        print('FOLDER_DISPATCH_TIMING '+str({key:round(value-marks['request'],6) for key,value in marks.items()}))
++        self.assertTrue(prompt,'Folder navigation waited for unrelated source grouping; dispatch happened only after the worker released group_lock')
++
++    def test_normal_http_source_folder_route_does_not_wait_for_book_work(self):
++        from test_merge_http import MergeHTTPTests
++        route=MergeHTTPTests();route.setUp();self.addCleanup(route.tearDown)
++        route.server.inventory=self.inv;route.server.merge=self.service
++        row=self.inv.candidates('Audiobooks')['rows'][0]
++        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
++        entered=threading.Event();release=threading.Event();dispatched=threading.Event();responses=[]
++        def worker():
++            with self.inv.group_lock,self.service.reviews.lock,self.service.operation_lock:entered.set();release.wait(5)
++        def request():responses.append(route.call('/api/open-folder',{'library':'Audiobooks','view':'candidates','id':row['id'],'folder_kind':'source'}))
++        holder=threading.Thread(target=worker);caller=threading.Thread(target=request)
++        with patch.object(self.service,'dispatch_folder',side_effect=lambda folder:dispatched.set()):
++            holder.start();self.assertTrue(entered.wait(2));caller.start();prompt=dispatched.wait(.5)
++            release.set();holder.join(5);caller.join(5)
++        self.assertFalse(holder.is_alive());self.assertFalse(caller.is_alive());self.assertTrue(prompt)
++        self.assertEqual(responses[0][:2],(200,{'opened':True}));self.assertEqual(route.server.merge_admissions,0)
++        with patch.object(self.service,'dispatch_folder',side_effect=PermissionError(13,'Private permission denial')):
++            response=route.call('/api/open-folder',{'library':'Audiobooks','view':'candidates','id':row['id']})
++        self.assertEqual(response[0],400);self.assertEqual(response[1]['code'],'folder_access_denied')
++        self.assertEqual(response[1]['folder'],str(self.sources[0].parent));self.assertNotIn('drive',response[1]['error'])
+ 
+ 
+ class SlowLookup:
+--- a/tests/test_destination_override.py
++++ b/tests/test_destination_override.py
+@@ -668,7 +668,7 @@
+ 
+     def test_gone_source_without_a_finished_book_says_unavailable(self):
+         merge = self.double('C:\\definitely-gone-folder-0x1')
+-        with self.assertRaisesRegex(ValueError, '^Folder unavailable. Connect the library drive and try again.$'):
++        with self.assertRaisesRegex(ValueError, 'Couldn’t open .*Check that this folder is available'):
+             merge.open_folder('Audiobooks', 'candidates', 'id')
+         self.assertEqual(merge.opened, [])
+ 
+--- a/tests/test_0231_rows_frontend.js
++++ b/tests/test_0231_rows_frontend.js
+@@ -204,7 +204,29 @@
+   paint([asked('q',{kind:'title_author',why:'',fields:{title:{proposal:'T',basis:'tag'},author:{proposal:'',basis:''}}})]);
+   assert.equal(credit(trOf('cand-q'))[0],'Author Not decided yet');assert.equal(value(trOf('cand-q'),'Author').className,'undecided');
+   assert.equal(fold(trOf('cand-q')),'Author not decided yet · 1 audio file');
+-  console.log('PASS 0.23.1 rows: Open source folder (one, several, 12, gone list, details builder), the In line, Book / Author / reader lines, Numbers and membership lines, gap faces, Includes, the raised folder question');
++  // Normal source-folder button: finite pending/unknown state and safe retry.
++  const originalTimer=context.setTimeout,originalClear=context.clearTimeout,timers=[];context.AbortController=AbortController;
++  context.setTimeout=(fn,ms)=>{const item={fn,ms};timers.push(item);return item;};context.clearTimeout=item=>{if(item)item.cleared=true;};
++  const folderRow=bookRow('finite');paint([folderRow]);tr=trOf(folderRow.id);button=folderButtons(tr)[0];
++  const adjacent=buttonsOf(tr)[buttonsOf(tr).indexOf(button)+1];let late;
++  openAnswer=()=>new Promise((resolve,reject)=>{late=resolve;calls.at(-1).options.signal.addEventListener('abort',()=>reject(Object.assign(new Error('aborted'),{name:'AbortError'})));});
++  const beforeCount=opened.length,pending=button.handlers.click({stopPropagation(){}});
++  assert.equal(button.disabled,true);assert.equal(adjacent.textContent,'Opening folder…');
++  await button.handlers.click({stopPropagation(){}});assert.equal(opened.length,beforeCount+1,'double press sends only one request');
++  timers.find(t=>t.ms===3000 && !t.cleared).fn();assert.equal(adjacent.textContent,'Opening folder… Waiting for the app to respond.');
++  timers.find(t=>t.ms===30000 && !t.cleared).fn();await pending;
++  assert.equal(button.disabled,false);assert.equal(adjacent.textContent,'The app couldn’t confirm whether the folder opened. Check File Explorer, then press Open source folder if needed.');
++  openAnswer=()=>({ok:false,status:400,json:async()=>({error:'Couldn’t open private folder. Check your access to this folder, then try again.',code:'folder_access_denied'})});
++  await button.handlers.click({stopPropagation(){}});assert.match(adjacent.textContent,/Check your access/);assert.equal(button.disabled,false);
++  openAnswer=null;await button.handlers.click({stopPropagation(){}});assert.equal(adjacent.textContent,'');
++  late({ok:false,status:400,json:async()=>({error:'Obsolete late failure'})});await new Promise(resolve=>setImmediate(resolve));assert.equal(adjacent.textContent,'','old reply cannot overwrite successful retry');
++  openAnswer=()=>Promise.reject(new Error('Lost reply'));await button.handlers.click({stopPropagation(){}});assert.match(adjacent.textContent,/couldn’t confirm/);assert.equal(button.disabled,false);
++  let stale;openAnswer=()=>new Promise(resolve=>{stale=resolve;});const old=button.handlers.click({stopPropagation(){}});
++  paint([bookRow('finite',{revision:3})]);const next=folderButtons(trOf('cand-finite'))[0];assert.equal(next.disabled,false,'new row generation is not held by old folder request');
++  openAnswer=null;await next.handlers.click({stopPropagation(){}});stale({ok:false,status:400,json:async()=>({error:'Old generation refusal'})});await old;assert.equal(next.disabled,false);
++  const nextTr=trOf('cand-finite');assert.equal(buttonsOf(nextTr)[buttonsOf(nextTr).indexOf(next)+1].textContent,'');
++  context.setTimeout=originalTimer;context.clearTimeout=originalClear;
++  console.log('PASS 0.23.1 rows: Open source folder (one, several, 12, gone list, details builder, bounded pending and retry), the In line, Book / Author / reader lines, Numbers and membership lines, gap faces, Includes, the raised folder question');
+ })().catch(error=>{console.error(error);process.exitCode=1;});
+ `;
+ const Module=require('node:module');const m=new Module(path.join(__dirname,'test_0231_rows_frontend.js'),module);m.filename=path.join(__dirname,'test_0231_rows_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

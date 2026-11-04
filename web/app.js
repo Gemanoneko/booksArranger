@@ -29,7 +29,7 @@ let retryPending=null,retryResult=null,retryEpoch=0;
 const pressed=new Map(),PRESS_MEMORY=10*60*1000;let heldRow=null,retrySelectedConfirm=null,retrySelectedRun=false;
 let listTicket=0,listPending='',paintedContext='',attentionGroup='all',retryAllRun=null,retryAllConfirm=null,stripNote='',listGeneration=0;
 const rowRetries=new Map();
-const pendingFolders=new Set(),folderMessages=new Map();
+const pendingFolders=new Set(),folderMessages=new Map(),folderAttempts=new Map();
 // Start over, "Let the app handle it" and Clear working files (RefusedRetry follow-ups 2-4, Sergei 2026-10-19).
 // restartResult: the panel note for a book whose press left it with no control (it now shows its Started over state).
 let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=null;
@@ -989,9 +989,23 @@ $('shutdown').addEventListener('click',later('toolbar:shutdown','shutdown',async
 }));
 function node(tag,text='',className=''){const element=document.createElement(tag);element.textContent=text;if(className)element.className=className;return element;}
 function recordIdentity(row){return {library:row.library || $('library').value,view:row.kind==='candidate'?'candidates':'files',id:row.kind==='candidate'?row.id:row.record_id};}
-function folderKey(row,kind='source',directory=null){return JSON.stringify([recordIdentity(row),kind,directory]);}
-function folderState(row,button,status,kind='source',directory=null){const key=folderKey(row,kind,directory);button.disabled=ended || !recordIdentity(row).id || pendingFolders.has(key);status.textContent=pendingFolders.has(key)?'Opening folder…':folderMessages.get(key) || '';}
-async function openFolder(row,button,status,folderKind='source',directoryId=null){const key=folderKey(row,folderKind,directoryId);if(ended || button.disabled || pendingFolders.has(key))return;pendingFolders.add(key);folderMessages.delete(key);folderState(row,button,status,folderKind,directoryId);try{const payload={...recordIdentity(row),folder_kind:folderKind};if(directoryId)payload.directory_id=directoryId;await request('/api/open-folder',payload);folderMessages.delete(key);}catch(error){folderMessages.set(key,error.message || 'Folder unavailable. Connect the library drive and try again.');}finally{pendingFolders.delete(key);folderState(row,button,status,folderKind,directoryId);}}
+function folderKey(row,kind='source',directory=null){return JSON.stringify([recordIdentity(row),kind,directory,row.revision ?? null,row.fingerprint ?? null]);}
+function folderState(row,button,status,kind='source',directory=null){const key=folderKey(row,kind,directory);button.disabled=ended || !recordIdentity(row).id || pendingFolders.has(key);status.textContent=folderMessages.get(key) || (pendingFolders.has(key)?'Opening folder…':'');}
+async function openFolder(row,button,status,folderKind='source',directoryId=null){
+  const key=folderKey(row,folderKind,directoryId);if(ended || button.disabled || pendingFolders.has(key))return;
+  const attempt={};folderAttempts.set(key,attempt);pendingFolders.add(key);folderMessages.delete(key);folderState(row,button,status,folderKind,directoryId);
+  const current=()=>folderAttempts.get(key)===attempt;
+  const waiting=setTimeout(()=>{if(current()){folderMessages.set(key,'Opening folder… Waiting for the app to respond.');folderState(row,button,status,folderKind,directoryId);}},3000);
+  const unknown='The app couldn’t confirm whether the folder opened. Check File Explorer, then press Open source folder if needed.';
+  try{
+    const payload={...recordIdentity(row),folder_kind:folderKind};if(directoryId)payload.directory_id=directoryId;
+    const answer=await request('/api/open-folder',payload,STATE_TIMEOUT);
+    if(!current())return;
+    if(answer?.opened!==true && answer?.dispatched!==true)throw Error(unknown);
+    folderMessages.delete(key);
+  }catch(error){if(current())folderMessages.set(key,error.httpStatus?error.message || 'Couldn’t open the folder. Check the folder and try again.':unknown);}
+  finally{clearTimeout(waiting);if(current()){folderAttempts.delete(key);pendingFolders.delete(key);folderState(row,button,status,folderKind,directoryId);}}
+}
 async function viewMetadata(row,showFolders=false){if(ended)return;const same=selectedPath===row.path;select(row,!same);const identity=recordIdentity(row),sequence=++inspectSequence;inspectorIdentity=identity;$('metadata-inspector').hidden=false;$('details-heading').textContent=row.kind==='candidate'?'Book metadata':'File metadata';$('details-heading').scrollIntoView?.({block:'start',behavior:'auto'});$('details-heading').focus?.({preventScroll:true});$('inspect-status').textContent='Reading metadata and artwork…';try{const result=await request('/api/inspect',identity);if(sequence!==inspectSequence || selectedPath!==row.path || ended)return;if(!result.inspector || !Array.isArray(result.inspector.sections))throw Error('Metadata inspection unavailable');renderInspector(result.inspector,row,sequence);if(showFolders)$('source-folders').open=true;$('inspect-status').textContent='';}catch(error){if(sequence===inspectSequence)$('inspect-status').textContent=error.message;}}
 function inspectedCandidateStatus(section,inspector,row){
   if(section.kind==='created' || section.kind==='snapshot')return section.status || '';

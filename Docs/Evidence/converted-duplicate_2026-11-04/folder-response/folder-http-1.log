@@ -1,0 +1,14 @@
+FOLDER_DISPATCH_TIMING {'request': 0.0, 'dispatch': 0.010717, 'worker_release': 0.01074, 'response': 0.010929}
+test_normal_http_source_folder_route_does_not_wait_for_book_work (test_lock_timing.SourceFolderDispatchTests.test_normal_http_source_folder_route_does_not_wait_for_book_work) ... ok
+test_source_folder_dispatches_while_unrelated_worker_holds_group_lock (test_lock_timing.SourceFolderDispatchTests.test_source_folder_dispatches_while_unrelated_worker_holds_group_lock) ... ok
+test_open_folder_route_uses_opaque_ids_and_kind (unittest.loader._FailedTest.test_open_folder_route_uses_opaque_ids_and_kind) ... ERROR
+
+======================================================================
+ERROR: test_open_folder_route_uses_opaque_ids_and_kind (unittest.loader._FailedTest.test_open_folder_route_uses_opaque_ids_and_kind)
+----------------------------------------------------------------------
+AttributeError: type object 'MergeHTTPTests' has no attribute 'test_open_folder_route_uses_opaque_ids_and_kind'
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.051s
+
+FAILED (errors=1)

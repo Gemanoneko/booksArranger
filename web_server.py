@@ -1126,7 +1126,10 @@ class Handler(BaseHTTPRequestHandler):
             kind=data.get('folder_kind','source')
             if kind not in {'source','output'}: raise ValueError('Invalid folder kind')
             directory_id=None if data.get('directory_id') is None else self.uuid_value(data['directory_id'])
-            self.response(200,self.server.merge.open_folder(library,view,identity,folder_kind=kind,directory_id=directory_id));return
+            from merge_service import FolderOpenRefused
+            try:answer=self.server.merge.open_folder(library,view,identity,folder_kind=kind,directory_id=directory_id)
+            except FolderOpenRefused as error:self.response(400,error.payload());return
+            self.response(200,answer);return
         if path in {'/api/audiobook/pause','/api/audiobook/resume'}:
             if data: raise ValueError('Audiobook job controls require an empty object')
             # Ruling 35: Resume while a Pause or an earlier start is still settling is kept and made when it settles.

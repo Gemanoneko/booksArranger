@@ -1,0 +1,16 @@
+FOLDER_DISPATCH_TIMING {'request': 0.0, 'worker_release': 0.505951, 'dispatch': 0.525988, 'response': 0.526085}
+test_source_folder_dispatches_while_unrelated_worker_holds_group_lock (test_lock_timing.SourceFolderDispatchTests.test_source_folder_dispatches_while_unrelated_worker_holds_group_lock) ... FAIL
+
+======================================================================
+FAIL: test_source_folder_dispatches_while_unrelated_worker_holds_group_lock (test_lock_timing.SourceFolderDispatchTests.test_source_folder_dispatches_while_unrelated_worker_holds_group_lock)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_lock_timing.py", line 49, in test_source_folder_dispatches_while_unrelated_worker_holds_group_lock
+    self.assertTrue(prompt,'Folder navigation waited for unrelated source grouping; dispatch happened only after the worker released group_lock')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : Folder navigation waited for unrelated source grouping; dispatch happened only after the worker released group_lock
+
+----------------------------------------------------------------------
+Ran 1 test in 1.136s
+
+FAILED (failures=1)

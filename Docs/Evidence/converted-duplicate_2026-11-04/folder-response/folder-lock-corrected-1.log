@@ -1,0 +1,10 @@
+FOLDER_DISPATCH_TIMING {'request': 0.0, 'dispatch': 0.011414, 'worker_release': 0.011441, 'response': 0.011609}
+test_source_folder_dispatches_while_unrelated_worker_holds_group_lock (test_lock_timing.SourceFolderDispatchTests.test_source_folder_dispatches_while_unrelated_worker_holds_group_lock) ... ok
+test_folder_action_uses_opaque_catalog_identity_and_mock_dispatch (test_merge_service.MergeTests.test_folder_action_uses_opaque_catalog_identity_and_mock_dispatch) ... ok
+test_gone_source_of_a_finished_book_opens_its_converted_files_folder (test_destination_override.OpenFolderTests.test_gone_source_of_a_finished_book_opens_its_converted_files_folder) ... ok
+test_gone_source_without_a_finished_book_says_unavailable (test_destination_override.OpenFolderTests.test_gone_source_without_a_finished_book_says_unavailable) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 1.147s
+
+OK

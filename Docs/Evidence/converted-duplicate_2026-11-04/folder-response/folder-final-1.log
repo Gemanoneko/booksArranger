@@ -1,0 +1,123 @@
+FOLDER_DISPATCH_TIMING {'request': 0.0, 'dispatch': 0.011332, 'worker_release': 0.011354, 'response': 0.011503}
+test_normal_http_source_folder_route_does_not_wait_for_book_work (test_lock_timing.SourceFolderDispatchTests.test_normal_http_source_folder_route_does_not_wait_for_book_work) ... ok
+test_source_folder_dispatches_while_unrelated_worker_holds_group_lock (test_lock_timing.SourceFolderDispatchTests.test_source_folder_dispatches_while_unrelated_worker_holds_group_lock) ... ok
+test_inspection_and_folder_use_only_opaque_record_identity (test_merge_http.MergeHTTPTests.test_inspection_and_folder_use_only_opaque_record_identity) ... ok
+test_folder_action_uses_opaque_catalog_identity_and_mock_dispatch (test_merge_service.MergeTests.test_folder_action_uses_opaque_catalog_identity_and_mock_dispatch) ... ok
+test_gone_source_of_a_finished_book_opens_its_converted_files_folder (test_destination_override.OpenFolderTests.test_gone_source_of_a_finished_book_opens_its_converted_files_folder) ... ok
+test_gone_source_without_a_finished_book_says_unavailable (test_destination_override.OpenFolderTests.test_gone_source_without_a_finished_book_says_unavailable) ... ok
+test_a_book_held_for_another_reason_never_takes_the_disagreeing_series_r1 (test_folder_regroup.FolderRegroupTests.test_a_book_held_for_another_reason_never_takes_the_disagreeing_series_r1)
+Senua's 74b review, r1: the same book and the same disagreement in the research cache, but its current question is ... ERROR
+test_a_held_row_says_the_series_approve_files_it_in (test_folder_regroup.FolderRegroupTests.test_a_held_row_says_the_series_approve_files_it_in) ... ok
+test_an_author_answer_on_disagreeing_numbers_asks_number_unclear_next_74b (test_folder_regroup.FolderRegroupTests.test_an_author_answer_on_disagreeing_numbers_asks_number_unclear_next_74b)
+Ruling 74b's follow-up, an identity question: no English spelling was found online («Джон Рональд Руэл Толкин»), ... ERROR
+test_foreign_author_in_cyrillic_is_rechecked_once_before_a_job_runs (test_folder_regroup.FolderRegroupTests.test_foreign_author_in_cyrillic_is_rechecked_once_before_a_job_runs) ... ok
+test_gap_in_a_settled_folder_is_listed_under_missing_files (test_folder_regroup.FolderRegroupTests.test_gap_in_a_settled_folder_is_listed_under_missing_files) ... ok
+test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b (test_folder_regroup.FolderRegroupTests.test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b)
+Ruling 74b, both ends: the to-do row (needs_you, ask_payload) carries both numbers and the provider with Series, ... ERROR
+test_order_question_says_membership_is_settled_and_rows_say_where_their_files_are (test_folder_regroup.FolderRegroupTests.test_order_question_says_membership_is_settled_and_rows_say_where_their_files_are) ... ok
+test_raised_folder_question_and_keep_as_separate_books (test_folder_regroup.FolderRegroupTests.test_raised_folder_question_and_keep_as_separate_books) ... ok
+test_unfinished_job_of_part_of_a_folder_is_set_aside_and_the_folder_regroups (test_folder_regroup.FolderRegroupTests.test_unfinished_job_of_part_of_a_folder_is_set_aside_and_the_folder_regroups) ... ok
+
+======================================================================
+ERROR: test_a_book_held_for_another_reason_never_takes_the_disagreeing_series_r1 (test_folder_regroup.FolderRegroupTests.test_a_book_held_for_another_reason_never_takes_the_disagreeing_series_r1)
+Senua's 74b review, r1: the same book and the same disagreement in the research cache, but its current question is
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_folder_regroup.py", line 163, in test_a_book_held_for_another_reason_never_takes_the_disagreeing_series_r1
+    self.answered_then_number_unclear(fresh)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_folder_regroup.py", line 131, in answered_then_number_unclear
+    metadata,_=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))
+                                    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3830, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3836, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3867, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3976, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 4246, in approve_automatic
+    fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=selected_cover['id'],actor=actor,evidence=evidence,automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']},automatic_facts=result.get('metadata_facts'),
+                          capture_manual=bool(typed),manual_source_values=({'title':typed['title']} if 'title' in typed else {})|({'canonical_author':typed['author']} if 'author' in typed else {}) if typed else None,user_approval=approved_by is not None)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\review_backend.py", line 640, in save
+    if approve and not preview['path']:raise ValueError(preview['reason'])
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Verified metadata exceeds the supported Windows output path length
+
+======================================================================
+ERROR: test_an_author_answer_on_disagreeing_numbers_asks_number_unclear_next_74b (test_folder_regroup.FolderRegroupTests.test_an_author_answer_on_disagreeing_numbers_asks_number_unclear_next_74b)
+Ruling 74b's follow-up, an identity question: no English spelling was found online («Джон Рональд Руэл Толкин»),
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_folder_regroup.py", line 173, in test_an_author_answer_on_disagreeing_numbers_asks_number_unclear_next_74b
+    self.answered_then_number_unclear(row,author='Tolkien J. R. R.')
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_folder_regroup.py", line 131, in answered_then_number_unclear
+    metadata,_=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))
+                                    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3830, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3836, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3867, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3976, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 4246, in approve_automatic
+    fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=selected_cover['id'],actor=actor,evidence=evidence,automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']},automatic_facts=result.get('metadata_facts'),
+                          capture_manual=bool(typed),manual_source_values=({'title':typed['title']} if 'title' in typed else {})|({'canonical_author':typed['author']} if 'author' in typed else {}) if typed else None,user_approval=approved_by is not None)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\review_backend.py", line 640, in save
+    if approve and not preview['path']:raise ValueError(preview['reason'])
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Verified metadata exceeds the supported Windows output path length
+
+======================================================================
+ERROR: test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b (test_folder_regroup.FolderRegroupTests.test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b)
+Ruling 74b, both ends: the to-do row (needs_you, ask_payload) carries both numbers and the provider with Series,
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\tests\test_folder_regroup.py", line 148, in test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b
+    metadata,destination=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))  # nothing typed
+                                              ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3830, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3836, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3867, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 3976, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\merge_service.py", line 4246, in approve_automatic
+    fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=selected_cover['id'],actor=actor,evidence=evidence,automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']},automatic_facts=result.get('metadata_facts'),
+                          capture_manual=bool(typed),manual_source_values=({'title':typed['title']} if 'title' in typed else {})|({'canonical_author':typed['author']} if 'author' in typed else {}) if typed else None,user_approval=approved_by is not None)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\converted-duplicate-20261104\review_backend.py", line 640, in save
+    if approve and not preview['path']:raise ValueError(preview['reason'])
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Verified metadata exceeds the supported Windows output path length
+
+----------------------------------------------------------------------
+Ran 15 tests in 20.963s
+
+FAILED (errors=3)

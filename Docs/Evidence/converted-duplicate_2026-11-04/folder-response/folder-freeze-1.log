@@ -1,0 +1,13 @@
+FOLDER_DISPATCH_TIMING {'request': 0.0, 'dispatch': 0.012297, 'worker_release': 0.012325, 'response': 0.012495}
+test_normal_http_source_folder_route_does_not_wait_for_book_work (test_lock_timing.SourceFolderDispatchTests.test_normal_http_source_folder_route_does_not_wait_for_book_work) ... ok
+test_source_folder_dispatches_while_unrelated_worker_holds_group_lock (test_lock_timing.SourceFolderDispatchTests.test_source_folder_dispatches_while_unrelated_worker_holds_group_lock) ... ok
+test_inspection_and_folder_use_only_opaque_record_identity (test_merge_http.MergeHTTPTests.test_inspection_and_folder_use_only_opaque_record_identity) ... ok
+test_folder_action_uses_opaque_catalog_identity_and_mock_dispatch (test_merge_service.MergeTests.test_folder_action_uses_opaque_catalog_identity_and_mock_dispatch) ... ok
+test_gone_source_of_a_finished_book_opens_its_converted_files_folder (test_destination_override.OpenFolderTests.test_gone_source_of_a_finished_book_opens_its_converted_files_folder) ... ok
+test_gone_source_without_a_finished_book_says_unavailable (test_destination_override.OpenFolderTests.test_gone_source_without_a_finished_book_says_unavailable) ... ok
+test_order_question_says_membership_is_settled_and_rows_say_where_their_files_are (test_folder_regroup.FolderRegroupTests.test_order_question_says_membership_is_settled_and_rows_say_where_their_files_are) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 2.872s
+
+OK

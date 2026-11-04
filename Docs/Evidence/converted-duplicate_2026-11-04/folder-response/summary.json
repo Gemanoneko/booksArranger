@@ -1,0 +1,129 @@
+{
+  "baseline": "87b568143a5f803154c2564cae0487cc83fe0f6c",
+  "files": [
+    {
+      "path": "merge_service.py",
+      "bytes": 440925,
+      "sha256": "6ee43ed100228b1549faeaecad66e9e3dcdf80d96f84a9ca649573c07fe9bb8c",
+      "lf_sha256": "2ccfd1970c54d7b8c3399e246bfb3d2b9421eb6617b37d3049ebd75608e6caaa",
+      "baseline_lf_sha256": "f0a5ce598cd5076b011d09ce98fe780e6a6c006e753c7bfde058aafa45288b06"
+    },
+    {
+      "path": "web_server.py",
+      "bytes": 113850,
+      "sha256": "d22673fc814f0489a84177fb5b6a601874b3d4557a109e268b850730fb539f2d",
+      "lf_sha256": "e942223e1c21c2ff653dbeb993cce88f565ac152c92e9cb890262ab85ebfa50a",
+      "baseline_lf_sha256": "7750191109555da166f396b979661888bc7dd53f24dfeb849f07e6df301315c3"
+    },
+    {
+      "path": "web/app.js",
+      "bytes": 526161,
+      "sha256": "c299ced34c75b8ac1abe350732091008732dd5ee20b9a033ee7e73a241d06446",
+      "lf_sha256": "070a8a4959f3a42aa096bbdf8916edf5f07fc5c22d5e829018ea83a782b687aa",
+      "baseline_lf_sha256": "b7f7dbd59f1a51f82a29613fb9b363e1a5cf3260a6c9bb9effcb4435744caff0"
+    },
+    {
+      "path": "tests/test_lock_timing.py",
+      "bytes": 25314,
+      "sha256": "b970b97f011c88b867161da8f2f62c684054175e423b6c31653f5281310d049b",
+      "lf_sha256": "1a5d15df3b2ad953c672414d2c7ca6ea3bfdb07883cf15e0d36f5d389a127a4f",
+      "baseline_lf_sha256": "e6457fd53f7b79342e2f339acd64136ba7a67a0cbc3340afe6492c6a2dfd8d06"
+    },
+    {
+      "path": "tests/test_destination_override.py",
+      "bytes": 46791,
+      "sha256": "7350ef9dcf2c7c80e8bfbc1702ba540a4d229cf21737f45398cfa957b324b4b0",
+      "lf_sha256": "36baa760a9aea0ed77c7641ebc13a3cb05e1f8f4194303af9efdac2043df9b52",
+      "baseline_lf_sha256": "9ca66e6f347edf46c70b5b3600b56e78ac3eac016849da4e171343e1413c57df"
+    },
+    {
+      "path": "tests/test_0231_rows_frontend.js",
+      "bytes": 29546,
+      "sha256": "f6775e2c4b1b79a7309d75c4c966bab40ab6a957dc2549825ec8eaef9f826683",
+      "lf_sha256": "d63fe29aec71a7ed59d890b4c648aef5215f2d83e2f28ac871ae7ff5d8fecdbd",
+      "baseline_lf_sha256": "1cc119a3ac008a1c4cdf3ed6918e187715fc17389df5de915ec15d957ceb090f"
+    }
+  ],
+  "patch_sha256": "b778381f979c0b4ad07b5432f61be7967ecf69c53e47bbf4faada0faa5ac7b71",
+  "root_cause": "Source navigation called ReviewBackend._row -> Inventory.candidate. A stale global group revision made that read synchronously wait for group_lock and regroup behind unrelated automatic source/media work. The HTTP route itself has no operation_lock; actual shell dispatch is direct argument-vector explorer Popen, no IPC/openPath promise. UI request previously had no deadline.",
+  "fix": "Catalog-only guarded source-folder paths read with no regroup/writer/group/review/operation lock; configured-root, archive, opaque-ID, selected-directory and native ancestry protections remain. Finite30s request with3s waiting copy, actual typed access refusal, unknown outcome copy, per-generation attempt state, retry and duplicate suppression; no focus move.",
+  "proof": "Baseline dispatch occurred after worker release (0.525988 vs0.505951s). Corrected freeze dispatch0.012297s while worker still held group/review/operation locks (release0.012325s). Actual Handler.do_POST/token/admission path also passes with Explorer mocked. Final7 casesPASS2.872s, owned3.660s/nativezero;3 frontend scriptsPASS.",
+  "preserved_failures": "Wrong selector loader in folder-http-1 retained; corrected selector passes. Broad folder-final-1 had12/15PASS and3 unrelated Tolkien approval cases refusing >240char paths under the long private fixture root; no path policy change. Direct affected folder case and all7 frozen selectors pass.",
+  "commands": [
+    "node <owned-scratch>/owned.mjs folder-freeze-1 test_lock_timing.SourceFolderDispatchTests test_merge_http.MergeHTTPTests.test_inspection_and_folder_use_only_opaque_record_identity test_merge_service.MergeTests.test_folder_action_uses_opaque_catalog_identity_and_mock_dispatch test_destination_override.OpenFolderTests test_folder_regroup.FolderRegroupTests.test_order_question_says_membership_is_settled_and_rows_say_where_their_files_are"
+  ],
+  "scope": "Private fixtures/mock Explorer only; no live app/focus/open action. Read-only source diagnostics were a separately authorized batch with independently preserved evidence and completed scoped cleanup.",
+  "graph": "Existing canonical test_lock_timing.py, test_destination_override.py and test_*.js discovery; no runner/graph change.",
+  "evidence": [
+    {
+      "path": "focused.py",
+      "bytes": 881,
+      "sha256": "2c8117b0e598bcdaa6ef326928f2aa9ec70641d06c8d46d56040c003eabf5ee7"
+    },
+    {
+      "path": "folder-final-1.json",
+      "bytes": 16088,
+      "sha256": "f75410e60b79b4dfbbc91f77ece8e06285744c534dcd04cf5aa204852cb13435"
+    },
+    {
+      "path": "folder-final-1.log",
+      "bytes": 14956,
+      "sha256": "7d862159ac3731f2d4c140d45e7722d82fa2ccec8ce9c4ac3bb2529377da66bc"
+    },
+    {
+      "path": "folder-freeze-1.json",
+      "bytes": 2205,
+      "sha256": "958318de8544928e1f62371e844aa31a8784e7a9e43247a397784684d6cb25d7"
+    },
+    {
+      "path": "folder-freeze-1.log",
+      "bytes": 1494,
+      "sha256": "6211fd2ac0c0a23d4c708f27a11fe2321f0e44503242bdf4fd5dbd2ef350195f"
+    },
+    {
+      "path": "folder-http-1.json",
+      "bytes": 1851,
+      "sha256": "865aebd6c7040ebeea6bfd6e11289602917e9ffbef8382b8c2f28c277bb5ef90"
+    },
+    {
+      "path": "folder-http-1.log",
+      "bytes": 1136,
+      "sha256": "e38a20b664867533d722639a5b7c76f3f30669b20f3182e04e0037012144c7d3"
+    },
+    {
+      "path": "folder-lock-baseline-1.json",
+      "bytes": 2171,
+      "sha256": "d8b7d7b1f61dba38e346c66185d996cebe8368d1d56961048cd72cc83bb22489"
+    },
+    {
+      "path": "folder-lock-baseline-1.log",
+      "bytes": 1445,
+      "sha256": "c8dc8a07d45c3ecdb7e9f27873eeab8aa5fda10d82ec64a71f2fa144b99d625f"
+    },
+    {
+      "path": "folder-lock-corrected-1.json",
+      "bytes": 1644,
+      "sha256": "20e36a5d440634da7e5c713cd7a6aeb3586a8a567457b3041c7cc7725760a3c9"
+    },
+    {
+      "path": "folder-lock-corrected-1.log",
+      "bytes": 939,
+      "sha256": "58eb0d48d644e9a26c0f58822a0d5cc7ed6bec30775799784d77c3958b846cd5"
+    },
+    {
+      "path": "frontend.txt",
+      "bytes": 232,
+      "sha256": "09ff324f7f0ea67dd7443be71a0e615e51352e3f1f75e23c2c2d253043ca9957"
+    },
+    {
+      "path": "owned.mjs",
+      "bytes": 1989,
+      "sha256": "70e2657c9a63b7475f4bdeeaa0b30b19ba7ea6b04058abad1c44e0e23022b7aa"
+    },
+    {
+      "path": "source.patch",
+      "bytes": 19773,
+      "sha256": "b778381f979c0b4ad07b5432f61be7967ecf69c53e47bbf4faada0faa5ac7b71"
+    }
+  ]
+}

@@ -18,6 +18,58 @@ def finish_thread(thread):
 from test_approve_as_is import ApproveFixture, tone
 
 
+class SourceFolderDispatchTests(unittest.TestCase):
+    """A catalog-only navigation press must not wait for unrelated grouping work."""
+    def setUp(self):
+        from test_merge_service import MergeTests
+        MergeTests.setUp(self)
+    def tearDown(self):
+        from test_merge_service import MergeTests
+        MergeTests.tearDown(self)
+    def test_source_folder_dispatches_while_unrelated_worker_holds_group_lock(self):
+        row=self.service.reviews._row('Audiobooks',self.inv.candidates('Audiobooks')['rows'][0]['id'])
+        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
+        entered=threading.Event();release=threading.Event();dispatched=threading.Event();errors=[];marks={}
+        def worker():
+            with self.inv.group_lock:entered.set();release.wait(5)
+        def open_folder():
+            marks['request']=time.monotonic()
+            try:self.service.open_folder('Audiobooks','candidates',row['id'])
+            except Exception as error:errors.append(error)
+            finally:marks['response']=time.monotonic()
+        def dispatch(path):
+            self.assertEqual(path,str(self.sources[0].parent));marks['dispatch']=time.monotonic();dispatched.set()
+        holder=threading.Thread(target=worker);opener=threading.Thread(target=open_folder)
+        with patch.object(self.service,'dispatch_folder',side_effect=dispatch):
+            holder.start();self.assertTrue(entered.wait(2));opener.start()
+            prompt=dispatched.wait(.5)
+            marks['worker_release']=time.monotonic();release.set();holder.join(5);opener.join(5)
+        self.assertFalse(holder.is_alive());self.assertFalse(opener.is_alive());self.assertEqual(errors,[])
+        print('FOLDER_DISPATCH_TIMING '+str({key:round(value-marks['request'],6) for key,value in marks.items()}))
+        self.assertTrue(prompt,'Folder navigation waited for unrelated source grouping; dispatch happened only after the worker released group_lock')
+
+    def test_normal_http_source_folder_route_does_not_wait_for_book_work(self):
+        from test_merge_http import MergeHTTPTests
+        route=MergeHTTPTests();route.setUp();self.addCleanup(route.tearDown)
+        route.server.inventory=self.inv;route.server.merge=self.service
+        row=self.inv.candidates('Audiobooks')['rows'][0]
+        with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
+        entered=threading.Event();release=threading.Event();dispatched=threading.Event();responses=[]
+        def worker():
+            with self.inv.group_lock,self.service.reviews.lock,self.service.operation_lock:entered.set();release.wait(5)
+        def request():responses.append(route.call('/api/open-folder',{'library':'Audiobooks','view':'candidates','id':row['id'],'folder_kind':'source'}))
+        holder=threading.Thread(target=worker);caller=threading.Thread(target=request)
+        with patch.object(self.service,'dispatch_folder',side_effect=lambda folder:dispatched.set()):
+            holder.start();self.assertTrue(entered.wait(2));caller.start();prompt=dispatched.wait(.5)
+            release.set();holder.join(5);caller.join(5)
+        self.assertFalse(holder.is_alive());self.assertFalse(caller.is_alive());self.assertTrue(prompt)
+        self.assertEqual(responses[0][:2],(200,{'opened':True}));self.assertEqual(route.server.merge_admissions,0)
+        with patch.object(self.service,'dispatch_folder',side_effect=PermissionError(13,'Private permission denial')):
+            response=route.call('/api/open-folder',{'library':'Audiobooks','view':'candidates','id':row['id']})
+        self.assertEqual(response[0],400);self.assertEqual(response[1]['code'],'folder_access_denied')
+        self.assertEqual(response[1]['folder'],str(self.sources[0].parent));self.assertNotIn('drive',response[1]['error'])
+
+
 class SlowLookup:
     """Every publication lookup sleeps `seconds` first (the live catalog's 433 relocations took 19 s in all)."""
     def __init__(self, service, seconds):
