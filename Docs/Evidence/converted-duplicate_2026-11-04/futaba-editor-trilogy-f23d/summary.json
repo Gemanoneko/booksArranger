@@ -1,0 +1,56 @@
+{
+  "schema": "books-futaba-editor-trilogy-focused-v1",
+  "source_commit": "f23d836e921b4d213ea3be04e688251404ed6dd4",
+  "version": "0.25.0",
+  "source": "private Git archive from committed and pushed main",
+  "frozen_implementation_summary_sha256": "8ef61d13c5c26fe1e257f28892be75c59d0b03cbdc3cccba5e8e6f80ba183310",
+  "frozen_changed_files_lf_hashes_matched": 9,
+  "source_files": 1527,
+  "source_before_after_identical": true,
+  "first_run": {
+    "cases": 37,
+    "failures": 1,
+    "case": "test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder",
+    "observation": "The initial QA fixture root made the custom-folder preview path exceed its existing protective destination bound; the returned absolute path was empty. This was a fixture-path refusal, preserved as the original raw result.",
+    "owner_code": 1,
+    "owner_closed": true,
+    "owner_output_complete": true,
+    "native_complete_zero": true,
+    "files": ["focused-first.py", "owned-first.mjs", "first-owned.json", "first-owned.log", "first-launcher.log"]
+  },
+  "fixture_correction": "Changed only copied QA runner fixture mapping from <scratch>/fixtures/<module> to <scratch>/f/<module>, keeping the same pinned source, selectors, 600000 ms native owner and product path policy.",
+  "final_python": {
+    "cases": 37,
+    "failures": 0,
+    "errors": 0,
+    "seconds": 18.943,
+    "owner_elapsed_ms": 19783.5012,
+    "owner_code": 0,
+    "owner_ok": true,
+    "owner_closed": true,
+    "owner_output_complete": true,
+    "owner_forced": false,
+    "owner_timed_out": false,
+    "native_active": 0,
+    "native_unsignaled": 0,
+    "native_complete_zero": true,
+    "selection": [
+      "test_shared_routing",
+      "test_folder_structure.TolkienHeldTranslationTests",
+      "test_folder_structure.TolkienCleanLibraryTests",
+      "test_entered_names.EditNamesTests.test_editor_series_and_universe_persist_without_resetting_title_or_chosen_folder",
+      "test_entered_names.EditNamesTests.test_the_editor_reads_what_the_files_say_with_the_place_and_no_job",
+      "test_entered_names.EditNamesTests.test_approve_with_the_editor_open_saves_the_names_and_the_job_carries_them"
+    ]
+  },
+  "frontend": {
+    "scripts": ["test_inline_series_frontend.js", "test_0242_frontend.js", "test_odd_names_frontend.js"],
+    "passed": 3,
+    "failed": 0,
+    "all_owned_closed_output_complete_native_zero": true,
+    "scope": "The inline-series script exercises the existing Edit names button with malformed HTTP 200 editor:null, retry, Series/Universe reachability, Discard preservation, stale revision and 30000 ms read timeout."
+  },
+  "focused_result": "PASS for Editor/Tolkien slice only",
+  "limits": "Duplicate-source recognition, child cleanup and destructive boundary are not implemented or tested in this slice. No packaged build, full entry, hidden/native app phase, UI geometry measurement, live catalog, Z: access or focus action was performed.",
+  "file_index": "files.json"
+}

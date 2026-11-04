@@ -1,0 +1,80 @@
+{
+  "deadlineMs": 600000,
+  "results": [
+    {
+      "script": "test_inline_series_frontend.js",
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 18,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      },
+      "elapsedMs": 296.9274
+    },
+    {
+      "script": "test_0242_frontend.js",
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 15,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      },
+      "elapsedMs": 216.43439999999998
+    },
+    {
+      "script": "test_odd_names_frontend.js",
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 18,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      },
+      "elapsedMs": 280.4104
+    }
+  ]
+}

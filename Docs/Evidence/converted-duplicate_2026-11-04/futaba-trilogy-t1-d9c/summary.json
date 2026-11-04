@@ -1,0 +1,25 @@
+{
+  "schema": "books-futaba-trilogy-t1-focused-v1",
+  "source_commit": "d9c0da2c0cb47abae4c75e8d722e06268d6ee600",
+  "version": "0.25.0",
+  "source": "private Git archive from committed and pushed main",
+  "ender_frozen_summary_sha256": "f0d8ea122391014006a6d0dab0a69220eccf20be7c97c5492e71f023345b234e",
+  "changed_files_lf_hashes_matched": 4,
+  "source_files": 1533,
+  "source_before_after_identical": true,
+  "committed_selection": ["test_shared_routing.TrilogyDecisionTests", "test_entered_names.StoreTests"],
+  "committed_cases": 13,
+  "committed_failures": 0,
+  "committed_seconds": 0.327,
+  "committed_owner": {"code": 0, "ok": true, "closed": true, "outputComplete": true, "forced": false, "timedOut": false, "nativeCompleteZero": true, "nativeActive": 0, "nativeUnsignaled": 0, "elapsedMs": 1020.573},
+  "private_probe": {
+    "cases": 1,
+    "subcases": ["legacy missing per-field saved_utc", "saved Russian series before the decision", "saved Russian series at the decision time", "later saved Russian series", "later custom series", "new explicit typed Russian series"],
+    "result": "PASS",
+    "checks": "Old entries replan to Lord of the Rings and pending_changed; title and chosen folder persist. Later saved/typed series choices stay authoritative.",
+    "owner": {"code": 0, "ok": true, "closed": true, "outputComplete": true, "forced": false, "timedOut": false, "nativeCompleteZero": true, "nativeActive": 0, "nativeUnsignaled": 0, "elapsedMs": 477.4276}
+  },
+  "focused_result": "PASS for T1 saved-series followup only",
+  "limits": "Private source-level focused verification. No duplicate-source cleanup behavior, packaged build, full entry, hidden/native app check, live catalog, Z: access or focus action was tested.",
+  "file_index": "files.json"
+}

@@ -1,0 +1,8 @@
+{"name":"qa-t1-legacy","ok":true,"code":0,"closed":true,"outputComplete":true,"native":{"active":0,"assigned":0,"listed":0,"retained":4,"unsignaled":0,"complete":true,"zero":true,"sampling":{"queries":30,"incompleteQueries":0,"firstIncomplete":null,"lastIncomplete":null}},"elapsedMs":477.4276}
+test_legacy_and_cutoff_replan_while_later_choices_stay (qa_t1_probe.LegacyT1Tests.test_legacy_and_cutoff_replan_while_later_choices_stay) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.057s
+
+OK
+

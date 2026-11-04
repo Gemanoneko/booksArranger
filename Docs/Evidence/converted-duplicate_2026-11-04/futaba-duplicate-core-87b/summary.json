@@ -1,0 +1,197 @@
+{
+  "source_commit": "87b568143a5f803154c2564cae0487cc83fe0f6c",
+  "origin_main_same": true,
+  "frozen_implementation_summary_sha256": "3d57f8c57182ab4a57c021b01727c4537a49131d695c9e3ad9e0964e84843594",
+  "private_source": "git archive of source_commit",
+  "source_files": [
+    {
+      "path": "audio_jobs.py",
+      "raw_sha256": "a65cdaa22451791980e95094155d5aae1981b9cce450be10c49ccc69c59b327f",
+      "lf_sha256": "1b600a811d9d2e03fe323957e70e1021649122c660659d676d4eb83010871757",
+      "frozen_lf_sha256": "1b600a811d9d2e03fe323957e70e1021649122c660659d676d4eb83010871757",
+      "match": true
+    },
+    {
+      "path": "automatic_processing.py",
+      "raw_sha256": "0d92b255aee8b701db3ede8958e9a3ee126db4a2375f195924f83516495b8d1c",
+      "lf_sha256": "c68e1bfa10005e044c02370e711213c26b01b1545e8f5adf0959ecb78bdc3e9a",
+      "frozen_lf_sha256": "c68e1bfa10005e044c02370e711213c26b01b1545e8f5adf0959ecb78bdc3e9a",
+      "match": true
+    },
+    {
+      "path": "current_audiobook.py",
+      "raw_sha256": "5589242044d51558bc4af7cf5d85825d068001090707cbfb3f6c0114b91d5112",
+      "lf_sha256": "210a456db3373813e8ec5a60079d4695f39a222b55b71fcb5ad28a0feea7f64f",
+      "frozen_lf_sha256": "210a456db3373813e8ec5a60079d4695f39a222b55b71fcb5ad28a0feea7f64f",
+      "match": true
+    },
+    {
+      "path": "gap_fill.py",
+      "raw_sha256": "37b2da84bd6dfb966b2e56bf5695f791e4657dca1d1cf3b1e9abf4aafc63770d",
+      "lf_sha256": "43fb0dd90445ba050caf8644efc63c0a4f02ebe016fa8b9a18a4e0d1c9dadd86",
+      "frozen_lf_sha256": "43fb0dd90445ba050caf8644efc63c0a4f02ebe016fa8b9a18a4e0d1c9dadd86",
+      "match": true
+    },
+    {
+      "path": "merge_service.py",
+      "raw_sha256": "a79d6ba6c4c203b4b7e57d9b8468c850c886b479b8f3dccf88e45bfdd0277b20",
+      "lf_sha256": "f0a5ce598cd5076b011d09ce98fe780e6a6c006e753c7bfde058aafa45288b06",
+      "frozen_lf_sha256": "f0a5ce598cd5076b011d09ce98fe780e6a6c006e753c7bfde058aafa45288b06",
+      "match": true
+    },
+    {
+      "path": "publication_reuse.py",
+      "raw_sha256": "f557bfd965c6d190683427cec38e8a4506af9f1fede723543957f5096895f024",
+      "lf_sha256": "55c442897f702e5e022346aa124e2c6302b7d5a813f2ce0a52c95b32b69d2932",
+      "frozen_lf_sha256": "55c442897f702e5e022346aa124e2c6302b7d5a813f2ce0a52c95b32b69d2932",
+      "match": true
+    },
+    {
+      "path": "recovery_retention.py",
+      "raw_sha256": "52dcc028268b53c2946af772e9ffdccf4165001ed480b9f800bfdba4349f697d",
+      "lf_sha256": "78ad246305bc78b541ad69d53ad51cdc165cb68d7a21d4293b162429094e92b4",
+      "frozen_lf_sha256": "78ad246305bc78b541ad69d53ad51cdc165cb68d7a21d4293b162429094e92b4",
+      "match": true
+    },
+    {
+      "path": "replacement_jobs.py",
+      "raw_sha256": "294e5a6c66f6254d7cfff7785e9ef4314519b64184300ad7bb07eb8484ae7509",
+      "lf_sha256": "ca190be32602caa64bfc9acd729826fb6fc5913f24aab6ce7daa266bbbaf21ab",
+      "frozen_lf_sha256": "ca190be32602caa64bfc9acd729826fb6fc5913f24aab6ce7daa266bbbaf21ab",
+      "match": true
+    },
+    {
+      "path": "review_backend.py",
+      "raw_sha256": "ab1598073928451a67e426ac077b508ebd8854f31eca6200f2a368486c9078ed",
+      "lf_sha256": "f76617400e29fea92449426e9dc1671afb2916eaf22efde5e124293fa713fd5a",
+      "frozen_lf_sha256": "f76617400e29fea92449426e9dc1671afb2916eaf22efde5e124293fa713fd5a",
+      "match": true
+    },
+    {
+      "path": "series_backfill.py",
+      "raw_sha256": "44063cf321aa8cc7790785f151a5d884353b56cf63bef4ca6404e9d07914f3df",
+      "lf_sha256": "5a9317c4c018fd35f585ae02ea4248db2caed8cefafb9732dba0473884cc9611",
+      "frozen_lf_sha256": "5a9317c4c018fd35f585ae02ea4248db2caed8cefafb9732dba0473884cc9611",
+      "match": true
+    },
+    {
+      "path": "source_cleanup.py",
+      "raw_sha256": "6eae2ea6f702aac34c7938b0bf0e3821b458ec7405eaf6cfcb61ab2367218694",
+      "lf_sha256": "3d6841872a5bb2bae7833de75bd059b35f8cb968a6a96176a203be471e0dbe40",
+      "frozen_lf_sha256": "3d6841872a5bb2bae7833de75bd059b35f8cb968a6a96176a203be471e0dbe40",
+      "match": true
+    },
+    {
+      "path": "storage_cleanup.py",
+      "raw_sha256": "c889e59708c33b0cd649d3a5502f44008186227d7a38444cb826a013d73eb3e6",
+      "lf_sha256": "0cb7793c304132587eed9edd5fd6a1e08d66c0285ff4a60e759d479d63cf81fc",
+      "frozen_lf_sha256": "0cb7793c304132587eed9edd5fd6a1e08d66c0285ff4a60e759d479d63cf81fc",
+      "match": true
+    },
+    {
+      "path": "web_server.py",
+      "raw_sha256": "da56f8dd44af5be8a3d382905fa583b16547571c66054f6cd045734df57bfa43",
+      "lf_sha256": "7750191109555da166f396b979661888bc7dd53f24dfeb849f07e6df301315c3",
+      "frozen_lf_sha256": "7750191109555da166f396b979661888bc7dd53f24dfeb849f07e6df301315c3",
+      "match": true
+    },
+    {
+      "path": "web/app.js",
+      "raw_sha256": "289837a12e48bd564199c9dd64467d21addbe650c31bc1836bdbae23ddcb67c2",
+      "lf_sha256": "b7f7dbd59f1a51f82a29613fb9b363e1a5cf3260a6c9bb9effcb4435744caff0",
+      "frozen_lf_sha256": "b7f7dbd59f1a51f82a29613fb9b363e1a5cf3260a6c9bb9effcb4435744caff0",
+      "match": true
+    },
+    {
+      "path": "tests/test_automatic_media.py",
+      "raw_sha256": "fb7318008983ac0b6a4d74cce46ebd2e188e6db3a5f0ee44196507ced2b80c52",
+      "lf_sha256": "e6c038b30261af51546640faaaace61716befb061a59accb5509a64e5076cffd",
+      "frozen_lf_sha256": "e6c038b30261af51546640faaaace61716befb061a59accb5509a64e5076cffd",
+      "match": true
+    },
+    {
+      "path": "tests/test_storage_cleanup.py",
+      "raw_sha256": "0ed730686d82cb6519f8a5b6eea87a1099e36414fe0cbd1912933e0039ac6d45",
+      "lf_sha256": "3da1667cf491c92eeedb9127f77abf6672315c3db915873da8f67bed16177357",
+      "frozen_lf_sha256": "3da1667cf491c92eeedb9127f77abf6672315c3db915873da8f67bed16177357",
+      "match": true
+    },
+    {
+      "path": "tests/test_progress_rows.py",
+      "raw_sha256": "3929dbcd868a6737457912075c65e5d1da000942e145a82d67c638350ff8f2b4",
+      "lf_sha256": "494e7b99a451ed490b038f490a10fec90822d3980f8b32753b39d9799cfc4807",
+      "frozen_lf_sha256": "494e7b99a451ed490b038f490a10fec90822d3980f8b32753b39d9799cfc4807",
+      "match": true
+    },
+    {
+      "path": "tests/test_inline_series_frontend.js",
+      "raw_sha256": "7361b38874efa7499d6f32ac42ba13ffaca852137ac28fa8cf0226d5746e971e",
+      "lf_sha256": "36c40272c5d58e1c5748dfa33bd11ba015a4391820a6d1da08ac76434053b920",
+      "frozen_lf_sha256": "36c40272c5d58e1c5748dfa33bd11ba015a4391820a6d1da08ac76434053b920",
+      "match": true
+    }
+  ],
+  "results": [
+    {
+      "name": "independent-cohort-1",
+      "ok": true,
+      "code": 0,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native_zero": true,
+      "native_complete": true,
+      "native_active": 0,
+      "native_unsignaled": 0,
+      "native_incomplete_queries": 2,
+      "elapsed_ms": 116055.6635
+    },
+    {
+      "name": "historical-start-1",
+      "ok": true,
+      "code": 0,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native_zero": true,
+      "native_complete": true,
+      "native_active": 0,
+      "native_unsignaled": 0,
+      "native_incomplete_queries": 0,
+      "elapsed_ms": 15982.9507
+    }
+  ],
+  "evidence": [
+    {
+      "name": "owned.mjs",
+      "sha256": "9e5ae21b740ce7372bb356852a30b35fbbd47912f24318a7899be30bd4f9ff4e"
+    },
+    {
+      "name": "focused.py",
+      "sha256": "a963d65187672d2b42632c042387eee03c5dc76d2558a9e3f2f5942a6d72bbc4"
+    },
+    {
+      "name": "test_historical_duplicate_hold.py",
+      "sha256": "1de8359b5f74a14c843845e719ff42943476ba686a59280cd45f404ce05df612"
+    },
+    {
+      "name": "independent-cohort-1.json",
+      "sha256": "2313202865c29a213bce85d7d1bd3b44a9946e4418844a0d543ceabf64b52a1e"
+    },
+    {
+      "name": "independent-cohort-1.log",
+      "sha256": "4627edd93d47501aabacc32d98823dcd3eb6bd088d285836e417b6cb4694b0bc"
+    },
+    {
+      "name": "historical-start-1.json",
+      "sha256": "d5a734892aa3986e8f98073dd367b9e0761731128c3f27593611195181bb896f"
+    },
+    {
+      "name": "historical-start-1.log",
+      "sha256": "819adc46ed0a0818e79dafc628e6b42cbc68ed9023a9406174ce0ebdc5d2f0cf"
+    }
+  ],
+  "scope": "Independent affected cohort and one actual historical held Start path; no build, full, hidden, live, Z, focus or separate folder-latency/Koontz checks."
+}

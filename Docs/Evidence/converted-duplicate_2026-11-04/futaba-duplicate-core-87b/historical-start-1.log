@@ -1,0 +1,6 @@
+test_old_hold_start_admits_child_without_parent_publication (test_historical_duplicate_hold.HistoricalDuplicateHoldQA.test_old_hold_start_admits_child_without_parent_publication) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 15.295s
+
+OK

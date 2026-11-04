@@ -1,0 +1,6 @@
+test_legacy_and_cutoff_replan_while_later_choices_stay (qa_t1_probe.LegacyT1Tests.test_legacy_and_cutoff_replan_while_later_choices_stay) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.057s
+
+OK

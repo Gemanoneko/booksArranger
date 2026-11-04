@@ -1,0 +1,62 @@
+[
+  {
+    "file": "owned.mjs",
+    "size": 2012,
+    "sha256": "9e5ae21b740ce7372bb356852a30b35fbbd47912f24318a7899be30bd4f9ff4e"
+  },
+  {
+    "file": "focused-initial.py",
+    "size": 864,
+    "sha256": "89f42e4c771d341928c7a05689aa3450b9b0b299e4f332e9b38e455caea99fcf"
+  },
+  {
+    "file": "focused.py",
+    "size": 874,
+    "sha256": "49f9358f36e360e1d538183b532b299575bd0e858eb6a3dff27dd4e2e978840b"
+  },
+  {
+    "file": "qa_t1_probe.py",
+    "size": 2723,
+    "sha256": "83d8a137f062c7cc269d49d8aae2dcbd07e467cab4db37ef63e3d28eb8e24ddf"
+  },
+  {
+    "file": "qa-t1-followup.json",
+    "size": 3289,
+    "sha256": "3fd02996616b9c8bc6c8feb93824b9ff7503d9918ea2c9196af3761f0427780e"
+  },
+  {
+    "file": "qa-t1-followup.log",
+    "size": 2570,
+    "sha256": "64b3bbd15fe0e575a49d321888a5bfc65082a6111a57f7d056a6564918e13b43"
+  },
+  {
+    "file": "qa-t1-legacy.json",
+    "size": 942,
+    "sha256": "e05b48cd0c7da71bfcc70641ec1680197135610cf4119864286cb52dd1596cc4"
+  },
+  {
+    "file": "qa-t1-legacy.log",
+    "size": 248,
+    "sha256": "5c6dd26f7c11af6a2edf10295cc20f4d19b8105ffc15ebdfecb1cce22c60025b"
+  },
+  {
+    "file": "launcher.log",
+    "size": 2870,
+    "sha256": "ea54751392116a83d3b80b3aed149dd40369431423f9f374292239bdcb77113b"
+  },
+  {
+    "file": "legacy-launcher.log",
+    "size": 546,
+    "sha256": "82abe53f8864266d004675d5855611feda15afc2aa7de3639773a19970b6a445"
+  },
+  {
+    "file": "source-before.json",
+    "size": 287947,
+    "sha256": "af1fc8794846964b843fe3b2e3580d3d4d47f7a48e9b068241a77889cc05acd9"
+  },
+  {
+    "file": "source-after.json",
+    "size": 287947,
+    "sha256": "af1fc8794846964b843fe3b2e3580d3d4d47f7a48e9b068241a77889cc05acd9"
+  }
+]
