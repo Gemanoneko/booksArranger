@@ -1,0 +1,176 @@
+{
+  "tool": "books-arranger",
+  "version": "0.25.0",
+  "source_commit": "0ec4971169a70d57a407ae1a9ef6bf96227724d4",
+  "build_id": "140014b8-b350-4a3e-a99b-05d24349f139",
+  "artifact_manifest_sha256": "8f055521103f91f9417331091b971c423f7da483980364ee7a020016c99a9ca9",
+  "runtime_pointer_sha256": "fe2e42723bbf6c5f7bfec0ad7d77b84255907a363ecf4d2c612ce432e61ec130",
+  "context_sha256": "fb3181e4c169835a8e083608b048c0e9d5b0cc2dc5ad7411bb34b58ae7b12179",
+  "schema": 3,
+  "source_dirty": "N",
+  "run_root": "C:/Antigravity Projects/q3",
+  "run_child": "C:/Antigravity Projects/q3/entry-run-jl1qFy",
+  "invocations_on_build": 1,
+  "work_deadline_ms": 900000,
+  "transport_timeout_ms": 930000,
+  "outer": {
+    "started_at": "2026-11-04T22:27:22.982Z",
+    "finished_at": "2026-11-04T22:36:04.729Z",
+    "exit_code": 1,
+    "killed": false
+  },
+  "owned_check": {
+    "code": 1,
+    "elapsed_ms": 488650.4203,
+    "closed": true,
+    "output_complete": true,
+    "forced": false,
+    "timed_out": false,
+    "overflow": false,
+    "truncated": false,
+    "closure_error": null,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 11093,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 17307,
+        "incompleteQueries": 354,
+        "firstIncomplete": {
+          "assigned": 54,
+          "listed": 53,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 10,
+          "listed": 8,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    }
+  },
+  "python": {
+    "batches": 13,
+    "reported_test_methods": 2405,
+    "passed_batches": 13,
+    "failed_batches": 0,
+    "failures": 0,
+    "errors": 0
+  },
+  "frontend_failure": {
+    "script": "tests/test_precheck_frontend.js",
+    "line": 126,
+    "assertion": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ \"Can't convert — M4B feature unsupported\"\n- \"Can't convert — M4B not supported\"\n                       ^\n\n    at C:\\Antigravity Projects\\q3\\entry-run-jl1qFy\\tests\\test_precheck_frontend.js:126:10\n    at Object.<anonymous> (C:\\Antigravity Projects\\q3\\entry-run-jl1qFy\\tests\\test_precheck_frontend.js:169:3)\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\n    at Object.<anonymous> (C:\\Antigravity Projects\\q3\\entry-run-jl1qFy\\tests\\test_precheck_frontend.js:128:196)\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\n    at Object..js (node:internal/modules/cjs/loader:2108:10)\n    at Module.load (node:internal/modules/cjs/loader:1690:32)\n    at Module._load (node:internal/modules/cjs/loader:1480:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: \"Can't convert — M4B feature unsupported\",\n  expected: \"Can't convert — M4B not supported\",\n  operator: 'strictEqual',\n  diff: 'simple'\n}"
+  },
+  "receipt_sha256": "27b38ef5288d82fe53df788a34b4ef2be0516d0d201471f2e9c311c9d2a1c1b5",
+  "receipt": "Entry-check receipt v2: books-arranger v0.25.0 @ 0ec4971169a70d57a407ae1a9ef6bf96227724d4 (dirty: N) [source:5fc7ae7c33b093f3f74c6a885c1b719434fc2b96070f04b3c87a0ca9baf282f4; harness:0b39618db4f5c8d969d73424e5157e735d9a59dca2dee773fb7165707ed22080; runtime:9b1d6629000104e25b0214104326e146b863afc0d28ee2de8bc66c267600f6f6; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean",
+  "verdict": "NO-GO; no same-build repeat, no native hidden check",
+  "raw_file_index": [
+    {
+      "path": "context/context.json",
+      "bytes": 4802,
+      "sha256": "fb3181e4c169835a8e083608b048c0e9d5b0cc2dc5ad7411bb34b58ae7b12179"
+    },
+    {
+      "path": "context/context.json.sha256",
+      "bytes": 65,
+      "sha256": "4899120769b4fa9cfc2004be04f3f29eda63a1b936f154b7c97a1694b06ec459"
+    },
+    {
+      "path": "context/harness/graph.json",
+      "bytes": 3027,
+      "sha256": "d68ce35a7496ea00afc17e37b9a75b266ad632a655f6e8177cf694210e99687c"
+    },
+    {
+      "path": "context/harness/run-entry.sh",
+      "bytes": 874,
+      "sha256": "a314dc9a97c7847702bab831f6e66c36d4fb0ecc1c3018547f687f37cdfa7417"
+    },
+    {
+      "path": "context/harness-manifest.json",
+      "bytes": 248,
+      "sha256": "219457dd72e9dc3f497464cb2d73be74584a0912d03a15c7f01af9343cd5870b"
+    },
+    {
+      "path": "context/runtime-bundled-media.json",
+      "bytes": 5823,
+      "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31"
+    },
+    {
+      "path": "context/runtime-dependencies.json",
+      "bytes": 1052511,
+      "sha256": "a47b7559faba4053f50f5eece4788c0177072dccea01c9ceb4ef6a7c0841f5f9"
+    },
+    {
+      "path": "context/runtime-git.json",
+      "bytes": 1381113,
+      "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606"
+    },
+    {
+      "path": "context/runtime-mp3-fixture.json",
+      "bytes": 133,
+      "sha256": "52e26c12f66067257afd51b841c2e44c7bc8a23a03684ec371936547da1317c8"
+    },
+    {
+      "path": "context/runtime-node-installation.json",
+      "bytes": 311392,
+      "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca"
+    },
+    {
+      "path": "context/runtime-ownership.json",
+      "bytes": 13523,
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+    },
+    {
+      "path": "context/runtime-powershell.json",
+      "bytes": 146442,
+      "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3"
+    },
+    {
+      "path": "context/source-manifest.json",
+      "bytes": 281458,
+      "sha256": "2cde419dcdd895831dbdfdbcaa16fa2782f3f1de1a9b40b82bd65cf9afeedf53"
+    },
+    {
+      "path": "failure-index.json",
+      "bytes": 1729,
+      "sha256": "da28f8cf88c9023834e9a206ad1a3626b5c0db8f355b9744b069f98630ee39e0"
+    },
+    {
+      "path": "invocation.json",
+      "bytes": 1884,
+      "sha256": "0ba451521328bbf254d0078b93b5e3404968637a29e4d51c1bd7c1f7e4735748"
+    },
+    {
+      "path": "operator.mjs",
+      "bytes": 2658,
+      "sha256": "83848df6101e8bc95730e30303727af4a195ddd175a4954e56dcf746b3bd280d"
+    },
+    {
+      "path": "outer-result.json",
+      "bytes": 581,
+      "sha256": "632bc69a163b0fb96bf9b29d95d711ba4eaf3e98fed48e93732893df62b496fc"
+    },
+    {
+      "path": "outer-stderr.log",
+      "bytes": 40,
+      "sha256": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57"
+    },
+    {
+      "path": "outer-stdout.log",
+      "bytes": 747135,
+      "sha256": "e2062137dac9ebf851c6ae75d64d91074360ef5fdb1cec6eb143d97a503bedef"
+    },
+    {
+      "path": "receipt.txt",
+      "bytes": 514,
+      "sha256": "27b38ef5288d82fe53df788a34b4ef2be0516d0d201471f2e9c311c9d2a1c1b5"
+    }
+  ]
+}

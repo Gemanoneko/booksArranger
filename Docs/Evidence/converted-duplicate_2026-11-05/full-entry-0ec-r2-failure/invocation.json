@@ -1,0 +1,42 @@
+{
+  "file": "C:/Program Files/nodejs/node.exe",
+  "args": [
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs",
+    "--context",
+    "C:/Antigravity Projects/q3/context/context.json",
+    "--context-sha",
+    "fb3181e4c169835a8e083608b048c0e9d5b0cc2dc5ad7411bb34b58ae7b12179",
+    "--run-root",
+    "C:/Antigravity Projects/q3"
+  ],
+  "options": {
+    "cwd": "C:/Antigravity Projects/Studio Illuminati",
+    "env": {
+      "SystemRoot": "C:\\Windows",
+      "WINDIR": "C:\\Windows",
+      "PATH": "C:/Program Files/nodejs;C:/Program Files/Git/cmd;C:/Windows/System32",
+      "TEMP": "C:/Antigravity Projects/q3/t",
+      "TMP": "C:/Antigravity Projects/q3/t",
+      "TMPDIR": "C:/Antigravity Projects/q3/t",
+      "USERPROFILE": "C:/Antigravity Projects/q3/profile",
+      "APPDATA": "C:/Antigravity Projects/q3/profile/AppData/Roaming",
+      "LOCALAPPDATA": "C:/Antigravity Projects/q3/profile/AppData/Local",
+      "GIT_OPTIONAL_LOCKS": "0",
+      "NODE_OPTIONS": "",
+      "NODE_PATH": "",
+      "BOOKS_QA_RUNTIME_ROOT": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+      "BOOKS_MP3_REAL_FIXTURE": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-fixtures/ba-mp3-fixture/fixture.mp3"
+    },
+    "windowsHide": true,
+    "timeout": 930000,
+    "maxBuffer": 67108864,
+    "encoding": "utf8"
+  },
+  "source_head": "0ec4971169a70d57a407ae1a9ef6bf96227724d4",
+  "build_id": "140014b8-b350-4a3e-a99b-05d24349f139",
+  "context_sha256": "fb3181e4c169835a8e083608b048c0e9d5b0cc2dc5ad7411bb34b58ae7b12179",
+  "entry_deadline_ms": 900000,
+  "transport_eof_only_ms": 930000,
+  "artifact_manifest_sha256": "8f055521103f91f9417331091b971c423f7da483980364ee7a020016c99a9ca9",
+  "runtime_pointer_sha256": "fe2e42723bbf6c5f7bfec0ad7d77b84255907a363ecf4d2c612ce432e61ec130"
+}

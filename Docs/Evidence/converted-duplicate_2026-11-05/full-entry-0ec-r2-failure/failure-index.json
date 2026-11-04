@@ -1,0 +1,39 @@
+{
+  "python_batch_counts": [
+    381,
+    46,
+    109,
+    145,
+    156,
+    221,
+    108,
+    210,
+    195,
+    141,
+    283,
+    134,
+    276
+  ],
+  "python_reported_methods": 2405,
+  "python_batch_statuses": [
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+    "OK"
+  ],
+  "python_failure_or_error_blocks": 0,
+  "frontend": {
+    "script": "tests/test_precheck_frontend.js",
+    "line": 126,
+    "assertion": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ \"Can't convert — M4B feature unsupported\"\n- \"Can't convert — M4B not supported\"\n                       ^\n\n    at C:\\Antigravity Projects\\q3\\entry-run-jl1qFy\\tests\\test_precheck_frontend.js:126:10\n    at Object.<anonymous> (C:\\Antigravity Projects\\q3\\entry-run-jl1qFy\\tests\\test_precheck_frontend.js:169:3)\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\n    at Object.<anonymous> (C:\\Antigravity Projects\\q3\\entry-run-jl1qFy\\tests\\test_precheck_frontend.js:128:196)\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\n    at Object..js (node:internal/modules/cjs/loader:2108:10)\n    at Module.load (node:internal/modules/cjs/loader:1690:32)\n    at Module._load (node:internal/modules/cjs/loader:1480:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: \"Can't convert — M4B feature unsupported\",\n  expected: \"Can't convert — M4B not supported\",\n  operator: 'strictEqual',\n  diff: 'simple'\n}"
+  }
+}

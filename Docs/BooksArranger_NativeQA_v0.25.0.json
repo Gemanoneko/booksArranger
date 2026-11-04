@@ -1,0 +1,79 @@
+{
+  "schema": "books-native-qa-v1",
+  "binding": {
+    "version": "0.25.0",
+    "source_head": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+    "product_digest": "21a42959c039c1e80075a5be71e7a86b0b17b09301ff00481857f12047febb16",
+    "build_id": "9b63e746-2a00-4cd8-a0ba-5b45e6405fc2",
+    "artifact_manifest_sha256": "2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "case": {
+    "phase": "PA-1",
+    "entry": "tests/real-shell-update.test.mjs",
+    "title": "PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again"
+  },
+  "records": {
+    "authority": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/authority.json",
+      "sha256": "1320031d13ba391bdcb9248c8e92cbb206edcabb70fda4a95e47712632ae139a",
+      "size": 1664
+    },
+    "plan": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/plan.json",
+      "sha256": "6793fedc82e0b5b27dc80b512ed3ef01bdb2b1950a8ccc9b1da02d8fa6b5137b",
+      "size": 593027
+    },
+    "owned": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/owned.json",
+      "sha256": "cd69a54c39b48c2f34c9abc3aa54ebe52b80b6263bb8de4674d591e1f421125a",
+      "size": 2667
+    },
+    "controller_owned": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/controller-owned.json",
+      "sha256": "6786fa6c3c0472e3271f8ce56bc0dbecf6a72a924dd5376763ad97dd3caa1468",
+      "size": 927
+    },
+    "callback": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/callback.json",
+      "sha256": "62c7238cf89fd8d049f3594a08ce9bfe06121e3fa5aed18f64b017210c8b833a",
+      "size": 717
+    },
+    "stdout": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/stdout.log",
+      "sha256": "95093400c18c49fc31ae1be112b7d7bf2341e2896390da5b635b390cb541d24a",
+      "size": 2007
+    },
+    "stderr": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "controller_stdout": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/controller-stdout.log",
+      "sha256": "02acf3d8f94d34ca3c8fd70be42208cba9605f4c1e9a7091144c7161e269aa3a",
+      "size": 392
+    },
+    "controller_stderr": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/controller-stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "functional": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/functional.json",
+      "sha256": "834694614cb7baaba3048b02097d6e859fccf14db074a45a9845f5787e35a954",
+      "size": 1569
+    },
+    "postflight": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/postflight.json",
+      "sha256": "ab5635ace13372922911b9d01356be9e872030299ff8e9f356516ccf777cbaa1",
+      "size": 804
+    },
+    "cleanup": {
+      "path": "Docs/BooksArranger_NativeQA_v0.25.0_Evidence/cleanup.json",
+      "sha256": "f3fe7c03e503a6cf2ecaa94508f7bd7278686cdedfc11080c1e27b2e80ff63f9",
+      "size": 1233
+    }
+  }
+}
