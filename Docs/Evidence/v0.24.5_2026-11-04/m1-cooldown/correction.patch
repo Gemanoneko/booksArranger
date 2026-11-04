@@ -1,0 +1,135 @@
+diff --git a/public_research.py b/public_research.py
+index 4270bca..8835743 100644
+--- a/public_research.py
++++ b/public_research.py
+@@ -462,25 +462,31 @@ class PublicClient:
+         # 0.22.1: the pacing wait and the fetch (up to 15 s) run outside the lock; the reservation above already paces the
+         # site. A cached answer another thread (research) needs no longer waits behind a background pass's request.
+         if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
++        family='wikimedia' if host in WIKIMEDIA_HOSTS else host
++        with self.lock:dispatch=self._dispatch_locks.setdefault(family,threading.Lock())
++        while not dispatch.acquire(timeout=.25):
++            if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
+         try:
+             # A reservation precedes its SQLite commit and thread scheduling. Those
+             # delays can compress actual starts, so also pace dispatch at the host.
+-            family='wikimedia' if host in WIKIMEDIA_HOSTS else host
+-            with self.lock:dispatch=self._dispatch_locks.setdefault(family,threading.Lock())
+-            while not dispatch.acquire(timeout=.25):
+-                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
+-            try:
+-                spacing=6.1 if host in WIKIMEDIA_HOSTS else host_policy(host)[1]
+-                remaining=self._last_dispatch.get(family,float('-inf'))+spacing-self.clock()
+-                if remaining>0 and (stop.wait(remaining) if stop else time.sleep(remaining)):
+-                    raise InterruptedError('Automatic processing paused')
+-                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
+-                self._last_dispatch[family]=self.clock()
+-                raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
+-            finally:dispatch.release()
++            spacing=6.1 if host in WIKIMEDIA_HOSTS else host_policy(host)[1]
++            remaining=self._last_dispatch.get(family,float('-inf'))+spacing-self.clock()
++            if remaining>0 and (stop.wait(remaining) if stop else time.sleep(remaining)):
++                raise InterruptedError('Automatic processing paused')
++            if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
++            # A different URL may have reserved before the preceding request
++            # received a pause. Keep that pause visible before handing off dispatch.
++            hosts=sorted(WIKIMEDIA_HOSTS) if host in WIKIMEDIA_HOSTS else [host]
++            marks=','.join('?' for _ in hosts)
++            with connect(self.database) as db:
++                wait=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host IN ('+marks+') AND next_at>? AND reason!="" ORDER BY next_at DESC LIMIT 1',(*hosts,self.clock())).fetchone()
++            if wait:
++                raise ResearchWait(host,wait['reason'],wait['next_at'],'source_pause' if wait['reason'] in PAUSE_REASONS else 'source_unavailable','host')
++            self._last_dispatch[family]=self.clock()
++            raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
+             if not isinstance(raw,bytes) or len(raw)>MAX_BYTES:raise ValueError()
+             if any(marker in raw[:MAX_BYTES].lower() for marker in CHALLENGE_MARKERS):raise ChallengeDetected()
+-        except InterruptedError:raise
++        except (InterruptedError,ResearchWait):raise
+         except Exception as error:
+             now=self.clock();http_error=isinstance(error,urllib.error.HTTPError);paused=http_error and error.code in (403,429)
+             # DuckDuckGo answers automated HTML queries with HTTP 202 and its anomaly
+@@ -506,6 +512,7 @@ class PublicClient:
+                     if existing['reason']:reason=existing['reason']
+                 db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,retry,reason))
+             raise ResearchWait(host,reason,retry,'source_pause' if reason in PAUSE_REASONS else 'source_unavailable','host') from None
++        finally:dispatch.release()
+         def cache_fetched(db):
+             encoded=base64.b64encode(raw).decode('ascii');fetched=self.clock()
+             self._expire(db,fetched)  # 0.22.2: expiry with each new answer, in this retried transaction (never on a read)
+diff --git a/tests/test_gap_fill.py b/tests/test_gap_fill.py
+index caf19ab..d949010 100644
+--- a/tests/test_gap_fill.py
++++ b/tests/test_gap_fill.py
+@@ -4,7 +4,7 @@ The book is approved on its local identity at once (test_local_identity.GapSearc
+ later by the background gap fill (gap_fill.GapFill); series backfill and the gap fill each use their own share of a
+ site's hourly bound (public_research lanes), so neither starves research or the other; and the client no longer holds
+ its lock while a request waits for its site or downloads. Private fixture answers; no network."""
+-import json, sqlite3, tempfile, threading, time, unittest, urllib.error, urllib.parse, uuid
++import contextlib, json, sqlite3, tempfile, threading, time, unittest, urllib.error, urllib.parse, uuid
+ from pathlib import Path
+ from types import SimpleNamespace
+ from unittest import mock
+@@ -227,6 +227,63 @@ class ClientLockTests(unittest.TestCase):
+         waiter = threading.Thread(target=stopped, daemon=True); waiter.start(); time.sleep(0.2); stop.set(); waiter.join(5)
+         self.assertEqual(len(errors), 1); self.release.set(); third.join(10)
+ 
++    def test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family(self):
++        cases = [('api.fantlab.ru', 'api.fantlab.ru', 429),
++                 ('ru.wikipedia.org', 'www.wikidata.org', 429),
++                 ('html.duckduckgo.com', 'html.duckduckgo.com', 202)]
++        for index, (host, following_host, code) in enumerate(cases):
++            with self.subTest(host=host, code=code):
++                now = [10000.]; sent = []; errors = []
++                started = threading.Event(); reserved = threading.Event(); finish_fetch = threading.Event()
++                committing = threading.Event(); finish_commit = threading.Event(); following_sent = threading.Event()
++                first_url = 'https://' + host + '/first'
++                following_url = 'https://' + following_host + '/following'
++                def fetch(url, *_):
++                    sent.append(url)
++                    if url == first_url:
++                        started.set()
++                        if not finish_fetch.wait(5): raise TimeoutError('Private failed fetch was not released')
++                        raise urllib.error.HTTPError(url, code, 'private source pause', {}, None)
++                    following_sent.set()
++                    return b'{"ok": true}'
++                client = PublicClient(Path(self.temp.name) / ('pause%d.sqlite3' % index), fetch=fetch, clock=lambda: now[0])
++                original_read = client._fetch_reserved; original_connect = public_research.connect
++                def mark_reserved(url, *args):
++                    if url == following_url: reserved.set()
++                    return original_read(url, *args)
++                @contextlib.contextmanager
++                def delayed_commit(*args, **kwargs):
++                    with original_connect(*args, **kwargs) as db:
++                        yield db
++                        if db.in_transaction:
++                            pause = db.execute('SELECT reason FROM public_research_limits WHERE host=?', (host,)).fetchone()
++                            if pause and pause['reason']:
++                                committing.set()
++                                if not finish_commit.wait(5): raise TimeoutError('Private pause commit was not released')
++                def read(url):
++                    try: client.read(url, None, {'remaining': 1})
++                    except Exception as error: errors.append(error)
++                first = threading.Thread(target=read, args=(first_url,))
++                following = threading.Thread(target=read, args=(following_url,))
++                with mock.patch.object(client, '_fetch_reserved', mark_reserved), mock.patch.object(public_research, 'connect', delayed_commit):
++                    try:
++                        first.start(); self.assertTrue(started.wait(5))
++                        now[0] += 10  # Both host and Wikimedia spacing permit the second reservation.
++                        following.start(); self.assertTrue(reserved.wait(5))
++                        finish_fetch.set(); self.assertTrue(committing.wait(5))
++                        self.assertFalse(following_sent.wait(.1), 'Dispatch escaped while its preceding pause was uncommitted')
++                    finally:
++                        finish_fetch.set(); finish_commit.set()
++                        first.join(5)
++                        if following.ident is not None: following.join(5)
++                self.assertFalse(first.is_alive()); self.assertFalse(following.is_alive())
++                self.assertEqual(sent, [first_url])
++                self.assertEqual(len(errors), 2)
++                self.assertTrue(all(isinstance(error, ResearchWait) and error.kind == 'source_pause' for error in errors), errors)
++                with connect(client.database) as db:
++                    pause = db.execute('SELECT next_at,reason FROM public_research_limits WHERE host=?', (host,)).fetchone()
++                self.assertTrue(pause['reason']); self.assertGreater(pause['next_at'], now[0])
++
+     def test_a_reservation_that_fails_to_commit_leaves_no_url_waiting(self):
+         # Senua's 0.22.1 review, W13: the in-flight mark was set before the reservation's commit; a commit that raised left
+         # the URL marked for ever, and every later reader of it waited until its stop (or for ever without one).

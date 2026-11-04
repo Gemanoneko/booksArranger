@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) ... \r\n  test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='api.fantlab.ru', code=429) ... FAIL\r\n  test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='ru.wikipedia.org', code=429) ... FAIL\r\n  test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='html.duckduckgo.com', code=202) ... FAIL\r\n\r\n======================================================================\r\nFAIL: test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='api.fantlab.ru', code=429)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0245-fix-20261104\\src\\tests\\test_gap_fill.py\", line 274, in test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family\r\n    self.assertFalse(following_sent.wait(.1), 'Dispatch escaped while its preceding pause was uncommitted')\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: True is not false : Dispatch escaped while its preceding pause was uncommitted\r\n\r\n======================================================================\r\nFAIL: test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='ru.wikipedia.org', code=429)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0245-fix-20261104\\src\\tests\\test_gap_fill.py\", line 274, in test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family\r\n    self.assertFalse(following_sent.wait(.1), 'Dispatch escaped while its preceding pause was uncommitted')\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: True is not false : Dispatch escaped while its preceding pause was uncommitted\r\n\r\n======================================================================\r\nFAIL: test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='html.duckduckgo.com', code=202)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0245-fix-20261104\\src\\tests\\test_gap_fill.py\", line 274, in test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family\r\n    self.assertFalse(following_sent.wait(.1), 'Dispatch escaped while its preceding pause was uncommitted')\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: True is not false : Dispatch escaped while its preceding pause was uncommitted\r\n\r\n----------------------------------------------------------------------\r\nRan 1 test in 0.150s\r\n\r\nFAILED (failures=3)\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 58476,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 61,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 985.3747,
+  "outputBytes": 3835
+}

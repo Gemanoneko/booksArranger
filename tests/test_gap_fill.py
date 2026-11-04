@@ -4,7 +4,7 @@ The book is approved on its local identity at once (test_local_identity.GapSearc
 later by the background gap fill (gap_fill.GapFill); series backfill and the gap fill each use their own share of a
 site's hourly bound (public_research lanes), so neither starves research or the other; and the client no longer holds
 its lock while a request waits for its site or downloads. Private fixture answers; no network."""
-import json, sqlite3, tempfile, threading, time, unittest, urllib.error, urllib.parse, uuid
+import contextlib, json, sqlite3, tempfile, threading, time, unittest, urllib.error, urllib.parse, uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -226,6 +226,63 @@ class ClientLockTests(unittest.TestCase):
             except InterruptedError as error: errors.append(error)
         waiter = threading.Thread(target=stopped, daemon=True); waiter.start(); time.sleep(0.2); stop.set(); waiter.join(5)
         self.assertEqual(len(errors), 1); self.release.set(); third.join(10)
+
+    def test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family(self):
+        cases = [('api.fantlab.ru', 'api.fantlab.ru', 429),
+                 ('ru.wikipedia.org', 'www.wikidata.org', 429),
+                 ('html.duckduckgo.com', 'html.duckduckgo.com', 202)]
+        for index, (host, following_host, code) in enumerate(cases):
+            with self.subTest(host=host, code=code):
+                now = [10000.]; sent = []; errors = []
+                started = threading.Event(); reserved = threading.Event(); finish_fetch = threading.Event()
+                committing = threading.Event(); finish_commit = threading.Event(); following_sent = threading.Event()
+                first_url = 'https://' + host + '/first'
+                following_url = 'https://' + following_host + '/following'
+                def fetch(url, *_):
+                    sent.append(url)
+                    if url == first_url:
+                        started.set()
+                        if not finish_fetch.wait(5): raise TimeoutError('Private failed fetch was not released')
+                        raise urllib.error.HTTPError(url, code, 'private source pause', {}, None)
+                    following_sent.set()
+                    return b'{"ok": true}'
+                client = PublicClient(Path(self.temp.name) / ('pause%d.sqlite3' % index), fetch=fetch, clock=lambda: now[0])
+                original_read = client._fetch_reserved; original_connect = public_research.connect
+                def mark_reserved(url, *args):
+                    if url == following_url: reserved.set()
+                    return original_read(url, *args)
+                @contextlib.contextmanager
+                def delayed_commit(*args, **kwargs):
+                    with original_connect(*args, **kwargs) as db:
+                        yield db
+                        if db.in_transaction:
+                            pause = db.execute('SELECT reason FROM public_research_limits WHERE host=?', (host,)).fetchone()
+                            if pause and pause['reason']:
+                                committing.set()
+                                if not finish_commit.wait(5): raise TimeoutError('Private pause commit was not released')
+                def read(url):
+                    try: client.read(url, None, {'remaining': 1})
+                    except Exception as error: errors.append(error)
+                first = threading.Thread(target=read, args=(first_url,))
+                following = threading.Thread(target=read, args=(following_url,))
+                with mock.patch.object(client, '_fetch_reserved', mark_reserved), mock.patch.object(public_research, 'connect', delayed_commit):
+                    try:
+                        first.start(); self.assertTrue(started.wait(5))
+                        now[0] += 10  # Both host and Wikimedia spacing permit the second reservation.
+                        following.start(); self.assertTrue(reserved.wait(5))
+                        finish_fetch.set(); self.assertTrue(committing.wait(5))
+                        self.assertFalse(following_sent.wait(.1), 'Dispatch escaped while its preceding pause was uncommitted')
+                    finally:
+                        finish_fetch.set(); finish_commit.set()
+                        first.join(5)
+                        if following.ident is not None: following.join(5)
+                self.assertFalse(first.is_alive()); self.assertFalse(following.is_alive())
+                self.assertEqual(sent, [first_url])
+                self.assertEqual(len(errors), 2)
+                self.assertTrue(all(isinstance(error, ResearchWait) and error.kind == 'source_pause' for error in errors), errors)
+                with connect(client.database) as db:
+                    pause = db.execute('SELECT next_at,reason FROM public_research_limits WHERE host=?', (host,)).fetchone()
+                self.assertTrue(pause['reason']); self.assertGreater(pause['next_at'], now[0])
 
     def test_a_reservation_that_fails_to_commit_leaves_no_url_waiting(self):
         # Senua's 0.22.1 review, W13: the in-flight mark was set before the reservation's commit; a commit that raised left

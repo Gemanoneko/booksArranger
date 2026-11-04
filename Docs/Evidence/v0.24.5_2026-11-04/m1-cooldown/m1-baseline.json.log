@@ -1,0 +1,36 @@
+test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) ... 
+  test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='api.fantlab.ru', code=429) ... FAIL
+  test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='ru.wikipedia.org', code=429) ... FAIL
+  test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='html.duckduckgo.com', code=202) ... FAIL
+
+======================================================================
+FAIL: test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='api.fantlab.ru', code=429)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_gap_fill.py", line 274, in test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family
+    self.assertFalse(following_sent.wait(.1), 'Dispatch escaped while its preceding pause was uncommitted')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false : Dispatch escaped while its preceding pause was uncommitted
+
+======================================================================
+FAIL: test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='ru.wikipedia.org', code=429)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_gap_fill.py", line 274, in test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family
+    self.assertFalse(following_sent.wait(.1), 'Dispatch escaped while its preceding pause was uncommitted')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false : Dispatch escaped while its preceding pause was uncommitted
+
+======================================================================
+FAIL: test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family (test_gap_fill.ClientLockTests.test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family) (host='html.duckduckgo.com', code=202)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_gap_fill.py", line 274, in test_reserved_dispatch_waits_for_a_pause_commit_and_rechecks_the_host_family
+    self.assertFalse(following_sent.wait(.1), 'Dispatch escaped while its preceding pause was uncommitted')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false : Dispatch escaped while its preceding pause was uncommitted
+
+----------------------------------------------------------------------
+Ran 1 test in 0.150s
+
+FAILED (failures=3)

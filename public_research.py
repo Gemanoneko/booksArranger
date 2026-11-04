@@ -462,25 +462,31 @@ class PublicClient:
         # 0.22.1: the pacing wait and the fetch (up to 15 s) run outside the lock; the reservation above already paces the
         # site. A cached answer another thread (research) needs no longer waits behind a background pass's request.
         if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
+        family='wikimedia' if host in WIKIMEDIA_HOSTS else host
+        with self.lock:dispatch=self._dispatch_locks.setdefault(family,threading.Lock())
+        while not dispatch.acquire(timeout=.25):
+            if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
         try:
             # A reservation precedes its SQLite commit and thread scheduling. Those
             # delays can compress actual starts, so also pace dispatch at the host.
-            family='wikimedia' if host in WIKIMEDIA_HOSTS else host
-            with self.lock:dispatch=self._dispatch_locks.setdefault(family,threading.Lock())
-            while not dispatch.acquire(timeout=.25):
-                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
-            try:
-                spacing=6.1 if host in WIKIMEDIA_HOSTS else host_policy(host)[1]
-                remaining=self._last_dispatch.get(family,float('-inf'))+spacing-self.clock()
-                if remaining>0 and (stop.wait(remaining) if stop else time.sleep(remaining)):
-                    raise InterruptedError('Automatic processing paused')
-                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
-                self._last_dispatch[family]=self.clock()
-                raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
-            finally:dispatch.release()
+            spacing=6.1 if host in WIKIMEDIA_HOSTS else host_policy(host)[1]
+            remaining=self._last_dispatch.get(family,float('-inf'))+spacing-self.clock()
+            if remaining>0 and (stop.wait(remaining) if stop else time.sleep(remaining)):
+                raise InterruptedError('Automatic processing paused')
+            if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
+            # A different URL may have reserved before the preceding request
+            # received a pause. Keep that pause visible before handing off dispatch.
+            hosts=sorted(WIKIMEDIA_HOSTS) if host in WIKIMEDIA_HOSTS else [host]
+            marks=','.join('?' for _ in hosts)
+            with connect(self.database) as db:
+                wait=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host IN ('+marks+') AND next_at>? AND reason!="" ORDER BY next_at DESC LIMIT 1',(*hosts,self.clock())).fetchone()
+            if wait:
+                raise ResearchWait(host,wait['reason'],wait['next_at'],'source_pause' if wait['reason'] in PAUSE_REASONS else 'source_unavailable','host')
+            self._last_dispatch[family]=self.clock()
+            raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
             if not isinstance(raw,bytes) or len(raw)>MAX_BYTES:raise ValueError()
             if any(marker in raw[:MAX_BYTES].lower() for marker in CHALLENGE_MARKERS):raise ChallengeDetected()
-        except InterruptedError:raise
+        except (InterruptedError,ResearchWait):raise
         except Exception as error:
             now=self.clock();http_error=isinstance(error,urllib.error.HTTPError);paused=http_error and error.code in (403,429)
             # DuckDuckGo answers automated HTML queries with HTTP 202 and its anomaly
@@ -506,6 +512,7 @@ class PublicClient:
                     if existing['reason']:reason=existing['reason']
                 db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,retry,reason))
             raise ResearchWait(host,reason,retry,'source_pause' if reason in PAUSE_REASONS else 'source_unavailable','host') from None
+        finally:dispatch.release()
         def cache_fetched(db):
             encoded=base64.b64encode(raw).decode('ascii');fetched=self.clock()
             self._expire(db,fetched)  # 0.22.2: expiry with each new answer, in this retried transaction (never on a read)

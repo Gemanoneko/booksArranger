@@ -1,0 +1,57 @@
+{
+  "base_head": "616b07298be5869c013cfd8b2235af64b221a2d3",
+  "candidate": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101",
+  "files": [
+    {
+      "path": "public_research.py",
+      "size": 203076,
+      "sha256": "7607d5015a35880b943ba5780e7dba137fb4c1a29c526f8acfb0f3755d95b883"
+    },
+    {
+      "path": "tests/test_gap_fill.py",
+      "size": 21818,
+      "sha256": "a0c98f9df250a083f800d2a4bdb9a68186c9e61f82d09dd751fe6c2d83f29437"
+    }
+  ],
+  "patch_sha256": "bd312280783cba892a74895893be2351805a53bb87cab842ba1e0bd4f56d0402",
+  "fix": "Keep provider dispatch locked through response validation and cooldown commit; reread persisted host/family pause immediately before dispatch; preserve ResearchWait without reclassifying or overwriting it.",
+  "regression": "One unittest with three deterministic subcases: FantLab HTTP429, ru.wikipedia.org to www.wikidata.org HTTP429, DuckDuckGo HTTP202 challenge. First fetch waits for a following URL reservation; its pause commit is then held while the following fetch must remain blocked. After commit both readers return source_pause, and only the first URL was fetched.",
+  "baseline": {
+    "source": "616b072 with new test only",
+    "cases": 1,
+    "failures": 3,
+    "seconds": 0.15,
+    "owned_ms": 985.3747,
+    "closed": true,
+    "native_zero": true
+  },
+  "corrected": {
+    "command": [
+      "C:/Program Files/nodejs/node.exe",
+      "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0245-fix-20261104\\owned.mjs",
+      "C:\\Antigravity Projects\\Studio Illuminati\\.claude\\skills\\qa-handoff\\scripts\\bounded-check.mjs",
+      "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\build-cache\\qa-ownership\\node_modules\\koffi",
+      "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\build-cache\\qa-runtime\\python\\python.exe",
+      "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0245-fix-20261104\\focused.py",
+      "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0245-fix-20261104\\src",
+      "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0245-fix-20261104\\m1-corrected.json",
+      "test_gap_fill"
+    ],
+    "cases": 14,
+    "failures": 0,
+    "errors": 0,
+    "seconds": 19.537,
+    "owned_ms": 20347.073,
+    "closed": true,
+    "native_zero": true
+  },
+  "owned_runner": {
+    "module": "C:\\Antigravity Projects\\Studio Illuminati\\.claude\\skills\\qa-handoff\\scripts\\bounded-check.mjs",
+    "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc",
+    "timeoutMs": 600000,
+    "maxBytes": 4194304,
+    "launcher": "owned.mjs"
+  },
+  "private_environment": "Owned src copy from git archive616b072, corrected source and test overlaid. temp/profile/fixtures paths under scratch. Explicit child env in owned.mjs. No network or codec invocation in this suite.",
+  "limits": "Focused source verification only. Full and hidden checks were not invoked."
+}
