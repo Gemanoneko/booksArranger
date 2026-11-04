@@ -1,0 +1,48 @@
+{
+  "status": "read-only review complete; no cleanup applied",
+  "root": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/tool-ignored-png-media-qa-025-20261104",
+  "owner": "Futaba private media QA on source a4e43d05e8a456dc3999b309b4f767dc45fc31e3",
+  "file_count": 1652,
+  "directory_count_below_root": 97,
+  "logical_file_bytes": 48178099,
+  "links_or_other_special_entries": 0,
+  "protected_copy": {
+    "path": "src/.claude/settings.json",
+    "copy_bytes": 7650,
+    "copy_sha256": "fcdd83cbfae9898a7f2602e45f795d84f39af881ca20fc099cfeeec5b9998637",
+    "git_filtered_blob_sha1": "154d9669f4d363649ebbcc512412f92c7e3e1a14",
+    "commit_blob_sha1": "154d9669f4d363649ebbcc512412f92c7e3e1a14",
+    "commit_blob_bytes": 7442,
+    "note": "Only file under copied .claude; CRLF checkout conversion explains byte-size difference. No session or credential directories were found in that subtree."
+  },
+  "process_closure": {
+    "owned_qa_result": "closed, native complete and zero; zero active or unsignaled",
+    "current_node_python_ffmpeg_process_referencing_root": 0
+  },
+  "retained_qa_evidence_summary_sha256": "71e4d237c687234aadce0ded435fb6b2ea3a77417140099d085f0b8a48e489f5",
+  "file_inventory": {
+    "path": "cleanup-ownership-review.json",
+    "sha256": "4d66fe0f70a2b5693def6dcf01552d28aa0714e40f245c7065d51939bc894183"
+  },
+  "sweep_named_dry_run": {
+    "path": "studio-sweep-dryrun.json",
+    "sha256": "0c00546680d23f0da8fef32ba68c439e80bc64f5c77a6835d797c9edf033f725",
+    "target_reason": "named with --path",
+    "links": 0,
+    "apply": false
+  },
+  "sweep_approved_exact_target_dry_run": {
+    "path": "studio-sweep-approved-dryrun.json",
+    "sha256": "f2cd0a2c3fc5d0e1cdd798b16211a74916480b99fb96832db7f2cf376c9885d4",
+    "mode": "approved",
+    "apply": false,
+    "target_count": 1,
+    "action": "would remove",
+    "planned_files": 1652,
+    "planned_logical_bytes": 48178099,
+    "kept": 0,
+    "protected_files": 0,
+    "links": 0
+  },
+  "no_deletion_performed": true
+}

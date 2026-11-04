@@ -10,4 +10,4 @@ The real AAC plus PNG/text-chapter case passed the production preservation pipel
 
 [Raw receipt, log, runner and exact source hashes](Evidence/converted-duplicate_2026-11-04/futaba-media-a4e/summary.json) are retained. No live Z: media was read. The primary job journal/UI consumers, folder latency, saved old-job readmission, packaged build and release gates remain separate work. No new pattern alert arose.
 
-Owned scratch cleanup remains pending: the studio disk-hygiene planner refused the private Git archive because it contains the protected copied path `src/.claude`. It created no cleanup manifest, and no removal was attempted by another route. The exact refusal is retained with the QA evidence.
+The initial disk-hygiene planner refused the private Git archive because it contains the protected copied path `src/.claude`; that refusal remains in the evidence. After individual ownership review, an exact-target approved studio sweep removed the owned scratch (1,652 files; 48,178,099 logical bytes). The [actual sweep receipt](Evidence/converted-duplicate_2026-11-04/futaba-media-a4e/studio-sweep-apply.json) and absence verification are retained.

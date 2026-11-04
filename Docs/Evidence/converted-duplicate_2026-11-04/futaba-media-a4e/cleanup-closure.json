@@ -1,0 +1,11 @@
+{
+  "target": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/tool-ignored-png-media-qa-025-20261104",
+  "route": "studio-sweep exact-target approved mode",
+  "review": "cleanup-admission.json",
+  "receipt": "studio-sweep-apply.json",
+  "receipt_sha256": "a4295d5c8436aef212d77bc4e5fe7b331a3de8c717749dfcce6512c046d81182",
+  "removed_files": 1652,
+  "removed_logical_bytes": 48178099,
+  "kept_count": 0,
+  "root_absent_after_apply": true
+}

@@ -1,0 +1,40 @@
+{
+ "mode": "approved",
+ "apply": false,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\tool-ignored-png-media-qa-025-20261104",
+   "reason": "Sergei requested removal of created temporary files; Futaba reviewed this exact disposable a4e43d05 QA archive; evidence retained in Docs; Jane review pending before apply",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\tool-ignored-png-media-qa-025-20261104",
+   "isDir": true,
+   "before": {
+    "files": 1652,
+    "bytes": 48178099
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 1652,
+    "bytes": 48178099
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "action": "would remove"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 104387969024,
+   "after": 104387854336
+  }
+ ],
+ "removedFiles": 1652,
+ "removedBytes": 48178099,
+ "keptCount": 0
+}
