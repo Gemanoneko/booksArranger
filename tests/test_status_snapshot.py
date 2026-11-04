@@ -28,6 +28,35 @@ class Clock:
 
 
 class SharedSnapshotTests(unittest.TestCase):
+    def test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights(self):
+        temporary = tempfile.TemporaryDirectory(dir=AREA)
+        self.addCleanup(temporary.cleanup)
+        shared = SharedSnapshot(wait=.01)
+        merge = MergeService.__new__(MergeService)
+        merge._status_shared = shared
+        merge._retention_stop = threading.Event(); merge._retention_wake = threading.Event()
+        merge._retention_thread = None; merge.jobs = Mock(); merge.cleanup = Mock()
+        entered = threading.Event(); release = threading.Event(); closed = threading.Event()
+        def compute():
+            connection = sqlite3.connect(Path(temporary.name) / 'catalog.sqlite3')
+            try:
+                connection.execute('CREATE TABLE fixture(n INTEGER)'); connection.commit()
+                entered.set()
+                if not release.wait(5): raise TimeoutError('Private catalog read was not released')
+                return {'state': 'Paused'}
+            finally: connection.close()
+        with self.assertRaises(StatusUnavailable): shared.get(compute, 0)
+        self.assertTrue(entered.wait(5))
+        shared.invalidate()
+        closer = threading.Thread(target=lambda: (merge.close(), closed.set()))
+        closer.start()
+        try:
+            self.assertFalse(closed.wait(.1), 'Close must retain the detached catalog read')
+            with self.assertRaises(StatusUnavailable): shared.get(lambda: self.fail('New closing read'), 0)
+        finally:
+            release.set(); closer.join(5)
+        self.assertTrue(closed.is_set())
+
     def test_concurrent_callers_share_one_computation_and_get_private_copies(self):
         calls = []
         gate = threading.Event()

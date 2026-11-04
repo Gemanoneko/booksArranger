@@ -175,6 +175,31 @@ class ClientLockTests(unittest.TestCase):
         times = sorted(at for _, at in self.started)
         self.assertEqual(len(times), 2); self.assertGreaterEqual(times[1] - times[0], public_research.host_policy('api.fantlab.ru')[1] - 0.05)
 
+    def test_a_delayed_first_dispatch_cannot_compress_the_second_reservation(self):
+        client = PublicClient(Path(self.temp.name) / 'c.sqlite3', fetch=self.fetch)
+        reserved = threading.Event(); second = threading.Event(); errors = []
+        original = client._fetch_reserved
+        def delayed(url, *args):
+            if url.endswith('/first'):
+                reserved.set()
+                if not second.wait(5): raise TimeoutError('Second reservation did not arrive')
+                time.sleep(.2)
+            else: second.set()
+            return original(url, *args)
+        def read(name):
+            try: client.read('https://api.fantlab.ru/' + name, None, {'remaining': 1})
+            except Exception as error: errors.append(error)
+        with mock.patch.object(client, '_fetch_reserved', delayed), mock.patch.object(public_research, 'host_policy', return_value=(100, .4)):
+            first = threading.Thread(target=read, args=('first',)); first.start()
+            self.assertTrue(reserved.wait(5))
+            following = threading.Thread(target=read, args=('second',)); following.start()
+            first.join(5); following.join(5)
+        self.assertFalse(first.is_alive()); self.assertFalse(following.is_alive())
+        self.assertEqual(errors, [])
+        times = sorted(at for _, at in self.started)
+        self.assertEqual(len(times), 2)
+        self.assertGreaterEqual(times[1] - times[0], .38)
+
     def test_one_url_asked_by_two_threads_is_fetched_once(self):
         # Senua's 0.22.1 review, W12: with the fetch outside the lock, research and a background lane both missed the cache
         # for the same URL and both reserved and fetched it: two requests against the site's bound.

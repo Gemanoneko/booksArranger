@@ -1,0 +1,59 @@
+test_a_delayed_first_dispatch_cannot_compress_the_second_reservation (test_gap_fill.ClientLockTests.test_a_delayed_first_dispatch_cannot_compress_the_second_reservation) ... FAIL
+test_close_waits_for_a_detached_catalog_read_and_refuses_new_flights (test_status_snapshot.SharedSnapshotTests.test_close_waits_for_a_detached_catalog_read_and_refuses_new_flights) ... Exception in thread Thread-3 (<lambda>):
+Traceback (most recent call last):
+  File "threading.py", line 1082, in _bootstrap_inner
+  File "threading.py", line 1024, in run
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_status_snapshot.py", line 41, in <lambda>
+    closer = threading.Thread(target=lambda: (shared.close(), closed.set()))
+                                              ^^^^^^^^^^^^
+AttributeError: 'SharedSnapshot' object has no attribute 'close'
+FAIL
+test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish (test_attempt_working_lifecycle.WorkingLifecycleTests.test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish) ... FAIL
+
+======================================================================
+FAIL: test_a_delayed_first_dispatch_cannot_compress_the_second_reservation (test_gap_fill.ClientLockTests.test_a_delayed_first_dispatch_cannot_compress_the_second_reservation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_gap_fill.py", line 201, in test_a_delayed_first_dispatch_cannot_compress_the_second_reservation
+    self.assertGreaterEqual(times[1] - times[0], .38)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0.19476859999849694 not greater than or equal to 0.38
+
+======================================================================
+FAIL: test_close_waits_for_a_detached_catalog_read_and_refuses_new_flights (test_status_snapshot.SharedSnapshotTests.test_close_waits_for_a_detached_catalog_read_and_refuses_new_flights)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_status_snapshot.py", line 45, in test_close_waits_for_a_detached_catalog_read_and_refuses_new_flights
+    with self.assertRaises(StatusUnavailable): shared.get(lambda: self.fail('New closing read'), 0)
+                                               ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\merge_service.py", line 141, in get
+    if flight['error'] is not None:raise flight['error']
+                                   ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\merge_service.py", line 118, in _run
+    try:flight['value']=compute()
+                        ~~~~~~~^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_status_snapshot.py", line 45, in <lambda>
+    with self.assertRaises(StatusUnavailable): shared.get(lambda: self.fail('New closing read'), 0)
+                                                                  ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: New closing read
+
+======================================================================
+FAIL: test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish (test_attempt_working_lifecycle.WorkingLifecycleTests.test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_attempt_working_lifecycle.py", line 275, in test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish
+    self.assertEqual([rows[m['job_id']]['state'] for m in manifests], ['completed'] * 3)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['pending', 'pending', 'pending'] != ['completed', 'completed', 'completed']
+
+First differing element 0:
+'pending'
+'completed'
+
+- ['pending', 'pending', 'pending']
++ ['completed', 'completed', 'completed']
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.853s
+
+FAILED (failures=3)

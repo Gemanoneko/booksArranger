@@ -5,6 +5,7 @@ They exercise actual owned cancellation/disposition, not codec correctness.
 """
 from sorted_fixture import library_is_sorted  # 0.21.3: fixtures publish inside their library
 import errno
+import copy
 import base64
 import contextlib
 import ctypes
@@ -236,6 +237,63 @@ class WorkingLifecycleTests(unittest.TestCase):
         self.life.reconcile(limit=1)
         with self.assertRaises(BoundaryError):self.life.admit(self.queue._rows('SELECT * FROM audio_jobs')[0])
         self.assertTrue((stage/'checked.m4b').exists())
+
+    def test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish(self):
+        attempt, stage, _ = self.stage()
+        prior = self.life._attempt(self.job_id, attempt)
+        self.life._set_attempt(prior, producer='active', state='producing')
+        retained = {path.name: path.read_bytes() for path in stage.iterdir()}
+        self.queue._update(self.job_id, state='pending', stage='queued')
+        manifests = []
+        for index in range(3):
+            manifest = copy.deepcopy(self.manifest)
+            manifest['job_id'] = str(uuid.uuid4()); manifest['candidate_id'] = str(uuid.uuid4())
+            source = self.library / ('independent%d.mp3' % index)
+            source.write_bytes(b'independent protected source ' + bytes([index]))
+            info = source.stat()
+            manifest['sources'] = [{'path': str(source), 'size': info.st_size, 'modified': str(info.st_mtime_ns),
+                                    'sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+                                    'fingerprint': {'size': info.st_size, 'modified': str(info.st_mtime_ns)}}]
+            manifest['destination'] = str(self.library / ('independent%d.m4b' % index))
+            self.queue.enqueue(manifest); manifests.append(manifest)
+        ran = []
+        def runner(manifest, stop, checkpoint):
+            ran.append(manifest['job_id'])
+            self.assertNotEqual(manifest['job_id'], self.job_id, 'Retained producer must never run again')
+            output = Path(manifest['destination']); output.write_bytes(b'private verified output')
+            record = {'job_id': manifest['job_id'], 'final_path': str(output), 'owned_temp': str(output),
+                      'sha256': hashlib.sha256(output.read_bytes()).hexdigest(), 'size': output.stat().st_size,
+                      'validation': {'passed': True}}
+            checkpoint('publishing', record)
+            return record
+        self.queue.runner = runner
+        self.queue._work()
+        rows = {row['job_id']: row for row in self.queue._rows('SELECT * FROM audio_jobs')}
+        self.assertEqual(rows[self.job_id]['state'], 'needs attention')
+        self.assertIn('not durably closed', rows[self.job_id]['reason'])
+        self.assertEqual(rows[self.job_id]['attempt_id'], attempt)
+        self.assertEqual([rows[m['job_id']]['state'] for m in manifests], ['completed'] * 3)
+        self.assertEqual(set(ran), {m['job_id'] for m in manifests})
+        self.assertFalse(self.queue._stop.is_set())
+        self.assertEqual({path.name: path.read_bytes() for path in stage.iterdir()}, retained)
+        self.assertEqual(self.source.read_bytes(), self.original)
+        self.assertEqual(self.life._attempt(self.job_id, attempt)['producer'], 'active')
+
+    def test_a_current_failed_producer_hold_does_not_stop_the_queue(self):
+        held = []
+        self.queue.on_working_hold = lambda: held.append(True)
+        def runner(manifest, stop, checkpoint):
+            self.life.begin(manifest)
+            raise OSError(errno.EIO, 'Private failure before closure was durably recorded')
+        self.queue.runner = runner
+        self.queue._work()
+        row = self.queue._rows('SELECT * FROM audio_jobs')[0]
+        self.assertEqual(row['state'], 'needs attention')
+        self.assertIn('not durably closed', row['reason'])
+        self.assertEqual(self.life._attempt(self.job_id, row['attempt_id'])['producer'], 'active')
+        self.assertFalse(self.queue._stop.is_set())
+        self.assertEqual(held, [])
+        self.assertEqual(self.source.read_bytes(), self.original)
 
     def test_unknown_attempt_file_is_not_claimed_by_retirement(self):
         attempt,stage,_=self.stage();unknown=stage/'unknown-personal.flac';unknown.write_bytes(b'not owned by producer')

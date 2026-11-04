@@ -1,0 +1,519 @@
+{
+  "captured_utc": "2026-11-04T06:15:25.029606+00:00",
+  "access": "SQLite URI mode=ro; query_only; SELECT diagnostic tables only; source paths not opened",
+  "job_counts": [
+    {
+      "state": "completed",
+      "stage": "completed",
+      "n": 689
+    },
+    {
+      "state": "needs attention",
+      "stage": "checking",
+      "n": 95
+    },
+    {
+      "state": "needs attention",
+      "stage": "checking sources",
+      "n": 81
+    },
+    {
+      "state": "needs attention",
+      "stage": "queued",
+      "n": 17
+    },
+    {
+      "state": "pending",
+      "stage": "queued",
+      "n": 521
+    },
+    {
+      "state": "running",
+      "stage": "checking sources",
+      "n": 1
+    }
+  ],
+  "recent_jobs": [
+    {
+      "job_id": "c53d7cc4-1e7a-455d-9821-b31782881e9e",
+      "state": "running",
+      "stage": "checking sources",
+      "attempt_id": "21c1f921-09cb-4bcc-af32-adb00842ef19",
+      "reason": "",
+      "created": "2026-10-28T12:29:41.087768+00:00",
+      "updated": "2026-11-04T06:13:27.391716+00:00",
+      "title": "Темные проемы. Тайные дела",
+      "journal_stages": [
+        {
+          "stage": "checking sources",
+          "at": "2026-11-04T06:13:27.391698+00:00"
+        }
+      ]
+    },
+    {
+      "job_id": "1fd15b61-2cb4-48cb-9867-ebf65074af7e",
+      "state": "needs attention",
+      "stage": "queued",
+      "attempt_id": "82a32e64-3c71-4b94-b91a-b766bd1bfe03",
+      "reason": "Working cleanup requires attention: A prior producer is not durably closed; another attempt is not admitted",
+      "created": "2026-10-28T12:27:51.567380+00:00",
+      "updated": "2026-11-03T20:15:37.307191+00:00",
+      "title": "The Amulet of Samarkand",
+      "journal_stages": [
+        {
+          "stage": "checking sources",
+          "at": "2026-11-03T18:38:04.284223+00:00"
+        },
+        {
+          "stage": "creating",
+          "at": "2026-11-03T18:47:51.126555+00:00"
+        }
+      ]
+    },
+    {
+      "job_id": "2fc6788a-1500-4686-aa5f-52e1edd7bb40",
+      "state": "pending",
+      "stage": "queued",
+      "attempt_id": null,
+      "reason": "",
+      "created": "2026-11-03T19:13:28.574924+00:00",
+      "updated": "2026-11-03T19:13:28.574924+00:00",
+      "title": "Armageddon 2000",
+      "journal_stages": []
+    },
+    {
+      "job_id": "7239f8a9-e7e7-4a32-90e3-c5822a900556",
+      "state": "completed",
+      "stage": "completed",
+      "attempt_id": "aa8027cd-68ab-4d1f-9f73-ab57f09261ca",
+      "reason": "",
+      "created": "2026-10-28T12:25:47.138402+00:00",
+      "updated": "2026-11-03T18:36:17.875310+00:00",
+      "title": "Комната ужасов",
+      "journal_stages": [
+        {
+          "stage": "checking sources",
+          "at": "2026-11-03T18:35:10.626909+00:00"
+        },
+        {
+          "stage": "creating",
+          "at": "2026-11-03T18:35:36.740335+00:00"
+        },
+        {
+          "stage": "checking",
+          "at": "2026-11-03T18:35:36.885646+00:00"
+        },
+        {
+          "stage": "publishing",
+          "at": "2026-11-03T18:36:00.665073+00:00"
+        }
+      ],
+      "publication_intent_present": true
+    },
+    {
+      "job_id": "1c8be99c-60fb-499f-9da5-734bd7d3f84a",
+      "state": "pending",
+      "stage": "queued",
+      "attempt_id": null,
+      "reason": "",
+      "created": "2026-11-03T18:31:23.329299+00:00",
+      "updated": "2026-11-03T18:31:23.329299+00:00",
+      "title": "The Final Conflict",
+      "journal_stages": []
+    },
+    {
+      "job_id": "a07e05e4-9898-4cf1-9e63-7bf0df32a147",
+      "state": "completed",
+      "stage": "completed",
+      "attempt_id": "2124cd44-5f82-42c0-bfa2-a66f72da2631",
+      "reason": "",
+      "created": "2026-10-28T12:24:27.463252+00:00",
+      "updated": "2026-11-03T18:19:55.156590+00:00",
+      "title": "Что за чушь я сейчас прочитал",
+      "journal_stages": [
+        {
+          "stage": "checking sources",
+          "at": "2026-11-03T17:56:30.979912+00:00"
+        },
+        {
+          "stage": "creating",
+          "at": "2026-11-03T18:01:03.119296+00:00"
+        },
+        {
+          "stage": "checking",
+          "at": "2026-11-03T18:15:02.613699+00:00"
+        },
+        {
+          "stage": "copying",
+          "at": "2026-11-03T18:16:38.913765+00:00"
+        },
+        {
+          "stage": "publishing",
+          "at": "2026-11-03T18:19:28.350573+00:00"
+        }
+      ],
+      "publication_intent_present": true
+    },
+    {
+      "job_id": "5ad3c222-b8e0-4b93-8e80-01848b4d9fc7",
+      "state": "completed",
+      "stage": "completed",
+      "attempt_id": "2c711a7a-865a-4fa2-81e6-410b78fcbfa1",
+      "reason": "",
+      "created": "2026-10-28T12:22:28.185564+00:00",
+      "updated": "2026-11-02T19:03:23.675966+00:00",
+      "title": "Таксидермист",
+      "journal_stages": [
+        {
+          "stage": "checking sources",
+          "at": "2026-11-02T17:57:23.602360+00:00"
+        },
+        {
+          "stage": "creating",
+          "at": "2026-11-02T18:10:54.975553+00:00"
+        },
+        {
+          "stage": "checking",
+          "at": "2026-11-02T18:57:57.399356+00:00"
+        },
+        {
+          "stage": "copying",
+          "at": "2026-11-02T19:02:38.229228+00:00"
+        },
+        {
+          "stage": "publishing",
+          "at": "2026-11-02T19:02:51.855038+00:00"
+        }
+      ],
+      "publication_intent_present": true
+    },
+    {
+      "job_id": "4e04aaa0-3019-4062-a207-8eef12bca678",
+      "state": "completed",
+      "stage": "completed",
+      "attempt_id": "35c210a5-ca18-4b19-ad14-271417628daf",
+      "reason": "",
+      "created": "2026-10-28T12:17:39.726551+00:00",
+      "updated": "2026-11-02T17:30:07.773385+00:00",
+      "title": "Эта книга полна пауков",
+      "journal_stages": [
+        {
+          "stage": "checking sources",
+          "at": "2026-11-02T16:12:42.905631+00:00"
+        },
+        {
+          "stage": "creating",
+          "at": "2026-11-02T16:24:56.989886+00:00"
+        },
+        {
+          "stage": "checking",
+          "at": "2026-11-02T17:21:49.157016+00:00"
+        },
+        {
+          "stage": "copying",
+          "at": "2026-11-02T17:29:02.057545+00:00"
+        },
+        {
+          "stage": "publishing",
+          "at": "2026-11-02T17:29:26.240059+00:00"
+        }
+      ],
+      "publication_intent_present": true
+    },
+    {
+      "job_id": "f0f942e7-ea63-4adc-9866-364cc779da73",
+      "state": "pending",
+      "stage": "queued",
+      "attempt_id": null,
+      "reason": "",
+      "created": "2026-11-02T16:11:34.411218+00:00",
+      "updated": "2026-11-02T16:11:34.411218+00:00",
+      "title": "Damien",
+      "journal_stages": []
+    },
+    {
+      "job_id": "a7ce9ec1-0e62-4abc-98a6-7768a5140dc5",
+      "state": "pending",
+      "stage": "queued",
+      "attempt_id": null,
+      "reason": "",
+      "created": "2026-11-02T16:04:05.044963+00:00",
+      "updated": "2026-11-02T16:04:05.044963+00:00",
+      "title": "The Omen",
+      "journal_stages": []
+    },
+    {
+      "job_id": "5b8291c6-7624-4dac-b8bd-2c37048f8674",
+      "state": "completed",
+      "stage": "completed",
+      "attempt_id": "2eb6ce35-5f93-4647-9e70-dd46e4a492f4",
+      "reason": "",
+      "created": "2026-10-28T12:12:14.738471+00:00",
+      "updated": "2026-11-02T15:42:33.544758+00:00",
+      "title": "В финале Джон умрёт",
+      "journal_stages": [
+        {
+          "stage": "checking sources",
+          "at": "2026-11-02T14:51:08.087030+00:00"
+        },
+        {
+          "stage": "creating",
+          "at": "2026-11-02T15:03:53.813457+00:00"
+        },
+        {
+          "stage": "checking",
+          "at": "2026-11-02T15:39:50.454251+00:00"
+        },
+        {
+          "stage": "copying",
+          "at": "2026-11-02T15:41:43.381583+00:00"
+        },
+        {
+          "stage": "publishing",
+          "at": "2026-11-02T15:42:01.792899+00:00"
+        }
+      ],
+      "publication_intent_present": true
+    },
+    {
+      "job_id": "78172ad2-125c-49dd-bf84-039bd7dc7795",
+      "state": "completed",
+      "stage": "completed",
+      "attempt_id": "76d2cb56-2eb2-4a6c-bb54-20b732725853",
+      "reason": "",
+      "created": "2026-10-28T12:01:38.717105+00:00",
+      "updated": "2026-11-02T14:47:56.410789+00:00",
+      "title": "Night of the Triffids",
+      "journal_stages": [
+        {
+          "stage": "checking sources",
+          "at": "2026-11-02T14:05:57.720720+00:00"
+        },
+        {
+          "stage": "creating",
+          "at": "2026-11-02T14:16:18.072569+00:00"
+        },
+        {
+          "stage": "checking",
+          "at": "2026-11-02T14:43:59.450874+00:00"
+        },
+        {
+          "stage": "copying",
+          "at": "2026-11-02T14:46:43.721266+00:00"
+        },
+        {
+          "stage": "publishing",
+          "at": "2026-11-02T14:47:11.522944+00:00"
+        }
+      ],
+      "publication_intent_present": true
+    }
+  ],
+  "automatic_runs": [
+    {
+      "id": "171f412c-5642-482b-a855-7d8ac636fe8d",
+      "state": "Running",
+      "phase": "research",
+      "reason": "",
+      "created": "2026-10-22T16:57:08.777943+00:00",
+      "updated": "2026-11-04T06:14:52.596232+00:00",
+      "restart_paused": 0
+    },
+    {
+      "id": "79b302f6-9800-4419-b8da-272ef8be937e",
+      "state": "Needs attention",
+      "phase": "discovery",
+      "reason": "Automatic pass could not continue; saved source and job evidence preserved",
+      "created": "2026-10-21T20:37:44.679738+00:00",
+      "updated": "2026-10-21T20:38:27.036897+00:00",
+      "restart_paused": 0
+    },
+    {
+      "id": "1046dc44-2921-41e7-9bb4-88ec17a8d73c",
+      "state": "Needs attention",
+      "phase": "discovery",
+      "reason": "Automatic pass could not continue; saved source and job evidence preserved",
+      "created": "2026-10-21T20:30:56.797410+00:00",
+      "updated": "2026-10-21T20:31:46.942327+00:00",
+      "restart_paused": 0
+    }
+  ],
+  "pause": [],
+  "source_cleanup": [
+    {
+      "id": "cc843c47-8633-409d-9394-9ddb149d0537",
+      "job_id": "7239f8a9-e7e7-4a32-90e3-c5822a900556",
+      "state": "completed",
+      "reason": "",
+      "updated": "2026-11-03T18:37:03.979693+00:00"
+    },
+    {
+      "id": "90a30690-8923-4d00-a94d-293f600316d8",
+      "job_id": "a07e05e4-9898-4cf1-9e63-7bf0df32a147",
+      "state": "completed",
+      "reason": "",
+      "updated": "2026-11-03T18:34:17.604638+00:00"
+    },
+    {
+      "id": "c697c15e-95e9-445f-90ed-443b024450f9",
+      "job_id": "5ad3c222-b8e0-4b93-8e80-01848b4d9fc7",
+      "state": "completed",
+      "reason": "",
+      "updated": "2026-11-02T19:16:12.178849+00:00"
+    },
+    {
+      "id": "36afc091-9c5d-4865-a246-d2aa4cb0a55f",
+      "job_id": "4e04aaa0-3019-4062-a207-8eef12bca678",
+      "state": "completed",
+      "reason": "",
+      "updated": "2026-11-02T17:56:19.516543+00:00"
+    },
+    {
+      "id": "d5320201-6a90-4779-b71d-f7da4426a8b3",
+      "job_id": "5b8291c6-7624-4dac-b8bd-2c37048f8674",
+      "state": "completed",
+      "reason": "",
+      "updated": "2026-11-02T16:11:42.935750+00:00"
+    },
+    {
+      "id": "b29aff11-a6f5-4987-bc51-17d9322a58b4",
+      "job_id": "78172ad2-125c-49dd-bf84-039bd7dc7795",
+      "state": "completed",
+      "reason": "",
+      "updated": "2026-11-02T14:50:09.048741+00:00"
+    },
+    {
+      "id": "5de2b9ba-897c-4a2f-82dc-7d7b39ac553d",
+      "job_id": "f310a184-ad41-4453-ad7d-4f9f0f0cba01",
+      "state": "completed",
+      "reason": "",
+      "updated": "2026-11-02T14:04:43.311252+00:00"
+    },
+    {
+      "id": "4ebe9835-63c8-4207-b80d-466cc670e3b0",
+      "job_id": "4953c7ff-6b02-4e0e-8ed8-234799678cb6",
+      "state": "completed",
+      "reason": "",
+      "updated": "2026-11-02T13:48:38.622125+00:00"
+    }
+  ],
+  "working_attempts": [
+    {
+      "job_id": "c53d7cc4-1e7a-455d-9821-b31782881e9e",
+      "attempt_id": "21c1f921-09cb-4bcc-af32-adb00842ef19",
+      "state": "producing",
+      "reason": "",
+      "updated": "2026-11-04T06:13:27.374407+00:00",
+      "producer": "active"
+    },
+    {
+      "job_id": "1fd15b61-2cb4-48cb-9867-ebf65074af7e",
+      "attempt_id": "82a32e64-3c71-4b94-b91a-b766bd1bfe03",
+      "state": "producing",
+      "reason": "",
+      "updated": "2026-11-03T18:38:04.210457+00:00",
+      "producer": "active"
+    },
+    {
+      "job_id": "7239f8a9-e7e7-4a32-90e3-c5822a900556",
+      "attempt_id": "aa8027cd-68ab-4d1f-9f73-ab57f09261ca",
+      "state": "retired",
+      "reason": "",
+      "updated": "2026-11-03T18:37:01.981206+00:00",
+      "producer": "closed"
+    },
+    {
+      "job_id": "a07e05e4-9898-4cf1-9e63-7bf0df32a147",
+      "attempt_id": "2124cd44-5f82-42c0-bfa2-a66f72da2631",
+      "state": "retired",
+      "reason": "",
+      "updated": "2026-11-03T18:30:28.352258+00:00",
+      "producer": "closed"
+    },
+    {
+      "job_id": "5ad3c222-b8e0-4b93-8e80-01848b4d9fc7",
+      "attempt_id": "2c711a7a-865a-4fa2-81e6-410b78fcbfa1",
+      "state": "retired",
+      "reason": "",
+      "updated": "2026-11-02T22:34:50.203777+00:00",
+      "producer": "closed"
+    },
+    {
+      "job_id": "4e04aaa0-3019-4062-a207-8eef12bca678",
+      "attempt_id": "35c210a5-ca18-4b19-ad14-271417628daf",
+      "state": "retired",
+      "reason": "",
+      "updated": "2026-11-02T17:55:42.096869+00:00",
+      "producer": "closed"
+    },
+    {
+      "job_id": "5b8291c6-7624-4dac-b8bd-2c37048f8674",
+      "attempt_id": "2eb6ce35-5f93-4647-9e70-dd46e4a492f4",
+      "state": "retired",
+      "reason": "",
+      "updated": "2026-11-02T16:00:48.776303+00:00",
+      "producer": "closed"
+    },
+    {
+      "job_id": "78172ad2-125c-49dd-bf84-039bd7dc7795",
+      "attempt_id": "76d2cb56-2eb2-4a6c-bb54-20b732725853",
+      "state": "retired",
+      "reason": "",
+      "updated": "2026-11-02T14:49:49.637564+00:00",
+      "producer": "closed"
+    }
+  ],
+  "storage_errors": [
+    {
+      "job_id": "5ad3c222-b8e0-4b93-8e80-01848b4d9fc7",
+      "created": "2026-11-02T19:16:14.487934+00:00",
+      "diagnostic": "{\"disposition\":\"not_started\",\"exception_class\":\"InterruptedError\",\"message\":\"Books Arranger is closing; remaining files retained\",\"phase\":\"verify completed output\",\"secondary\":[],\"sqlite_errorcode\":null,\"sqlite_errorname\":null,\"stack\":[{\"file\":\"storage_cleanup.py\",\"function\":\"run\",\"line\":620},{\"file\":\"contextlib.py\",\"function\":\"__enter__\",\"line\":141},{\"file\":\"storage_cleanup.py\",\"function\":\"protected_output\",\"line\":183},{\"file\":\"merge_service.py\",\"function\":\"_storage_guard\",\"line\":1026},{\"file\":\"merge_service.py\",\"function\":\"_background_guard\",\"line\":1000}]}"
+    },
+    {
+      "job_id": "34ed610b-c2f1-4a50-9274-4e8915e9c7e3",
+      "created": "2026-10-26T21:06:51.261271+00:00",
+      "diagnostic": "{\"disposition\":\"confirmed_absent\",\"exception_class\":\"OperationalError\",\"message\":\"database is locked\",\"phase\":\"commit removed receipt\",\"secondary\":[],\"sqlite_errorcode\":5,\"sqlite_errorname\":\"SQLITE_BUSY\",\"stack\":[{\"file\":\"merge_service.py\",\"function\":\"_after_completed_work\",\"line\":1174},{\"file\":\"merge_service.py\",\"function\":\"_prune_completed\",\"line\":1136},{\"file\":\"recovery_retention.py\",\"function\":\"sync\",\"line\":85}]}"
+    },
+    {
+      "job_id": "8148c6a7-4718-4005-8eca-2fb0457ae6f3",
+      "created": "2026-10-26T15:27:32.946585+00:00",
+      "diagnostic": "{\"disposition\":\"confirmed_absent\",\"exception_class\":\"OperationalError\",\"message\":\"database is locked\",\"phase\":\"commit removed receipt\",\"secondary\":[],\"sqlite_errorcode\":5,\"sqlite_errorname\":\"SQLITE_BUSY\",\"stack\":[{\"file\":\"merge_service.py\",\"function\":\"_after_completed_work\",\"line\":1174},{\"file\":\"merge_service.py\",\"function\":\"_prune_completed\",\"line\":1136},{\"file\":\"recovery_retention.py\",\"function\":\"sync\",\"line\":76}]}"
+    },
+    {
+      "job_id": "a12fd32a-69d7-4c0e-86a6-2da51239bf3f",
+      "created": "2026-10-26T15:20:48.265792+00:00",
+      "diagnostic": "{\"disposition\":\"confirmed_absent\",\"exception_class\":\"OperationalError\",\"message\":\"database is locked\",\"phase\":\"commit removed receipt\",\"secondary\":[],\"sqlite_errorcode\":5,\"sqlite_errorname\":\"SQLITE_BUSY\",\"stack\":[{\"file\":\"merge_service.py\",\"function\":\"_after_completed_work\",\"line\":1174},{\"file\":\"merge_service.py\",\"function\":\"_prune_completed\",\"line\":1136},{\"file\":\"recovery_retention.py\",\"function\":\"sync\",\"line\":76}]}"
+    },
+    {
+      "job_id": "5e255a40-8a72-439f-8f94-e1ebf810a24b",
+      "created": "2026-10-26T15:14:15.525557+00:00",
+      "diagnostic": "{\"disposition\":\"confirmed_absent\",\"exception_class\":\"OperationalError\",\"message\":\"database is locked\",\"phase\":\"commit removed receipt\",\"secondary\":[],\"sqlite_errorcode\":5,\"sqlite_errorname\":\"SQLITE_BUSY\",\"stack\":[{\"file\":\"merge_service.py\",\"function\":\"_after_completed_work\",\"line\":1174},{\"file\":\"merge_service.py\",\"function\":\"_prune_completed\",\"line\":1136},{\"file\":\"recovery_retention.py\",\"function\":\"sync\",\"line\":76}]}"
+    },
+    {
+      "job_id": "d5aec4f5-b3bb-4c62-b4f4-5e3c398aa1fd",
+      "created": "2026-10-26T12:32:57.802458+00:00",
+      "diagnostic": "{\"disposition\":\"confirmed_absent\",\"exception_class\":\"OperationalError\",\"message\":\"database is locked\",\"phase\":\"commit removed receipt\",\"secondary\":[],\"sqlite_errorcode\":5,\"sqlite_errorname\":\"SQLITE_BUSY\",\"stack\":[{\"file\":\"merge_service.py\",\"function\":\"_after_completed_work\",\"line\":1174},{\"file\":\"merge_service.py\",\"function\":\"_prune_completed\",\"line\":1136},{\"file\":\"recovery_retention.py\",\"function\":\"sync\",\"line\":76}]}"
+    },
+    {
+      "job_id": "59e8af8c-dc7e-45fe-bc55-f43bcd1af1d2",
+      "created": "2026-10-23T07:25:17.437225+00:00",
+      "diagnostic": "{\"disposition\":\"confirmed_absent\",\"exception_class\":\"OperationalError\",\"message\":\"database is locked\",\"phase\":\"commit removed receipt\",\"secondary\":[],\"sqlite_errorcode\":5,\"sqlite_errorname\":\"SQLITE_BUSY\",\"stack\":[{\"file\":\"merge_service.py\",\"function\":\"_after_completed_work\",\"line\":990},{\"file\":\"merge_service.py\",\"function\":\"_prune_completed\",\"line\":954},{\"file\":\"recovery_retention.py\",\"function\":\"sync\",\"line\":76}]}"
+    },
+    {
+      "job_id": "7ab467bd-622a-440f-a1d3-c60a73ceb46d",
+      "created": "2026-10-23T05:32:23.497046+00:00",
+      "diagnostic": "{\"disposition\":\"confirmed_absent\",\"exception_class\":\"OperationalError\",\"message\":\"database is locked\",\"phase\":\"commit removed receipt\",\"secondary\":[],\"sqlite_errorcode\":5,\"sqlite_errorname\":\"SQLITE_BUSY\",\"stack\":[{\"file\":\"merge_service.py\",\"function\":\"_after_completed_work\",\"line\":990},{\"file\":\"merge_service.py\",\"function\":\"_prune_completed\",\"line\":954},{\"file\":\"recovery_retention.py\",\"function\":\"sync\",\"line\":76}]}"
+    }
+  ],
+  "owner": {
+    "application": "Books Arranger",
+    "version": "0.24.4",
+    "instance": "8ad99aa38d97957313b4d0e455243550",
+    "pid": 41084,
+    "port": 5210,
+    "closing": false,
+    "restart_context": false,
+    "recovery_active": false,
+    "url": "http://127.0.0.1:5210/"
+  }
+}

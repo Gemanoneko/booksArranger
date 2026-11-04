@@ -107,6 +107,7 @@ class SharedSnapshot:
     def __init__(self,clock=time.monotonic,wait=STATUS_WAIT,keep_flight=False):
         self._lock=threading.Lock();self._clock=clock;self._wait=wait;self._value=None;self._at=None;self._flight=None;self._generation=0
         self._keep_flight=keep_flight
+        self._threads=set();self._closed=False
         self._last=None  # (value, generation, started) of the newest finished computation
 
     def invalidate(self):
@@ -123,15 +124,28 @@ class SharedSnapshot:
                     if flight['generation']==self._generation:self._value,self._at=flight['value'],flight['started']
                     if self._last is None or flight['started']>=self._last[2]:self._last=(flight['value'],flight['generation'],flight['started'])
                 if self._flight is flight:self._flight=None
+                self._threads.discard(threading.current_thread())
             flight['done'].set()
+
+    def close(self):
+        """Stop admitting reads and wait for every computation, including detached flights."""
+        with self._lock:
+            self._closed=True;threads=list(self._threads)
+        deadline=time.monotonic()+30
+        for thread in threads:
+            thread.join(max(0,deadline-time.monotonic()))
+        if any(thread.is_alive() for thread in threads):
+            raise TimeoutError('Status computations are still closing their catalog reads')
 
     def get(self,compute,max_age):
         with self._lock:
+            if self._closed:raise StatusUnavailable('Books Arranger is closing')
             if self._at is not None and 0<=self._clock()-self._at<max_age:return copy.deepcopy(self._value)
             flight=self._flight
             if flight is None:
                 flight=self._flight={'done':threading.Event(),'value':None,'error':None,'generation':self._generation,'started':self._clock()}
-                threading.Thread(target=self._run,args=(flight,compute),name='books-status',daemon=True).start()
+                thread=threading.Thread(target=self._run,args=(flight,compute),name='books-status',daemon=True)
+                self._threads.add(thread);thread.start()
             last=self._last;current=self._generation
         bound=self._wait if last is None or last[1]!=current else min(self._wait,STALE_WAIT)
         if not flight['done'].wait(bound):
@@ -570,7 +584,10 @@ class MergeService:
         with _QUIET_LOCK:
             kept=self.__dict__.get('_quiet_state')
             if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():return copy.deepcopy(kept[2])
-        started,value=self.__dict__.setdefault('_status_shared',SharedSnapshot()).get(lambda:(self._quiet_token(),self.state()),max_age)
+        with _QUIET_LOCK:
+            if self.__dict__.get('_closing'):raise StatusUnavailable('Books Arranger is closing')
+            shared=self.__dict__.setdefault('_status_shared',SharedSnapshot())
+        started,value=shared.get(lambda:(self._quiet_token(),self.state()),max_age)
         if token is not None and started==token:
             with _QUIET_LOCK:self._quiet_state=(token,time.monotonic(),copy.deepcopy(value))
         return value
@@ -584,6 +601,7 @@ class MergeService:
             kept=self.__dict__.get('_quiet_pages',{}).get(key)
             if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<min(self.quiet_max_age(),kept[3]):return copy.deepcopy(kept[2])
         with _QUIET_LOCK:
+            if self.__dict__.get('_closing'):raise StatusUnavailable('Books Arranger is closing')
             flights=self.__dict__.setdefault('_page_shared',{})
             tokens=self.__dict__.setdefault('_page_tokens',{})
             if key not in flights and len(flights)>=32:
@@ -4994,6 +5012,10 @@ class MergeService:
             pending=self.__dict__.get('_retry_all_stop')
             if pending:pending.set()
             for press in list(self.__dict__.get('_approve_stops',())):press.set()
+        with _QUIET_LOCK:
+            snapshots=[self.__dict__.get('_status_shared'),*self.__dict__.get('_page_shared',{}).values()]
+        for snapshot in snapshots:
+            if snapshot is not None:snapshot.close()
         for name in ('series_backfill','gap_fill'):
             background=self.__dict__.get(name)
             if background is not None:background.close()

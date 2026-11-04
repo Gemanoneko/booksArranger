@@ -1,0 +1,86 @@
+{
+  "captured_utc": "2026-11-04T06:25:44.727763+00:00",
+  "base_head": "94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb",
+  "candidate": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101",
+  "frozen_files": [
+    {
+      "path": "audio_jobs.py",
+      "size": 96346,
+      "sha256": "8a6b6840754c4d3803381b9e3ae5c3579fe9b01818acdf79b915d26a9d666a32"
+    },
+    {
+      "path": "merge_service.py",
+      "size": 421486,
+      "sha256": "3e7fd0e86b063727c53dbfdea2c788cf5079cbf7ee6c203db2ad6837f2f46bfe"
+    },
+    {
+      "path": "public_research.py",
+      "size": 202403,
+      "sha256": "2033861591675474b97cfcadb9c87c08dfbf34bcab390104cd804330148d105e"
+    },
+    {
+      "path": "working_lifecycle.py",
+      "size": 55153,
+      "sha256": "af6e5b15192bc9ebbf3469021f184ac10627dfc3eeec4b83ac4d14af5b41ff9b"
+    },
+    {
+      "path": "tests/test_attempt_working_lifecycle.py",
+      "size": 31890,
+      "sha256": "7d0971e215ecd6445a96806e8b56a736a0c12708764097c085c9fc5242246709"
+    },
+    {
+      "path": "tests/test_gap_fill.py",
+      "size": 17751,
+      "sha256": "24555ad12305c0b6bfc9b29181bd37f4b339270cc96b4acd2d8c79b9a6f43315"
+    },
+    {
+      "path": "tests/test_status_snapshot.py",
+      "size": 21820,
+      "sha256": "0b1c6e627523994e566b8904d8396e77b1818040205a9cb2569ebf94824c025c"
+    }
+  ],
+  "tests": [
+    {
+      "command": "focused.py (14-case initial default subset)",
+      "cases": 14,
+      "seconds": 5.39,
+      "result": "PASS"
+    },
+    {
+      "command": "focused.py test_gap_fill test_status_snapshot test_attempt_working_lifecycle test_web",
+      "cases": 91,
+      "seconds": 46.129,
+      "result": "PASS"
+    },
+    {
+      "command": "focused.py test_status_snapshot.SharedSnapshotTests.test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights test_attempt_working_lifecycle.WorkingLifecycleTests.test_a_current_failed_producer_hold_does_not_stop_the_queue test_startup_loading",
+      "cases": 14,
+      "seconds": 22.617,
+      "result": "PASS"
+    }
+  ],
+  "baseline_controls": [
+    {
+      "cases": 3,
+      "seconds": 0.853,
+      "result": "3 expected failures",
+      "spacing_seconds": 0.1947686,
+      "spacing_requirement": 0.38,
+      "source": "94be500 product code with new regression tests"
+    },
+    {
+      "cases": 2,
+      "seconds": 0.154,
+      "result": "2 expected failures",
+      "source": "94be500 product code with final owner-close and current-producer regression tests"
+    }
+  ],
+  "runtime": "WIP/Books Arranger/build-cache/qa-runtime/python/python.exe; -I -B; retained pinned QA codecs",
+  "scope": "Copied private source snapshot and private fixture/temp/profile roots. No full or hidden QA, no source-library opens, no installed-state changes.",
+  "limitations": [
+    "Overnight original event leaving producer active is not present in the durable diagnostics; selected audio_failure_history is empty.",
+    "Existing test_a_waiter_gives_up_after_its_bound_without_a_second_computation emits an uncaught expected StatusUnavailable in its test reader thread while passing. Preserved in raw log.",
+    "The three-independent-books regression uses real queue/lifecycle/native private files and an injected validated-output runner; packaged QA supplies codec behavior.",
+    "Affected-module run preceded strengthening the owner-close regression to exercise real SQLite and MergeService.close. Final strengthened test was separately baseline-failed then passed with startup coverage."
+  ]
+}

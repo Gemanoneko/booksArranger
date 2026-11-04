@@ -1,0 +1,29 @@
+test_a_cached_answer_never_waits_behind_another_threads_request (test_gap_fill.ClientLockTests.test_a_cached_answer_never_waits_behind_another_threads_request) ... ok
+test_a_delayed_first_dispatch_cannot_compress_the_second_reservation (test_gap_fill.ClientLockTests.test_a_delayed_first_dispatch_cannot_compress_the_second_reservation) ... ok
+test_a_reservation_that_fails_to_commit_leaves_no_url_waiting (test_gap_fill.ClientLockTests.test_a_reservation_that_fails_to_commit_leaves_no_url_waiting) ... ok
+test_one_url_asked_by_two_threads_is_fetched_once (test_gap_fill.ClientLockTests.test_one_url_asked_by_two_threads_is_fetched_once) ... ok
+test_requests_to_one_site_stay_spaced_from_two_threads (test_gap_fill.ClientLockTests.test_requests_to_one_site_stay_spaced_from_two_threads) ... ok
+test_a_waiter_gives_up_after_its_bound_without_a_second_computation (test_status_snapshot.SharedSnapshotTests.test_a_waiter_gives_up_after_its_bound_without_a_second_computation) ... Exception in thread Thread-11 (<lambda>):
+Traceback (most recent call last):
+  File "threading.py", line 1082, in _bootstrap_inner
+  File "threading.py", line 1024, in run
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_status_snapshot.py", line 129, in <lambda>
+    owner = threading.Thread(target=lambda: shared.get(hung, 1.0)); owner.start()
+                                            ~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\merge_service.py", line 153, in get
+    raise StatusUnavailable('Status computation is still running')
+merge_service.StatusUnavailable: Status computation is still running
+ok
+test_answer_age_counts_from_the_start_of_its_computation (test_status_snapshot.SharedSnapshotTests.test_answer_age_counts_from_the_start_of_its_computation) ... ok
+test_close_waits_for_a_detached_catalog_read_and_refuses_new_flights (test_status_snapshot.SharedSnapshotTests.test_close_waits_for_a_detached_catalog_read_and_refuses_new_flights) ... ok
+test_concurrent_callers_share_one_computation_and_get_private_copies (test_status_snapshot.SharedSnapshotTests.test_concurrent_callers_share_one_computation_and_get_private_copies) ... ok
+test_failure_reaches_every_waiter_and_is_never_cached (test_status_snapshot.SharedSnapshotTests.test_failure_reaches_every_waiter_and_is_never_cached) ... ok
+test_finished_answer_is_reused_only_for_max_age (test_status_snapshot.SharedSnapshotTests.test_finished_answer_is_reused_only_for_max_age) ... ok
+test_invalidate_detaches_a_running_computation_so_it_never_refills_or_is_joined (test_status_snapshot.SharedSnapshotTests.test_invalidate_detaches_a_running_computation_so_it_never_refills_or_is_joined) ... ok
+test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish (test_attempt_working_lifecycle.WorkingLifecycleTests.test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish) ... ok
+test_malformed_payloads_and_configured_roots_only (test_web.BrowserTests.test_malformed_payloads_and_configured_roots_only) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 5.390s
+
+OK

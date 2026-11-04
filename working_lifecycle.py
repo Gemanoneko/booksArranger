@@ -17,6 +17,11 @@ from scanner import connect
 from sqlite_retry import transaction
 from native_io import BoundaryError, DirectoryBoundary as NativeBoundary, VerifiedFile as NativeFile, ordinary, kernel
 from source_cleanup import packed, stamp, single_stream
+from audio_jobs import JobWorkingHold
+
+
+class ProducerNotClosed(BoundaryError, JobWorkingHold):
+    """An earlier producer remains retained for this job alone."""
 
 TERMINAL = {'removed', 'absent_after_intent', 'not_created'}
 # tag-repair-<hex>.mp3/.json: the MP3 trailing-tag repair's private copy and its proof (audio_pipeline._mp3_tag_copy). Until
@@ -417,7 +422,7 @@ class WorkingLifecycle:
                 raise BoundaryError('A retired working name was replaced; preserved')
             return
         if attempt['producer'] != 'closed':
-            raise BoundaryError('A prior producer is not durably closed; another attempt is not admitted')
+            raise ProducerNotClosed('A prior producer is not durably closed; another attempt is not admitted')
         self._unpublished(attempt)
         manifest = json.loads(attempt['manifest'])
         stage = self.stage_root / job_id / attempt_id

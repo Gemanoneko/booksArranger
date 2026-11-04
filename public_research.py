@@ -300,6 +300,7 @@ def source_leads():
 class PublicClient:
     def __init__(self,database,fetch=None,clock=time.time):
         self.database=database;self.fetch=fetch or transport;self.clock=clock;self.lock=threading.Lock()
+        self._dispatch_locks={};self._last_dispatch={}
         with connect(database) as db:
             db.execute('CREATE TABLE IF NOT EXISTS public_research_cache(url TEXT PRIMARY KEY,raw TEXT,sha256 TEXT,fetched REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS public_research_requests(host TEXT,at REAL)')
@@ -462,7 +463,21 @@ class PublicClient:
         # site. A cached answer another thread (research) needs no longer waits behind a background pass's request.
         if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
         try:
-            raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
+            # A reservation precedes its SQLite commit and thread scheduling. Those
+            # delays can compress actual starts, so also pace dispatch at the host.
+            family='wikimedia' if host in WIKIMEDIA_HOSTS else host
+            with self.lock:dispatch=self._dispatch_locks.setdefault(family,threading.Lock())
+            while not dispatch.acquire(timeout=.25):
+                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
+            try:
+                spacing=6.1 if host in WIKIMEDIA_HOSTS else host_policy(host)[1]
+                remaining=self._last_dispatch.get(family,float('-inf'))+spacing-self.clock()
+                if remaining>0 and (stop.wait(remaining) if stop else time.sleep(remaining)):
+                    raise InterruptedError('Automatic processing paused')
+                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
+                self._last_dispatch[family]=self.clock()
+                raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
+            finally:dispatch.release()
             if not isinstance(raw,bytes) or len(raw)>MAX_BYTES:raise ValueError()
             if any(marker in raw[:MAX_BYTES].lower() for marker in CHALLENGE_MARKERS):raise ChallengeDetected()
         except InterruptedError:raise

@@ -1,0 +1,25 @@
+test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights (test_status_snapshot.SharedSnapshotTests.test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights) ... FAIL
+test_a_current_failed_producer_hold_does_not_stop_the_queue (test_attempt_working_lifecycle.WorkingLifecycleTests.test_a_current_failed_producer_hold_does_not_stop_the_queue) ... FAIL
+
+======================================================================
+FAIL: test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights (test_status_snapshot.SharedSnapshotTests.test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_status_snapshot.py", line 54, in test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights
+    self.assertFalse(closed.wait(.1), 'Close must retain the detached catalog read')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false : Close must retain the detached catalog read
+
+======================================================================
+FAIL: test_a_current_failed_producer_hold_does_not_stop_the_queue (test_attempt_working_lifecycle.WorkingLifecycleTests.test_a_current_failed_producer_hold_does_not_stop_the_queue)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0245-fix-20261104\src\tests\test_attempt_working_lifecycle.py", line 294, in test_a_current_failed_producer_hold_does_not_stop_the_queue
+    self.assertFalse(self.queue._stop.is_set())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.154s
+
+FAILED (failures=2)

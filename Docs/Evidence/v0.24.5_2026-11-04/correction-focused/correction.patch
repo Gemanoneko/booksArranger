@@ -1,0 +1,333 @@
+diff --git a/audio_jobs.py b/audio_jobs.py
+index 93dbe41..567cb3a 100644
+--- a/audio_jobs.py
++++ b/audio_jobs.py
+@@ -23,6 +23,10 @@ MEASURED = {"checking sources": {"preparing": "files", "source copies": "bytes",
+             "creating": {"encoding": "seconds"}, "copying": {"publishing": "bytes"}}
+ 
+ 
++class JobWorkingHold(ValueError):
++    """This job's retained producer prevents its retry; unrelated jobs may continue."""
++
++
+ def _now():
+     return datetime.now(timezone.utc).isoformat()
+ 
+@@ -1213,6 +1217,9 @@ class AudioJobs:
+                     self._stop.set();return
+                 if self._stop.is_set() or self._drain.is_set():return
+                 continue
++            except JobWorkingHold as error:
++                self._update(row['job_id'],state='needs attention',reason='Working cleanup requires attention: '+str(error))
++                continue
+             except Exception as error:
+                 self._update(row['job_id'],state='needs attention',reason='Working cleanup requires attention: '+str(error))
+                 self._stop.set()
+@@ -1315,6 +1322,7 @@ class AudioJobs:
+             self._archive_attempt(row)
+         except Exception as error:
+             self._update(job_id,state='needs attention',reason='Working cleanup requires attention: '+str(error))
++            if isinstance(error,JobWorkingHold):return True
+             self._stop.set()
+             if self.on_working_hold:self.on_working_hold()
+             return False # No new attempt or source copy exists before admission.
+@@ -1402,11 +1410,12 @@ class AudioJobs:
+                     self.after_attempt(job_id,attempt)
+                     attempt_closed=True
+                 except Exception as cleanup_error:
+-                    self._stop.set()
++                    if not isinstance(cleanup_error,JobWorkingHold):
++                        self._stop.set()
++                        if self.on_working_hold:self.on_working_hold()
+                     latest=self._rows('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,))
+                     if latest and latest[0]['state'] in {'pending','needs attention'}:
+                         self._update(job_id,reason=(latest[0]['reason']+'; ' if latest[0]['reason'] else '')+'Working cleanup requires attention: '+str(cleanup_error))
+-                    if self.on_working_hold:self.on_working_hold()
+         if damage_assessment is not None and attempt_closed and self.after_failed:
+             try:self.after_failed(job_id,attempt,damage_assessment)
+             except (ValueError,OSError):pass # No marker without exact supported assessment and closure.
+diff --git a/merge_service.py b/merge_service.py
+index b4f30c1..e90593f 100644
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -107,6 +107,7 @@ class SharedSnapshot:
+     def __init__(self,clock=time.monotonic,wait=STATUS_WAIT,keep_flight=False):
+         self._lock=threading.Lock();self._clock=clock;self._wait=wait;self._value=None;self._at=None;self._flight=None;self._generation=0
+         self._keep_flight=keep_flight
++        self._threads=set();self._closed=False
+         self._last=None  # (value, generation, started) of the newest finished computation
+ 
+     def invalidate(self):
+@@ -123,15 +124,28 @@ class SharedSnapshot:
+                     if flight['generation']==self._generation:self._value,self._at=flight['value'],flight['started']
+                     if self._last is None or flight['started']>=self._last[2]:self._last=(flight['value'],flight['generation'],flight['started'])
+                 if self._flight is flight:self._flight=None
++                self._threads.discard(threading.current_thread())
+             flight['done'].set()
+ 
++    def close(self):
++        """Stop admitting reads and wait for every computation, including detached flights."""
++        with self._lock:
++            self._closed=True;threads=list(self._threads)
++        deadline=time.monotonic()+30
++        for thread in threads:
++            thread.join(max(0,deadline-time.monotonic()))
++        if any(thread.is_alive() for thread in threads):
++            raise TimeoutError('Status computations are still closing their catalog reads')
++
+     def get(self,compute,max_age):
+         with self._lock:
++            if self._closed:raise StatusUnavailable('Books Arranger is closing')
+             if self._at is not None and 0<=self._clock()-self._at<max_age:return copy.deepcopy(self._value)
+             flight=self._flight
+             if flight is None:
+                 flight=self._flight={'done':threading.Event(),'value':None,'error':None,'generation':self._generation,'started':self._clock()}
+-                threading.Thread(target=self._run,args=(flight,compute),name='books-status',daemon=True).start()
++                thread=threading.Thread(target=self._run,args=(flight,compute),name='books-status',daemon=True)
++                self._threads.add(thread);thread.start()
+             last=self._last;current=self._generation
+         bound=self._wait if last is None or last[1]!=current else min(self._wait,STALE_WAIT)
+         if not flight['done'].wait(bound):
+@@ -570,7 +584,10 @@ class MergeService:
+         with _QUIET_LOCK:
+             kept=self.__dict__.get('_quiet_state')
+             if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():return copy.deepcopy(kept[2])
+-        started,value=self.__dict__.setdefault('_status_shared',SharedSnapshot()).get(lambda:(self._quiet_token(),self.state()),max_age)
++        with _QUIET_LOCK:
++            if self.__dict__.get('_closing'):raise StatusUnavailable('Books Arranger is closing')
++            shared=self.__dict__.setdefault('_status_shared',SharedSnapshot())
++        started,value=shared.get(lambda:(self._quiet_token(),self.state()),max_age)
+         if token is not None and started==token:
+             with _QUIET_LOCK:self._quiet_state=(token,time.monotonic(),copy.deepcopy(value))
+         return value
+@@ -584,6 +601,7 @@ class MergeService:
+             kept=self.__dict__.get('_quiet_pages',{}).get(key)
+             if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<min(self.quiet_max_age(),kept[3]):return copy.deepcopy(kept[2])
+         with _QUIET_LOCK:
++            if self.__dict__.get('_closing'):raise StatusUnavailable('Books Arranger is closing')
+             flights=self.__dict__.setdefault('_page_shared',{})
+             tokens=self.__dict__.setdefault('_page_tokens',{})
+             if key not in flights and len(flights)>=32:
+@@ -4994,6 +5012,10 @@ class MergeService:
+             pending=self.__dict__.get('_retry_all_stop')
+             if pending:pending.set()
+             for press in list(self.__dict__.get('_approve_stops',())):press.set()
++        with _QUIET_LOCK:
++            snapshots=[self.__dict__.get('_status_shared'),*self.__dict__.get('_page_shared',{}).values()]
++        for snapshot in snapshots:
++            if snapshot is not None:snapshot.close()
+         for name in ('series_backfill','gap_fill'):
+             background=self.__dict__.get(name)
+             if background is not None:background.close()
+diff --git a/public_research.py b/public_research.py
+index f8fba91..4270bca 100644
+--- a/public_research.py
++++ b/public_research.py
+@@ -300,6 +300,7 @@ def source_leads():
+ class PublicClient:
+     def __init__(self,database,fetch=None,clock=time.time):
+         self.database=database;self.fetch=fetch or transport;self.clock=clock;self.lock=threading.Lock()
++        self._dispatch_locks={};self._last_dispatch={}
+         with connect(database) as db:
+             db.execute('CREATE TABLE IF NOT EXISTS public_research_cache(url TEXT PRIMARY KEY,raw TEXT,sha256 TEXT,fetched REAL)')
+             db.execute('CREATE TABLE IF NOT EXISTS public_research_requests(host TEXT,at REAL)')
+@@ -462,7 +463,21 @@ class PublicClient:
+         # site. A cached answer another thread (research) needs no longer waits behind a background pass's request.
+         if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
+         try:
+-            raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
++            # A reservation precedes its SQLite commit and thread scheduling. Those
++            # delays can compress actual starts, so also pace dispatch at the host.
++            family='wikimedia' if host in WIKIMEDIA_HOSTS else host
++            with self.lock:dispatch=self._dispatch_locks.setdefault(family,threading.Lock())
++            while not dispatch.acquire(timeout=.25):
++                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
++            try:
++                spacing=6.1 if host in WIKIMEDIA_HOSTS else host_policy(host)[1]
++                remaining=self._last_dispatch.get(family,float('-inf'))+spacing-self.clock()
++                if remaining>0 and (stop.wait(remaining) if stop else time.sleep(remaining)):
++                    raise InterruptedError('Automatic processing paused')
++                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
++                self._last_dispatch[family]=self.clock()
++                raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
++            finally:dispatch.release()
+             if not isinstance(raw,bytes) or len(raw)>MAX_BYTES:raise ValueError()
+             if any(marker in raw[:MAX_BYTES].lower() for marker in CHALLENGE_MARKERS):raise ChallengeDetected()
+         except InterruptedError:raise
+diff --git a/tests/test_attempt_working_lifecycle.py b/tests/test_attempt_working_lifecycle.py
+index f37f18f..0a004c5 100644
+--- a/tests/test_attempt_working_lifecycle.py
++++ b/tests/test_attempt_working_lifecycle.py
+@@ -5,6 +5,7 @@ They exercise actual owned cancellation/disposition, not codec correctness.
+ """
+ from sorted_fixture import library_is_sorted  # 0.21.3: fixtures publish inside their library
+ import errno
++import copy
+ import base64
+ import contextlib
+ import ctypes
+@@ -237,6 +238,63 @@ class WorkingLifecycleTests(unittest.TestCase):
+         with self.assertRaises(BoundaryError):self.life.admit(self.queue._rows('SELECT * FROM audio_jobs')[0])
+         self.assertTrue((stage/'checked.m4b').exists())
+ 
++    def test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish(self):
++        attempt, stage, _ = self.stage()
++        prior = self.life._attempt(self.job_id, attempt)
++        self.life._set_attempt(prior, producer='active', state='producing')
++        retained = {path.name: path.read_bytes() for path in stage.iterdir()}
++        self.queue._update(self.job_id, state='pending', stage='queued')
++        manifests = []
++        for index in range(3):
++            manifest = copy.deepcopy(self.manifest)
++            manifest['job_id'] = str(uuid.uuid4()); manifest['candidate_id'] = str(uuid.uuid4())
++            source = self.library / ('independent%d.mp3' % index)
++            source.write_bytes(b'independent protected source ' + bytes([index]))
++            info = source.stat()
++            manifest['sources'] = [{'path': str(source), 'size': info.st_size, 'modified': str(info.st_mtime_ns),
++                                    'sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
++                                    'fingerprint': {'size': info.st_size, 'modified': str(info.st_mtime_ns)}}]
++            manifest['destination'] = str(self.library / ('independent%d.m4b' % index))
++            self.queue.enqueue(manifest); manifests.append(manifest)
++        ran = []
++        def runner(manifest, stop, checkpoint):
++            ran.append(manifest['job_id'])
++            self.assertNotEqual(manifest['job_id'], self.job_id, 'Retained producer must never run again')
++            output = Path(manifest['destination']); output.write_bytes(b'private verified output')
++            record = {'job_id': manifest['job_id'], 'final_path': str(output), 'owned_temp': str(output),
++                      'sha256': hashlib.sha256(output.read_bytes()).hexdigest(), 'size': output.stat().st_size,
++                      'validation': {'passed': True}}
++            checkpoint('publishing', record)
++            return record
++        self.queue.runner = runner
++        self.queue._work()
++        rows = {row['job_id']: row for row in self.queue._rows('SELECT * FROM audio_jobs')}
++        self.assertEqual(rows[self.job_id]['state'], 'needs attention')
++        self.assertIn('not durably closed', rows[self.job_id]['reason'])
++        self.assertEqual(rows[self.job_id]['attempt_id'], attempt)
++        self.assertEqual([rows[m['job_id']]['state'] for m in manifests], ['completed'] * 3)
++        self.assertEqual(set(ran), {m['job_id'] for m in manifests})
++        self.assertFalse(self.queue._stop.is_set())
++        self.assertEqual({path.name: path.read_bytes() for path in stage.iterdir()}, retained)
++        self.assertEqual(self.source.read_bytes(), self.original)
++        self.assertEqual(self.life._attempt(self.job_id, attempt)['producer'], 'active')
++
++    def test_a_current_failed_producer_hold_does_not_stop_the_queue(self):
++        held = []
++        self.queue.on_working_hold = lambda: held.append(True)
++        def runner(manifest, stop, checkpoint):
++            self.life.begin(manifest)
++            raise OSError(errno.EIO, 'Private failure before closure was durably recorded')
++        self.queue.runner = runner
++        self.queue._work()
++        row = self.queue._rows('SELECT * FROM audio_jobs')[0]
++        self.assertEqual(row['state'], 'needs attention')
++        self.assertIn('not durably closed', row['reason'])
++        self.assertEqual(self.life._attempt(self.job_id, row['attempt_id'])['producer'], 'active')
++        self.assertFalse(self.queue._stop.is_set())
++        self.assertEqual(held, [])
++        self.assertEqual(self.source.read_bytes(), self.original)
++
+     def test_unknown_attempt_file_is_not_claimed_by_retirement(self):
+         attempt,stage,_=self.stage();unknown=stage/'unknown-personal.flac';unknown.write_bytes(b'not owned by producer')
+         # Files arriving after capture are not ledger-owned and cannot be selected.
+diff --git a/tests/test_gap_fill.py b/tests/test_gap_fill.py
+index 71e5195..caf19ab 100644
+--- a/tests/test_gap_fill.py
++++ b/tests/test_gap_fill.py
+@@ -175,6 +175,31 @@ class ClientLockTests(unittest.TestCase):
+         times = sorted(at for _, at in self.started)
+         self.assertEqual(len(times), 2); self.assertGreaterEqual(times[1] - times[0], public_research.host_policy('api.fantlab.ru')[1] - 0.05)
+ 
++    def test_a_delayed_first_dispatch_cannot_compress_the_second_reservation(self):
++        client = PublicClient(Path(self.temp.name) / 'c.sqlite3', fetch=self.fetch)
++        reserved = threading.Event(); second = threading.Event(); errors = []
++        original = client._fetch_reserved
++        def delayed(url, *args):
++            if url.endswith('/first'):
++                reserved.set()
++                if not second.wait(5): raise TimeoutError('Second reservation did not arrive')
++                time.sleep(.2)
++            else: second.set()
++            return original(url, *args)
++        def read(name):
++            try: client.read('https://api.fantlab.ru/' + name, None, {'remaining': 1})
++            except Exception as error: errors.append(error)
++        with mock.patch.object(client, '_fetch_reserved', delayed), mock.patch.object(public_research, 'host_policy', return_value=(100, .4)):
++            first = threading.Thread(target=read, args=('first',)); first.start()
++            self.assertTrue(reserved.wait(5))
++            following = threading.Thread(target=read, args=('second',)); following.start()
++            first.join(5); following.join(5)
++        self.assertFalse(first.is_alive()); self.assertFalse(following.is_alive())
++        self.assertEqual(errors, [])
++        times = sorted(at for _, at in self.started)
++        self.assertEqual(len(times), 2)
++        self.assertGreaterEqual(times[1] - times[0], .38)
++
+     def test_one_url_asked_by_two_threads_is_fetched_once(self):
+         # Senua's 0.22.1 review, W12: with the fetch outside the lock, research and a background lane both missed the cache
+         # for the same URL and both reserved and fetched it: two requests against the site's bound.
+diff --git a/tests/test_status_snapshot.py b/tests/test_status_snapshot.py
+index c10da8c..c967e16 100644
+--- a/tests/test_status_snapshot.py
++++ b/tests/test_status_snapshot.py
+@@ -28,6 +28,35 @@ class Clock:
+ 
+ 
+ class SharedSnapshotTests(unittest.TestCase):
++    def test_merge_close_waits_for_a_detached_catalog_read_and_refuses_new_flights(self):
++        temporary = tempfile.TemporaryDirectory(dir=AREA)
++        self.addCleanup(temporary.cleanup)
++        shared = SharedSnapshot(wait=.01)
++        merge = MergeService.__new__(MergeService)
++        merge._status_shared = shared
++        merge._retention_stop = threading.Event(); merge._retention_wake = threading.Event()
++        merge._retention_thread = None; merge.jobs = Mock(); merge.cleanup = Mock()
++        entered = threading.Event(); release = threading.Event(); closed = threading.Event()
++        def compute():
++            connection = sqlite3.connect(Path(temporary.name) / 'catalog.sqlite3')
++            try:
++                connection.execute('CREATE TABLE fixture(n INTEGER)'); connection.commit()
++                entered.set()
++                if not release.wait(5): raise TimeoutError('Private catalog read was not released')
++                return {'state': 'Paused'}
++            finally: connection.close()
++        with self.assertRaises(StatusUnavailable): shared.get(compute, 0)
++        self.assertTrue(entered.wait(5))
++        shared.invalidate()
++        closer = threading.Thread(target=lambda: (merge.close(), closed.set()))
++        closer.start()
++        try:
++            self.assertFalse(closed.wait(.1), 'Close must retain the detached catalog read')
++            with self.assertRaises(StatusUnavailable): shared.get(lambda: self.fail('New closing read'), 0)
++        finally:
++            release.set(); closer.join(5)
++        self.assertTrue(closed.is_set())
++
+     def test_concurrent_callers_share_one_computation_and_get_private_copies(self):
+         calls = []
+         gate = threading.Event()
+diff --git a/working_lifecycle.py b/working_lifecycle.py
+index 429c55f..795a50d 100644
+--- a/working_lifecycle.py
++++ b/working_lifecycle.py
+@@ -17,6 +17,11 @@ from scanner import connect
+ from sqlite_retry import transaction
+ from native_io import BoundaryError, DirectoryBoundary as NativeBoundary, VerifiedFile as NativeFile, ordinary, kernel
+ from source_cleanup import packed, stamp, single_stream
++from audio_jobs import JobWorkingHold
++
++
++class ProducerNotClosed(BoundaryError, JobWorkingHold):
++    """An earlier producer remains retained for this job alone."""
+ 
+ TERMINAL = {'removed', 'absent_after_intent', 'not_created'}
+ # tag-repair-<hex>.mp3/.json: the MP3 trailing-tag repair's private copy and its proof (audio_pipeline._mp3_tag_copy). Until
+@@ -417,7 +422,7 @@ class WorkingLifecycle:
+                 raise BoundaryError('A retired working name was replaced; preserved')
+             return
+         if attempt['producer'] != 'closed':
+-            raise BoundaryError('A prior producer is not durably closed; another attempt is not admitted')
++            raise ProducerNotClosed('A prior producer is not durably closed; another attempt is not admitted')
+         self._unpublished(attempt)
+         manifest = json.loads(attempt['manifest'])
+         stage = self.stage_root / job_id / attempt_id

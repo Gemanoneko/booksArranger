@@ -23,6 +23,10 @@ MEASURED = {"checking sources": {"preparing": "files", "source copies": "bytes",
             "creating": {"encoding": "seconds"}, "copying": {"publishing": "bytes"}}
 
 
+class JobWorkingHold(ValueError):
+    """This job's retained producer prevents its retry; unrelated jobs may continue."""
+
+
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -1213,6 +1217,9 @@ class AudioJobs:
                     self._stop.set();return
                 if self._stop.is_set() or self._drain.is_set():return
                 continue
+            except JobWorkingHold as error:
+                self._update(row['job_id'],state='needs attention',reason='Working cleanup requires attention: '+str(error))
+                continue
             except Exception as error:
                 self._update(row['job_id'],state='needs attention',reason='Working cleanup requires attention: '+str(error))
                 self._stop.set()
@@ -1315,6 +1322,7 @@ class AudioJobs:
             self._archive_attempt(row)
         except Exception as error:
             self._update(job_id,state='needs attention',reason='Working cleanup requires attention: '+str(error))
+            if isinstance(error,JobWorkingHold):return True
             self._stop.set()
             if self.on_working_hold:self.on_working_hold()
             return False # No new attempt or source copy exists before admission.
@@ -1402,11 +1410,12 @@ class AudioJobs:
                     self.after_attempt(job_id,attempt)
                     attempt_closed=True
                 except Exception as cleanup_error:
-                    self._stop.set()
+                    if not isinstance(cleanup_error,JobWorkingHold):
+                        self._stop.set()
+                        if self.on_working_hold:self.on_working_hold()
                     latest=self._rows('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,))
                     if latest and latest[0]['state'] in {'pending','needs attention'}:
                         self._update(job_id,reason=(latest[0]['reason']+'; ' if latest[0]['reason'] else '')+'Working cleanup requires attention: '+str(cleanup_error))
-                    if self.on_working_hold:self.on_working_hold()
         if damage_assessment is not None and attempt_closed and self.after_failed:
             try:self.after_failed(job_id,attempt,damage_assessment)
             except (ValueError,OSError):pass # No marker without exact supported assessment and closure.
