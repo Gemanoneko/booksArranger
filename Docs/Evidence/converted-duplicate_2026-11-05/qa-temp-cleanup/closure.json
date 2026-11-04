@@ -1,0 +1,25 @@
+{
+  "schema": "books-qa-temp-cleanup-closure-v1",
+  "date": "2026-11-05",
+  "release": "Books Arranger v0.25.0 published before cleanup",
+  "mode": "sanctioned studio-sweep exact approved targets",
+  "dryrun_sha256": "98c7f281fcc40d521a7bba6b7876a826a19958de2b33e4a442a4a80e9a0ed414",
+  "ownership_review_sha256": "a0a98b67d5d23ef17bcb501ccddb329c832fa02932cc37844a785d2923c708f4",
+  "apply_receipt_sha256": "fee42a20255b2a8f8fa4d43c7c10112445e894bb0f301fb999970718a0c766c2",
+  "removed_files": 13349,
+  "removed_logical_bytes": 968209604,
+  "removed_reported_mib": 923.36,
+  "refused_or_kept_targets": 0,
+  "roots_absent": [
+    "C:/Antigravity Projects/q2",
+    "C:/Antigravity Projects/q3",
+    "C:/Antigravity Projects/q4",
+    "C:/Antigravity Projects/n25"
+  ],
+  "junctions_unlinked_not_followed": 3,
+  "published_qa_sha256": "9687c24556593209402eccf4d8cc08f4833552f813679b87bd2bb4da114e6621",
+  "published_native_qa_sha256": "4970eeb2c8600912f76c36bcba6a8134fabdeb0f9d87648f908362846f6e8321",
+  "published_full_receipt_sha256": "afab5c83f884a5f6e283b96cdff60fba75b17abd44dec239183b64cc060a9de2",
+  "release_installer_sha256": "a286126ba64d63c61dd307d00bbd230734c967a66114babd7197b9af81921963",
+  "excluded": "0.24.5 old roots, Ender PNG scratch, installed app, release worktrees, live user data/Z: and real HKCU untouched"
+}

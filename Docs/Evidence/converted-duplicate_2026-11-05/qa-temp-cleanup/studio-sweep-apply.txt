@@ -1,0 +1,13 @@
+studio-sweep approved targets (apply): removed 13,349 file(s), 923.36 MB; refused or kept 0 target(s).
+  REMOVED      C:\Antigravity Projects\q2  [Sergei requested cleanup of Futaba owned failed e691 0.25 full QA temp; exact q2 evidence is committed in Docs]
+               before 3,621 files, 97.85 MB; removed 3,621 files, 97.85 MB; after 0 files, 0 B
+               1 link(s) inside: unlinked, never followed
+  REMOVED      C:\Antigravity Projects\q3  [Sergei requested cleanup of Futaba owned failed 0ec 0.25 full QA temp; exact q3 evidence is committed in Docs]
+               before 3,697 files, 98.24 MB; removed 3,697 files, 98.24 MB; after 0 files, 0 B
+               1 link(s) inside: unlinked, never followed
+  REMOVED      C:\Antigravity Projects\q4  [Sergei requested cleanup of Futaba owned passed 90f 0.25 full QA temp; exact q4 evidence is committed in Docs]
+               before 5,601 files, 156.88 MB; removed 5,601 files, 156.88 MB; after 0 files, 0 B
+               1 link(s) inside: unlinked, never followed
+  REMOVED      C:\Antigravity Projects\n25  [Sergei requested cleanup of Futaba owned accepted private 0.25 PA-1 temp; exact 12 role native evidence is committed in Docs]
+               before 430 files, 570.39 MB; removed 430 files, 570.39 MB; after 0 files, 0 B
+  free space on C:\: 94.18 GB -> 95.11 GB (+953.00 MB, statfs)

@@ -1,0 +1,76 @@
+{
+  "schema": "books-qa-temp-cleanup-review-v1",
+  "date": "2026-11-05",
+  "authority": "Sergei standing cleanup request; parent explicitly approved exact q2 q3 q4 n25 after publisher success",
+  "publisher": "v0.25.0 release published; canonical QA/native/raw evidence committed",
+  "dryrun_sha256": "98c7f281fcc40d521a7bba6b7876a826a19958de2b33e4a442a4a80e9a0ed414",
+  "dryrun_would_remove_files": 13349,
+  "dryrun_would_remove_mb": 923.36,
+  "dryrun_refused_or_kept": 0,
+  "active_process_references": 0,
+  "junction_policy": "Three private node_modules junctions target exact release worktrees; studio-sweep dry run says unlink, never follow",
+  "roots": [
+    {
+      "root": "C:/Antigravity Projects/q2",
+      "files": 3621,
+      "logical_bytes": 102600213.0,
+      "links": [
+        {
+          "relative": "entry-run-8nmZH2/node_modules",
+          "kind": "Junction",
+          "target": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0250-release-20261104\\node_modules"
+        }
+      ],
+      "review": "Futaba-owned private disposable 0.25 QA root; no live user data or required source; no active process references",
+      "source_head": "e6912eb7e43cac35bf26a7a662bc9dc95c0e1d2d",
+      "context_sha256": "330b4a035a44c29d4d35e6ddfc72517d9af24b9640261f25ae550c91cc20c515",
+      "docs_context_matches": true,
+      "protected_names": "Only copied Git-archive .claude/settings.json and private node_modules; no .git, keys, .env, credentials or secrets"
+    },
+    {
+      "root": "C:/Antigravity Projects/q3",
+      "files": 3697,
+      "logical_bytes": 103010667.0,
+      "links": [
+        {
+          "relative": "entry-run-jl1qFy/node_modules",
+          "kind": "Junction",
+          "target": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0250-release-20261105-r2\\node_modules"
+        }
+      ],
+      "review": "Futaba-owned private disposable 0.25 QA root; no live user data or required source; no active process references",
+      "source_head": "0ec4971169a70d57a407ae1a9ef6bf96227724d4",
+      "context_sha256": "fb3181e4c169835a8e083608b048c0e9d5b0cc2dc5ad7411bb34b58ae7b12179",
+      "docs_context_matches": true,
+      "protected_names": "Only copied Git-archive .claude/settings.json and private node_modules; no .git, keys, .env, credentials or secrets"
+    },
+    {
+      "root": "C:/Antigravity Projects/q4",
+      "files": 5601,
+      "logical_bytes": 164500895.0,
+      "links": [
+        {
+          "relative": "entry-run-3PcwKx/node_modules",
+          "kind": "Junction",
+          "target": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0250-release-20261105-r3\\node_modules"
+        }
+      ],
+      "review": "Futaba-owned private disposable 0.25 QA root; no live user data or required source; no active process references",
+      "source_head": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+      "context_sha256": "ef05253c057a0aff3a5ade8eb854f076725e4dd82ef512e641c407aa5cd9752c",
+      "docs_context_matches": true,
+      "protected_names": "Only copied Git-archive .claude/settings.json and private node_modules; no .git, keys, .env, credentials or secrets"
+    },
+    {
+      "root": "C:/Antigravity Projects/n25",
+      "files": 430,
+      "logical_bytes": 598097829.0,
+      "links": [],
+      "review": "Futaba-owned private disposable 0.25 QA root; no live user data or required source; no active process references",
+      "accepted_native_sha256": "4970eeb2c8600912f76c36bcba6a8134fabdeb0f9d87648f908362846f6e8321",
+      "docs_native_matches": true,
+      "protected_names": "Private PA-1 app home/data contains only temporary fixture DB/cache; accepted 12 roles copied to Docs"
+    }
+  ],
+  "excluded": "0.24.5 old roots, Ender PNG scratch, installed app, release worktrees, live Z/user data and real HKCU are outside exact approved targets"
+}
