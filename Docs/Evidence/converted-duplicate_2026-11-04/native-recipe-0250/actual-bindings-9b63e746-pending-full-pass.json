@@ -1,0 +1,226 @@
+{
+  "schema": "books-native-0250-precollected-bindings-v1",
+  "observed_utc": "2026-11-04T22:53:57.457Z",
+  "candidate": "corrected-r3-build-9b63e746",
+  "scope": "Read-only precollection while the single r3 full entry is active; no full PASS claimed",
+  "operator_status": "Unchanged blocked template; no substitutions applied",
+  "operator": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/native-once.mjs",
+    "sha256": "0758bcaf5b6ea3d59f4545a3fe75a48fa1e831bb48cce1da48f00b27c49f4b1d",
+    "size": 12714,
+    "dev": "2803554832",
+    "ino": "5910974513115668",
+    "nlink": 1
+  },
+  "prior_unaccepted_candidates": [
+    {
+      "record": {
+        "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/actual-bindings-pending-full-pass.json",
+        "sha256": "5b69c4606879a857d3cebdb9b9a6379a264220f70e68017263356dcf1244e12d",
+        "size": 9250,
+        "dev": "2803554832",
+        "ino": "47850746047934950",
+        "nlink": 1
+      },
+      "source_head": "e6912eb7e43cac35bf26a7a662bc9dc95c0e1d2d",
+      "build_id": "3dbcfc92-c326-4d3b-907c-4b1b4e5d8c7a",
+      "status": "NOT ACCEPTED: superseded before native acceptance; retained byte-exact and not reused"
+    },
+    {
+      "record": {
+        "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/actual-bindings-140014b8-pending-full-pass.json",
+        "sha256": "0ea280432fd5ae4b09ff3ccb95344a250aa447ffc16ca8cb646b245c0c756b69",
+        "size": 10385,
+        "dev": "2803554832",
+        "ino": "29836347538616854",
+        "nlink": 1
+      },
+      "source_head": "0ec4971169a70d57a407ae1a9ef6bf96227724d4",
+      "build_id": "140014b8-b350-4a3e-a99b-05d24349f139",
+      "status": "NOT ACCEPTED: superseded before native acceptance; retained byte-exact and not reused"
+    }
+  ],
+  "full_entry": {
+    "context": {
+      "path": "C:/Antigravity Projects/q4/context/context.json",
+      "sha256": "ef05253c057a0aff3a5ade8eb854f076725e4dd82ef512e641c407aa5cd9752c",
+      "size": 4802,
+      "dev": "2803554832",
+      "ino": "3659174704505435",
+      "nlink": 1
+    },
+    "source_head": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+    "context_dirty": "N",
+    "original_exec_session": "99024",
+    "active_child": "Not inspected; no active child output read or adoption"
+  },
+  "paths": {
+    "BASE": "C:/Antigravity Projects/n25",
+    "SOURCE": "C:/Antigravity Projects/q4/context/source",
+    "CONTEXT": "C:/Antigravity Projects/q4/context",
+    "OWNERSHIP": "C:/Antigravity Projects/q4/ownership",
+    "RELEASE": "C:/Antigravity Projects/Worktrees/Books Arranger/0250-release-20261105-r3",
+    "node_installation": "C:/Program Files/nodejs"
+  },
+  "release_read_only_identity": {
+    "head": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+    "porcelain": ""
+  },
+  "binding": {
+    "version": "0.25.0",
+    "source_head": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+    "product_digest": "21a42959c039c1e80075a5be71e7a86b0b17b09301ff00481857f12047febb16",
+    "build_id": "9b63e746-2a00-4cd8-a0ba-5b45e6405fc2",
+    "artifact_manifest_sha256": "2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "literal_replacements": {
+    "PENDING_FINAL_FULL_ENTRY_SOURCE_ABSOLUTE_PATH": "C:/Antigravity Projects/q4/context/source",
+    "PENDING_FINAL_FULL_ENTRY_CONTEXT_ABSOLUTE_PATH": "C:/Antigravity Projects/q4/context",
+    "PENDING_FINAL_FULL_ENTRY_OWNERSHIP_ABSOLUTE_PATH": "C:/Antigravity Projects/q4/ownership",
+    "PENDING_FINAL_SOURCE_HEAD": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+    "PENDING_FINAL_PRODUCT_DIGEST": "21a42959c039c1e80075a5be71e7a86b0b17b09301ff00481857f12047febb16",
+    "PENDING_FINAL_BUILD_ID": "9b63e746-2a00-4cd8-a0ba-5b45e6405fc2",
+    "PENDING_FINAL_ARTIFACT_MANIFEST_SHA256": "2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4",
+    "PENDING_FINAL_RUNTIME_MANIFEST_SHA256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "PENDING_FINAL_PHASE_CONTRACT_SHA256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f",
+    "PENDING_FINAL_NATIVE_CONTROLLER_SHA256": "49a0a2fae1f29b0dd0631644be168fa321df4a4689a9cf59dbc076da5e6f32af",
+    "PENDING_FINAL_NATIVE_SUPPORT_SHA256": "fd3f0c9c5d0af1bbf877b089781e718092b64c6488d483ba2c925c3326975c90",
+    "PENDING_FINAL_NATIVE_TEST_SHA256": "0a4a48db35c05214c1ac5e9cd9cb536fc73fd3989664685f0f376975e2ee4ee2",
+    "PENDING_FINAL_FULL_CONTEXT_SHA256": "ef05253c057a0aff3a5ade8eb854f076725e4dd82ef512e641c407aa5cd9752c",
+    "PENDING_FINAL_RUNTIME_POINTER_SHA256": "da4cfa5c4684ed71706c48536962ba3419c07fac3b8c4281831d59fd4e2fab10",
+    "PENDING_FINAL_NODE_INVENTORY_SHA256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca",
+    "PENDING_FINAL_OWNERSHIP_INVENTORY_SHA256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+  },
+  "release_path_literal_replacement": {
+    "from": "C:/Antigravity Projects/Worktrees/Books Arranger/0250-release-20261104",
+    "to": "C:/Antigravity Projects/Worktrees/Books Arranger/0250-release-20261105-r3",
+    "reason": "Original blocked template planned path must become this actual corrected r3 worktree when final literals are filled"
+  },
+  "pins": {
+    "artifact_manifest": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/0250-release-20261105-r3/dist/release-artifacts.json",
+      "sha256": "2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4",
+      "size": 62980,
+      "dev": "2803554832",
+      "ino": "7318349401757788",
+      "nlink": 1
+    },
+    "runtime_pointer": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/0250-release-20261105-r3/build-cache/runtime-pointer.json",
+      "sha256": "da4cfa5c4684ed71706c48536962ba3419c07fac3b8c4281831d59fd4e2fab10",
+      "size": 5819,
+      "dev": "2803554832",
+      "ino": "7318349401757791",
+      "nlink": 1
+    },
+    "source_manifest": {
+      "path": "C:/Antigravity Projects/q4/context/source-manifest.json",
+      "sha256": "9f0d6aa9fdc5eac764b4cf78647d3d3a01343c83588315bbbfc27eb017f826c2",
+      "size": 291606,
+      "dev": "2803554832",
+      "ino": "3096224751084111",
+      "nlink": 1
+    },
+    "node_inventory": {
+      "path": "C:/Antigravity Projects/q4/context/runtime-node-installation.json",
+      "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca",
+      "size": 311392,
+      "dev": "2803554832",
+      "ino": "21392098230447591",
+      "nlink": 1
+    },
+    "ownership_inventory": {
+      "path": "C:/Antigravity Projects/q4/context/runtime-ownership.json",
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617",
+      "size": 13523,
+      "dev": "2803554832",
+      "ino": "3096224751084124",
+      "nlink": 1
+    },
+    "node": {
+      "path": "C:/Program Files/nodejs/node.exe",
+      "sha256": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5",
+      "size": 100097864,
+      "dev": "2803554832",
+      "ino": "63331869760192827",
+      "nlink": 1
+    },
+    "helper": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+      "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc",
+      "size": 14108,
+      "dev": "2803554832",
+      "ino": "2251799820517571",
+      "nlink": 1
+    },
+    "child": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-child.mjs",
+      "sha256": "240a6a96a32f08989439387d5d6ab75d17e1bcf243863d31d2ff7287f68d1e42",
+      "size": 1258,
+      "dev": "2803554832",
+      "ino": "2251799820517574",
+      "nlink": 1
+    },
+    "canonical": {
+      "scripts/qa-phase-contract.mjs": {
+        "path": "C:/Antigravity Projects/q4/context/source/scripts/qa-phase-contract.mjs",
+        "sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f",
+        "size": 14734,
+        "dev": "2803554832",
+        "ino": "2814749774351286",
+        "nlink": 1
+      },
+      "scripts/qa-real-shell-phase.mjs": {
+        "path": "C:/Antigravity Projects/q4/context/source/scripts/qa-real-shell-phase.mjs",
+        "sha256": "49a0a2fae1f29b0dd0631644be168fa321df4a4689a9cf59dbc076da5e6f32af",
+        "size": 8539,
+        "dev": "2803554832",
+        "ino": "2814749774351287",
+        "nlink": 1
+      },
+      "tests/real-shell-update-support.mjs": {
+        "path": "C:/Antigravity Projects/q4/context/source/tests/real-shell-update-support.mjs",
+        "sha256": "fd3f0c9c5d0af1bbf877b089781e718092b64c6488d483ba2c925c3326975c90",
+        "size": 41396,
+        "dev": "2803554832",
+        "ino": "12947848935934941",
+        "nlink": 1
+      },
+      "tests/real-shell-update.test.mjs": {
+        "path": "C:/Antigravity Projects/q4/context/source/tests/real-shell-update.test.mjs",
+        "sha256": "0a4a48db35c05214c1ac5e9cd9cb536fc73fd3989664685f0f376975e2ee4ee2",
+        "size": 18177,
+        "dev": "2803554832",
+        "ino": "36873221956340703",
+        "nlink": 1
+      }
+    }
+  },
+  "full_pass_receipt": {
+    "status": "PENDING",
+    "path": "PENDING_ACTUAL_ORIGINAL_R3_FULL_PASS_RECEIPT_PATH",
+    "sha256": "PENDING_ACTUAL_ORIGINAL_R3_FULL_PASS_RECEIPT_SHA256",
+    "line": "PENDING_ACTUAL_CLEAN_0.25.0_90F0368_FULL_PASS_LINE"
+  },
+  "remaining_before_pin_fill": [
+    "Original actual r3 full PASS receipt path, SHA256 and exact clean matching 90f0368 receipt line from this existing single entry; normal completed outcome must be supplied by the entry owner."
+  ],
+  "future_derived_not_fake": [
+    "Final operator self SHA after actual r3 literal/path fill and static verification.",
+    "Actual plan SHA/size only after the subsequently authorized canonical pure preparation."
+  ],
+  "final_prepare_rechecks": [
+    "Recheck exact r3 candidate/context/input hashes and normal full-entry binding; these observations do not replace final pin verification.",
+    "Check n25 still absent at real preparation; do not adopt or clear existing paths.",
+    "Unchanged preparer pins native identities for the five explicitly allowed system DLLs at actual preparation time."
+  ],
+  "limitations": [
+    "No prepare/run/accept, authority, plan, fixture or native app execution.",
+    "No q2/q3 input is used for the current r3 candidate; old q and unaccepted q2/q3 contexts remain retained.",
+    "No context, source, build, runtime or active full-entry child was modified.",
+    "No installer/payload trees were rehashed during this low-CPU metadata precollection; only verified artifact-manifest claims are recorded.",
+    "The final operator remains byte-identical to the reviewed blocked template until an actual r3 full PASS is supplied."
+  ]
+}

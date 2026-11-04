@@ -1,0 +1,96 @@
+{
+  "schema": "books-native-final-preparation-v1",
+  "version": "0.25.0",
+  "candidate_binding": {
+    "version": "0.25.0",
+    "source_head": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+    "product_digest": "21a42959c039c1e80075a5be71e7a86b0b17b09301ff00481857f12047febb16",
+    "build_id": "9b63e746-2a00-4cd8-a0ba-5b45e6405fc2",
+    "artifact_manifest_sha256": "2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "operator": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/native-once.mjs",
+    "sha256": "6e4f1761b7edc0bb0b5906a1dc92364867a05fc5826236d425b1a8bc99816e78",
+    "size": 13035
+  },
+  "plan": {
+    "path": "C:/Antigravity Projects/n25/plan.json",
+    "sha256": "6793fedc82e0b5b27dc80b512ed3ef01bdb2b1950a8ccc9b1da02d8fa6b5137b",
+    "size": 593027
+  },
+  "authority": {
+    "path": "C:/Antigravity Projects/n25/authority.json",
+    "sha256": "1320031d13ba391bdcb9248c8e92cbb206edcabb70fda4a95e47712632ae139a",
+    "size": 1664
+  },
+  "original_full_receipt": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-05/full-entry-90f-r3-pass/receipt.txt",
+    "sha256": "afab5c83f884a5f6e283b96cdff60fba75b17abd44dec239183b64cc060a9de2",
+    "size": 500,
+    "identity": {
+      "dev": "2803554832",
+      "ino": "4503599634654999",
+      "nlink": 1
+    }
+  },
+  "full_pass_origin": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/full-pass-origin.json",
+    "sha256": "e97134a5514aafcfafa403701e73f49022ebb44f151db5354fb188ce875e42b9"
+  },
+  "review_origins": {
+    "audited_operator": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.24.5_2026-11-04/native-recipe/native-once.mjs",
+      "sha256": "3de1a8b3f15f6390cf6ed64e461478be542219af38b51a31bd209658201bd3c3",
+      "size": 12922
+    },
+    "blocked_template": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/blocked-template-0758.mjs",
+      "sha256": "0758bcaf5b6ea3d59f4545a3fe75a48fa1e831bb48cce1da48f00b27c49f4b1d",
+      "size": 12714
+    }
+  },
+  "syntax_check": "PASS",
+  "literal_only_fill": true,
+  "run_callback_body_byte_equal_to_audited_operator": true,
+  "canonical_validatePlan": "PASS",
+  "normalized_operator_path": "PASS",
+  "readPin_operator_authority_full_receipt": "PASS",
+  "pending_final_literals": 0,
+  "canonical_pure_prepare_invocations": 1,
+  "metadata_prepare_elapsed_seconds": 3.2038303,
+  "prepared_at": "2026-11-04T23:03:28.110Z",
+  "launch_marker_absent": true,
+  "fixture_absent": true,
+  "native_executed": false,
+  "scope": "One canonical pure metadata preparation only; Senua final clear and Futaba single hidden run remain",
+  "prepare_invocation": {
+    "node": "C:/Program Files/nodejs/node.exe",
+    "args": [
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/native-once.mjs",
+      "prepare",
+      "6e4f1761b7edc0bb0b5906a1dc92364867a05fc5826236d425b1a8bc99816e78",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-05/full-entry-90f-r3-pass/receipt.txt",
+      "afab5c83f884a5f6e283b96cdff60fba75b17abd44dec239183b64cc060a9de2"
+    ]
+  },
+  "run_invocation": {
+    "node": "C:/Program Files/nodejs/node.exe",
+    "args": [
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/native-once.mjs",
+      "run",
+      "6e4f1761b7edc0bb0b5906a1dc92364867a05fc5826236d425b1a8bc99816e78",
+      "6793fedc82e0b5b27dc80b512ed3ef01bdb2b1950a8ccc9b1da02d8fa6b5137b"
+    ]
+  },
+  "accept_invocation": {
+    "node": "C:/Program Files/nodejs/node.exe",
+    "args": [
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/native-once.mjs",
+      "accept",
+      "6e4f1761b7edc0bb0b5906a1dc92364867a05fc5826236d425b1a8bc99816e78",
+      "6793fedc82e0b5b27dc80b512ed3ef01bdb2b1950a8ccc9b1da02d8fa6b5137b"
+    ]
+  }
+}

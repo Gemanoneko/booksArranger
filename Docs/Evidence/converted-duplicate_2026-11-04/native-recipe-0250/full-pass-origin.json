@@ -1,0 +1,90 @@
+{
+  "schema": "books-native-final-full-pass-origin-v1",
+  "candidate_binding": {
+    "version": "0.25.0",
+    "source_head": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+    "product_digest": "21a42959c039c1e80075a5be71e7a86b0b17b09301ff00481857f12047febb16",
+    "build_id": "9b63e746-2a00-4cd8-a0ba-5b45e6405fc2",
+    "artifact_manifest_sha256": "2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "precollected_binding": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/actual-bindings-9b63e746-pending-full-pass.json",
+    "sha256": "cb6659661a827dbf5ecddc2d92a95f52136e382867d3c656294999c49dc8d6e8",
+    "size": 11085
+  },
+  "receipt": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-05/full-entry-90f-r3-pass/receipt.txt",
+    "sha256": "afab5c83f884a5f6e283b96cdff60fba75b17abd44dec239183b64cc060a9de2",
+    "size": 500
+  },
+  "receipt_line": "Entry-check receipt v2: books-arranger v0.25.0 @ 90f0368ba7631659a3caafc2fa6125e9075ccf2a (dirty: N) [source:237d023559af279fcd28cceecbb18bc29bbcc47b580b295c742134a206590309; harness:bc550df9786d87f2d49f3017a3e97d87ace1510fec5253eb5f135564d03d2e4d; runtime:9b1d6629000104e25b0214104326e146b863afc0d28ee2de8bc66c267600f6f6; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a; personal-folders clean",
+  "original_stdout": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-05/full-entry-90f-r3-pass/outer-stdout.log",
+    "sha256": "4932f5b7a1b48f836f1d621ab34bfeae1ab86c143d1a83cf0fdeeb46caa2d556",
+    "size": 756196
+  },
+  "original_json_result": {
+    "source_file": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-05/full-entry-90f-r3-pass/outer-stdout.log",
+    "line_prefix": "Entry-check evidence v2: ",
+    "json_payload_sha256": "bb6054e83aa135c83d789343a94c52dec73e7f9edbbba2f24de33c27bb55681d",
+    "normal_fields": {
+      "kind": "result",
+      "name": "check",
+      "code": 0,
+      "signal": null,
+      "error": null,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "overflow": false,
+      "truncated": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 11131,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 16590,
+          "incompleteQueries": 311,
+          "firstIncomplete": {
+            "assigned": 48,
+            "listed": 47,
+            "capacity": 8192,
+            "query_ok": true
+          },
+          "lastIncomplete": {
+            "assigned": 16,
+            "listed": 14,
+            "capacity": 8192,
+            "query_ok": true
+          }
+        }
+      },
+      "elapsedMs": 465352.4772
+    }
+  },
+  "original_callback": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-05/full-entry-90f-r3-pass/outer-result.json",
+    "sha256": "c5c5047c87163dc78674edc638b619028b152c42377f88a86970d53795055578",
+    "size": 143
+  },
+  "original_invocation": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-05/full-entry-90f-r3-pass/invocation.json",
+    "sha256": "676916a540fb6afd09411101f3129d7a758d0c870e4db8cfe2dbce349ca1c6e4",
+    "size": 1884
+  },
+  "preserved_summary": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-05/full-entry-90f-r3-pass/summary.json",
+    "sha256": "8b7234a956f900a6e2ab147a507df9d97e934de34a11c01cc2a8725f04078373",
+    "size": 4885
+  },
+  "scope": "Links original full result JSON and matching actual receipt; no synthetic PASS or native app execution",
+  "verified_utc": "2026-11-04T23:03:07.021Z"
+}

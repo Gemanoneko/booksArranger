@@ -1,0 +1,69 @@
+{
+  "schema": "books-native-recipe-handoff-files-v1",
+  "operator_sha256": "6e4f1761b7edc0bb0b5906a1dc92364867a05fc5826236d425b1a8bc99816e78",
+  "plan_sha256": "6793fedc82e0b5b27dc80b512ed3ef01bdb2b1950a8ccc9b1da02d8fa6b5137b",
+  "authority_sha256": "1320031d13ba391bdcb9248c8e92cbb206edcabb70fda4a95e47712632ae139a",
+  "native_executed": false,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 9584,
+      "sha256": "d7fc34217fdfcb95179e37a2ac4f20735f834e52dc9d00f83e62ad98beabb121"
+    },
+    {
+      "path": "native-once.mjs",
+      "bytes": 13035,
+      "sha256": "6e4f1761b7edc0bb0b5906a1dc92364867a05fc5826236d425b1a8bc99816e78"
+    },
+    {
+      "path": "static-preparation.json",
+      "bytes": 4521,
+      "sha256": "7f2dee30a21495c80f825b79977c10232afc5ec00245e91a1a31d57db932db2b"
+    },
+    {
+      "path": "blocked-template-0758.mjs",
+      "bytes": 12714,
+      "sha256": "0758bcaf5b6ea3d59f4545a3fe75a48fa1e831bb48cce1da48f00b27c49f4b1d"
+    },
+    {
+      "path": "blocked-template-static-preparation.json",
+      "bytes": 2145,
+      "sha256": "d0c21cef9567179df901cfe828e91134158ac02a99f0e124854b20eb0d72776d"
+    },
+    {
+      "path": "full-pass-origin.json",
+      "bytes": 4332,
+      "sha256": "e97134a5514aafcfafa403701e73f49022ebb44f151db5354fb188ce875e42b9"
+    },
+    {
+      "path": "prepared-plan.json",
+      "bytes": 593027,
+      "sha256": "6793fedc82e0b5b27dc80b512ed3ef01bdb2b1950a8ccc9b1da02d8fa6b5137b"
+    },
+    {
+      "path": "prepared-authority.json",
+      "bytes": 1664,
+      "sha256": "1320031d13ba391bdcb9248c8e92cbb206edcabb70fda4a95e47712632ae139a"
+    },
+    {
+      "path": "final-preparation.json",
+      "bytes": 4521,
+      "sha256": "7f2dee30a21495c80f825b79977c10232afc5ec00245e91a1a31d57db932db2b"
+    },
+    {
+      "path": "actual-bindings-pending-full-pass.json",
+      "bytes": 9250,
+      "sha256": "5b69c4606879a857d3cebdb9b9a6379a264220f70e68017263356dcf1244e12d"
+    },
+    {
+      "path": "actual-bindings-140014b8-pending-full-pass.json",
+      "bytes": 10385,
+      "sha256": "0ea280432fd5ae4b09ff3ccb95344a250aa447ffc16ca8cb646b245c0c756b69"
+    },
+    {
+      "path": "actual-bindings-9b63e746-pending-full-pass.json",
+      "bytes": 11085,
+      "sha256": "cb6659661a827dbf5ecddc2d92a95f52136e382867d3c656294999c49dc8d6e8"
+    }
+  ]
+}
