@@ -1,0 +1,20 @@
+{
+  "schema": "books-desktop-publication-v1",
+  "version": "0.25.0",
+  "tag": "v0.25.0",
+  "commit": "719d46f08b95e1d2a7aa29759f3b33122d40235c",
+  "source_commit": "90f0368ba7631659a3caafc2fa6125e9075ccf2a",
+  "build_id": "9b63e746-2a00-4cd8-a0ba-5b45e6405fc2",
+  "artifact_manifest_sha256": "2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4",
+  "native_qa_sha256": "4970eeb2c8600912f76c36bcba6a8134fabdeb0f9d87648f908362846f6e8321",
+  "release_url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.25.0",
+  "remote_tag_matches_commit": true,
+  "remote_assets": {
+    "Books-Arranger-Setup-0.25.0.exe": "a286126ba64d63c61dd307d00bbd230734c967a66114babd7197b9af81921963",
+    "Books-Arranger-Setup-0.25.0.exe.blockmap": "eb42a70673bdcbe7e902832c209e5c7a46d650c346cc80e2b22fb8147fd4fe1d",
+    "latest.yml": "a5a7b87c7af3b89f3670bd527c314e3f4bd67a8aebfbfbd067cee5663778ebae"
+  },
+  "retained_releases": ["v0.25.0", "v0.24.5", "v0.24.4", "v0.24.3"],
+  "owned_release_exit_code": 0,
+  "owned_release_native_zero": true
+}
