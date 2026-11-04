@@ -17,6 +17,22 @@ INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac
 
 class Paused(InterruptedError):pass
 class ValidationError(ValueError):pass
+class SourceDecodeError(ValidationError):
+    """A native strict-decode failure bound to one original included source.
+
+    Staging aliases never identify a source to the user. The plain diagnostic can be
+    journaled without reconstructing an exception; consumers bind it to the manifest.
+    """
+    def __init__(self,source_path,source_index,source_count,error):
+        self.code='source_decode_failed';self.source_path=source_path
+        self.source_index=source_index;self.source_count=source_count;self.detail=str(error)[-2000:]
+        self.media_decode_failed=True
+        if getattr(error,'tag_repair_checked',False) is True:self.tag_repair_checked=True
+        self.source_diagnostic=self.to_dict()
+        super().__init__(f'Source {source_index+1} of {source_count} failed full audio decoding: {source_path}: {self.detail}')
+    def to_dict(self):
+        return {'schema':'source-decode-failed-v1','code':self.code,'source_path':self.source_path,
+            'source_index':self.source_index,'source_count':self.source_count,'detail':self.detail}
 class ChapterValidationError(ValidationError):
     """Actionable chapter failure; structured fields survive the row's UI boundary."""
     def __init__(self,diagnostic):
@@ -437,25 +453,35 @@ def _mp3_tag_copy(manifest,item,path,stage,stop,duration):
     return cached
 
 
-def _source_duration(manifest,item,path,stage,stop,duration):
+def _source_duration(manifest,item,path,stage,stop,duration,*,source_index=None):
     if m4b_repair.silence_approved(manifest):return duration
     current=getattr(_ARTIFACTS,'current',None)
     if current and len(current)>4 and (item['path'],item['sha256']) in current[4]:
         return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
-    try:return decoded_duration(path,stage,stop,duration)
-    except ValidationError as original:
-        if Path(path).suffix.lower()=='.mp3':original.tag_repair_checked=True  # this version weighed the tag repair (audio_jobs.tag_repair_retry)
-        if Path(path).suffix.lower()!='.mp3' or not getattr(original,'media_decode_failed',False):raise
-        try:return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
-        except ValidationError as repair:
-            raise original from repair
+    try:
+        try:return decoded_duration(path,stage,stop,duration)
+        except ValidationError as original:
+            if Path(path).suffix.lower()=='.mp3':original.tag_repair_checked=True  # this version weighed the tag repair (audio_jobs.tag_repair_retry)
+            if Path(path).suffix.lower()!='.mp3' or not getattr(original,'media_decode_failed',False):raise
+            try:return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
+            except ValidationError as repair:
+                raise original from repair
+    except ValidationError as error:
+        sources=manifest.get('sources')
+        # Only a completed native media failure has this marker. Pause, deadlines,
+        # uncertain ownership/drain and output validation must keep their original type.
+        if (isinstance(error,SourceDecodeError) or not getattr(error,'media_decode_failed',False) or
+            not isinstance(sources,list) or type(source_index) is not int or not 0<=source_index<len(sources) or
+            not isinstance(sources[source_index],dict) or not isinstance(item.get('path'),str) or
+            sources[source_index].get('path')!=item['path'] or sources[source_index].get('sha256')!=item.get('sha256')):raise
+        raise SourceDecodeError(item['path'],source_index,len(sources),error) from error
 
 
 def check_working_space(manifest, stage, stop):
     if shutil.disk_usage(stage).free<sum(item['size'] for item in manifest['sources'])+64*1024*1024:
         raise OSError(errno.ENOSPC,'Insufficient staging space before source admission; originals retained')
     durations=[];profiles=[]
-    for item in manifest['sources']:
+    for index,item in enumerate(manifest['sources']):
         path=ordinary(item['path'])
         if not path.is_relative_to(ordinary(manifest['root'])) or path.suffix.lower() not in INPUT_FORMATS:
             raise ValidationError('Source is outside the supported audiobook boundary')
@@ -467,7 +493,7 @@ def check_working_space(manifest, stage, stop):
             raw=probe(path,stage,stop);duration,profile=audio_info(raw)
             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
-            durations.append(_source_duration(manifest,item,path,stage,stop,duration))
+            durations.append(_source_duration(manifest,item,path,stage,stop,duration,source_index=index))
     if manifest.get('profile')==AUTOMATIC_PROFILE:
         encoding=choose_automatic_encoding(profiles,single_m4b=len(profiles)==1 and Path(manifest['sources'][0]['path']).suffix.lower()=='.m4b')
     elif manifest.get('profile')==PROFILE:encoding=choose_encoding(profiles)
@@ -528,7 +554,7 @@ def snapshot_manifest(manifest,stage,stop,report=None):
             compatibility=profile
             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
-            duration=_source_duration(manifest,item,alias,stage,stop,duration)
+            duration=_source_duration(manifest,item,alias,stage,stop,duration,source_index=index)
         durations.append(duration);copies.append(alias.name)
         step.update(index+1,index+1,force=True)
     return copies,durations,protected_cover(manifest,stage,stop),profiles

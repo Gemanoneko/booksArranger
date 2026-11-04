@@ -1,0 +1,72 @@
+{
+  "base": "87b568143a5f803154c2564cae0487cc83fe0f6c",
+  "source": "C:/Antigravity Projects/Worktrees/Books Arranger/m4b-chapter-image-025-20261104",
+  "files": [
+    {
+      "name": "audio_pipeline.py",
+      "bytes": 93356,
+      "sha256": "467cb6c581fa4dce3908e52ce46524c85d3d68984ea64ae36edf1a6f11bcc7a0"
+    },
+    {
+      "name": "tests/test_mp3_tag_repair.py",
+      "bytes": 16655,
+      "sha256": "31835cb874557096447f0140372033d3a93fa80b51deaf4824da85c0977ab378"
+    }
+  ],
+  "patch": {
+    "path": "implementation.patch",
+    "bytes": 13080,
+    "sha256": "b272e2ce0944e7a3200021ca2af3e130bb4f14d584c9b3fb337e2b0c74b8d061"
+  },
+  "contract": {
+    "exception": "audio_pipeline.SourceDecodeError",
+    "plain": "error.source_diagnostic and error.to_dict()",
+    "schema": "source-decode-failed-v1",
+    "code": "source_decode_failed",
+    "fields": [
+      "source_path",
+      "source_index",
+      "source_count",
+      "detail"
+    ],
+    "source_index": "zero-based original included playback position; presentation is1-based"
+  },
+  "proof": {
+    "final": "119 cases PASS in6.859s; source-diagnostic-final.json: ok/closed/outputComplete true, native active0/unsignaled0/zero true",
+    "native": "Private invalid MP3 input at12/57 produces typed original path/index/native diagnostic after strict decode and finite tag-repair refusal; source and alias bytes unchanged, no derived repair audio created",
+    "pure": "Alias source00011.mp3 maps to exact original12.mp3/57; JSON roundtrip, native cause and repair causal chain retained; index mismatches/ambiguous indexes/spoofed prefixes/timeouts/pauses/drain failures stay unclassified; valid decode and finite successful repair unchanged"
+  },
+  "limits": [
+    "No live media opened/copied/edited/deleted",
+    "No broken-media repair claimed",
+    "Only native-completed media failures receive SourceDecodeError; output/native ownership failures retain original types",
+    "Job-store/attention/UI consumer integration belongs to primary Ender; this patch does not modify those files",
+    "Own scratch cleanup was rejected by command-launch policy; no alternate deletion route attempted"
+  ],
+  "retained": [
+    {
+      "path": "source-diagnostic-focused.json",
+      "sha256": "70282f7e2f193088b186cea3cdc817d000bbd29a009ed9f8a149cc76e34896fd"
+    },
+    {
+      "path": "source-diagnostic-focused.log",
+      "sha256": "2911d745ea6bf4cf597330f823173793974d391e3a0c7d7964dd04c596ad0736"
+    },
+    {
+      "path": "source-diagnostic-final.json",
+      "sha256": "c8469a1e3b7c7db40cd1977ff5a91568bf83b442b3e45cf41ddcc6ba3b035e6c"
+    },
+    {
+      "path": "source-diagnostic-final.log",
+      "sha256": "167d339e0ec57bc971368b2d56bec287167805c19c9d40dfe1c4da141c12c8d8"
+    },
+    {
+      "path": "owned.mjs",
+      "sha256": "96661876499ad17313245a25b35e881c4900a2c47195fe9207c12518ba737a5d"
+    },
+    {
+      "path": "focused.py",
+      "sha256": "bab9c396f945495bc4e9e519d0453d2c5164f6e22397e766c2720f724443a197"
+    }
+  ]
+}

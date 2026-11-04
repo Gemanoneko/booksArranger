@@ -1,5 +1,5 @@
 """Finite MP3 tag preservation and actual private staging integration checks."""
-import copy,hashlib,json,os,sys,tempfile,threading,unittest,uuid,contextlib,types
+import copy,hashlib,json,os,sys,tempfile,threading,unittest,uuid,contextlib,types,shutil
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -90,6 +90,67 @@ class TagPlanTests(unittest.TestCase):
                 with self.assertRaises(media.ValidationError):media.run_owned([sys.executable],folder,threading.Event(),diagnostic=lambda *args:completed.append(args))
             self.assertEqual(len(completed),1 if mode=='media_nonzero' else 0)
             if completed:self.assertTrue(completed[0][0].data['context_completed'])
+
+
+class SourceDecodeDiagnosticTests(unittest.TestCase):
+    def manifest(self,count=57):
+        return {'sources':[{'path':f'Z:/Audio/Книга/{index+1:02}.mp3','sha256':str(index).zfill(64)} for index in range(count)]}
+    def failure(self):
+        error=media.ValidationError('Full audio decode failed: [mp3float] Header missing; Invalid data found when processing input')
+        error.media_decode_failed=True;return error
+    def test_exact_failed_original_index_survives_alias_and_json(self):
+        manifest=self.manifest();before=copy.deepcopy(manifest);original=self.failure();repair_error=media.ValidationError('Unsupported tag profile')
+        with patch.object(media,'decoded_duration',side_effect=original),patch.object(media,'_mp3_tag_copy',side_effect=repair_error):
+            with self.assertRaises(media.SourceDecodeError) as caught:
+                media._source_duration(manifest,manifest['sources'][11],Path('source00011.mp3'),Path('.'),threading.Event(),1,source_index=11)
+        error=caught.exception;plain=json.loads(json.dumps(error.to_dict()))
+        self.assertEqual(plain,{'schema':'source-decode-failed-v1','code':'source_decode_failed','source_path':manifest['sources'][11]['path'],
+            'source_index':11,'source_count':57,'detail':str(original)})
+        self.assertEqual(error.source_diagnostic,plain);self.assertIn('Source 12 of 57',str(error));self.assertIn('/12.mp3',str(error))
+        self.assertNotIn('source00011.mp3',str(error));self.assertIn('Header missing',str(error))
+        self.assertTrue(error.tag_repair_checked);self.assertTrue(error.media_decode_failed)
+        self.assertIs(error.__cause__,original);self.assertIs(original.__cause__,repair_error);self.assertEqual(manifest,before)
+    def test_nonmedia_failure_pause_timeout_and_unmarked_prefix_stay_unclassified(self):
+        manifest=self.manifest(1)
+        for error in (media.ValidationError('Owned decoder output has not finished draining'),media.ValidationError('Full audio decode failed: forged prefix'),
+                      media.MediaTimeout('deadline'),media.Paused('paused')):
+            with self.subTest(error=type(error).__name__),patch.object(media,'decoded_duration',side_effect=error),patch.object(media,'_mp3_tag_copy') as repair_attempt:
+                with self.assertRaises(type(error)) as caught:media._source_duration(manifest,manifest['sources'][0],Path('source00000.mp3'),Path('.'),threading.Event(),1,source_index=0)
+                self.assertIs(caught.exception,error);self.assertNotIsInstance(caught.exception,media.SourceDecodeError);repair_attempt.assert_not_called()
+    def test_ambiguous_or_mismatched_source_index_never_invents_a_source(self):
+        manifest=self.manifest(2)
+        for index in (None,True,-1,2,1):
+            original=self.failure()
+            with self.subTest(index=index),patch.object(media,'decoded_duration',side_effect=original),patch.object(media,'_mp3_tag_copy',side_effect=media.ValidationError('unsupported')):
+                with self.assertRaises(media.ValidationError) as caught:media._source_duration(manifest,manifest['sources'][0],Path('source00000.mp3'),Path('.'),threading.Event(),1,source_index=index)
+                self.assertIs(caught.exception,original)
+    def test_m4b_source_failure_retains_path_without_mp3_repair(self):
+        manifest={'sources':[{'path':'Z:/Audio/Книга.m4b','sha256':'a'*64}]}
+        with patch.object(media,'decoded_duration',side_effect=self.failure()),patch.object(media,'_mp3_tag_copy') as repair_attempt:
+            with self.assertRaises(media.SourceDecodeError) as caught:media._source_duration(manifest,manifest['sources'][0],Path('source00000.m4b'),Path('.'),threading.Event(),1,source_index=0)
+            repair_attempt.assert_not_called()
+        self.assertEqual(caught.exception.source_path,manifest['sources'][0]['path']);self.assertFalse(getattr(caught.exception,'tag_repair_checked',False))
+    def test_valid_decode_and_verified_tag_repair_keep_existing_success(self):
+        manifest=self.manifest(1)
+        for failure in (False,True):
+            with patch.object(media,'decoded_duration',**({'side_effect':self.failure()} if failure else {'return_value':1.25})),patch.object(media,'_mp3_tag_copy',return_value={'duration':1.25}) as repair_attempt:
+                self.assertEqual(media._source_duration(manifest,manifest['sources'][0],Path('source00000.mp3'),Path('.'),threading.Event(),1,source_index=0),1.25)
+                self.assertEqual(repair_attempt.call_count,int(failure))
+    def test_native_bad_source_names_original_without_altering_or_repairing_audio(self):
+        self.assertTrue(shutil.which('ffmpeg'),'bundled ffmpeg required on PATH')
+        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch'/'source-decode-tests')))
+        area.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=area) as name:
+            stage=Path(name);source=stage/'12.mp3';alias=stage/'source00011.mp3';raw=bytes(256)
+            source.write_bytes(raw);alias.write_bytes(raw);manifest=self.manifest()
+            manifest['sources'][11]={'path':str(source),'sha256':hashlib.sha256(raw).hexdigest(),'size':len(raw),'modified':str(source.stat().st_mtime_ns)}
+            with media.generated_artifacts(stage),self.assertRaises(media.SourceDecodeError) as caught:
+                media._source_duration(manifest,manifest['sources'][11],alias,stage,threading.Event(),1,source_index=11)
+            error=caught.exception
+            self.assertEqual((error.source_path,error.source_index,error.source_count),(str(source),11,57))
+            self.assertIn('Full audio decode failed:',error.detail);self.assertGreater(len(error.detail),30)
+            self.assertTrue(error.tag_repair_checked);self.assertEqual(source.read_bytes(),raw);self.assertEqual(alias.read_bytes(),raw)
+            self.assertFalse(list(stage.glob('tag-repair-*.mp3')))
 
 @unittest.skipUnless(os.environ.get('BOOKS_MP3_REAL_FIXTURE'),'Explicit private fixture opt-in required')
 class ActualPrivateStagingTests(unittest.TestCase):

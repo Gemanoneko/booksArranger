@@ -1,0 +1,28 @@
+{
+  "provenance": "Parent relay of authorized bounded selective read-only diagnostic, November4; no live read by this lane",
+  "observed": [
+    {
+      "title": "Последняя глава",
+      "width": 500,
+      "height": 500,
+      "samples": 18
+    },
+    {
+      "title": "Splatterpunk stories3",
+      "width": 512,
+      "height": 499,
+      "samples": 18
+    },
+    {
+      "title": "Сад Камней",
+      "width": 512,
+      "height": 512,
+      "samples": 11
+    }
+  ],
+  "stsd": "All94bytes: one86-byte png-space VisualSampleEntry with78-byte payload and no extensions; admitted by exact-code/78-byte parser and empty extension list",
+  "limits": [
+    "This establishes sample-entry applicability, not a successful live-file conversion or repair",
+    "Independent full container/sample/reference/PNG-envelope/audio/presentation proofs still must pass during normal protected conversion"
+  ]
+}

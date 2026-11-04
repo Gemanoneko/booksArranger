@@ -1,0 +1,169 @@
+diff --git a/audio_pipeline.py b/audio_pipeline.py
+index 5081a1e..c1a28ae 100644
+--- a/audio_pipeline.py
++++ b/audio_pipeline.py
+@@ -17,6 +17,22 @@ INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac
+ 
+ class Paused(InterruptedError):pass
+ class ValidationError(ValueError):pass
++class SourceDecodeError(ValidationError):
++    """A native strict-decode failure bound to one original included source.
++
++    Staging aliases never identify a source to the user. The plain diagnostic can be
++    journaled without reconstructing an exception; consumers bind it to the manifest.
++    """
++    def __init__(self,source_path,source_index,source_count,error):
++        self.code='source_decode_failed';self.source_path=source_path
++        self.source_index=source_index;self.source_count=source_count;self.detail=str(error)[-2000:]
++        self.media_decode_failed=True
++        if getattr(error,'tag_repair_checked',False) is True:self.tag_repair_checked=True
++        self.source_diagnostic=self.to_dict()
++        super().__init__(f'Source {source_index+1} of {source_count} failed full audio decoding: {source_path}: {self.detail}')
++    def to_dict(self):
++        return {'schema':'source-decode-failed-v1','code':self.code,'source_path':self.source_path,
++            'source_index':self.source_index,'source_count':self.source_count,'detail':self.detail}
+ class ChapterValidationError(ValidationError):
+     """Actionable chapter failure; structured fields survive the row's UI boundary."""
+     def __init__(self,diagnostic):
+@@ -437,25 +453,35 @@ def _mp3_tag_copy(manifest,item,path,stage,stop,duration):
+     return cached
+ 
+ 
+-def _source_duration(manifest,item,path,stage,stop,duration):
++def _source_duration(manifest,item,path,stage,stop,duration,*,source_index=None):
+     if m4b_repair.silence_approved(manifest):return duration
+     current=getattr(_ARTIFACTS,'current',None)
+     if current and len(current)>4 and (item['path'],item['sha256']) in current[4]:
+         return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
+-    try:return decoded_duration(path,stage,stop,duration)
+-    except ValidationError as original:
+-        if Path(path).suffix.lower()=='.mp3':original.tag_repair_checked=True  # this version weighed the tag repair (audio_jobs.tag_repair_retry)
+-        if Path(path).suffix.lower()!='.mp3' or not getattr(original,'media_decode_failed',False):raise
+-        try:return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
+-        except ValidationError as repair:
+-            raise original from repair
++    try:
++        try:return decoded_duration(path,stage,stop,duration)
++        except ValidationError as original:
++            if Path(path).suffix.lower()=='.mp3':original.tag_repair_checked=True  # this version weighed the tag repair (audio_jobs.tag_repair_retry)
++            if Path(path).suffix.lower()!='.mp3' or not getattr(original,'media_decode_failed',False):raise
++            try:return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
++            except ValidationError as repair:
++                raise original from repair
++    except ValidationError as error:
++        sources=manifest.get('sources')
++        # Only a completed native media failure has this marker. Pause, deadlines,
++        # uncertain ownership/drain and output validation must keep their original type.
++        if (isinstance(error,SourceDecodeError) or not getattr(error,'media_decode_failed',False) or
++            not isinstance(sources,list) or type(source_index) is not int or not 0<=source_index<len(sources) or
++            not isinstance(sources[source_index],dict) or not isinstance(item.get('path'),str) or
++            sources[source_index].get('path')!=item['path'] or sources[source_index].get('sha256')!=item.get('sha256')):raise
++        raise SourceDecodeError(item['path'],source_index,len(sources),error) from error
+ 
+ 
+ def check_working_space(manifest, stage, stop):
+     if shutil.disk_usage(stage).free<sum(item['size'] for item in manifest['sources'])+64*1024*1024:
+         raise OSError(errno.ENOSPC,'Insufficient staging space before source admission; originals retained')
+     durations=[];profiles=[]
+-    for item in manifest['sources']:
++    for index,item in enumerate(manifest['sources']):
+         path=ordinary(item['path'])
+         if not path.is_relative_to(ordinary(manifest['root'])) or path.suffix.lower() not in INPUT_FORMATS:
+             raise ValidationError('Source is outside the supported audiobook boundary')
+@@ -467,7 +493,7 @@ def check_working_space(manifest, stage, stop):
+             raw=probe(path,stage,stop);duration,profile=audio_info(raw)
+             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
+             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
+-            durations.append(_source_duration(manifest,item,path,stage,stop,duration))
++            durations.append(_source_duration(manifest,item,path,stage,stop,duration,source_index=index))
+     if manifest.get('profile')==AUTOMATIC_PROFILE:
+         encoding=choose_automatic_encoding(profiles,single_m4b=len(profiles)==1 and Path(manifest['sources'][0]['path']).suffix.lower()=='.m4b')
+     elif manifest.get('profile')==PROFILE:encoding=choose_encoding(profiles)
+@@ -528,7 +554,7 @@ def snapshot_manifest(manifest,stage,stop,report=None):
+             compatibility=profile
+             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
+             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
+-            duration=_source_duration(manifest,item,alias,stage,stop,duration)
++            duration=_source_duration(manifest,item,alias,stage,stop,duration,source_index=index)
+         durations.append(duration);copies.append(alias.name)
+         step.update(index+1,index+1,force=True)
+     return copies,durations,protected_cover(manifest,stage,stop),profiles
+diff --git a/tests/test_mp3_tag_repair.py b/tests/test_mp3_tag_repair.py
+index df018a1..92c0f06 100644
+--- a/tests/test_mp3_tag_repair.py
++++ b/tests/test_mp3_tag_repair.py
+@@ -1,5 +1,5 @@
+ """Finite MP3 tag preservation and actual private staging integration checks."""
+-import copy,hashlib,json,os,sys,tempfile,threading,unittest,uuid,contextlib,types
++import copy,hashlib,json,os,sys,tempfile,threading,unittest,uuid,contextlib,types,shutil
+ from pathlib import Path
+ from unittest.mock import patch
+ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+@@ -91,6 +91,67 @@ class TagPlanTests(unittest.TestCase):
+             self.assertEqual(len(completed),1 if mode=='media_nonzero' else 0)
+             if completed:self.assertTrue(completed[0][0].data['context_completed'])
+ 
++
++class SourceDecodeDiagnosticTests(unittest.TestCase):
++    def manifest(self,count=57):
++        return {'sources':[{'path':f'Z:/Audio/Книга/{index+1:02}.mp3','sha256':str(index).zfill(64)} for index in range(count)]}
++    def failure(self):
++        error=media.ValidationError('Full audio decode failed: [mp3float] Header missing; Invalid data found when processing input')
++        error.media_decode_failed=True;return error
++    def test_exact_failed_original_index_survives_alias_and_json(self):
++        manifest=self.manifest();before=copy.deepcopy(manifest);original=self.failure();repair_error=media.ValidationError('Unsupported tag profile')
++        with patch.object(media,'decoded_duration',side_effect=original),patch.object(media,'_mp3_tag_copy',side_effect=repair_error):
++            with self.assertRaises(media.SourceDecodeError) as caught:
++                media._source_duration(manifest,manifest['sources'][11],Path('source00011.mp3'),Path('.'),threading.Event(),1,source_index=11)
++        error=caught.exception;plain=json.loads(json.dumps(error.to_dict()))
++        self.assertEqual(plain,{'schema':'source-decode-failed-v1','code':'source_decode_failed','source_path':manifest['sources'][11]['path'],
++            'source_index':11,'source_count':57,'detail':str(original)})
++        self.assertEqual(error.source_diagnostic,plain);self.assertIn('Source 12 of 57',str(error));self.assertIn('/12.mp3',str(error))
++        self.assertNotIn('source00011.mp3',str(error));self.assertIn('Header missing',str(error))
++        self.assertTrue(error.tag_repair_checked);self.assertTrue(error.media_decode_failed)
++        self.assertIs(error.__cause__,original);self.assertIs(original.__cause__,repair_error);self.assertEqual(manifest,before)
++    def test_nonmedia_failure_pause_timeout_and_unmarked_prefix_stay_unclassified(self):
++        manifest=self.manifest(1)
++        for error in (media.ValidationError('Owned decoder output has not finished draining'),media.ValidationError('Full audio decode failed: forged prefix'),
++                      media.MediaTimeout('deadline'),media.Paused('paused')):
++            with self.subTest(error=type(error).__name__),patch.object(media,'decoded_duration',side_effect=error),patch.object(media,'_mp3_tag_copy') as repair_attempt:
++                with self.assertRaises(type(error)) as caught:media._source_duration(manifest,manifest['sources'][0],Path('source00000.mp3'),Path('.'),threading.Event(),1,source_index=0)
++                self.assertIs(caught.exception,error);self.assertNotIsInstance(caught.exception,media.SourceDecodeError);repair_attempt.assert_not_called()
++    def test_ambiguous_or_mismatched_source_index_never_invents_a_source(self):
++        manifest=self.manifest(2)
++        for index in (None,True,-1,2,1):
++            original=self.failure()
++            with self.subTest(index=index),patch.object(media,'decoded_duration',side_effect=original),patch.object(media,'_mp3_tag_copy',side_effect=media.ValidationError('unsupported')):
++                with self.assertRaises(media.ValidationError) as caught:media._source_duration(manifest,manifest['sources'][0],Path('source00000.mp3'),Path('.'),threading.Event(),1,source_index=index)
++                self.assertIs(caught.exception,original)
++    def test_m4b_source_failure_retains_path_without_mp3_repair(self):
++        manifest={'sources':[{'path':'Z:/Audio/Книга.m4b','sha256':'a'*64}]}
++        with patch.object(media,'decoded_duration',side_effect=self.failure()),patch.object(media,'_mp3_tag_copy') as repair_attempt:
++            with self.assertRaises(media.SourceDecodeError) as caught:media._source_duration(manifest,manifest['sources'][0],Path('source00000.m4b'),Path('.'),threading.Event(),1,source_index=0)
++            repair_attempt.assert_not_called()
++        self.assertEqual(caught.exception.source_path,manifest['sources'][0]['path']);self.assertFalse(getattr(caught.exception,'tag_repair_checked',False))
++    def test_valid_decode_and_verified_tag_repair_keep_existing_success(self):
++        manifest=self.manifest(1)
++        for failure in (False,True):
++            with patch.object(media,'decoded_duration',**({'side_effect':self.failure()} if failure else {'return_value':1.25})),patch.object(media,'_mp3_tag_copy',return_value={'duration':1.25}) as repair_attempt:
++                self.assertEqual(media._source_duration(manifest,manifest['sources'][0],Path('source00000.mp3'),Path('.'),threading.Event(),1,source_index=0),1.25)
++                self.assertEqual(repair_attempt.call_count,int(failure))
++    def test_native_bad_source_names_original_without_altering_or_repairing_audio(self):
++        self.assertTrue(shutil.which('ffmpeg'),'bundled ffmpeg required on PATH')
++        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch'/'source-decode-tests')))
++        area.mkdir(parents=True,exist_ok=True)
++        with tempfile.TemporaryDirectory(dir=area) as name:
++            stage=Path(name);source=stage/'12.mp3';alias=stage/'source00011.mp3';raw=bytes(256)
++            source.write_bytes(raw);alias.write_bytes(raw);manifest=self.manifest()
++            manifest['sources'][11]={'path':str(source),'sha256':hashlib.sha256(raw).hexdigest(),'size':len(raw),'modified':str(source.stat().st_mtime_ns)}
++            with media.generated_artifacts(stage),self.assertRaises(media.SourceDecodeError) as caught:
++                media._source_duration(manifest,manifest['sources'][11],alias,stage,threading.Event(),1,source_index=11)
++            error=caught.exception
++            self.assertEqual((error.source_path,error.source_index,error.source_count),(str(source),11,57))
++            self.assertIn('Full audio decode failed:',error.detail);self.assertGreater(len(error.detail),30)
++            self.assertTrue(error.tag_repair_checked);self.assertEqual(source.read_bytes(),raw);self.assertEqual(alias.read_bytes(),raw)
++            self.assertFalse(list(stage.glob('tag-repair-*.mp3')))
++
+ @unittest.skipUnless(os.environ.get('BOOKS_MP3_REAL_FIXTURE'),'Explicit private fixture opt-in required')
+ class ActualPrivateStagingTests(unittest.TestCase):
+     def test_verified_tag_copy_used_only_as_derived_encoder_input(self):

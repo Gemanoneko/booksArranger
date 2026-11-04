@@ -1,0 +1,21 @@
+test_completed_nonzero_and_partial_pcm_never_prove_source_damage (test_mp3_tag_repair.TagPlanTests.test_completed_nonzero_and_partial_pcm_never_prove_source_damage) ... ok
+test_completion_callback_distinguishes_media_exit_from_context_and_bounds_failure (test_mp3_tag_repair.TagPlanTests.test_completion_callback_distinguishes_media_exit_from_context_and_bounds_failure) ... ok
+test_derived_input_mapping_keeps_original_provenance_and_frozen_manifest (test_mp3_tag_repair.TagPlanTests.test_derived_input_mapping_keeps_original_provenance_and_frozen_manifest) ... ok
+test_encoder_trim_metadata_refuses (test_mp3_tag_repair.TagPlanTests.test_encoder_trim_metadata_refuses) ... ok
+test_exact_tail_and_input_immutability (test_mp3_tag_repair.TagPlanTests.test_exact_tail_and_input_immutability) ... ok
+test_media_failure_preserves_original_when_profile_unavailable (test_mp3_tag_repair.TagPlanTests.test_media_failure_preserves_original_when_profile_unavailable) ... ok
+test_missing_nonterminal_or_extra_bytes_refuse (test_mp3_tag_repair.TagPlanTests.test_missing_nonterminal_or_extra_bytes_refuse) ... ok
+test_nonmedia_failure_never_attempts_repair (test_mp3_tag_repair.TagPlanTests.test_nonmedia_failure_never_attempts_repair) ... ok
+test_packet_timing_and_full_trailer_coverage (test_mp3_tag_repair.TagPlanTests.test_packet_timing_and_full_trailer_coverage) ... ok
+test_partial_audio_and_changed_configuration_refuse (test_mp3_tag_repair.TagPlanTests.test_partial_audio_and_changed_configuration_refuse) ... ok
+test_untrusted_json_cannot_mint_assessment (test_mp3_tag_repair.TagPlanTests.test_untrusted_json_cannot_mint_assessment) ... ok
+test_ambiguous_or_mismatched_source_index_never_invents_a_source (test_mp3_tag_repair.SourceDecodeDiagnosticTests.test_ambiguous_or_mismatched_source_index_never_invents_a_source) ... ok
+test_exact_failed_original_index_survives_alias_and_json (test_mp3_tag_repair.SourceDecodeDiagnosticTests.test_exact_failed_original_index_survives_alias_and_json) ... ok
+test_m4b_source_failure_retains_path_without_mp3_repair (test_mp3_tag_repair.SourceDecodeDiagnosticTests.test_m4b_source_failure_retains_path_without_mp3_repair) ... ok
+test_nonmedia_failure_pause_timeout_and_unmarked_prefix_stay_unclassified (test_mp3_tag_repair.SourceDecodeDiagnosticTests.test_nonmedia_failure_pause_timeout_and_unmarked_prefix_stay_unclassified) ... ok
+test_valid_decode_and_verified_tag_repair_keep_existing_success (test_mp3_tag_repair.SourceDecodeDiagnosticTests.test_valid_decode_and_verified_tag_repair_keep_existing_success) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.013s
+
+OK
