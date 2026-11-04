@@ -1,0 +1,61 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0245-release-20261104-r3",
+   "reason": "Superseded published 0.24.5 local build; 0.25.0 tagged and verified; durable release evidence retained",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0245-release-20261104-r3",
+   "isDir": true,
+   "before": {
+    "files": 12212,
+    "bytes": 1289592317
+   },
+   "kept": [],
+   "worktrees": [
+    {
+     "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0245-release-20261104-r3",
+     "repo": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger",
+     "files": 12212,
+     "bytes": 1289592317,
+     "newestFileMs": 1793782052977.7068,
+     "action": "removed"
+    }
+   ],
+   "plan": {
+    "files": 12212,
+    "bytes": 1289592317
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 12212,
+    "bytes": 1289592317
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 99824885760,
+   "after": 101138505728
+  }
+ ],
+ "removedFiles": 12212,
+ "removedBytes": 1289592317,
+ "keptCount": 0
+}

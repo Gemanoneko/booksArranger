@@ -1,0 +1,61 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0250-release-20261104",
+   "reason": "Superseded failed 0.25.0 first build; frozen NO-GO evidence committed; current v0.25.0 published",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0250-release-20261104",
+   "isDir": true,
+   "before": {
+    "files": 12412,
+    "bytes": 1292464550
+   },
+   "kept": [],
+   "worktrees": [
+    {
+     "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0250-release-20261104",
+     "repo": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger",
+     "files": 12412,
+     "bytes": 1292464550,
+     "newestFileMs": 1793829216484.5176,
+     "action": "removed"
+    }
+   ],
+   "plan": {
+    "files": 12412,
+    "bytes": 1292464550
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 12412,
+    "bytes": 1292464550
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 96944623616,
+   "after": 98261053440
+  }
+ ],
+ "removedFiles": 12412,
+ "removedBytes": 1292464550,
+ "keptCount": 0
+}
