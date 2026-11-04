@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0250-r2-release-20261105",
+   "reason": "Sully owned failed r2 0.25.0 pack scratch; receipts committed; old build removed",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0250-r2-release-20261105",
+   "isDir": true,
+   "before": {
+    "files": 1186,
+    "bytes": 38446861
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 1186,
+    "bytes": 38446861
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 1186,
+    "bytes": 38446861
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 102289154048,
+   "after": 102330122240
+  }
+ ],
+ "removedFiles": 1186,
+ "removedBytes": 38446861,
+ "keptCount": 0
+}
