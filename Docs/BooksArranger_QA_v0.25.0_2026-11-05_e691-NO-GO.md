@@ -1,0 +1,11 @@
+# Books Arranger 0.25.0 QA — e691 build, 2026-11-05
+
+**Verdict:** NO-GO. The single authorized full schema 3 entry on build `3dbcfc92-c326-4d3b-907c-4b1b4e5d8c7a` failed. No same-build repeat or native/hidden release check was run.
+
+Source commit: `e6912eb7e43cac35bf26a7a662bc9dc95c0e1d2d` (clean). Release artifact manifest SHA256: `068e9ad0a02b2fc16950e5109540c1ed8e77e609845ec914f022b38e8548bc1f`. Runtime pointer SHA256: `d6386c9f373ebe2f69f03338dac4fda7ec27c21013e9fa2c41ff2a5283b696cd`. Schema 3 context SHA256: `330b4a035a44c29d4d35e6ddfc72517d9af24b9640261f25ae550c91cc20c515`.
+
+The owned check exited 1 after 481.5 s; it closed normally, completed output, and ended with native complete/zero, no force or timeout. The 13 Python workers reported 2,405 test methods: seven batches passed and six failed, with 23 failure/error blocks (including subtests). One Node frontend assertion failed. Personal-folder audit was clean. [Exact receipt, raw logs, context and failure index](Evidence/converted-duplicate_2026-11-05/full-entry-e691-failure/summary.json) are retained. Receipt SHA256: `3bfc5e500a5ebee25474bc0a71068e8c67affc6c1a677c34196ae8f66e803ab7`.
+
+The failures include an inspector query for a missing `book_groups.root` column, seven Names Save integration errors from an `operation_lock` missing on test service fixtures, seven peer errors from missing `page_local` on test stubs, a source-folder interruption assertion, two destination/moved-book inspector cases, five Tolkien expectations for the old Russian series route, and one Node status-label assertion. These need a corrected committed source and new build before release QA can resume. The earlier focused source slices passed, but they do not clear this full gate.
+
+Entry-check receipt v2: books-arranger v0.25.0 @ e6912eb7e43cac35bf26a7a662bc9dc95c0e1d2d (dirty: N) [source:aacdecf08af33175bcd4d3d0e3608fab0e07a15778cf4242f3e045f33f0329fb; harness:6f76ee440e550b16c87fbcd578e30eee597c34d2ccd5df3402d777f298159165; runtime:9b1d6629000104e25b0214104326e146b863afc0d28ee2de8bc66c267600f6f6; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean

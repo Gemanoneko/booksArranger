@@ -1,0 +1,255 @@
+{
+  "source_commit": "0ec4971169a70d57a407ae1a9ef6bf96227724d4",
+  "frozen_summaries": {
+    "primary": "c0279204fb51aa4aaf013a878d7a931f1ab4c2d9ed811c7d4bc88cb3a8c91a83",
+    "tolkien": "cce29cba6bef88f20fb34853ac6f1066f2a92e2e590561c09c76380f1d1737c2"
+  },
+  "source_files": [
+    {
+      "path": "tests/test_replacement_jobs.py",
+      "raw_sha256": "37486d7f5f1b3e36d29a55f25a21f0557d33c28272e12a145333f51f0891f962",
+      "lf_sha256": "b9c4cf4bc248d57b3072692496efa8f0115e489607af1b539c7969ba09c9af04",
+      "match": true
+    },
+    {
+      "path": "tests/test_destination_override.py",
+      "raw_sha256": "5a53927513cd9070a062587f07287587b4ab3c85beaf4f65b7ea5d3075e225d4",
+      "lf_sha256": "2ec79cae7d56b2706a05f0a3516aeeb1acccb0b1dde2a2a451c495075609ea8a",
+      "match": true
+    },
+    {
+      "path": "tests/test_backend_242.py",
+      "raw_sha256": "0847d1f9cefa2583b26c18937655877f1b13bc1e52d299d83cfcd063da18c3c9",
+      "lf_sha256": "766473c4a70c730033dc1fa50000f5b3e771a8ced3da1da7d10c9472bfcf4798",
+      "match": true
+    },
+    {
+      "path": "tests/test_integration_242.py",
+      "raw_sha256": "fb6fcbb40558d6748523f4fa0961423e96a81d2ab451f8e97fd79116142c51e0",
+      "lf_sha256": "7293249ee2e9029e5d3a30307d343cda63a746d64304f6c1b09dac7a0cc3f8e6",
+      "match": true
+    },
+    {
+      "path": "tests/test_source_folders.py",
+      "raw_sha256": "eb1fcbd74a2a88a26572a3a29f5a2e4dd9c7bfa11020f1fe2850f05d3af2141d",
+      "lf_sha256": "1c7c18c818412d3e2c0085a40d68ffcafc208e99888451a2d73447d6b36a1547",
+      "match": true
+    },
+    {
+      "path": "tests/test_attention_frontend.js",
+      "raw_sha256": "85256039ab8b90ba71b7a75610d993ebec6c3bdbf2a61ef531e0c7cca34ae148",
+      "lf_sha256": "6ba5d78dce7783180a9d1178f27dc8528c09ce999dd5cf092e6ea45004d8a4f1",
+      "match": true
+    },
+    {
+      "path": "tests/test_iron_skazka_frontend.js",
+      "raw_sha256": "fdaf2612a64f6c89ee58d378164f8891f33d86858f41f935eb7a9990d76ec40d",
+      "lf_sha256": "6f6f91756c15b6a2fe80773bdcacf234939f813bfa27a574cf941b247ea914b8",
+      "match": true
+    },
+    {
+      "path": "web/app.js",
+      "raw_sha256": "f5f20fb45eec0d7029e5c7a1aae7e00cd996de7dc521fbe48d458d6c91d09b70",
+      "lf_sha256": "98f777b8634259d84611a43c9c80b73c646a0bb4cd4462beb807c540d43ace4a",
+      "match": true
+    },
+    {
+      "path": "tests/test_series_identity_242.py",
+      "raw_sha256": "c9e619791a9ea0bc41732a5d39199ce311c8118b90531775ec58b4e748675d43",
+      "lf_sha256": "f37a0979b575f2984f967b12ca470c0e671ef86b73fadc35f12e6463f00f5b02",
+      "match": true
+    }
+  ],
+  "python": {
+    "ran": 193,
+    "passed": 193,
+    "owned": {
+      "code": 0,
+      "ok": true,
+      "closed": true,
+      "outputComplete": true,
+      "forced": false,
+      "timedOut": false,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 26,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 3963,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      },
+      "elapsedMs": 62048.512200000005
+    }
+  },
+  "frontend": {
+    "deadlineMs": 600000,
+    "results": [
+      {
+        "script": "test_iron_skazka_frontend.js",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 15,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 255.64969999999997
+      },
+      {
+        "script": "test_attention_frontend.js",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 32,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 481.54350000000005
+      },
+      {
+        "script": "test_refused_retry_frontend.js",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 16,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 233.9072
+      },
+      {
+        "script": "test_retry_frontend.js",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 17,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 248.22699999999998
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "name": "owned.mjs",
+      "sha256": "88857dd92d48cdd2132123a842ff4deeae4cf9208819ab71e0815b6b5464f12e"
+    },
+    {
+      "name": "focused.py",
+      "sha256": "3a1e57d8386f5a6bad13125d4457e20803b19b2f36867c52116337cf02a3d624"
+    },
+    {
+      "name": "frontend-owned.mjs",
+      "sha256": "f0086fa0268814fdd9ed34d079e7eb550cde21ca9b28c32b9c809a0d6be10229"
+    },
+    {
+      "name": "corrected-failures-193.json",
+      "sha256": "642d7134016173c16040cdb812c4ee98b4695b347f78d6ad2f50ec14a61ee210"
+    },
+    {
+      "name": "corrected-failures-193.log",
+      "sha256": "8fe966948de2b23acd6cac5d930ba9f7998ba6964fc0ff7a83168b4042f4cd10"
+    },
+    {
+      "name": "frontend-summary.json",
+      "sha256": "42c399f7f1a4eee8138452e20ecee19d22af5a79f05f3c3fa0fc5168a4942e9f"
+    },
+    {
+      "name": "test_iron_skazka_frontend.json",
+      "sha256": "c0118e5cf5290a38797dfdf5d61eddc954c59373563a033383b6665da2b0c1d7"
+    },
+    {
+      "name": "test_iron_skazka_frontend.log",
+      "sha256": "6e697565d0faf1dca25c91d8eaca5eb0bfe3d2bc8b40123b52b06aa31edb9a33"
+    },
+    {
+      "name": "test_attention_frontend.json",
+      "sha256": "6f2a35835cb98d4e7526ff662d060d52298fe1f158acb7a3c823f0e50eb5374c"
+    },
+    {
+      "name": "test_attention_frontend.log",
+      "sha256": "b45d5c4de81b320ff998906b5d2e18be5e528091d5a44c40d2dba97852bc50f9"
+    },
+    {
+      "name": "test_refused_retry_frontend.json",
+      "sha256": "8e1fc406442f4c716c9c2620361a66248a2cba5e830cd85a1fedef294cbaef49"
+    },
+    {
+      "name": "test_refused_retry_frontend.log",
+      "sha256": "93c6d9d04fa2c7fbed4f9d2240bbe77a55a3078024838eab9c54ef4d2c36c90e"
+    },
+    {
+      "name": "test_retry_frontend.json",
+      "sha256": "15b9802b137d0a20b9c9c2ed8e220c5aec34359a513e8b59567eeb547f657655"
+    },
+    {
+      "name": "test_retry_frontend.log",
+      "sha256": "237c3d7950a06d25bd57d6b555c72c4f31ad6e4a89f56502af9791dc02ef1c72"
+    }
+  ],
+  "scope": "All previously failing full-gate modules and four frontend scripts only; no full/hidden actions in this focused pass."
+}
