@@ -7,20 +7,20 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-11-05
 Tool: Books Arranger (Electron desktop with Python backend)
 Release: v0.25.0
-Commit range: bf4425de09c355d2a0743771ca4209b24c8f0de1..0ec4971169a70d57a407ae1a9ef6bf96227724d4
-Files changed: 456 files, +343997 / -164 lines, including retained documentation/evidence
-Product/test/release scope: 45 files, +1704 / -143 lines
+Commit range: bf4425de09c355d2a0743771ca4209b24c8f0de1..90f0368ba7631659a3caafc2fa6125e9075ccf2a
+Files changed: 510 files, +436288 / -165 lines, including retained documentation/evidence
+Product/test/release scope: 46 files, +1705 / -144 lines
 Stand-down dimensions: none
-Binding: corrected pushed source and build 140014b8-b350-4a3e-a99b-05d24349f139
+Binding: corrected pushed source and r3 build 9b63e746-2a00-4cd8-a0ba-5b45e6405fc2
 ```
 
-Release source commit: 0ec4971169a70d57a407ae1a9ef6bf96227724d4
+Release source commit: 90f0368ba7631659a3caafc2fa6125e9075ccf2a
 
 ## Summary
 
-This is the updated accumulated source review after the first 0.25.0 build's full-check NO-GO. It incorporates the previously completed review through `e6912eb`, documented in [the November 4 report](BooksArranger_CodeReview_v0.25.0_2026-11-04.md), and reviews the exact correction through `0ec4971`. The earlier report remains unchanged as historical evidence. Build `3dbcfc92-c326-4d3b-907c-4b1b4e5d8c7a` and its failed full-check result are excluded from this acceptance; no earlier artifact binding is inherited.
+This is the updated accumulated source review after the first two 0.25.0 builds' full-check NO-GO results. It incorporates the previously completed review through `e6912eb`, documented in [the November 4 report](BooksArranger_CodeReview_v0.25.0_2026-11-04.md), the nine-file correction through `0ec4971`, and the final one-assertion correction at `90f0368`. The earlier report remains unchanged as historical evidence. Builds `3dbcfc92-c326-4d3b-907c-4b1b4e5d8c7a` and `140014b8-b350-4a3e-a99b-05d24349f139` and their failed full-check results are excluded from this acceptance; no earlier artifact binding is inherited.
 
-The correction changes one product line in `web/app.js`, restoring the established untyped single-MP3 replacement status/hint. Typed `books-media-failure-v1` presentation still takes precedence. Eight existing test files are corrected to use the real constructor/catalog/cleanup entry contracts or the accepted Tolkien naming decision; the changelog records the correction. No backend SQL, source cleanup, retention, ownership, admission, media validation, build input or runner graph changes in this correction.
+The correction changes one product line in `web/app.js`, restoring the established untyped single-MP3 replacement status/hint. Typed `books-media-failure-v1` presentation still takes precedence. Eight existing test files are corrected to use the real constructor/catalog/cleanup entry contracts or the accepted Tolkien naming decision; the changelog records the correction. The final additional test changes only one stale expected status to the committed feature-specific M4B label. No backend SQL, source cleanup, retention, ownership, admission, media validation, build input or runner graph changes in these corrections.
 
 ## Rubric
 
@@ -59,7 +59,7 @@ The correction changes one product line in `web/app.js`, restoring the establish
 
 ### 9. Build & Release Hygiene
 
-- Pass for the corrected source and exact replacement package bound below. Version remains 0.25.0, dependencies/lock/build pins are unchanged, and the exact pushed correction source is pinned above. The previous build/full NO-GO and failed baseline receipts remain preserved. Independent full/native QA remains required; neither an old full result nor an old native plan is reused.
+- Pass for the corrected source and exact r3 package bound below. Version remains 0.25.0, dependencies/lock/build pins are unchanged, and the exact pushed correction source is pinned above. Both previous build/full NO-GO results and failed baseline receipts remain preserved. The changed Git product digest and generated payload differences are independently explained below. Independent full/native QA remains required; neither an old full result nor an old native plan is reused.
 
 ## Correction review and safety trace
 
@@ -80,27 +80,37 @@ The primary baseline reproduces the own affected failure categories in ten metho
 
 All earlier source findings remain closed as documented in the November 4 review: saved-series T1, duplicate chapter-plan correspondence, startup failure reporting and output/fallback navigation F1. The typed child/publication ownership, backup-first cleanup, immutable parent, current destructive-transaction guards, strict PNG/audio preservation, names CAS and honest damaged-source holds are unchanged by this correction.
 
+### Final Node assertion correction
+
+`0ec4971..90f0368` changes only the expected label in `tests/test_precheck_frontend.js:83`, from the older broad M4B wording to `Can't convert — M4B feature unsupported`. The fixture is the current unsupported-feature group after precheck; the expected label agrees with the committed UX media-addendum table/filter wording and existing runtime copy. No mock, runtime behavior, predicate, safety assertion or test graph is changed.
+
+Verified summary SHA256 `9a1c22e0bae49d2b9ee5fd68a7632e3dc098d23d8c8da2d16d9daf074dd624fd` and patch SHA256 `2d25ce21d44836b487f91db776e3ce559c3fa0ef5f14f4f1abb394a541a76236` under `Docs/Evidence/converted-duplicate_2026-11-05/node-phase-correction`. The committed test's frozen LF hash and all ten listed evidence hashes match. The old assertion failure is reproduced in the preserved baseline receipt.
+
+The actual complete canonical Node-side phase records 11 syntax checks, all 18 declared Node entries/242 cases with zero failures/skips/cancellations, and all 39 sorted DOM scripts: 51 commands, all exit 0, source inputs unchanged. Its owned receipt closes normally in 23.530 seconds with complete output, native zero, no force and no timeout. The fixed phase contract excludes the PA-1 native entry. This Node-side result does not turn the previous r2 full NO-GO into a full pass, combine phases from different source/build identities, or authorize a native launch. A fresh source-bound r3 build/full result remains required.
+
 Senua performed read-only source/evidence/hash inspection and report edits only. No tests, native probes/apps, live library or Z: access, focus action or product edits were performed. The only open construction finding is the carried advisory M2.
 
 ## Artifact binding
 
 ```text
-Release worktree: C:/Antigravity Projects/Worktrees/Books Arranger/0250-release-20261105-r2
-Build ID: 140014b8-b350-4a3e-a99b-05d24349f139
-Product digest: 3c9a1f5670ac4e0dded9ddc4c658cc70e7c17fda4b80350e80c0d1cf8a69b4cd
-Release artifact manifest SHA256: 8f055521103f91f9417331091b971c423f7da483980364ee7a020016c99a9ca9
-Runtime pointer SHA256: fe2e42723bbf6c5f7bfec0ad7d77b84255907a363ecf4d2c612ce432e61ec130
-Payload manifest SHA256: 960972d791d3b4dd8b471775e2c6edaeaa727a08bb701b2008c9c854b3eae270
+Release worktree: C:/Antigravity Projects/Worktrees/Books Arranger/0250-release-20261105-r3
+Build ID: 9b63e746-2a00-4cd8-a0ba-5b45e6405fc2
+Product digest: 21a42959c039c1e80075a5be71e7a86b0b17b09301ff00481857f12047febb16
+Release artifact manifest SHA256: 2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4
+Runtime pointer SHA256: da4cfa5c4684ed71706c48536962ba3419c07fac3b8c4281831d59fd4e2fab10
+Payload manifest SHA256: cdfe05351609941bdc0d956a7d00a7abfaec0b7fb523d96fbb26d313f0085100
 Installer: Books-Arranger-Setup-0.25.0.exe
-Installer size: 174729156 bytes
-Installer SHA256: 695e52cb8b4788d7c010ee11edc3e87b5d9cbad8fc7ab19c71f835721d7d00e3
+Installer size: 174729365 bytes
+Installer SHA256: a286126ba64d63c61dd307d00bbd230734c967a66114babd7197b9af81921963
 ```
 
-The replacement release worktree is clean at the exact corrected source pin. Senua independently verified the artifact-manifest/runtime-pointer hashes and version/source/build/product identity; all three artifact sizes and hashes; actual packaged shell `package.json` and backend `VERSION` at 0.25.0; and the unchanged raw lock SHA256 `01d87e0d44a2b4485d5d674121fc1389cfa2092fd1b7a10c6ce7ca846f6c86a5`.
+The r3 release worktree is clean at the exact source pin above. Senua independently verified manifest/pointer/version/source/build/product identity, all three artifact sizes/hashes, actual packaged shell `package.json` and backend `VERSION` at 0.25.0, and unchanged raw lock SHA256 `01d87e0d44a2b4485d5d674121fc1389cfa2092fd1b7a10c6ce7ca846f6c86a5`. All 20 changed runtime backend/frontend files match their release-source bytes and payload records, including both new root modules, media/cleanup/diagnostic consumers and `web/app.js`. No source or release-worktree edit was made.
 
-All 20 changed backend/frontend files match the release-source bytes and payload entries, including both new root modules `publication_reuse.py` and `tolkien_trilogy.py`, the cleanup/resolver and media/diagnostic modules, and corrected `web/app.js`. Independent binary Git-blob reads confirm every file matches the accepted `0ec4971` source after CRLF/LF normalization. No source or release-worktree edit was made.
+**Product-digest difference resolved.** `build-manifest.mjs:35` produces Git `{mode, object, name}` records; `release-contract.productTree()` excludes only `Docs/` and `CHANGELOG.md`, sorts by name and hashes their JSON. Tests are included. Independently recomputing both immutable trees yields exactly r2 `3c9a1f5670ac4e0dded9ddc4c658cc70e7c17fda4b80350e80c0d1cf8a69b4cd` and r3 `21a42959c039c1e80075a5be71e7a86b0b17b09301ff00481857f12047febb16`. Each preimage has 427 members; their sole selected-record change is `tests/test_precheck_frontend.js`, mode `100644`, blob `04a9140dd94257fb2ac2aebff81f9f1ec6c211e1` to `a29c9f82c362da1c3224c184907ac22c1610cb63`. The new digest binds the reviewed assertion; it is not evidence of runtime or checkout-EOL drift.
 
-`Docs/Evidence/converted-duplicate_2026-11-05/pack-r2/pack-owned.json` records the guarded replacement pack finishing in 83.224 seconds with exit 0, complete owned output, native zero, no force and no timeout. This establishes source/artifact identity, not independent full/native QA clearance. The excluded first build and its full-check NO-GO remain historical evidence; no tag/publication is implied.
+**Payload-manifest difference resolved separately.** Comparing every r2/r3 payload entry finds exactly 95 changed generated backend `.pyc` files, all the same size; every other payload entry is identical, including `app.asar`. The unchanged compiler step uses `compileall --invalidation-mode unchecked-hash` on its private backend path. For every changed bytecode file, Senua replaced only its observed embedded absolute compiler filename prefix: r2 `0250-release-20261105-r2/build-cache/builds/47d1052e-ce23-44c3-b9b1-c9eb9e3768cb/backend/` to r3 `0250-release-20261105-r3/build-cache/builds/37154e4d-beda-45a8-81f1-e42e97c54bc1/backend/`, preserving the same relative filename. All 95 complete binaries then match the r3 recorded SHA256 exactly. Headers and every other byte are identical; no bytecode was executed to establish this. There is no unexplained generated-code drift.
+
+`Docs/Evidence/converted-duplicate_2026-11-05/pack-r3/pack-owned.json` records the guarded pack finishing in 81.805 seconds with exit 0, complete owned output, native zero, no force and no timeout. This accepts r3 source/artifact identity only; independent full/native QA remains necessary. The previous r2 package remains excluded because its full check failed the stale Node assertion. The earlier first-build NO-GO also remains excluded.
 
 ## Verdict
 
@@ -110,4 +120,4 @@ All 20 changed backend/frontend files match the release-source bytes and payload
 
 **Verdict:** RELEASE CLEAR
 
-This verdict certifies the exact corrected source range, documentation-only descendants and the exact replacement build bound above. The safety floor is intact. It excludes the superseded build; independent QA/native evidence remains required before publication.
+This verdict certifies the exact corrected source range, documentation-only descendants and the exact r3 build bound above. The safety floor is intact. Both superseded builds are excluded; independent QA/native evidence remains required before publication.
