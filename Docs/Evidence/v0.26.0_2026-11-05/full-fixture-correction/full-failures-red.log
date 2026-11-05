@@ -1,0 +1,39 @@
+test_verified_tag_copy_used_only_as_derived_encoder_input (test_mp3_tag_repair.ActualPrivateStagingTests.test_verified_tag_copy_used_only_as_derived_encoder_input) ... FAIL
+test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom (test_metadata_choices.MetadataChoiceBrowserContractTests.test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom) ... FAIL
+
+======================================================================
+FAIL: test_verified_tag_copy_used_only_as_derived_encoder_input (test_mp3_tag_repair.ActualPrivateStagingTests.test_verified_tag_copy_used_only_as_derived_encoder_input)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\tests\test_mp3_tag_repair.py", line 159, in test_verified_tag_copy_used_only_as_derived_encoder_input
+    self.assertEqual(hashlib.sha256(data).hexdigest(),'e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '3fd8b5de3da373c69eff6a0eafe42ea313c15b04952523c3c3b2515505958288' != 'e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed'
+- 3fd8b5de3da373c69eff6a0eafe42ea313c15b04952523c3c3b2515505958288
++ e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed
+
+
+======================================================================
+FAIL: test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom (test_metadata_choices.MetadataChoiceBrowserContractTests.test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\tests\test_metadata_choices.py", line 256, in test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom
+    self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertIn('METADATA_CHOICE_DOM_CONTRACT_PASS',result.stdout)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 1 != 0 : TypeError: button.removeAttribute is not a function
+    at updateMetadataChoiceControls (evalmachine.<anonymous>:17:76)
+    at Object.renderMetadataQuestions (evalmachine.<anonymous>:61:3)
+    at [eval]:36:10
+    at [eval]:63:3
+    at runScriptInThisContext (node:internal/vm:219:10)
+    at node:internal/process/execution:485:12
+    at [eval]-wrapper:6:24
+    at runScriptInContext (node:internal/process/execution:483:60)
+    at evalFunction (node:internal/process/execution:317:30)
+    at evalTypeScript (node:internal/process/execution:329:3)
+
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.139s
+
+FAILED (failures=2)

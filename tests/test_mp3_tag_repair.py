@@ -152,39 +152,59 @@ class SourceDecodeDiagnosticTests(unittest.TestCase):
             self.assertTrue(error.tag_repair_checked);self.assertEqual(source.read_bytes(),raw);self.assertEqual(alias.read_bytes(),raw)
             self.assertFalse(list(stage.glob('tag-repair-*.mp3')))
 
-@unittest.skipUnless(os.environ.get('BOOKS_MP3_REAL_FIXTURE'),'Explicit private fixture opt-in required')
 class ActualPrivateStagingTests(unittest.TestCase):
     def test_verified_tag_copy_used_only_as_derived_encoder_input(self):
-        source=Path(os.environ['BOOKS_MP3_REAL_FIXTURE']);data=source.read_bytes()
-        self.assertEqual(hashlib.sha256(data).hexdigest(),'e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed')
-        stage_parent=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(source.parent)));stage_parent.mkdir(parents=True,exist_ok=True)
-        # The staging folder is removed when the test ends: a direct run (no BOOKS_QA_FIXTURE_ROOT) stages beside the
-        # private fixture, and a 2026-10-24 run left a 117 MB app-staging folder there.
-        temp=tempfile.TemporaryDirectory(prefix='app-staging-',dir=stage_parent,ignore_cleanup_errors=True);self.addCleanup(temp.cleanup);stage=Path(temp.name)
-        item={'path':str(source),'sha256':hashlib.sha256(data).hexdigest(),'size':len(data),'modified':str(source.stat().st_mtime_ns)}
-        manifest={'job_id':'private-diagnostic','candidate_id':'private-candidate','candidate_revision':1,'sources':[item],
-            'metadata_facts':{'source_fingerprint':'private'},'root':str(source.parent)}
-        before=copy.deepcopy(manifest);stop=threading.Event()
-        with media.generated_artifacts(stage) as artifacts:
-            value=media._mp3_tag_copy(manifest,item,source,stage,stop,2182)
-            self.assertEqual(value['proof']['affected_audio_seconds'],0)
-            self.assertEqual(value['proof']['frame_count'],83499)
-            self.assertEqual(value['proof']['native_pcm']['sample_count'],96190848)
-            self.assertEqual(value['sha256'],'c76279acb6f2d0896b745daf814a969b047ccc2ceca8a9e0fd53382c360aa959')
-            alias=stage/'source00000.mp3';alias.write_bytes(data)
-            # The frozen original snapshot remains the receipt/provenance input.
-            def encode(manifest_,stage_,copies,durations,cover,stop_,progress,encoding,original_copies,feed):
-                self.assertEqual(copies,[value['name']]);self.assertEqual(original_copies,[alias.name])
-                self.assertEqual(media.digest(alias),item['sha256'])
-                return stage/'not-created.m4b',{}
-            with patch.object(media,'_encode_inputs',side_effect=encode):
-                _,validation=media._encode_private(manifest,stage,[alias.name],[value['duration']],None,stop,lambda *a:None,{'mode':'private-check'})
-            self.assertEqual(validation['source_working_repairs'][0]['affected_audio_seconds'],0)
-            self.assertIn(value['name'],artifacts)
-            self.assertEqual(media._source_duration(manifest,item,alias,stage,stop,1),value['duration'])
-            repaired=stage/value['name']
-            with repaired.open('ab') as stream:stream.write(b'x')
-            with self.assertRaises(media.ValidationError):media._mp3_tag_copy(manifest,item,alias,stage,stop,1)
-        self.assertEqual(manifest,before);self.assertEqual(source.read_bytes(),data)
+        ffmpeg=shutil.which('ffmpeg');self.assertTrue(ffmpeg,'Pinned private FFmpeg required on PATH')
+        stage_parent=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch'/'mp3-staging-tests')))
+        stage_parent.mkdir(parents=True,exist_ok=True)
+        # Own a short, exact finite ID3v1-tail profile. An opt-in MP3 from another
+        # run is neither this recording nor necessarily eligible for tag repair.
+        with tempfile.TemporaryDirectory(prefix='mp3-staging-',dir=stage_parent) as name:
+            stage=Path(name);source=stage/'original.mp3';stop=threading.Event()
+            media.run_owned([ffmpeg,'-hide_banner','-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=0.8',
+                '-c:a','libmp3lame','-ar','44100','-ac','1','-b:a','128k','-write_xing','0','-id3v2_version','3','-write_id3v1','1',
+                '-metadata','title=Private ID3v1 staging proof','-metadata','artist=Private QA Author',str(source)],stage,stop,30)
+            ordinary_data=source.read_bytes();self.assertEqual(ordinary_data[-128:-125],b'TAG')
+            ordinary=stage/'ordinary-tag.mp3';ordinary.write_bytes(ordinary_data)
+            # A complete 96-byte false MPEG frame (32 kbps/48 kHz) inside the
+            # non-audio tag is emitted before EOF. A plain TAG is skipped at EOF.
+            data=ordinary_data
+            data=data[:-128]+b'TAG'+b'\xff\xfb\x14\xc0'+bytes(121);source.write_bytes(data)
+            layout=repair.plan(data)
+            self.assertEqual(data[-128:-125],b'TAG');self.assertGreater(len(layout.frames),2)
+            item={'path':str(source),'sha256':hashlib.sha256(data).hexdigest(),'size':len(data),'modified':str(source.stat().st_mtime_ns)}
+            manifest={'job_id':'private-diagnostic','candidate_id':'private-candidate','candidate_revision':1,'sources':[item],
+                'metadata_facts':{'source_fingerprint':'private'},'root':str(source.parent)}
+            before=copy.deepcopy(manifest)
+            with media.generated_artifacts(stage) as artifacts:
+                ordinary_item={'path':str(ordinary),'sha256':hashlib.sha256(ordinary_data).hexdigest(),'size':len(ordinary_data)}
+                with self.assertRaisesRegex(media.ValidationError,'Unexpected terminal packet layout'):
+                    media._mp3_tag_copy({'sources':[ordinary_item]},ordinary_item,ordinary,stage,stop,1)
+                self.assertEqual(ordinary.read_bytes(),ordinary_data,'A tag without the required native packet proof is preserved')
+                with self.assertRaisesRegex(media.ValidationError,'Full audio decode failed'):
+                    media.decoded_duration(source,stage,stop,1)
+                value=media._mp3_tag_copy(manifest,item,source,stage,stop,layout.samples/layout.sample_rate)
+                self.assertEqual(value['proof']['affected_audio_seconds'],0)
+                self.assertEqual(value['proof']['source_sha256'],item['sha256'])
+                self.assertEqual(value['proof']['removed_sha256'],hashlib.sha256(data[-128:]).hexdigest())
+                self.assertEqual(value['proof']['frame_count'],len(layout.frames))
+                self.assertEqual(value['proof']['native_pcm']['sample_count'],layout.samples)
+                self.assertEqual((stage/value['name']).read_bytes(),data[:-128],'Only the exact non-audio terminal tag is removed')
+                self.assertEqual(value['sha256'],hashlib.sha256(data[:-128]).hexdigest())
+                alias=stage/'source00000.mp3';alias.write_bytes(data)
+                # The frozen original snapshot remains the receipt/provenance input.
+                def encode(manifest_,stage_,copies,durations,cover,stop_,progress,encoding,original_copies,feed):
+                    self.assertEqual(copies,[value['name']]);self.assertEqual(original_copies,[alias.name])
+                    self.assertEqual(media.digest(alias),item['sha256'])
+                    return stage/'not-created.m4b',{}
+                with patch.object(media,'_encode_inputs',side_effect=encode):
+                    _,validation=media._encode_private(manifest,stage,[alias.name],[value['duration']],None,stop,lambda *a:None,{'mode':'private-check'})
+                self.assertEqual(validation['source_working_repairs'][0]['affected_audio_seconds'],0)
+                self.assertIn(value['name'],artifacts)
+                self.assertEqual(media._source_duration(manifest,item,alias,stage,stop,1),value['duration'])
+                repaired=stage/value['name']
+                with repaired.open('ab') as stream:stream.write(b'x')
+                with self.assertRaises(media.ValidationError):media._mp3_tag_copy(manifest,item,alias,stage,stop,1)
+            self.assertEqual(manifest,before);self.assertEqual(source.read_bytes(),data)
 
 if __name__=='__main__':unittest.main()

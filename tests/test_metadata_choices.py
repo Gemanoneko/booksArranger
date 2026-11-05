@@ -197,7 +197,8 @@ class Element {
  constructor(tag='div'){this.tagName=tag;this.children=[];this.listeners={};this.attributes={};this.value='';this.checked=false;this.hidden=false;this.textContent='';}
  append(...items){for(const item of items){if(item.parentElement)item.parentElement.children=item.parentElement.children.filter(child=>child!==item);item.parentElement=this;this.children.push(item);}}
  replaceChildren(...items){this.children=[];this.append(...items);}
- setAttribute(key,value){this.attributes[key]=value;}
+ setAttribute(key,value){this.attributes[key]=String(value);}
+ removeAttribute(key){delete this.attributes[key];}
  addEventListener(type,handler){(this.listeners[type]??=[]).push(handler);}
  querySelector(selector){if(selector!=='input[type=radio]')return null;const walk=element=>{if(element.tagName==='input' && element.type==='radio')return element;for(const child of element.children){const found=walk(child);if(found)return found;}return null;};return walk(this);}
  focus(){if(this===get('metadata-questions-heading')){assert.equal(get('manual-review').open,true,'editor opens before question heading focus');assert.equal(get('metadata-questions').hidden,false,'question is visible before heading focus');}context.document.activeElement=this;} scrollIntoView(){}
@@ -217,13 +218,13 @@ const makeRow=()=>({id:'candidate',revision:7,kind:'candidate',title_clue:'Actua
 let requests=[],response,errorNext=null;
 context={console,later:(key,kind,handler)=>handler,keptNote:row=>row?.review_context?.manual_note || '',document:{activeElement:inputs.narrator},$:get,form,fields:names,dirty:false,coverId:null,busy:false,ended:false,recoveryDisconnected:false,trackDraft:null,manualMetadataTouched:false,selectedLibrary:'Audiobooks',selectedRow:makeRow(),
  node:(tag,text='',className='')=>Object.assign(new Element(tag),{textContent:text,className}),sourceLink:(url,text)=>Object.assign(new Element('a'),{href:url,textContent:text}),controls(){},syncManualDraft(){},choiceSave:null,clockNote:note=>note,lostLine:()=>'not confirmed',namesHold:()=>false,panelEditNames(){},
- async request(route,data){requests.push({route,data});if(errorNext)throw errorNext;return response;},select(row){context.selectedRow=row;context.renderMetadataQuestions(row,false);}};
-vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+ editSeq:0,decisionFeedback(){},restoreDecisionPanel(){},async bookDecision(row,action,payload){assert.equal(get('save-metadata-choices').attributes['aria-disabled'],'true','pending Save is labelled before acceptance');requests.push({row,action,payload});if(errorNext)throw errorNext;return response;},async request(){throw Error('No legacy metadata-choice mutation');},select(row){context.selectedRow=row;context.renderMetadataQuestions(row,false);}};
+vm.createContext(context);for(const helper of ['function decisionPacked(', 'function sameDecisionRow(']){const at=source.indexOf(helper);assert(at>=0);vm.runInContext(source.slice(at,source.indexOf('\n',at)),context);}vm.runInContext(source.slice(start,end),context);
 const directStart=source.indexOf("$('edit-held-metadata').addEventListener('click'");assert(directStart>=0);vm.runInContext(source.slice(directStart,source.indexOf('\n',directStart)),context);
 form.addEventListener('input',()=>{context.dirty=true;context.updateMetadataChoiceControls();});
 function radios(){const result=[];function walk(element){if(element.tagName==='input' && element.type==='radio')result.push(element);for(const child of element.children)walk(child);}walk(get('metadata-question-fields'));return result;}
 (async()=>{
- context.renderMetadataQuestions(context.selectedRow,false);assert.equal(radios().filter(r=>r.checked).length,1);assert.equal(radios().find(r=>r.checked).value,'unresolved');
+ get('save-metadata-choices').setAttribute('aria-disabled','true');context.renderMetadataQuestions(context.selectedRow,false);assert.equal(get('save-metadata-choices').attributes['aria-disabled'],undefined,'idle render removes stale pending ARIA state');assert.equal(radios().filter(r=>r.checked).length,1);assert.equal(radios().find(r=>r.checked).value,'unresolved');
  // Both Resolve entries open the enclosing editor before focusing its question
  // heading. They must not select a provider or save data.
  inputs.narrator.value='Мой незавершённый ввод';inputs.narrator.selectionStart=2;inputs.narrator.selectionEnd=6;
@@ -237,7 +238,7 @@ function radios(){const result=[];function walk(element){if(element.tagName==='i
  assert.equal(radios().find(r=>r.checked).value,'unresolved');assert.equal(requests.length,0);assert.equal(context.selectedRow,entryRow);assert.equal(context.selectedRow.metadata_questions.signature,entrySignature);
  assert.equal(inputs.narrator.value,'Мой незавершённый ввод');assert.equal(inputs.narrator.selectionStart,2);assert.equal(inputs.narrator.selectionEnd,6);
  const before=inputs.title.value,provider=radios().find(r=>r.value==='a');provider.checked=true;await provider.emit('input');await provider.emit('change');assert.equal(context.dirty,false);assert.equal(inputs.title.value,before);
- response={row:makeRow(),unresolved_count:0};await get('save-metadata-choices').emit('click');assert.equal(requests[0].route,'/api/candidate/metadata-choice');assert.equal(requests[0].data.choices[0].option_id,'a');assert(!('approve' in requests[0].data));
+ response={durable:true,decision:{state:'applied'},row:makeRow(),unresolved_count:0};await get('save-metadata-choices').emit('click');assert.equal(requests[0].action,'metadata_choices');assert.equal(requests[0].payload.signature,'snapshot1');assert.equal(requests[0].payload.choices[0].option_id,'a');assert(!('approve' in requests[0].payload));assert.equal(get('save-metadata-choices').attributes['aria-disabled'],undefined,'completed Save clears pending ARIA state');
  // Background evidence arrival cannot touch a focused existing text input.
  inputs.title.value='Незавершённый текст';inputs.title.selectionStart=2;inputs.title.selectionEnd=5;context.document.activeElement=inputs.title;context.dirty=true;
  const renewed=makeRow();renewed.metadata_questions.signature='renewed';renewed.metadata_questions.questions[0].evidence_signature='ev2';context.renderMetadataQuestions(renewed,false);
@@ -248,7 +249,7 @@ function radios(){const result=[];function walk(element){if(element.tagName==='i
  inputs.title.value='Исправленная книга';inputs.canonical_author.value='Верный Автор';await inputs.title.emit('input');assert.equal(get('save-metadata-choices').disabled,false);
  inputs.genre.value='Unrelated unsaved draft';await inputs.genre.emit('input');assert.equal(get('save-metadata-choices').disabled,true);inputs.genre.value='';await inputs.genre.emit('input');assert.equal(get('save-metadata-choices').disabled,false);
  const stale=new Error('Sources changed. Compare the updated results before saving.');stale.httpStatus=409;stale.body={row:{...correctedRow,revision:8,metadata_questions:{...correctedRow.metadata_questions,signature:'newer'}}};errorNext=stale;
- inputs.title.selectionStart=3;inputs.title.selectionEnd=6;await get('save-metadata-choices').emit('click');assert.equal(inputs.title.value,'Исправленная книга');assert.equal(inputs.title.selectionStart,3);assert.equal(inputs.title.selectionEnd,6);assert.equal(requests.at(-1).data.choices[0].mode,'corrected');assert.equal(requests.at(-1).data.choices[0].values.title,'Исправленная книга');
+ inputs.title.selectionStart=3;inputs.title.selectionEnd=6;await get('save-metadata-choices').emit('click');assert.equal(inputs.title.value,'Исправленная книга');assert.equal(inputs.title.selectionStart,3);assert.equal(inputs.title.selectionEnd,6);assert.equal(requests.at(-1).payload.choices[0].mode,'corrected');assert.equal(requests.at(-1).payload.choices[0].values.title,'Исправленная книга');
  assert.match(get('metadata-question-status').textContent,/Sources changed/);console.log('METADATA_CHOICE_DOM_CONTRACT_PASS');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''

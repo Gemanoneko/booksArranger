@@ -1,0 +1,159 @@
+{
+  "schema": "books-0260-full-fixture-correction-v1",
+  "base_head": "d6753c69ae01468693d8c77964893b1e259c9190",
+  "source_root": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1",
+  "files": [
+    {
+      "path": "tests/test_mp3_tag_repair.py",
+      "base_lf_sha256": "929fd0a2eb96427d8e48995dfdf2d73edcf544a2f71e6e7bba2611f2bed08711",
+      "raw_sha256": "74c27576e00aa4cfac41b2b910df8a7ed2ce5859ce8b820db848ad4499dba40f",
+      "lf_sha256": "87925650e6e92fcaf8c5902082a8d31db431ab1ccc4278eafb747f85de32b64a",
+      "bytes": 18528
+    },
+    {
+      "path": "tests/test_metadata_choices.py",
+      "base_lf_sha256": "21f5d003e649c3e1b43943d470ee75b8bf8f8c01204837b01a9f462168c5d724",
+      "raw_sha256": "7647ee866eda92067ddfbe9d981bfcceeff3dda77610ccb661d6a7f1f1889f1b",
+      "lf_sha256": "1ccbcfb388cae32959ef4a0ffcdc18a1fb15bc0a575ba36afb50a24a78194064",
+      "bytes": 27118
+    }
+  ],
+  "patch_sha256": "531e68897ca1ca49f25202f00ea419e2bf20dca2b3be30a21c5cd50a1c2d9a8e",
+  "scope": "Only the two existing failing tests/fixtures changed. No runtime product, MP3 repair/native ownership guard, version, dependencies or check graph changed.",
+  "failed_candidate": {
+    "source_head": "d6753c69ae01468693d8c77964893b1e259c9190",
+    "build_id": "7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9",
+    "context_sha256": "c9a979022a33967c5e29535c3b242f0df5af7a72bd249277bb07f6e769853365",
+    "full_result": "FAIL;13 Python batches completed, failures in7 and9 only; no timeout/overflow/native closure failure",
+    "evidence": "Docs/Evidence/v0.26.0_2026-11-05/full-entry-d675-failure/summary.json",
+    "native": "Held; n26 authority/plan/launch were never prepared"
+  },
+  "root_causes": [
+    {
+      "case": "test_mp3_tag_repair.ActualPrivateStagingTests.test_verified_tag_copy_used_only_as_derived_encoder_input",
+      "cause": "Fixture assumed one old recording digest/frame count/PCM count/duration, though the canonical context accepts a freshly pinned private MP3. Arbitrary valid MP3 is not necessarily the finite ID3v1 repair profile.",
+      "correction": "Own short FFmpeg-generated source with Xing disabled, ID3v2v3 and exact terminal128-byte ID3v1. Embed one complete96-byte false MPEG frame in the nonaudioTAG to exercise pre-EOF invalid packet delivery; leave every actual audio byte intact. Frozen manifest/source hash is derived from these actual private bytes. Assert original strict decode fails, repaired bytes are exactly original[:-128], source/removed-tag/working hashes, complete nativePCM sample count and frame timing proof, original alias provenance, unchanged frozen manifest/source and refusal of modified derived input. OrdinaryTAG lacking required packet proof remains rejected and unchanged.",
+      "pinned_codec_source": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/29e619e767/libavcodec/mpegaudio_parser.c",
+      "source_finding": "Lines113\u2013116 discard a TAG buffer on EOF flush, explaining both retained ordinary/long-false-sync negative probes. Product guard remains unchanged."
+    },
+    {
+      "case": "test_metadata_choices.MetadataChoiceBrowserContractTests.test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom",
+      "cause": "Standalone DOM double lacks real removeAttribute behavior; its Save mock still uses obsolete direct /api/candidate/metadata-choice, whereas the renderer now accepts durable metadata_choices decisions.",
+      "correction": "Real delete-attribute semantics plus pending/cleared ARIA assertions; use actual product decisionPacked/sameDecisionRow helpers, current durable boundary and explicit legacy mutation trap. Preserve provider/correction/raw payload, no-approval, stale evidence, focused text/caret and dirty-field refusal assertions. This remains an isolated DOM consumer unit; transport/ledger binding is covered separately by the already committed six-action tests."
+    }
+  ],
+  "focused_runs": [
+    {
+      "result": "full-failures-red.json",
+      "cases": 2,
+      "outcome": "Both exact baseline failures reproduced",
+      "normal_native_zero": true
+    },
+    {
+      "result": "full-failures-green.json",
+      "outcome": "DOM pass; ordinaryTAG refused by unchanged packet guard",
+      "normal_native_zero": true
+    },
+    {
+      "result": "full-failures-green-v2.json",
+      "outcome": "DOM pass; long false sync still refused atEOF by unchanged packet guard",
+      "normal_native_zero": true
+    },
+    {
+      "result": "full-failures-green-v3.json",
+      "cases": 2,
+      "outcome": "Both target cases passed before final added ordinaryTAG/strict-source negatives",
+      "normal_native_zero": true
+    },
+    {
+      "result": "affected-modules-green.json",
+      "selectors": [
+        "test_mp3_tag_repair",
+        "test_metadata_choices"
+      ],
+      "cases": 41,
+      "skipped": 0,
+      "outcome": "FINAL corrected source cohort PASS",
+      "elapsed_ms": 2148.1139,
+      "normal_native_zero": true
+    }
+  ],
+  "next_candidate": "Tests are part of productTree: Sully must commit these exact2paths, create a NEW guarded build/context and obtain Senua review. Never repeat full on oldbuild7e1 or prepare native from its FAIL. q26 original failure retained; next shortroot q27 authorized by Jane.",
+  "evidence_files": [
+    {
+      "path": "failure-focused-owned.mjs",
+      "size": 1974,
+      "sha256": "ffe8d33a28c9ffc37336000b9801ce0ed47cfbae5b1fc7ca8f05fcd13a98b5ba"
+    },
+    {
+      "path": "focused.py",
+      "size": 794,
+      "sha256": "a0b02cdf06f23fcf5c3018cb7670f0aedfcce43c79bd9dac0711acb5d172ef2d"
+    },
+    {
+      "path": "full-failures-red.json",
+      "size": 3816,
+      "sha256": "8706fd3b7c7fd53ed36f622ee3234dfae7895b4093e6a6f6c689d7ad23bca35c"
+    },
+    {
+      "path": "full-failures-red.log",
+      "size": 3028,
+      "sha256": "1476fb6a5d59cb1907b84aeee99f23291604d1afa9421757a8f578dff5f8dd4a"
+    },
+    {
+      "path": "full-failures-green.json",
+      "size": 3274,
+      "sha256": "6528fb1ebf8fed7567a06093c7df1713cbadfb10c5e605ae3da1172e4b4064dd"
+    },
+    {
+      "path": "full-failures-green.log",
+      "size": 2488,
+      "sha256": "d64d84575b893e21208a670f5ad9c15ff606fa6d67cc3135c39abfd6a24d9e44"
+    },
+    {
+      "path": "full-failures-green-v2.json",
+      "size": 3273,
+      "sha256": "c52f1bff3e87aeda249fd4b184f2156244bf11ae98ed53cc94bc35e49ef5cad4"
+    },
+    {
+      "path": "full-failures-green-v2.log",
+      "size": 2488,
+      "sha256": "b65c13f23552a345b60df2a5ab1d25205835954974a10ff63e0dc499e06f3320"
+    },
+    {
+      "path": "full-failures-green-v3.json",
+      "size": 1208,
+      "sha256": "10a2b75a16d4049f4cae8909d236279c63466a7365609a4a08ef5476ece788cf"
+    },
+    {
+      "path": "full-failures-green-v3.log",
+      "size": 510,
+      "sha256": "6ea584a9b1203235bb3f551b0cb9b78cc8816e732720bd580b69157d526dc8ff"
+    },
+    {
+      "path": "affected-modules-green.json",
+      "size": 8149,
+      "sha256": "d6ecbd1c410aab74f6ed3cb9b7e52eca84de5321c597098d5c89bd6c02b9ba82"
+    },
+    {
+      "path": "affected-modules-green.log",
+      "size": 7370,
+      "sha256": "5f3b0744c8d99caaeb78d70845054890b605a5041c57fda13c88feffbf58f77b"
+    },
+    {
+      "path": "frozen-source/tests/test_mp3_tag_repair.py",
+      "size": 18528,
+      "sha256": "74c27576e00aa4cfac41b2b910df8a7ed2ce5859ce8b820db848ad4499dba40f"
+    },
+    {
+      "path": "frozen-source/tests/test_metadata_choices.py",
+      "size": 27118,
+      "sha256": "7647ee866eda92067ddfbe9d981bfcceeff3dda77610ccb661d6a7f1f1889f1b"
+    },
+    {
+      "path": "source.patch",
+      "size": 16879,
+      "sha256": "531e68897ca1ca49f25202f00ea419e2bf20dca2b3be30a21c5cd50a1c2d9a8e"
+    }
+  ]
+}

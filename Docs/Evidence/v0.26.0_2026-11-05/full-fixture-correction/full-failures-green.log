@@ -1,0 +1,32 @@
+test_verified_tag_copy_used_only_as_derived_encoder_input (test_mp3_tag_repair.ActualPrivateStagingTests.test_verified_tag_copy_used_only_as_derived_encoder_input) ... ERROR
+test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom (test_metadata_choices.MetadataChoiceBrowserContractTests.test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom) ... ok
+
+======================================================================
+ERROR: test_verified_tag_copy_used_only_as_derived_encoder_input (test_mp3_tag_repair.ActualPrivateStagingTests.test_verified_tag_copy_used_only_as_derived_encoder_input)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\audio_pipeline.py", line 431, in _mp3_tag_copy
+    try:packet_proof=mp3_tag_repair.verify_packets(*packets,layout)
+                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\mp3_tag_repair.py", line 67, in verify_packets
+    require(1<=len(extra)<=2,'Unexpected terminal packet layout')
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\mp3_tag_repair.py", line 9, in require
+    if not value:raise UnsupportedProfile(message)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+mp3_tag_repair.UnsupportedProfile: Unexpected terminal packet layout
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\tests\test_mp3_tag_repair.py", line 174, in test_verified_tag_copy_used_only_as_derived_encoder_input
+    value=media._mp3_tag_copy(manifest,item,source,stage,stop,layout.samples/layout.sample_rate)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\audio_pipeline.py", line 432, in _mp3_tag_copy
+    except mp3_tag_repair.UnsupportedProfile as exc:raise ValidationError(str(exc)) from exc
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+audio_pipeline.ValidationError: Unexpected terminal packet layout
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.539s
+
+FAILED (errors=1)
