@@ -1,0 +1,65 @@
+{
+  "schema": "books-resume-hold-futaba-focused-v1",
+  "source_commit": "433885d0b658e8f4096a10e85c12da51e0d4b54e",
+  "source_clean_and_origin_match": true,
+  "frozen_core_summary_sha256": "db72bcca4d56db3ec6d5f3d7dcd787934551084629e77bc1b10c7d980f35526c",
+  "source_archive_sha256": "9da1cf01fdfd4f70802099d3c0fa03cddeabe93cb2bff7da412ce4bee03fff51",
+  "source_file_sha256": "f57403018280271f97bc0c0f5d0c37d79df412af5f93d41164d23d0dd88dc28c",
+  "test_file_sha256": "b560db6b4394ad389523a3e42ee4fce14d2178f5daccc7a621d59ab781569c1b",
+  "owner": {
+    "ok": true,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "forced": false,
+    "timedOut": false,
+    "nativeComplete": true,
+    "nativeZero": true,
+    "nativeActive": 0,
+    "nativeUnsignaled": 0,
+    "elapsedMs": 13715.658800000001
+  },
+  "tests": {
+    "class": "test_attempt_working_lifecycle.WorkingLifecycleTests",
+    "run": 31,
+    "passed": 31,
+    "failed": 0,
+    "targets": [
+      {
+        "name": "test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish",
+        "passed": true
+      },
+      {
+        "name": "test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume",
+        "passed": true
+      },
+      {
+        "name": "test_unknown_retirement_boundary_failure_still_stops_the_queue",
+        "passed": true
+      }
+    ]
+  },
+  "scope": "Committed source, private Windows file and SQLite fixtures. Independent jobs use injected validated output; no real codec, package, live app, Z source or user data.",
+  "files": [
+    {
+      "name": "focused.py",
+      "bytes": 387,
+      "sha256": "bb8c60eee675c4d05a987f0281b697e02ead757cf37fe5b6d433e447f3d083e7"
+    },
+    {
+      "name": "owned.mjs",
+      "bytes": 1693,
+      "sha256": "e1d34841f7cbadb60c7a2ec576bdfa891a38e2e20a729d2cd2f730db736ce71b"
+    },
+    {
+      "name": "result.json",
+      "bytes": 6429,
+      "sha256": "babde412a7ca30f6a715f9b06b9ad599b36c310d970f2c30756f6f0e28504d37"
+    },
+    {
+      "name": "result.log",
+      "bytes": 5662,
+      "sha256": "b94ff7b1a0606ba8fa7546c661618ae136f7f3c51fe0f28cf191b703ace74335"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+studio-sweep approved targets (apply): removed 315 file(s), 12.19 MB; refused or kept 0 target(s).
+  REMOVED      C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\resume-hold-futaba-20261105  [Sergei standing cleanup of Futaba private committed 433885d focused QA scratch; raw evidence preserved in Docs]
+               before 315 files, 12.19 MB; removed 315 files, 12.19 MB; after 0 files, 0 B
+  free space on C:\: 94.11 GB -> 94.13 GB (+13.00 MB, statfs)
