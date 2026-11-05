@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0260-closure-20261105",
+   "reason": "Sully exact own 0.26 closure scratch approved by Sergei release cleanup request 2026-11-05; three input receipts archived",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0260-closure-20261105",
+   "isDir": true,
+   "before": {
+    "files": 3,
+    "bytes": 7041
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 3,
+    "bytes": 7041
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 3,
+    "bytes": 7041
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 112986595328,
+   "after": 112986611712
+  }
+ ],
+ "removedFiles": 3,
+ "removedBytes": 7041,
+ "keptCount": 0
+}

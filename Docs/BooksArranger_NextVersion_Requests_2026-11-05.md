@@ -1,6 +1,6 @@
 # Books Arranger 0.26.0 — requested fixes
 
-All requests below are implemented in release source `3932155e9f3ceac00632d2d82a4e91315f7c832f`, build `82b4dac4-0aad-453a-a013-d3486cc431eb`. Full QA passed 2,447 Python tests, 242 Node tests and all 41 frontend scripts. The single private packaged PA-1 check passed strict acceptance. Formal QA is GO and code review is RELEASE CLEAR. Publication is pending Sully's final guarded release step; the installed app and live library were untouched.
+All requests below shipped in [0.26.0](https://github.com/Gemanoneko/booksArranger/releases/tag/v0.26.0), tag `1b2f81a8f6d86995e937332e0c225837d05cbc20`, release source `3932155e9f3ceac00632d2d82a4e91315f7c832f`, build `82b4dac4-0aad-453a-a013-d3486cc431eb`. Full QA passed 2,447 Python tests, 242 Node tests and all 41 frontend scripts. The single private packaged PA-1 check passed strict acceptance. Formal QA is GO and code review is RELEASE CLEAR. Sully verified all three downloaded assets against their accepted hashes/sizes and exactly four retained releases. The installed app and live library were untouched.
 
 Canonical validation: `BooksArranger_QA_v0.26.0_2026-11-05.md`, `BooksArranger_CodeReview_v0.26.0_2026-11-05.md`, and `BooksArranger_NativeQA_v0.26.0.json`. The earlier focused checks recorded below are implementation history, not substitutes for those release-bound results.
 

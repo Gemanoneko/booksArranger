@@ -1,0 +1,28 @@
+{
+  "schema": "books-arranger-0260-closure-v1",
+  "date": "2026-11-05",
+  "privateRoots": [
+    "q26",
+    "q27",
+    "q28",
+    "n26"
+  ],
+  "removedFiles": 15514,
+  "removedBytes": 1107913227,
+  "kept": 0,
+  "skipped": 0,
+  "privateRootsAbsent": true,
+  "failedWorktrees": [
+    "0260-release-20261105-r1",
+    "0260-release-20261105-r2"
+  ],
+  "failedWorktreesRemoved": true,
+  "failedWorktreeAudit": "r1 only two modified test files, raw byte equal to committed main; r2 clean; no untracked nonignored files or unique commits; prior failure evidence archived",
+  "retained": [
+    "0260-release-20261105-r3",
+    "0250-release-20261105-r3",
+    "approve-retrieved-20261105",
+    "books-0242-candidate-20261101"
+  ],
+  "note": "Existing command-launch denied targets and their parents were not touched."
+}

@@ -1,0 +1,160 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\q26",
+   "reason": "Sergei authorized 0.26 release task cleanup through Jane/Sully on 2026-11-05; original QA/native records archived and owners exited",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\q26",
+   "isDir": true,
+   "before": {
+    "files": 4859,
+    "bytes": 145799293
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 4859,
+    "bytes": 145799293
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 1,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 4859,
+    "bytes": 145799293
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  },
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\q27",
+   "reason": "Sergei authorized 0.26 release task cleanup through Jane/Sully on 2026-11-05; original QA/native records archived and owners exited",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\q27",
+   "isDir": true,
+   "before": {
+    "files": 5023,
+    "bytes": 169424954
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 5023,
+    "bytes": 169424954
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 1,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 5023,
+    "bytes": 169424954
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  },
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\q28",
+   "reason": "Sergei authorized 0.26 release task cleanup through Jane/Sully on 2026-11-05; original QA/native records archived and owners exited",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\q28",
+   "isDir": true,
+   "before": {
+    "files": 5192,
+    "bytes": 194115296
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 5192,
+    "bytes": 194115296
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 1,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 5192,
+    "bytes": 194115296
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  },
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\n26",
+   "reason": "Sergei authorized 0.26 release task cleanup through Jane/Sully on 2026-11-05; original QA/native records archived and owners exited",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\n26",
+   "isDir": true,
+   "before": {
+    "files": 440,
+    "bytes": 598573684
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 440,
+    "bytes": 598573684
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 440,
+    "bytes": 598573684
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 108996603904,
+   "after": 110118113280
+  }
+ ],
+ "removedFiles": 15514,
+ "removedBytes": 1107913227,
+ "keptCount": 0
+}
