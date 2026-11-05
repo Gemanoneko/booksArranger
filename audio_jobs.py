@@ -1235,8 +1235,9 @@ class AudioJobs:
         state = "Pausing" if running and self._stop.is_set() else "Running" if running else "Paused" if counts["queued"] else "Needs attention" if counts["failed"] else "Completed"
         with self._lock:
             check = copy.deepcopy(self._check_progress)
+            admitting=bool(running and current is None and self._claimed)
         if not running and not counts['queued'] and waiting_requests:state='Waiting for retry checks'
-        return {"retry_checks":{"waiting":waiting_requests,"worker":copy.deepcopy(self._priority_status)},"state": state, **counts, "published_check": check, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
+        return {"queue_work":{"schema":"books-audio-queue-work-v1","state":"checking_pending"} if admitting else None,"retry_checks":{"waiting":waiting_requests,"worker":copy.deepcopy(self._priority_status)},"state": state, **counts, "published_check": check, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
 
     def report_priority(self,value):
         with self._lock:self._priority_status=dict(value)

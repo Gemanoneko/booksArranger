@@ -50,7 +50,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.deepEqual(sent('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-b',revision:2,path:'Петров Иван\\Тайна - Петров Иван.m4b',queue:true,label:'Title b'});
   tr=trOf('cand-b');
   assert.equal(byText(tr,'Queued').getAttribute('aria-disabled'),'true','its face: Queued, inert');
-  assert.equal(statusCell(tr).children[0].textContent,'Approve queued. Your choices are saved. It runs when the scan finishes.');
+  assert.equal(statusCell(tr).children[0].textContent,'Approve queued. Choices are waiting in memory, not saved yet. It runs when the scan finishes.');
   const cancel=buttonsOf(tr).find(b=>b.textContent==='Cancel approve');assert.ok(cancel && !cancel.hidden,'its own Cancel');
   assert.equal(walk(get('inventory')).some(e=>e.title==='Another operation is in progress.'),false,'never "Another operation is in progress."');
   // The outcome: refused, with its gate's words.
@@ -129,6 +129,25 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   const body=sent('/api/candidate/names-save').at(-1);
   assert.deepEqual(body.names,{title:'Пртоколы SCP. Сейф №1',author:'Разные авторы',series:'Протоколы SCP',number:'1',universe:'',collection:true});assert.equal(body.queue,true);
   assert.equal(save().textContent,'Saving…','queued: Saving…');
+  assert.equal(save().title,'Names are queued in this session. They are not saved yet.');
+  assert.equal(run('queueHint(rows.find(row=>row.id==="cand-a"))'),"Save names queued until this book's processing finishes. These edits are waiting in memory, not saved yet.");
+  run('queueState.queued[0].position=3');
+  assert.match(run('queueHint(rows.find(row=>row.id==="cand-a"))'),/^Save names queued, 2 ahead until/);
+  // Cancel is authoritative only when the engine confirms it; the draft stays.
+  answers['/api/queue/cancel']=()=>ok({cancelled:true});
+  await run('cancelQueued(rows.find(row=>row.id==="cand-a"),"names")');await tick();
+  assert.equal(run('namesNotes.get("cand-a").text'),'Save cancelled. These edits were not saved.');
+  assert.equal(run('namesOpen("cand-a")'),true);assert.equal(label('Series').value,'Протоколы SCP');
+  run('namesQueued({id:"refused-names",action:"names",book_id:"cand-a",result:"refused",error:"Another book is being checked. Try Save again shortly."})');await tick();
+  assert.match(run('namesNotes.get("cand-a").text'),/Another book is being checked/i);assert.equal(run('namesOpen("cand-a")'),true);
+  answers['/api/candidate/names-save']=()=>{throw Error('Private lost reply');};
+  await save().handlers.click({stopPropagation(){}});await tick();
+  assert.equal(run('namesNotes.get("cand-a").text'),'Save not confirmed. Check this book before trying again.');
+  assert.equal(run('namesOpen("cand-a")'),true);assert.equal(label('Series').value,'Протоколы SCP');
+  run('clearConnectionNotice();ended=false;recoveryDisconnected=false;controls()');
+  answers['/api/candidate/names-save']=()=>ok({queued:true,id:'qn',position:1,blocker:{kind:'book'}},202);
+  // Re-submit the same preserved draft, then only a durable success closes it.
+  await save().handlers.click({stopPropagation(){}});await tick();
   run('syncQueue('+JSON.stringify({queued_actions:[],queue_running:null,queue_outcomes:[{id:'qn',action:'names',book_id:'cand-a',title:'Title a',result:'done',answer:{outcome:'saved',applies:3,entered:['series','number']}}]})+')');await tick();
   tr=trOf('cand-a');assert.equal(statusCell(tr).children[0].textContent,'Saved. Approve uses these names.');
   assert.equal(get('retry-all-status').textContent,'Saved names for Title a. Applies to 3 books.');

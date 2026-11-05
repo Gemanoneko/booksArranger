@@ -833,6 +833,7 @@ class MergeService:
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
             'approved_total':totals['approved'],'converted_total':totals['converted'],'candidate_total':totals.get('candidate_total'),'not_approved_total':totals.get('not_approved_total'),'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
             'pause':pause,'start_admission':self._current_start_admission(),
+            'queue_work':value.get('queue_work') if not active and not post else None,
             'current_job_origin':job_origin(current['manifest']) if current else 'unknown',
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
             'current_task_kind':current['manifest'].get('task_kind') if current else None,

@@ -1,0 +1,20 @@
+test_claimed_source_admission_is_checking_not_conversion_progress (test_progress_rows.CheckpointTests.test_claimed_source_admission_is_checking_not_conversion_progress) ... ERROR
+test_measured_steps_per_stage_are_accepted_and_others_refused (test_progress_rows.CheckpointTests.test_measured_steps_per_stage_are_accepted_and_others_refused) ... ok
+test_phase_progress_passes_measurements_and_step_start (test_progress_rows.CheckpointTests.test_phase_progress_passes_measurements_and_step_start) ... ok
+test_step_start_is_kept_while_the_same_step_reports (test_progress_rows.CheckpointTests.test_step_start_is_kept_while_the_same_step_reports) ... ok
+
+======================================================================
+ERROR: test_claimed_source_admission_is_checking_not_conversion_progress (test_progress_rows.CheckpointTests.test_claimed_source_admission_is_checking_not_conversion_progress)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\resume-hold-20261105\tests\test_progress_rows.py", line 54, in test_claimed_source_admission_is_checking_not_conversion_progress
+    queue.enqueue(manifest)
+    ~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\resume-hold-20261105\audio_jobs.py", line 675, in enqueue
+    raise ValueError("Manifest requires ordered sources")
+ValueError: Manifest requires ordered sources
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.266s
+
+FAILED (errors=1)

@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "PASS ruling 35 on the page: queued Approve with Cancel and its outcome, rows never hold each other, held Start over and toolbar presses; Edit names: read, pairing, Applies to, queued Save, row line, Place and Entered\n",
+  "err": "",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 85376,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 15,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 240.6864,
+  "outputBytes": 217
+}

@@ -41,6 +41,24 @@ class StepProgressTests(unittest.TestCase):
 class CheckpointTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup)
+    def test_claimed_source_admission_is_checking_not_conversion_progress(self):
+        entered=threading.Event();release=threading.Event()
+        def admission(row):
+            entered.set()
+            if not release.wait(5):raise AssertionError('Private admission was not released')
+        def runner(manifest,stop,checkpoint):stop.set();raise InterruptedError('Private normal stop')
+        queue=AudioJobs(Path(self.temp.name)/'catalog.sqlite3',runner,lambda m:True,lambda r:True)
+        self.addCleanup(queue.close);queue.before_attempt=admission
+        manifest={'job_id':str(uuid.uuid4()),'candidate_id':str(uuid.uuid4()),'candidate_revision':1,'sources':[{'path':'C:/private/input.mp3','sha256':'a'*64,'fingerprint':{}}],
+                  'metadata':{'title':'Private pending book'},'destination':'C:/private/output.m4b','profile':'fixture','evidence':{},'cover':{}}
+        queue.enqueue(manifest)
+        try:
+            queue.resume(settle=False);self.assertTrue(entered.wait(2))
+            status=queue.status()
+            self.assertEqual(status['queue_work'],{'schema':'books-audio-queue-work-v1','state':'checking_pending'})
+            self.assertIsNone(status['current_job_id']);self.assertIsNone(status['current_stage'])
+        finally:release.set();queue._thread.join(5)
+        self.assertFalse(queue._thread.is_alive());self.assertIsNone(queue.status()['queue_work'])
     def run_attempt(self,steps):
         results=[];queue=None
         def runner(manifest,stop,checkpoint):

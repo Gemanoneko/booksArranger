@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_claimed_source_admission_is_checking_not_conversion_progress (test_progress_rows.CheckpointTests.test_claimed_source_admission_is_checking_not_conversion_progress) ... ok\r\ntest_measured_steps_per_stage_are_accepted_and_others_refused (test_progress_rows.CheckpointTests.test_measured_steps_per_stage_are_accepted_and_others_refused) ... ok\r\ntest_phase_progress_passes_measurements_and_step_start (test_progress_rows.CheckpointTests.test_phase_progress_passes_measurements_and_step_start) ... ok\r\ntest_step_start_is_kept_while_the_same_step_reports (test_progress_rows.CheckpointTests.test_step_start_is_kept_while_the_same_step_reports) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 4 tests in 0.256s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 90748,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 60,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 978.9018,
+  "outputBytes": 753
+}

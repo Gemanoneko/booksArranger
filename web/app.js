@@ -479,6 +479,7 @@ function admissionLine(jobs){
   const admission=jobs?.start_admission;
   if(jobControlFlights.has('pause') && admission?.state==='checking')return 'Pausing start checks…';
   if(admission?.state==='checking')return 'Checking pending audiobook work';
+  if(jobs?.state==='Running' && jobs.queue_work?.schema==='books-audio-queue-work-v1' && jobs.queue_work.state==='checking_pending')return 'Checking pending audiobook work';
   if(admission?.state==='waiting')return startWaitLine(admission.reason);
   if(admission?.state==='stale')return 'Start checks stopped. Pending work is kept.';
   if(admission?.state==='closing')return 'Books Arranger is closing. Pending work is kept.';
@@ -494,7 +495,8 @@ function renderJobControlState(){
   pause.title=disconnected?'Current processing status unavailable.':stopping?stopTip:admission?.state==='checking'?'Pause the start checks and keep pending work. The current read may finish before stopping.':maintenance?'Stop finished-book checks at the next safe checkpoint. Pending work is kept.':pause.disabled?'No audiobook work is running.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
   resume.title=disconnected?'Current processing status unavailable.':status || (resume.disabled?'No pending audiobook work can be resumed.':jobs.cleanup_active===true?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.');
   for(const button of [pause,resume])button.setAttribute('aria-describedby','jobs-help jobs-status');
-  const detail=maintenance && stopping?'Stopping finished-book checks…':status || jobControlNote || (['Paused','paused'].includes(jobs.state)?pauseLine(jobs.pause):'');
+  const paused=['user','update','closing'].includes(jobs.pause?.origin)?pauseLine(jobs.pause):'Audiobook jobs are paused. The app has not identified which book stopped them. Resume continues pending work.';
+  const detail=maintenance && stopping?'Stopping finished-book checks…':status || jobControlNote || (['Paused','paused'].includes(jobs.state)?paused:'');
   const base=jobs.cleanup_active===true?'Pausing source cleanup finishes the current file. Resume continues its saved progress.':'An interrupted conversion restarts; completed outputs stay in place.';
   writeText($('jobs-help'),[detail,base,'Scanning has separate stop and resume controls.',Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?'Source folders retained: safe automatic removal is unavailable on this drive.':''].filter(Boolean).join(' '));
 }
@@ -1045,7 +1047,7 @@ function renderJobs(){
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
   const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved`:'Book candidate totals unavailable');
-  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',admissionLine(jobs) || jobs.state,`${jobs.queued || 0} queued`,jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:'',`${attentionTotal(jobs)} need attention`].filter(Boolean).join(' · '));
+  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[admissionLine(jobs) || jobs.state,`${jobs.queued || 0} queued`,`${attentionTotal(jobs)} need attention`,counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:''].filter(Boolean).join(' · '));
   renderActivities(checkActivities(Array.isArray(state.activities)?state.activities:[],jobs),jobs);
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
@@ -1079,7 +1081,7 @@ function activityLabel(row){
   if(row.kind==='conversion')return ({attention:'Audiobook on hold',paused:'Audiobook paused',pausing:'Pausing audiobook'})[row.state] || 'Converting';
   if(row.kind==='cleanup')return ['originals','recovery copies'].includes(row.step)?'Removing originals':'Cleaning up';
   if(row.kind==='identity')return 'Checking finished books';
-  if(row.kind==='series')return 'Updating series';
+  if(row.kind==='series')return 'Metadata: Updating series';
   return row.step==='researching'?'Researching books':'Scanning files';
 }
 function activityStep(row,finishing){
@@ -3775,7 +3777,7 @@ function updateNamesRow(row){
   if(!askOf(row)){const dest=destRows.get(row.id);if(dest){dest.row=row;updateDestination(dest);}}
   if(entry.save){
     const pending=state?.pending,queued=queuedFor(row,'names') || queueRunning(row,'names'),inert=pending || queued?'':namesInert(row);
-    const face=pending || queued?'Saving…':'Save',tip=pending?'Saving these names…':queued?(queueHint(row) || 'Saving these names…'):inert || NAMES_SAVE_TIP;
+    const face=pending || queued?'Saving…':'Save',tip=pending?'Saving these names…':queuedFor(row,'names')?'Names are queued in this session. They are not saved yet.':queued?'Saving these names…':inert || NAMES_SAVE_TIP;
     if(entry.save.textContent!==face)entry.save.textContent=face;if(entry.save.title!==tip)entry.save.title=tip;entry.save.setAttribute('aria-label',face.replace(/…$/,'')+': '+askName(row));
     if(pending || queued || inert)entry.save.setAttribute('aria-disabled','true');else entry.save.removeAttribute('aria-disabled');
     // 0.22.3: the clock while it waits, a failure in its place (the editor stays open, the typing is kept), else the cause.
@@ -3827,7 +3829,7 @@ async function namesSave(id){
   if(answer?.queued===true){queueAccepted(row,'names',answer);updateNamesRows();return;}
   if(answer){namesDone(row,answer);return;}
   const code=failure?.body?.code;
-  namesNotes.set(id,{text:!failure?.httpStatus?lostLine():code==='changed'?'This book changed. Review its details and try again.':serverSentence(failure,'Save was not accepted. Nothing was changed.'),warn:true});
+  namesNotes.set(id,{text:!failure?.httpStatus?'Save not confirmed. Check this book before trying again.':code==='changed'?'This book changed. Review its details and try again.':serverSentence(failure,'Save was not accepted. Nothing was changed.'),warn:true});
   if(!failure?.httpStatus)refreshFailed(failure);
   if(code==='changed'){lastKey=null;refresh(true).catch(()=>{});}  // the next press carries the new revision
   updateNamesRows();
@@ -4380,7 +4382,8 @@ function queueHint(row){
     if(item.action==='copy')return `Remove this copy queued${ahead}. Nothing is deleted yet. It runs when ${p} finishes.`;
     if(['retry','repair'].includes(item.action))return `${item.action==='repair'?'Repair':'Retry'} queued${ahead}. Starts when ${p} finishes.`;
     // Ruling 35 (provisional copy, sent to Judy): his values are kept with the queued press.
-    return `${queueWord(item.action)} queued${ahead}. Your choices are saved. It runs when ${p} finishes.`;
+    if(item.action==='names')return `Save names queued${ahead} until ${p} finishes. These edits are waiting in memory, not saved yet.`;
+    return `${queueWord(item.action)} queued${ahead}. Choices are waiting in memory, not saved yet. It runs when ${p} finishes.`;
   }
   const running=queueState.running;if(!queueRunning(row))return null;
   if(running.action==='delete' || running.action==='copy'){const n=Number(running.n) || 0;return n===0?'Removing this book…':n===1?'Deleting 1 file…':`Deleting ${n.toLocaleString()} files…`;}
@@ -4409,6 +4412,7 @@ async function cancelQueued(row,action){
   if(answer?.cancelled===true){
     queueState={...queueState,queued:queueState.queued.filter(entry=>entry.id!==item.id).map(entry=>({...entry,position:Number(entry.position)>Number(item.position)?Number(entry.position)-1:entry.position}))};
     queueAnnounce(`${queueWord(item.action)} cancelled: ${item.title || queueTitle(row)}.`);
+    if(item.action==='names'){namesNotes.set(row.id,{text:'Save cancelled. These edits were not saved.',warn:false});updateNamesRows();}
   }else if(failure?.httpStatus===409 && failure.body?.code==='started')queueLate.set(item.id,{book_id:row.id,text:`Too late to cancel: the ${word} has already started.`});
   // Focus goes to the row's restored Retry or Delete book button, else the Status filter (1.7); again after the list is
   // read, which rebuilds the row.

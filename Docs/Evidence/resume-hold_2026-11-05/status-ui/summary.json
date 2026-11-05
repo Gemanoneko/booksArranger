@@ -1,0 +1,162 @@
+{
+  "baseline": "433885d0b658e8f4096a10e85c12da51e0d4b54e",
+  "spec": "11c4043686f5f64f6141153729c29c7828e3fde3:Docs/BooksArranger_QueueStatus_UX_2026-11-05.md",
+  "files": [
+    {
+      "path": "audio_jobs.py",
+      "bytes": 102497,
+      "sha256": "af0801fef9ad9a3ac51c52051f7da1005e5bd6ecc7237aa637dbf4b6b4b9b87e",
+      "lf_sha256": "a806d1a0c0c41709ca073e7ce4cfbf84d2f87b48c3d23a967cdb9a17c2ce49ce",
+      "baseline_lf_sha256": "2d4852a4b5b1750accf820adb85c244b3e88d179e86611f7ccc2ebc0ce69c713"
+    },
+    {
+      "path": "merge_service.py",
+      "bytes": 442766,
+      "sha256": "3b03a539fb7bd52b2e40b83bb6c4171bdbc6556633a6ab454ac65bd6e603fdb4",
+      "lf_sha256": "0f842f02150a1bdc0dc4d051d817d5490cfec3b03ce94f12c1704dfb67ef33fc",
+      "baseline_lf_sha256": "d3605b348ef2a3a8ea73e847b28af8e05b333448452ad1c7a6d637599d77d381"
+    },
+    {
+      "path": "web/app.js",
+      "bytes": 527895,
+      "sha256": "09e2f6a09ccf0b713dacb4bb54cd54dbde7c46c40100fcff44ecc22e4b0e7a06",
+      "lf_sha256": "8d172e1ef235cd0aecae49818546ca1b7e4ff0432c82352d30318159169c22dc",
+      "baseline_lf_sha256": "98f777b8634259d84611a43c9c80b73c646a0bb4cd4462beb807c540d43ace4a"
+    },
+    {
+      "path": "tests/test_progress_rows.py",
+      "bytes": 23366,
+      "sha256": "1dc399edb28277f51c99b84e4bb54d303c39b41a25263bf2bab45c03d47a1b1e",
+      "lf_sha256": "612de12faf2050828a2ae63e0bd0808a8f4052d2c668633a93f3dae9d58ad5c8",
+      "baseline_lf_sha256": "494e7b99a451ed490b038f490a10fec90822d3980f8b32753b39d9799cfc4807"
+    },
+    {
+      "path": "tests/test_progress_frontend.js",
+      "bytes": 16731,
+      "sha256": "6b0c0ed099ea7a8e37d7f4e0b1e603228d29284c35e47006759c688bd870b1f8",
+      "lf_sha256": "7492eb933b39c88fda729f5e3ed93df700d0bbcf5ee112a80776aea86d0e03f9",
+      "baseline_lf_sha256": "37efd93fae0c416dae0ac3ae6c15943bf933ad858fe0ac7893b77088e1a707ba"
+    },
+    {
+      "path": "tests/test_0242_frontend.js",
+      "bytes": 15333,
+      "sha256": "211247edfbb85203620be47bafe65a7ea37a70ea6410e2ac03df8812f3806e8c",
+      "lf_sha256": "a3f33c0938c285ee87188aca6760a45a273e89bbff19af376e188961ce803cdd",
+      "baseline_lf_sha256": "2114492af45181b611cbe9071ff110147b66d3de1d1391e489e077d62e2cdeda"
+    },
+    {
+      "path": "tests/test_ruling35_frontend.js",
+      "bytes": 17586,
+      "sha256": "9b317063ec55059af705d7d995dc467e7771a143f6721a7b1732d4d0d6e0f031",
+      "lf_sha256": "e93f4acf076943545fa09864a1eb672b605991803dde545bff27d3c1bda8b6f7",
+      "baseline_lf_sha256": "f3c57c3ec5e0e77f52a1ad8a60cf67abd76b684b82ace97f18b63b7779f1b964"
+    }
+  ],
+  "patch_sha256": "4bbe531c6fb3beb126736169172baed2999eeccae8ce88ab2b4b4dd62deb7def",
+  "changes": [
+    "Existing jobs status starts with queue state and queue/attention counts; converted/approved retained. Series activity explicitly labelled Metadata. User/update/closing attribution kept; interrupted/unbound pause says exact stopping book is unidentified, never guesses old Brom/Jordan attention row.",
+    "Read-only books-audio-queue-work-v1 marker only while a real alive worker has a claimed job but no durable running job. Existing state/control semantics unchanged. Merge excludes marker during actual cleanup/postprocessing. UI says Checking pending audiobook work with no invented conversion progress.",
+    "Queued names Save says values wait in session memory, not durably saved. Generic pending-action copy likewise removes false saved claim. Existing queued Cancel positively confirmed preserves editor draft and says not saved. Lost Save reply says not confirmed; durable success alone closes draft with saved receipt."
+  ],
+  "results": "26/26 progress_rows+quiet_status Python tests PASS9.938s (owned10.589s normalnativezero), including actual private AudioJobs worker held at preattemptadmission; phase marker true, no current job/phase, disappears after completion. Three existing Node/DOM scripts progress_frontend,0242_frontend,ruling35_frontend PASS normalnativezero. Fixtures cover paused418/65+series0/292+unrelatedBromhold, actualrunningconversion, queuedSaveRAM/ahead/cancel/draftretained/refusal/lostreply/success. Initial newphase fixture had no sources and correctly failed enqueue; fixed fixture supplies required ordered source, no guard changed.",
+  "limitations": "Focused source/DOM verification only; no fullcheck/build/release/native/real-window/rect measurement. No live mutation/API/Z/media access. No actual new global pause is attributed to Jordan: core keeps that expected hold local, and old generic pause record has no typed book binding. SourcebadJordanuncapturedfiles and Bromidentityhold remain protected; this change does not repair either book.",
+  "unmodified_core": "Two core433885d paths normalized-equal verified; excluded from UI delta. No new framework/options/universe changes.",
+  "graph": "Existing test modules/scripts only. Prepared canonical Node phase helper was not executed because parent limited followup to affected source/DOM checks; no release gate claim.",
+  "evidence": [
+    {
+      "path": "owned.mjs",
+      "bytes": 1973,
+      "sha256": "d8c3986c1eefb8943ebb778ee29e17e13fbe5bc541be7b58a4290e4a9b6515b3"
+    },
+    {
+      "path": "owned-node.mjs",
+      "bytes": 1949,
+      "sha256": "beefd303cb64f7f33a651f2c50fa59fa0dc796357cbff6b714f7e1456fa22d75"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 955,
+      "sha256": "164d793cafec51b5d63eb5e8eea28b4a4c693e9433035d8fd0559b7a65a74343"
+    },
+    {
+      "path": "freeze-ui.py",
+      "bytes": 4740,
+      "sha256": "fc2728ffb054c991c50bde75c63abd985ba55c3881e10c5b72bc885fa98c8f07"
+    },
+    {
+      "path": "ui.patch",
+      "bytes": 22945,
+      "sha256": "4bbe531c6fb3beb126736169172baed2999eeccae8ce88ab2b4b4dd62deb7def"
+    },
+    {
+      "path": "queue-phase.json",
+      "bytes": 2338,
+      "sha256": "901a70cf1848dd9a95d7347777ce139fda53897b5b61923de58bf8ecf7d63b53"
+    },
+    {
+      "path": "queue-phase.log",
+      "bytes": 1597,
+      "sha256": "42d53ed6342e3af1b3723d584ab2481b043e4acc37b9eb0c7fe201f0a1a42d74"
+    },
+    {
+      "path": "queue-phase-corrected.json",
+      "bytes": 1453,
+      "sha256": "6de5f818b3798757c055789d20cc08ef50eb49587ecc4b5c938af9181b725300"
+    },
+    {
+      "path": "queue-phase-corrected.log",
+      "bytes": 753,
+      "sha256": "6e606beccb53213b4ed0f56b661e9177e66892804dbd0e6d51f81dff60cde723"
+    },
+    {
+      "path": "progress-ui.json",
+      "bytes": 831,
+      "sha256": "97f395db51ddaaabb4b2c30c11d68402c4cab91929f61f2d7c07812259a28691"
+    },
+    {
+      "path": "progress-ui.log",
+      "bytes": 147,
+      "sha256": "4fa3ef4fc86112a7153eb89abbb7bcde5d2c94a78a675e97594be961924ef32e"
+    },
+    {
+      "path": "pause-ui.json",
+      "bytes": 827,
+      "sha256": "809c7a667196ae36804e04532f29cbc21e4c088e23518dcf6292d47c2a10b203"
+    },
+    {
+      "path": "pause-ui.log",
+      "bytes": 144,
+      "sha256": "a53fbca6458d3a2d67ac0acd1a4c7f60bc4d66ad716aba530e9cbdab06b4eaf8"
+    },
+    {
+      "path": "queued-save-ui.json",
+      "bytes": 900,
+      "sha256": "fdc3457ba99880c0820b298df06bc8f405a60209ca2101adb1164e94fcf26c2e"
+    },
+    {
+      "path": "queued-save-ui.log",
+      "bytes": 217,
+      "sha256": "246c69f1877918128cb7397194e6d4e371890f20df450279fc9cfe8e902908a9"
+    },
+    {
+      "path": "queued-save-final.json",
+      "bytes": 900,
+      "sha256": "be795876ec37c05d43f3f445d1de292cdeb8fd6f62a1e6ee0464f7e046c82947"
+    },
+    {
+      "path": "queued-save-final.log",
+      "bytes": 217,
+      "sha256": "246c69f1877918128cb7397194e6d4e371890f20df450279fc9cfe8e902908a9"
+    },
+    {
+      "path": "progress-affected.json",
+      "bytes": 4603,
+      "sha256": "92946857125099ee73c893b2a26bb18a3a70a17039ed0869eda69519f00ef460"
+    },
+    {
+      "path": "progress-affected.log",
+      "bytes": 3854,
+      "sha256": "211a618cedc580036c1a68a90d82b4cb448ad2030dd5fbf899dd1f9390bdb136"
+    }
+  ]
+}

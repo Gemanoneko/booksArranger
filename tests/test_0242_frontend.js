@@ -15,7 +15,7 @@ const answer=body=>({ok:true,status:200,json:async()=>body});
   // Known and historical pause origins remain distinct; old restart flags do not invent an origin.
   for(const [origin,copy] of [['user','Paused by you.'],['update','Paused for an update.'],['closing','Paused when Books Arranger closed.'],['interrupted','Paused after an interruption.'],['unknown','Paused.']]){
     stateWith({pause:{origin}},{pause:{origin},restart_paused:true});
-    assert.ok(get('jobs-help').textContent.includes(copy+' Resume continues pending work.'));
+    assert.ok(get('jobs-help').textContent.includes(['user','update','closing'].includes(origin)?copy+' Resume continues pending work.':'Audiobook jobs are paused. The app has not identified which book stopped them.'));
     assert.equal(get('automatic-detail').textContent,copy+' Start automatic processing to continue.');
   }
   stateWith({}, {restart_paused:true});assert.equal(get('automatic-detail').textContent,'Paused. Start automatic processing to continue.');

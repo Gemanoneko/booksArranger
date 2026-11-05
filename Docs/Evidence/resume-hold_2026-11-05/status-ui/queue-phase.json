@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_claimed_source_admission_is_checking_not_conversion_progress (test_progress_rows.CheckpointTests.test_claimed_source_admission_is_checking_not_conversion_progress) ... ERROR\r\ntest_measured_steps_per_stage_are_accepted_and_others_refused (test_progress_rows.CheckpointTests.test_measured_steps_per_stage_are_accepted_and_others_refused) ... ok\r\ntest_phase_progress_passes_measurements_and_step_start (test_progress_rows.CheckpointTests.test_phase_progress_passes_measurements_and_step_start) ... ok\r\ntest_step_start_is_kept_while_the_same_step_reports (test_progress_rows.CheckpointTests.test_step_start_is_kept_while_the_same_step_reports) ... ok\r\n\r\n======================================================================\r\nERROR: test_claimed_source_admission_is_checking_not_conversion_progress (test_progress_rows.CheckpointTests.test_claimed_source_admission_is_checking_not_conversion_progress)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Worktrees\\Books Arranger\\resume-hold-20261105\\tests\\test_progress_rows.py\", line 54, in test_claimed_source_admission_is_checking_not_conversion_progress\r\n    queue.enqueue(manifest)\r\n    ~~~~~~~~~~~~~^^^^^^^^^^\r\n  File \"C:\\Antigravity Projects\\Worktrees\\Books Arranger\\resume-hold-20261105\\audio_jobs.py\", line 675, in enqueue\r\n    raise ValueError(\"Manifest requires ordered sources\")\r\nValueError: Manifest requires ordered sources\r\n\r\n----------------------------------------------------------------------\r\nRan 4 tests in 0.266s\r\n\r\nFAILED (errors=1)\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 61512,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 58,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 911.1884,
+  "outputBytes": 1597
+}

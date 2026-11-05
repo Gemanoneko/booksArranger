@@ -31,7 +31,7 @@ function parts(row){const [first,bar,last]=row.children;return {label:first.chil
 const conversion=(extra={})=>({id:'conversion',kind:'conversion',subject:'Long book title',step:'encoding',step_index:3,step_count:4,done:4325,total:39820,unit:'seconds',indeterminate:false,state:'running',step_started_at:NOW-134000,...extra});
 
 // Status line is unchanged.
-render();assert.match(get('jobs-status').textContent,/1 converted out of 2 approved books/);
+render();assert.match(get('jobs-status').textContent,/^Running · 0 queued · 0 need attention · 1 converted out of 2 approved books/);
 render({approved_total:undefined});assert.match(get('jobs-status').textContent,/Approved book progress unavailable/);
 
 // One measured conversion row: label, subject, audio-time detail, bar, Step N of 4, elapsed.
@@ -64,6 +64,17 @@ assert.equal(parts(render({},[conversion({unit:undefined,done:35,total:100})])[0
 // Several activities: fixed order (conversion, cleanup, identity, scan), whatever order they arrive in.
 const identity={id:'identity',kind:'identity',subject:'',step:'identity',done:3,total:60,unit:'books',indeterminate:false,state:'running',step_started_at:NOW-9000};
 const research={id:'scan',kind:'scan',subject:'Дюна',step:'researching',step_text:'Publisher - Fetching credits',done:12,total:40,unit:'books',indeterminate:false,state:'running',step_started_at:NOW-5000};
+const series={id:'series',kind:'series',subject:'Мухи',step:'series looking up',done:0,total:292,unit:'books',state:'running',step_started_at:NOW};
+const oldHeld={id:'cleanup',kind:'cleanup',subject:'Похититель детей',step:'originals',state:'attention',reason:'Cannot refresh protected file identity'};
+let mixed=render({state:'Paused',queued:418,attention_counts:{other:65},approved_total:1200,converted_total:778,pause:{origin:'interrupted'}},[oldHeld,series]);
+assert.match(get('jobs-status').textContent,/^Paused · 418 queued · 65 need attention · 778 converted out of 1200 approved books/);
+assert.match(get('jobs-help').textContent,/has not identified which book stopped them/);assert.doesNotMatch(get('jobs-help').textContent,/Похититель|Возрожденный/);
+assert.equal(parts(mixed.find(item=>item.dataset.kind==='series')).label,'Metadata: Updating series: ');
+assert.equal(parts(mixed.find(item=>item.dataset.kind==='series')).detail,'0 of 292 books');
+assert.equal(parts(mixed.find(item=>item.dataset.kind==='cleanup')).bar.hidden,true);
+render({state:'Running',queue_work:{schema:'books-audio-queue-work-v1',state:'checking_pending'}},[series]);
+assert.match(get('jobs-status').textContent,/^Checking pending audiobook work/);
+assert.equal(get('jobs-rows').children.some(item=>item.dataset.kind==='conversion'),false);
 rows=render({},[research,identity,conversion()]);assert.deepEqual(rows.map(item=>item.dataset.kind),['conversion','identity','scan']);
 row=parts(rows[1]);assert.equal(row.label,'Checking finished books');assert.equal(row.subject,'');assert.equal(row.detail,'3 of 60 books');assert.equal(row.step,'Checking identity');assert.equal(row.time,'0:09 elapsed');
 row=parts(rows[2]);assert.equal(row.label,'Researching books: ');assert.equal(row.subject,'Дюна');assert.equal(row.step,'Publisher - Fetching credits');assert.equal(row.subject.length>0&&rows[2].children[0].children[0].children[1].title,'Дюна');

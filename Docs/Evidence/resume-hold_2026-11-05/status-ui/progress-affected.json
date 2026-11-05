@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_cleanup_temporary_scan_and_indeterminate_rows (test_progress_rows.ActivityRowTests.test_cleanup_temporary_scan_and_indeterminate_rows) ... ok\r\ntest_extra_source_activity_keeps_typed_cleanup_identity (test_progress_rows.ActivityRowTests.test_extra_source_activity_keeps_typed_cleanup_identity) ... ok\r\ntest_research_pass_counts_this_pass (test_progress_rows.ActivityRowTests.test_research_pass_counts_this_pass) ... ok\r\ntest_rows_kinds_order_measurements_and_step_start (test_progress_rows.ActivityRowTests.test_rows_kinds_order_measurements_and_step_start) ... ok\r\ntest_claimed_source_admission_is_checking_not_conversion_progress (test_progress_rows.CheckpointTests.test_claimed_source_admission_is_checking_not_conversion_progress) ... ok\r\ntest_measured_steps_per_stage_are_accepted_and_others_refused (test_progress_rows.CheckpointTests.test_measured_steps_per_stage_are_accepted_and_others_refused) ... ok\r\ntest_phase_progress_passes_measurements_and_step_start (test_progress_rows.CheckpointTests.test_phase_progress_passes_measurements_and_step_start) ... ok\r\ntest_step_start_is_kept_while_the_same_step_reports (test_progress_rows.CheckpointTests.test_step_start_is_kept_while_the_same_step_reports) ... ok\r\ntest_checking_reports_originals_checked (test_progress_rows.CleanupCountTests.test_checking_reports_originals_checked) ... ok\r\ntest_conversion_completes_while_the_queue_lock_is_held (test_progress_rows.LockedQueueTests.test_conversion_completes_while_the_queue_lock_is_held) ... ok\r\ntest_every_step_reports_valid_monotonic_measurements (test_progress_rows.LockedQueueTests.test_every_step_reports_valid_monotonic_measurements) ... ok\r\ntest_failing_reporter_never_fails_a_step (test_progress_rows.LockedQueueTests.test_failing_reporter_never_fails_a_step) ... ok\r\ntest_background_and_start_checks_report_books_done (test_progress_rows.PublishedCheckTests.test_background_and_start_checks_report_books_done) ... ok\r\ntest_every_step_reports_valid_monotonic_measurements (test_progress_rows.RealConversionTests.test_every_step_reports_valid_monotonic_measurements) ... ok\r\ntest_pcm_seconds_counts_decoded_audio (test_progress_rows.StepProgressTests.test_pcm_seconds_counts_decoded_audio) ... ok\r\ntest_throttle_clamp_items_and_forced_boundaries (test_progress_rows.StepProgressTests.test_throttle_clamp_items_and_forced_boundaries) ... ok\r\ntest_schema_is_ensured_once_per_catalog_file (test_quiet_status.ConnectTests.test_schema_is_ensured_once_per_catalog_file) ... ok\r\ntest_prefiltered_page_reads_only_the_listed_rows (test_quiet_status.GroupsTests.test_prefiltered_page_reads_only_the_listed_rows) ... ok\r\ntest_newest_jobs_for_named_books_only (test_quiet_status.IndexTests.test_newest_jobs_for_named_books_only) ... ok\r\ntest_per_book_lookups_use_indexes (test_quiet_status.IndexTests.test_per_book_lookups_use_indexes) ... ok\r\ntest_book_list_page_is_reused_while_quiet (test_quiet_status.QuietTests.test_book_list_page_is_reused_while_quiet) ... ok\r\ntest_converted_ids_and_cleanup_statuses_follow_the_quiet_state (test_quiet_status.QuietTests.test_converted_ids_and_cleanup_statuses_follow_the_quiet_state) ... ok\r\ntest_running_work_is_never_reused (test_quiet_status.QuietTests.test_running_work_is_never_reused) ... ok\r\ntest_status_is_reused_until_a_commit_a_control_or_the_bound (test_quiet_status.QuietTests.test_status_is_reused_until_a_commit_a_control_or_the_bound) ... ok\r\ntest_finished_checks_are_saved_once_per_pass_and_loaded_by_the_next_run (test_quiet_status.RepairCheckTests.test_finished_checks_are_saved_once_per_pass_and_loaded_by_the_next_run) ... ok\r\ntest_poll_reuses_library_and_automatic_status_while_quiet (test_quiet_status.ServerStateTests.test_poll_reuses_library_and_automatic_status_while_quiet) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 26 tests in 9.938s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 50968,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 84,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 677,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 10588.9705,
+  "outputBytes": 3854
+}

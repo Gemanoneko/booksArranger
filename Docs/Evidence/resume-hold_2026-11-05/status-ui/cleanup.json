@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-hold-20261105",
+   "reason": "Ender resume-hold diagnosis/core/status task finished; required read-only diagnostic and focused failed/passing receipts/source patches are hash-preserved in versioned Docs; Sergei explicitly required cleanup of created temporaries; all private owned workers closed native complete zero and no active fixtures",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-hold-20261105",
+   "isDir": true,
+   "before": {
+    "files": 34,
+    "bytes": 1142596
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 34,
+    "bytes": 1142596
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 34,
+    "bytes": 1142596
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 101065736192,
+   "after": 101066960896
+  }
+ ],
+ "removedFiles": 34,
+ "removedBytes": 1142596,
+ "keptCount": 0
+}
