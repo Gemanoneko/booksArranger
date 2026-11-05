@@ -246,5 +246,148 @@ class TrilogyDecisionTests(unittest.TestCase):
         self.assertEqual(attach_shared_routing(typed)['review']['series'],'Властелин колец','a new explicit press is not an old saved spelling')
 
 
+class CuratedDecisionEvidenceTests(unittest.TestCase):
+    def result(self,legacy=False):
+        from public_research import attach_shared_routing
+        source=TrilogyDecisionTests().result(2)
+        if legacy:
+            # Existing normalized credit reaches the older exact-work world branch.
+            source['review']['author']=source['review']['canonical_author']='Tolkien J. R. R'
+            source['metadata_facts']['authors']=['Tolkien J. R. R']
+        return attach_shared_routing(source)
+
+    def test_curated_time_and_user_attribution_are_not_a_public_fetch(self):
+        from curated_decisions import validate
+        for legacy in (False,True):
+            result=self.result(legacy);facts=result['metadata_facts'];row={'fingerprint':facts['source_fingerprint']}
+            records=[r for r in result['evidence'] if r.get('source_kind')=='curated_user_decision']
+            self.assertEqual({r['field'] for r in records},{'universe'} if legacy else {'series','universe'})
+            for record in records:
+                self.assertNotIn('retrieved_utc',record);self.assertEqual(record['source_url'],'')
+                self.assertEqual(record['decision_actor'],'user');self.assertEqual(record['decision_identity'],'Sergei')
+                self.assertEqual(record['recorded_utc'],'2026-11-01T11:36:38Z' if legacy else '2026-11-04T19:52:41Z')
+                self.assertEqual(validate(record,row,result['review'],facts),record)
+
+    def test_unknown_decision_field_time_actor_or_any_binding_change_refuses(self):
+        from curated_decisions import validate
+        for legacy in (False,True):
+            result=self.result(legacy);facts=result['metadata_facts'];row={'fingerprint':facts['source_fingerprint']}
+            record=next(r for r in result['evidence'] if r.get('source_kind')=='curated_user_decision')
+            for change in ('ref','time','field','value','actor','identity','url','retrieval','source','work','cycle','title','authors','accepted'):
+                bad=copy.deepcopy(record)
+                if change=='ref':bad['decision_ref']='user:unknown'
+                if change=='time':bad['recorded_utc']='2026-11-05T00:00:00Z'
+                if change=='field':bad['field']='title'
+                if change=='value':bad['cited_value']='My unverified series'
+                if change=='actor':bad['decision_actor']='assistant'
+                if change=='identity':bad['decision_identity']='Someone else'
+                if change=='url':bad['source_url']='https://fantlab.ru/work1693'
+                if change=='retrieval':bad['retrieved_utc']='2026-11-05T00:00:00Z'
+                if change=='source':bad['binding']['source_fingerprint']='changed'
+                if change=='work':bad['binding']['work_ids']=['fantlab:999']
+                if change=='cycle':bad['binding']['catalog_cycle']='https://fantlab.ru/work999'
+                if change=='title':bad['binding']['original_title']='Other novel'
+                if change=='authors':bad['binding']['authors']=['Another Writer']
+                if change=='accepted':bad['binding']['review']['title']='Other title'
+                with self.subTest(legacy=legacy,change=change),self.assertRaises(ValueError):validate(bad,row,result['review'],facts)
+            wrong=copy.deepcopy(facts);wrong['source_fingerprint']='changed'
+            with self.assertRaises(ValueError):validate(record,row,result['review'],wrong)
+            wrong=copy.deepcopy(facts)
+            if legacy:wrong['shared_routing']['universe']['members'][0]['series_id']='https://fantlab.ru/work999'
+            else:wrong['trilogy_routing']['binding']['source_fingerprint']='changed'
+            with self.assertRaises(ValueError):validate(record,row,result['review'],wrong)
+
+    def test_generic_manual_rules_keep_https_time_and_field_requirements(self):
+        from metadata_sources import manual_evidence
+        record={'field':'series','cited_value':'Lord of the Rings','source_url':'https://fantlab.ru/work1693',
+            'retrieved_utc':'2026-11-04T19:52:41Z','reviewer_actor':'assistant','reviewer_identity':'Fixture reviewer','basis':'Public catalog identifies this series'}
+        self.assertEqual(manual_evidence(**record)['source_url'],record['source_url'])
+        for changed in ({'field':'universe'},{'source_url':''},{'retrieved_utc':None},{'retrieved_utc':'2026-11-04T19:52:41+02:00'}):
+            with self.subTest(changed=changed),self.assertRaises(ValueError):manual_evidence(**dict(record,**changed))
+
+
+class CuratedApprovalTests(unittest.TestCase):
+    """Actual user Approve and pending persistence; no conversion or network."""
+    def setUp(self):
+        import os,tempfile
+        from pathlib import Path
+        self.temp=tempfile.TemporaryDirectory(dir=os.environ['BOOKS_QA_FIXTURE_ROOT']);self.addCleanup(self.temp.cleanup)
+        self.base=Path(self.temp.name);self.audio=self.base/'a';self.audio.mkdir();self.sorted=self.base/'s';self.sorted.mkdir()
+
+    def approve(self,number,legacy=False):
+        import json,threading,shutil
+        from pathlib import Path
+        from unittest.mock import patch
+        from scanner import Inventory
+        from scan_wait import finish_scan
+        from merge_service import MergeService
+        from public_research import PublicClient,PublicResearch,attach_shared_routing
+        from standing_metadata import build_policy
+        from audio_pipeline import run_owned
+        source=self.audio/'book.m4b'
+        run_owned([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=0.4',
+            '-c:a','aac','-b:a','64k','-ar','44100','-ac','1','-metadata','album=Source recording','-metadata','title=Source recording',str(source)],self.base,threading.Event(),30)
+        before=source.read_bytes()
+        inv=Inventory(self.base/'catalog.sqlite3',{'Audiobooks':str(self.audio),'Podcasts':str(self.base/'p'),'Ebooks':str(self.base/'e')},output_root=str(self.sorted))
+        inv.launch('Audiobooks');finish_scan(inv)
+        service=MergeService(inv,self.base/'c');self.addCleanup(service.close)
+        def offline(url,*args):raise AssertionError('Unexpected fixture network access: '+url)
+        research=PublicResearch(PublicClient(inv.database,fetch=offline),leads=[]);service.automatic.research=research
+        row=service.reviews.page()['rows'][0];title=TrilogyDecisionTests.TITLES[number-1]
+        work={'id':'local:accepted-fellowship' if number==1 else 'fantlab:'+str(1666+number),'original_title':title,'titles':[title],
+            'original_language':'en','author_aliases':['Tolkien J. R. R.'],'policy_version':'standing-17-v1',
+            'verified_series':{'provider':'fantlab','name':'Властелин колец','number':str(number),'source_url':'https://fantlab.ru/work1693'}}
+        credit='Tolkien J. R. R' if legacy else 'Tolkien J. R. R.'
+        review,facts,reasons=build_policy(row,work,title,[credit],series='Властелин колец',number=str(number))
+        result={'work':work,'review':review,'metadata_facts':facts,'reasons':reasons,'evidence':[],
+            'sources':[{'kind':'publisher_or_journal','url':'https://publisher.example/tolkien','verified_identity':True}],
+            'approval':{'title':title,'author':credit,'typed':[],'collection':False}}
+        result=attach_shared_routing(result)
+        with patch.object(service,'_approval_result',return_value=(row,result)),patch.object(service,'_english_spelling_answer',return_value=None):
+            approved=service.approve_book(row['id'],row['revision'])
+        jobs=service.jobs.status()['jobs'];self.assertEqual(len(jobs),1);job=jobs[0]
+        self.assertEqual(job['job_id'],approved['job_id']);self.assertEqual(job['state'],'pending')
+        self.assertIsNone(job.get('output'));self.assertIsNone(job.get('attempt_id'))
+        records=job['manifest']['evidence']['metadata_fields'];curated=[r for r in records if r.get('source_kind')=='curated_user_decision']
+        self.assertEqual({r['field'] for r in curated},{'universe'} if legacy else {'series','universe'})
+        self.assertTrue(all(r['reviewer_actor']=='user' and r['decision_actor']=='user' and r['decision_identity']=='Sergei' for r in curated))
+        self.assertTrue(all('retrieved_utc' not in r for r in curated))
+        fresh=service.reviews._row('Audiobooks',row['id']);ctx=service.reviews._context(fresh)
+        self.assertEqual(ctx['metadata_evidence'],records);self.assertTrue(ctx['metadata_approved'])
+        self.assertEqual(fresh['review']['universe'],'Middle-earth')
+        self.assertEqual(fresh['review']['series'],'Властелин колец' if legacy else 'Lord of the Rings')
+        from review_backend import CandidateReviewService
+        restarted=CandidateReviewService(inv,self.base/'c')
+        self.assertEqual(restarted._context(restarted._row('Audiobooks',row['id']))['metadata_evidence'],records)
+        self.assertTrue(source.is_file());self.assertEqual(source.read_bytes(),before);self.assertFalse(Path(job['manifest']['destination']).exists())
+        return service,row,result
+
+    def test_return_king_actual_approve_persists_and_queues(self):self.approve(3)
+    def test_two_towers_actual_approve_persists_and_queues(self):self.approve(2)
+    def test_fellowship_actual_approve_persists_and_queues(self):self.approve(1)
+    def test_legacy_middle_earth_actual_approve_persists_and_queues(self):self.approve(2,legacy=True)
+    def test_private_review_consumer_refuses_malformed_or_mismatched_curated_records_before_writes(self):
+        import json
+        from scanner import connect
+        service,row,result=self.approve(3)
+        fresh=service.reviews._row('Audiobooks',row['id']);ctx=service.reviews._context(fresh)
+        def stored():
+            with connect(service.inventory.database) as db:
+                return tuple(db.execute('SELECT revision,review FROM book_groups WHERE id=?',(row['id'],)).fetchone()),tuple(db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(row['id'],)).fetchone())
+        before=stored();records=ctx['metadata_evidence']
+        for change in ('schema','ref','time','source','field','no_private_admission'):
+            bad=copy.deepcopy(records);record=next(r for r in bad if r.get('source_kind')=='curated_user_decision')
+            if change=='schema':record['schema']='untrusted'
+            if change=='ref':record['decision_ref']='user:unknown'
+            if change=='time':record['recorded_utc']='2026-11-05T00:00:00Z'
+            if change=='source':record['binding']['source_fingerprint']='changed'
+            if change=='field':record['field']='title'
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                service.reviews.save('Audiobooks',fresh['id'],fresh['revision'],fresh['review'],actor='user',evidence=bad,
+                    **({'approve':False} if change=='no_private_admission' else {'approve':True,'user_approval':True,
+                    'cover_id':ctx['cover_id'],'automatic_pending':{'matcher_version':'fixture','work_id':result['work']['id']},'automatic_facts':result['metadata_facts']}))
+            self.assertEqual(stored(),before)
+
+
 if __name__ == '__main__':
     unittest.main()

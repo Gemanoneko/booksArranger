@@ -624,7 +624,11 @@ class CandidateReviewService:
                 local=bool(automatic_facts is not None and automatic_facts.get('identity_basis')=='local_agreement')
                 for record in evidence:
                     if not isinstance(record,dict):raise ValueError('Invalid evidence record')
-                    if local and record.get('source_url')=='':
+                    if record.get('source_kind')=='curated_user_decision':
+                        if automatic_facts is None:raise ValueError('Curated user decisions require private standing admission')
+                        from curated_decisions import validate as validate_curated_decision
+                        records.append(validate_curated_decision(record,row,review,automatic_facts))
+                    elif local and record.get('source_url')=='':
                         records.append(local_evidence(**{k:record[k] for k in ('field','cited_value','retrieved_utc','reviewer_actor','reviewer_identity','basis')}))
                     else:records.append(manual_evidence(**{k:record[k] for k in ('field','cited_value','source_url','retrieved_utc','reviewer_actor','reviewer_identity','basis')}))
                 if any(e['reviewer_actor']!=actor for e in records):raise ValueError('Evidence actor must match actual reviewer')

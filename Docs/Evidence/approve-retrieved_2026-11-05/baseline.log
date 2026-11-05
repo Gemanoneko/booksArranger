@@ -1,0 +1,105 @@
+test_fellowship_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_fellowship_actual_approve_persists_and_queues) ... ERROR
+test_legacy_middle_earth_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_legacy_middle_earth_actual_approve_persists_and_queues) ... ERROR
+test_return_king_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_return_king_actual_approve_persists_and_queues) ... ERROR
+test_two_towers_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_two_towers_actual_approve_persists_and_queues) ... ERROR
+
+======================================================================
+ERROR: test_fellowship_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_fellowship_actual_approve_persists_and_queues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 364, in test_fellowship_actual_approve_persists_and_queues
+    def test_fellowship_actual_approve_persists_and_queues(self):self.approve(1)
+                                                                 ~~~~~~~~~~~~^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 330, in approve
+    service=MergeService(inv,self.base/'c');self.addCleanup(service.close)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 287, in __init__
+    self.automatic=AutomaticProcessing(self)
+                   ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\automatic_processing.py", line 87, in __init__
+    self.research=research or PublicResearch(PublicClient(self.database))
+                              ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\approve-retrieved-20261105\baseline-source\public_research.py", line 573, in __init__
+    self.client=client;self.leads=source_leads() if leads is None else leads
+                                  ~~~~~~~~~~~~^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\approve-retrieved-20261105\baseline-source\public_research.py", line 293, in source_leads
+    raw=path.read_bytes()
+  File "pathlib\__init__.py", line 777, in read_bytes
+  File "pathlib\__init__.py", line 771, in open
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\approve-retrieved-20261105\\baseline-source\\public_source_leads.json'
+
+======================================================================
+ERROR: test_legacy_middle_earth_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_legacy_middle_earth_actual_approve_persists_and_queues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 365, in test_legacy_middle_earth_actual_approve_persists_and_queues
+    def test_legacy_middle_earth_actual_approve_persists_and_queues(self):self.approve(2,legacy=True)
+                                                                          ~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 330, in approve
+    service=MergeService(inv,self.base/'c');self.addCleanup(service.close)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 287, in __init__
+    self.automatic=AutomaticProcessing(self)
+                   ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\automatic_processing.py", line 87, in __init__
+    self.research=research or PublicResearch(PublicClient(self.database))
+                              ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\approve-retrieved-20261105\baseline-source\public_research.py", line 573, in __init__
+    self.client=client;self.leads=source_leads() if leads is None else leads
+                                  ~~~~~~~~~~~~^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\approve-retrieved-20261105\baseline-source\public_research.py", line 293, in source_leads
+    raw=path.read_bytes()
+  File "pathlib\__init__.py", line 777, in read_bytes
+  File "pathlib\__init__.py", line 771, in open
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\approve-retrieved-20261105\\baseline-source\\public_source_leads.json'
+
+======================================================================
+ERROR: test_return_king_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_return_king_actual_approve_persists_and_queues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 362, in test_return_king_actual_approve_persists_and_queues
+    def test_return_king_actual_approve_persists_and_queues(self):self.approve(3)
+                                                                  ~~~~~~~~~~~~^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 330, in approve
+    service=MergeService(inv,self.base/'c');self.addCleanup(service.close)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 287, in __init__
+    self.automatic=AutomaticProcessing(self)
+                   ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\automatic_processing.py", line 87, in __init__
+    self.research=research or PublicResearch(PublicClient(self.database))
+                              ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\approve-retrieved-20261105\baseline-source\public_research.py", line 573, in __init__
+    self.client=client;self.leads=source_leads() if leads is None else leads
+                                  ~~~~~~~~~~~~^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\approve-retrieved-20261105\baseline-source\public_research.py", line 293, in source_leads
+    raw=path.read_bytes()
+  File "pathlib\__init__.py", line 777, in read_bytes
+  File "pathlib\__init__.py", line 771, in open
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\approve-retrieved-20261105\\baseline-source\\public_source_leads.json'
+
+======================================================================
+ERROR: test_two_towers_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_two_towers_actual_approve_persists_and_queues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 363, in test_two_towers_actual_approve_persists_and_queues
+    def test_two_towers_actual_approve_persists_and_queues(self):self.approve(2)
+                                                                 ~~~~~~~~~~~~^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 330, in approve
+    service=MergeService(inv,self.base/'c');self.addCleanup(service.close)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 287, in __init__
+    self.automatic=AutomaticProcessing(self)
+                   ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\automatic_processing.py", line 87, in __init__
+    self.research=research or PublicResearch(PublicClient(self.database))
+                              ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\approve-retrieved-20261105\baseline-source\public_research.py", line 573, in __init__
+    self.client=client;self.leads=source_leads() if leads is None else leads
+                                  ~~~~~~~~~~~~^^
+  File "C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\approve-retrieved-20261105\baseline-source\public_research.py", line 293, in source_leads
+    raw=path.read_bytes()
+  File "pathlib\__init__.py", line 777, in read_bytes
+  File "pathlib\__init__.py", line 771, in open
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\approve-retrieved-20261105\\baseline-source\\public_source_leads.json'
+
+----------------------------------------------------------------------
+Ran 4 tests in 1.978s
+
+FAILED (errors=4)

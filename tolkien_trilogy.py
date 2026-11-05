@@ -71,9 +71,9 @@ def apply(result):
                                   'catalog_cycle':CYCLE,'original_title':out['work']['original_title'],
                                   'binding':_binding(review,facts)}
         evidence=out.setdefault('evidence',[])
+        from curated_decisions import evidence as decision_evidence
         for field,value in (('series',SERIES),('universe',WORLD)):
-            item={'field':field,'cited_value':value,'source_url':'','reviewer_actor':'user',
-                  'reviewer_identity':'Sergei','basis':'Confirmed trilogy naming and author/world/series hierarchy, 2026-11-04.'}
+            item=decision_evidence(out,DECISION,field,value)
             if item not in evidence:evidence.append(item)
     return out
 

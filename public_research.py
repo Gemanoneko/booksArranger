@@ -2485,6 +2485,14 @@ def attach_shared_routing(result, peers=()):
     member = _routing_member(out)
     if not isinstance(review, dict) or not isinstance(facts, dict) or member is None:
         return out
+    # This producer is also called again at approval. Revalidate only its exact
+    # typed legacy decision before rebuilding, never retain an unbound world name.
+    from curated_decisions import LEGACY_WORLD,validate as validate_curated_decision
+    prior_legacy_world=False
+    for record in out.get('evidence') or []:
+        if isinstance(record,dict) and record.get('source_kind')=='curated_user_decision' and record.get('decision_ref')==LEGACY_WORLD:
+            validate_curated_decision(record,{'fingerprint':facts.get('source_fingerprint')},review,facts)
+            prior_legacy_world=True
     # A new review cannot carry a prior receipt whose name/source binding may be stale.
     facts.pop('shared_routing', None)
     series = None; universe = None
@@ -2524,10 +2532,12 @@ def attach_shared_routing(result, peers=()):
             and review.get('number') == expected[1] and sid == 'https://fantlab.ru/work1693'
             and len(member['authors']) == 1 and any(_exact_people(member['authors'][0], [alias]) for alias in
                 ('J. R. R. Tolkien', 'Tolkien J. R. R.', 'John Ronald Reuel Tolkien', 'Джон Рональд Руэл Толкин'))
-            and 'universe' not in names and 'universe' not in entered and not review.get('universe')):
+            and 'universe' not in names and 'universe' not in entered
+            and (not review.get('universe') or prior_legacy_world and review.get('universe')=='Middle-earth')):
         review['universe'] = 'Middle-earth'
-        out.setdefault('evidence', []).append({'field': 'universe', 'cited_value': 'Middle-earth', 'source_url': '',
-            'reviewer_actor': 'user', 'reviewer_identity': 'Sergei', 'basis': 'Confirmed Middle-earth relationship, 2026-11-01; exact Tolkien work and cycle identity.'})
+        from curated_decisions import evidence as decision_evidence,LEGACY_WORLD
+        item=decision_evidence(out,LEGACY_WORLD,'universe','Middle-earth')
+        if item not in out.setdefault('evidence', []):out['evidence'].append(item)
         universe = {'id': 'user:middle-earth-2026-11-01', 'name': 'Middle-earth', 'basis': 'user',
                     'evidence': ['user:middle-earth-decision-2026-11-01'],
                     'members': [dict(member, series_id=sid)]}

@@ -1,0 +1,79 @@
+{
+  "schema": "books-curated-tolkien-approval-fix-v1",
+  "base": "b8f1ac2502ce34b215ca6e7ca16a7685b698ac6b",
+  "root": "C:/Antigravity Projects/Worktrees/Books Arranger/approve-retrieved-20261105",
+  "files": [
+    {
+      "path": "curated_decisions.py",
+      "size": 5133,
+      "sha256": "3a5729bb491a599badab3d033c2272cbc84c0c96e2e914b33908cf1ba4d56efb"
+    },
+    {
+      "path": "tolkien_trilogy.py",
+      "size": 7190,
+      "sha256": "6c9624149d018339a60aefb221823894cba7373a8f5b77a91586ec482efb7b98"
+    },
+    {
+      "path": "public_research.py",
+      "size": 204404,
+      "sha256": "eb2afc815ed940a92d456b82f5235c483c3258dff6d856939b4288ce1d11e505"
+    },
+    {
+      "path": "review_backend.py",
+      "size": 80061,
+      "sha256": "c6fa35bbff05ade07b225dbf0fa4e7c76dcb7dc315ed27dc61a8f2d60513e628"
+    },
+    {
+      "path": "tests/test_shared_routing.py",
+      "size": 28447,
+      "sha256": "dfcdce88e96241011d0b25966eb14573bd018cc0883ce61222b69513a88f396a"
+    }
+  ],
+  "patch": {
+    "path": "implementation.patch",
+    "size": 22147,
+    "sha256": "3087279338770863f2cf10cf178e5c0511a9d51707fac5342f543221179198e1"
+  },
+  "root_cause": "Curated trilogy/world decisions were emitted as URL-less evidence without retrieved_utc and with universe outside generic manual fields. The private approval indexed retrieved_utc and failed before persistence/queue. A decision record is not a public retrieval.",
+  "contract": {
+    "schema": "books-curated-user-decision-v1",
+    "source_kind": "curated_user_decision",
+    "allowlist": [
+      "user:tolkien-trilogy-2026-11-04",
+      "user:middle-earth-2026-11-01"
+    ],
+    "current_recorded_utc": "2026-11-04T19:52:41Z",
+    "legacy_recorded_utc": "2026-11-01T11:36:38Z",
+    "decision_actor": "user",
+    "actual_reviewer_actor": "Current admission actor, independent from decision actor",
+    "scope": "Only known series/universe exact values in private automatic_facts admission, validated against accepted source/work/cycle/author/field binding and existing trilogy/world proof; no fabricated retrieval/URL"
+  },
+  "proof": {
+    "baseline": "Final private actual approve_book cases for Fellowship, Two Towers, Return King and legacy world:4 KeyError retrieved_utc failures with original producer/review modules; baseline-final.json/log",
+    "fixed": "74PASS16.157s, no skips/errors/failures; final-fixed.json/log; runOwned600000ms normal native active0/unsignaled0/complete zero",
+    "actual": "Actual private generated M4B→approve_book→review/evidence persistence→manifest→pending AudioJob, source bytes unchanged, destination not created, no conversion started. Restarted review reads exact evidence.",
+    "negative": "Malformed schema/ref/UTC/source/field and nonprivate admission refuse before candidate/context writes. Pure identity/field/actor/URL/retrieval spoof tests and unchanged generic manual HTTPS/time/field rules pass."
+  },
+  "boundaries": {
+    "product_unchanged": [
+      "metadata_sources.py generic validators",
+      "MergeService actual actor rewrite and approval architecture",
+      "standing policy validators",
+      "output path guard"
+    ],
+    "no_live_access": true,
+    "no_conversion": true,
+    "no_full_release_claim": true
+  },
+  "limitation": "Production approved/lookup builds fresh evidence after current names; its second attach is same-binding. Direct external mutation of previously typed result before attach is not a supported current caller path; stale generated records then fail closed. Bounded review is assessing this limitation.",
+  "scratch": {
+    "scripts": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/approve-retrieved-20261105",
+    "private_fixture_arena": "C:/Antigravity Projects/a26",
+    "ownership": "Checked absent before creation; owner.json identifies this lane; pending cleanup after evidence retention"
+  },
+  "prior_probe_failures": [
+    "Initial baseline harness copy omitted public_source_leads.json; retained as baseline.* diagnostics.",
+    "Second baseline fixture omitted standing policy marker before actual KeyError route; retained baseline-repaired.*.",
+    "Legacy second attach initially lost world proof; corrected by revalidating existing typed exact legacy proof before rebuilding."
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "books-curated-fix-cleanup-status-v1",
+  "status": "command-launch-policy-rejected",
+  "removed": false,
+  "roots_preserved": [
+    "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/approve-retrieved-20261105",
+    "C:/Antigravity Projects/a26",
+    "C:/Antigravity Projects/Worktrees/Books Arranger/approve-retrieved-20261105/scratch"
+  ],
+  "intended_action": "Validate exact absolute roots and ordinary non-link owned output; compare retained evidence copies; remove individual identified files then empty owned directories without recursive deletion.",
+  "outcome": "The command was blocked before process creation. No deletion occurred. No alternative deletion route was attempted.",
+  "ownership": "The a26 arena was absent before creation and has owner.json for ender_m4b / approve-retrieved-20261105. Scratch is this lane's scripts, retained-output duplicates and baseline source copies. Worktree scratch contains only empty fixture parent directories.",
+  "closure": "Final owned test result proves normal complete native zero, active 0 / unsignaled 0.",
+  "retained_unique_evidence": "Docs/Evidence/approve-retrieved_2026-11-05"
+}

@@ -1,0 +1,125 @@
+test_fellowship_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_fellowship_actual_approve_persists_and_queues) ... ERROR
+test_legacy_middle_earth_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_legacy_middle_earth_actual_approve_persists_and_queues) ... ERROR
+test_return_king_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_return_king_actual_approve_persists_and_queues) ... ERROR
+test_two_towers_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_two_towers_actual_approve_persists_and_queues) ... ERROR
+
+======================================================================
+ERROR: test_fellowship_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_fellowship_actual_approve_persists_and_queues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 364, in test_fellowship_actual_approve_persists_and_queues
+    def test_fellowship_actual_approve_persists_and_queues(self):self.approve(1)
+                                                                 ~~~~~~~~~~~~^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 344, in approve
+    approved=service.approve_book(row['id'],row['revision'])
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3852, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3858, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3889, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3998, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 4138, in approve_automatic
+    if reasons:raise ValueError('; '.join(reasons))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Audio format needs an encoding decision
+
+======================================================================
+ERROR: test_legacy_middle_earth_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_legacy_middle_earth_actual_approve_persists_and_queues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 365, in test_legacy_middle_earth_actual_approve_persists_and_queues
+    def test_legacy_middle_earth_actual_approve_persists_and_queues(self):self.approve(2,legacy=True)
+                                                                          ~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 344, in approve
+    approved=service.approve_book(row['id'],row['revision'])
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3852, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3858, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3889, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3998, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 4138, in approve_automatic
+    if reasons:raise ValueError('; '.join(reasons))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Audio format needs an encoding decision
+
+======================================================================
+ERROR: test_return_king_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_return_king_actual_approve_persists_and_queues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 362, in test_return_king_actual_approve_persists_and_queues
+    def test_return_king_actual_approve_persists_and_queues(self):self.approve(3)
+                                                                  ~~~~~~~~~~~~^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 344, in approve
+    approved=service.approve_book(row['id'],row['revision'])
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3852, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3858, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3889, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3998, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 4138, in approve_automatic
+    if reasons:raise ValueError('; '.join(reasons))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Audio format needs an encoding decision
+
+======================================================================
+ERROR: test_two_towers_actual_approve_persists_and_queues (test_shared_routing.CuratedApprovalTests.test_two_towers_actual_approve_persists_and_queues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 363, in test_two_towers_actual_approve_persists_and_queues
+    def test_two_towers_actual_approve_persists_and_queues(self):self.approve(2)
+                                                                 ~~~~~~~~~~~~^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\tests\test_shared_routing.py", line 344, in approve
+    approved=service.approve_book(row['id'],row['revision'])
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3852, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3858, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3889, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 3998, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\approve-retrieved-20261105\merge_service.py", line 4138, in approve_automatic
+    if reasons:raise ValueError('; '.join(reasons))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Audio format needs an encoding decision
+
+----------------------------------------------------------------------
+Ran 4 tests in 2.603s
+
+FAILED (errors=4)

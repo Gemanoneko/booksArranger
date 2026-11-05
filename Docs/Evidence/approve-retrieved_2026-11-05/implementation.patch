@@ -1,0 +1,303 @@
+diff --git a/curated_decisions.py b/curated_decisions.py
+new file mode 100644
+--- /dev/null
++++ b/curated_decisions.py
+@@ -0,0 +1,77 @@
++"""Exact repository-recorded user decisions, distinct from fetched/manual citations.
++
++Only the private standing-metadata admission accepts these records. Recording a
++decision is not a public fetch; its timestamp and attribution retain that meaning.
++"""
++import copy
++
++SCHEMA='books-curated-user-decision-v1'
++SOURCE_KIND='curated_user_decision'
++LEGACY_WORLD='user:middle-earth-2026-11-01'
++LEGACY_RECORDED='2026-11-01T11:36:38Z'  # f942ac2: SeriesPreview_Diagnosis_2026-11-01.md
++KEYS={'schema','source_kind','decision_ref','recorded_utc','decision_actor','decision_identity',
++      'field','cited_value','source_url','reviewer_actor','reviewer_identity','basis','binding'}
++
++
++def _decision(ref):
++    from tolkien_trilogy import DECISION,RECORDED,SERIES,WORLD
++    if ref==DECISION:return RECORDED.isoformat().replace('+00:00','Z'),{'series':SERIES,'universe':WORLD}
++    if ref==LEGACY_WORLD:return LEGACY_RECORDED,{'universe':WORLD}
++    raise ValueError('Unknown curated user decision')
++
++
++def _binding(review,facts,original_title,cycle):
++    from tolkien_trilogy import FIELDS
++    return {'source_fingerprint':facts.get('source_fingerprint'),'work_ids':copy.deepcopy(facts.get('work_ids')),
++            'authors':copy.deepcopy(facts.get('authors')),'original_title':original_title,'catalog_cycle':cycle,
++            'review':{field:review.get(field,'') for field in FIELDS}}
++
++
++def evidence(result,decision_ref,field,value):
++    recorded,fields=_decision(decision_ref)
++    if fields.get(field)!=value:raise ValueError('Unknown curated decision field/value')
++    work=result.get('work') or {};series=work.get('verified_series') or {}
++    return {'schema':SCHEMA,'source_kind':SOURCE_KIND,'decision_ref':decision_ref,'recorded_utc':recorded,
++            'decision_actor':'user','decision_identity':'Sergei','field':field,'cited_value':value,'source_url':'',
++            'reviewer_actor':'assistant','reviewer_identity':'Books Arranger recorded user decision',
++            'basis':'Repository-recorded exact Tolkien work/cycle and user naming or world decision.',
++            'binding':_binding(result.get('review') or {},result.get('metadata_facts') or {},work.get('original_title'),series.get('source_url'))}
++
++
++def validate(record,row,review,facts):
++    """Validate one detached record against this accepted private source/work/field.
++
++    A schema label, blank URL or user attribution alone grants no admission. Generic
++    public/manual/local records continue through their own unchanged validators.
++    """
++    from tolkien_trilogy import DECISION,CYCLE,WORKS,AUTHORS,author_world
++    if not isinstance(record,dict) or set(record)!=KEYS or record.get('schema')!=SCHEMA or record.get('source_kind')!=SOURCE_KIND:
++        raise ValueError('Invalid curated user decision record')
++    recorded,fields=_decision(record.get('decision_ref'))
++    field=record.get('field')
++    if (field not in fields or record.get('cited_value')!=fields[field] or review.get(field)!=fields[field]
++        or record.get('recorded_utc')!=recorded or record.get('decision_actor')!='user' or record.get('decision_identity')!='Sergei'
++        or record.get('source_url')!='' or record.get('reviewer_actor') not in ('user','assistant')):
++        raise ValueError('Curated user decision field or attribution differs')
++    for key in ('reviewer_identity','basis'):
++        if not isinstance(record.get(key),str) or not record[key].strip() or len(record[key])>4000:raise ValueError('Invalid curated decision review attribution')
++    if not isinstance(facts,dict) or not isinstance(row,dict) or not row.get('fingerprint') or facts.get('source_fingerprint')!=row['fingerprint']:
++        raise ValueError('Curated user decision source binding differs')
++    original=facts.get('original_title');expected=WORKS.get(original);ids=facts.get('work_ids');authors=facts.get('authors')
++    if (not expected or not isinstance(ids,list) or len(ids)!=1 or not isinstance(ids[0],str)
++        or not isinstance(authors,list) or len(authors)!=1
++        or review.get('canonical_author')!=authors[0] or facts.get('series_state')!='verified' or review.get('number')!=expected[1]
++        or record.get('binding')!=_binding(review,facts,original,CYCLE)):
++        raise ValueError('Curated user decision work binding differs')
++    if record['decision_ref']==DECISION:
++        if authors[0] not in AUTHORS or not author_world(review,facts):raise ValueError('Current trilogy decision proof differs')
++    else:
++        from public_research import _exact_people
++        world=(facts.get('shared_routing') or {}).get('universe') or {}
++        if (ids!=[expected[0]] or review.get('series')!='Властелин колец' or world.get('id')!=LEGACY_WORLD
++            or not any(_exact_people(authors[0],[alias]) for alias in AUTHORS)
++            or world.get('name')!='Middle-earth' or world.get('basis')!='user'
++            or world.get('evidence')!=['user:middle-earth-decision-2026-11-01']
++            or world.get('members')!=[{'work_id':ids[0],'authors':authors,'series_id':CYCLE}]):
++            raise ValueError('Legacy Middle-earth decision proof differs')
++    return copy.deepcopy(record)
+diff --git a/public_research.py b/public_research.py
+index 80ccf3e..b277402 100644
+--- a/public_research.py
++++ b/public_research.py
+@@ -2485,6 +2485,14 @@ def attach_shared_routing(result, peers=()):
+     member = _routing_member(out)
+     if not isinstance(review, dict) or not isinstance(facts, dict) or member is None:
+         return out
++    # This producer is also called again at approval. Revalidate only its exact
++    # typed legacy decision before rebuilding, never retain an unbound world name.
++    from curated_decisions import LEGACY_WORLD,validate as validate_curated_decision
++    prior_legacy_world=False
++    for record in out.get('evidence') or []:
++        if isinstance(record,dict) and record.get('source_kind')=='curated_user_decision' and record.get('decision_ref')==LEGACY_WORLD:
++            validate_curated_decision(record,{'fingerprint':facts.get('source_fingerprint')},review,facts)
++            prior_legacy_world=True
+     # A new review cannot carry a prior receipt whose name/source binding may be stale.
+     facts.pop('shared_routing', None)
+     series = None; universe = None
+@@ -2524,10 +2532,12 @@ def attach_shared_routing(result, peers=()):
+             and review.get('number') == expected[1] and sid == 'https://fantlab.ru/work1693'
+             and len(member['authors']) == 1 and any(_exact_people(member['authors'][0], [alias]) for alias in
+                 ('J. R. R. Tolkien', 'Tolkien J. R. R.', 'John Ronald Reuel Tolkien', 'Джон Рональд Руэл Толкин'))
+-            and 'universe' not in names and 'universe' not in entered and not review.get('universe')):
++            and 'universe' not in names and 'universe' not in entered
++            and (not review.get('universe') or prior_legacy_world and review.get('universe')=='Middle-earth')):
+         review['universe'] = 'Middle-earth'
+-        out.setdefault('evidence', []).append({'field': 'universe', 'cited_value': 'Middle-earth', 'source_url': '',
+-            'reviewer_actor': 'user', 'reviewer_identity': 'Sergei', 'basis': 'Confirmed Middle-earth relationship, 2026-11-01; exact Tolkien work and cycle identity.'})
++        from curated_decisions import evidence as decision_evidence,LEGACY_WORLD
++        item=decision_evidence(out,LEGACY_WORLD,'universe','Middle-earth')
++        if item not in out.setdefault('evidence', []):out['evidence'].append(item)
+         universe = {'id': 'user:middle-earth-2026-11-01', 'name': 'Middle-earth', 'basis': 'user',
+                     'evidence': ['user:middle-earth-decision-2026-11-01'],
+                     'members': [dict(member, series_id=sid)]}
+diff --git a/review_backend.py b/review_backend.py
+index 8c1b2af..aa1353b 100644
+--- a/review_backend.py
++++ b/review_backend.py
+@@ -624,7 +624,11 @@ class CandidateReviewService:
+                 local=bool(automatic_facts is not None and automatic_facts.get('identity_basis')=='local_agreement')
+                 for record in evidence:
+                     if not isinstance(record,dict):raise ValueError('Invalid evidence record')
+-                    if local and record.get('source_url')=='':
++                    if record.get('source_kind')=='curated_user_decision':
++                        if automatic_facts is None:raise ValueError('Curated user decisions require private standing admission')
++                        from curated_decisions import validate as validate_curated_decision
++                        records.append(validate_curated_decision(record,row,review,automatic_facts))
++                    elif local and record.get('source_url')=='':
+                         records.append(local_evidence(**{k:record[k] for k in ('field','cited_value','retrieved_utc','reviewer_actor','reviewer_identity','basis')}))
+                     else:records.append(manual_evidence(**{k:record[k] for k in ('field','cited_value','source_url','retrieved_utc','reviewer_actor','reviewer_identity','basis')}))
+                 if any(e['reviewer_actor']!=actor for e in records):raise ValueError('Evidence actor must match actual reviewer')
+diff --git a/tests/test_shared_routing.py b/tests/test_shared_routing.py
+index 91988c2..379b7b5 100644
+--- a/tests/test_shared_routing.py
++++ b/tests/test_shared_routing.py
+@@ -246,5 +246,148 @@ class TrilogyDecisionTests(unittest.TestCase):
+         self.assertEqual(attach_shared_routing(typed)['review']['series'],'Властелин колец','a new explicit press is not an old saved spelling')
+ 
+ 
++class CuratedDecisionEvidenceTests(unittest.TestCase):
++    def result(self,legacy=False):
++        from public_research import attach_shared_routing
++        source=TrilogyDecisionTests().result(2)
++        if legacy:
++            # Existing normalized credit reaches the older exact-work world branch.
++            source['review']['author']=source['review']['canonical_author']='Tolkien J. R. R'
++            source['metadata_facts']['authors']=['Tolkien J. R. R']
++        return attach_shared_routing(source)
++
++    def test_curated_time_and_user_attribution_are_not_a_public_fetch(self):
++        from curated_decisions import validate
++        for legacy in (False,True):
++            result=self.result(legacy);facts=result['metadata_facts'];row={'fingerprint':facts['source_fingerprint']}
++            records=[r for r in result['evidence'] if r.get('source_kind')=='curated_user_decision']
++            self.assertEqual({r['field'] for r in records},{'universe'} if legacy else {'series','universe'})
++            for record in records:
++                self.assertNotIn('retrieved_utc',record);self.assertEqual(record['source_url'],'')
++                self.assertEqual(record['decision_actor'],'user');self.assertEqual(record['decision_identity'],'Sergei')
++                self.assertEqual(record['recorded_utc'],'2026-11-01T11:36:38Z' if legacy else '2026-11-04T19:52:41Z')
++                self.assertEqual(validate(record,row,result['review'],facts),record)
++
++    def test_unknown_decision_field_time_actor_or_any_binding_change_refuses(self):
++        from curated_decisions import validate
++        for legacy in (False,True):
++            result=self.result(legacy);facts=result['metadata_facts'];row={'fingerprint':facts['source_fingerprint']}
++            record=next(r for r in result['evidence'] if r.get('source_kind')=='curated_user_decision')
++            for change in ('ref','time','field','value','actor','identity','url','retrieval','source','work','cycle','title','authors','accepted'):
++                bad=copy.deepcopy(record)
++                if change=='ref':bad['decision_ref']='user:unknown'
++                if change=='time':bad['recorded_utc']='2026-11-05T00:00:00Z'
++                if change=='field':bad['field']='title'
++                if change=='value':bad['cited_value']='My unverified series'
++                if change=='actor':bad['decision_actor']='assistant'
++                if change=='identity':bad['decision_identity']='Someone else'
++                if change=='url':bad['source_url']='https://fantlab.ru/work1693'
++                if change=='retrieval':bad['retrieved_utc']='2026-11-05T00:00:00Z'
++                if change=='source':bad['binding']['source_fingerprint']='changed'
++                if change=='work':bad['binding']['work_ids']=['fantlab:999']
++                if change=='cycle':bad['binding']['catalog_cycle']='https://fantlab.ru/work999'
++                if change=='title':bad['binding']['original_title']='Other novel'
++                if change=='authors':bad['binding']['authors']=['Another Writer']
++                if change=='accepted':bad['binding']['review']['title']='Other title'
++                with self.subTest(legacy=legacy,change=change),self.assertRaises(ValueError):validate(bad,row,result['review'],facts)
++            wrong=copy.deepcopy(facts);wrong['source_fingerprint']='changed'
++            with self.assertRaises(ValueError):validate(record,row,result['review'],wrong)
++            wrong=copy.deepcopy(facts)
++            if legacy:wrong['shared_routing']['universe']['members'][0]['series_id']='https://fantlab.ru/work999'
++            else:wrong['trilogy_routing']['binding']['source_fingerprint']='changed'
++            with self.assertRaises(ValueError):validate(record,row,result['review'],wrong)
++
++    def test_generic_manual_rules_keep_https_time_and_field_requirements(self):
++        from metadata_sources import manual_evidence
++        record={'field':'series','cited_value':'Lord of the Rings','source_url':'https://fantlab.ru/work1693',
++            'retrieved_utc':'2026-11-04T19:52:41Z','reviewer_actor':'assistant','reviewer_identity':'Fixture reviewer','basis':'Public catalog identifies this series'}
++        self.assertEqual(manual_evidence(**record)['source_url'],record['source_url'])
++        for changed in ({'field':'universe'},{'source_url':''},{'retrieved_utc':None},{'retrieved_utc':'2026-11-04T19:52:41+02:00'}):
++            with self.subTest(changed=changed),self.assertRaises(ValueError):manual_evidence(**dict(record,**changed))
++
++
++class CuratedApprovalTests(unittest.TestCase):
++    """Actual user Approve and pending persistence; no conversion or network."""
++    def setUp(self):
++        import os,tempfile
++        from pathlib import Path
++        self.temp=tempfile.TemporaryDirectory(dir=os.environ['BOOKS_QA_FIXTURE_ROOT']);self.addCleanup(self.temp.cleanup)
++        self.base=Path(self.temp.name);self.audio=self.base/'a';self.audio.mkdir();self.sorted=self.base/'s';self.sorted.mkdir()
++
++    def approve(self,number,legacy=False):
++        import json,threading,shutil
++        from pathlib import Path
++        from unittest.mock import patch
++        from scanner import Inventory
++        from scan_wait import finish_scan
++        from merge_service import MergeService
++        from public_research import PublicClient,PublicResearch,attach_shared_routing
++        from standing_metadata import build_policy
++        from audio_pipeline import run_owned
++        source=self.audio/'book.m4b'
++        run_owned([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=0.4',
++            '-c:a','aac','-b:a','64k','-ar','44100','-ac','1','-metadata','album=Source recording','-metadata','title=Source recording',str(source)],self.base,threading.Event(),30)
++        before=source.read_bytes()
++        inv=Inventory(self.base/'catalog.sqlite3',{'Audiobooks':str(self.audio),'Podcasts':str(self.base/'p'),'Ebooks':str(self.base/'e')},output_root=str(self.sorted))
++        inv.launch('Audiobooks');finish_scan(inv)
++        service=MergeService(inv,self.base/'c');self.addCleanup(service.close)
++        def offline(url,*args):raise AssertionError('Unexpected fixture network access: '+url)
++        research=PublicResearch(PublicClient(inv.database,fetch=offline),leads=[]);service.automatic.research=research
++        row=service.reviews.page()['rows'][0];title=TrilogyDecisionTests.TITLES[number-1]
++        work={'id':'local:accepted-fellowship' if number==1 else 'fantlab:'+str(1666+number),'original_title':title,'titles':[title],
++            'original_language':'en','author_aliases':['Tolkien J. R. R.'],'policy_version':'standing-17-v1',
++            'verified_series':{'provider':'fantlab','name':'Властелин колец','number':str(number),'source_url':'https://fantlab.ru/work1693'}}
++        credit='Tolkien J. R. R' if legacy else 'Tolkien J. R. R.'
++        review,facts,reasons=build_policy(row,work,title,[credit],series='Властелин колец',number=str(number))
++        result={'work':work,'review':review,'metadata_facts':facts,'reasons':reasons,'evidence':[],
++            'sources':[{'kind':'publisher_or_journal','url':'https://publisher.example/tolkien','verified_identity':True}],
++            'approval':{'title':title,'author':credit,'typed':[],'collection':False}}
++        result=attach_shared_routing(result)
++        with patch.object(service,'_approval_result',return_value=(row,result)),patch.object(service,'_english_spelling_answer',return_value=None):
++            approved=service.approve_book(row['id'],row['revision'])
++        jobs=service.jobs.status()['jobs'];self.assertEqual(len(jobs),1);job=jobs[0]
++        self.assertEqual(job['job_id'],approved['job_id']);self.assertEqual(job['state'],'pending')
++        self.assertIsNone(job.get('output'));self.assertIsNone(job.get('attempt_id'))
++        records=job['manifest']['evidence']['metadata_fields'];curated=[r for r in records if r.get('source_kind')=='curated_user_decision']
++        self.assertEqual({r['field'] for r in curated},{'universe'} if legacy else {'series','universe'})
++        self.assertTrue(all(r['reviewer_actor']=='user' and r['decision_actor']=='user' and r['decision_identity']=='Sergei' for r in curated))
++        self.assertTrue(all('retrieved_utc' not in r for r in curated))
++        fresh=service.reviews._row('Audiobooks',row['id']);ctx=service.reviews._context(fresh)
++        self.assertEqual(ctx['metadata_evidence'],records);self.assertTrue(ctx['metadata_approved'])
++        self.assertEqual(fresh['review']['universe'],'Middle-earth')
++        self.assertEqual(fresh['review']['series'],'Властелин колец' if legacy else 'Lord of the Rings')
++        from review_backend import CandidateReviewService
++        restarted=CandidateReviewService(inv,self.base/'c')
++        self.assertEqual(restarted._context(restarted._row('Audiobooks',row['id']))['metadata_evidence'],records)
++        self.assertTrue(source.is_file());self.assertEqual(source.read_bytes(),before);self.assertFalse(Path(job['manifest']['destination']).exists())
++        return service,row,result
++
++    def test_return_king_actual_approve_persists_and_queues(self):self.approve(3)
++    def test_two_towers_actual_approve_persists_and_queues(self):self.approve(2)
++    def test_fellowship_actual_approve_persists_and_queues(self):self.approve(1)
++    def test_legacy_middle_earth_actual_approve_persists_and_queues(self):self.approve(2,legacy=True)
++    def test_private_review_consumer_refuses_malformed_or_mismatched_curated_records_before_writes(self):
++        import json
++        from scanner import connect
++        service,row,result=self.approve(3)
++        fresh=service.reviews._row('Audiobooks',row['id']);ctx=service.reviews._context(fresh)
++        def stored():
++            with connect(service.inventory.database) as db:
++                return tuple(db.execute('SELECT revision,review FROM book_groups WHERE id=?',(row['id'],)).fetchone()),tuple(db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(row['id'],)).fetchone())
++        before=stored();records=ctx['metadata_evidence']
++        for change in ('schema','ref','time','source','field','no_private_admission'):
++            bad=copy.deepcopy(records);record=next(r for r in bad if r.get('source_kind')=='curated_user_decision')
++            if change=='schema':record['schema']='untrusted'
++            if change=='ref':record['decision_ref']='user:unknown'
++            if change=='time':record['recorded_utc']='2026-11-05T00:00:00Z'
++            if change=='source':record['binding']['source_fingerprint']='changed'
++            if change=='field':record['field']='title'
++            with self.subTest(change=change),self.assertRaises(ValueError):
++                service.reviews.save('Audiobooks',fresh['id'],fresh['revision'],fresh['review'],actor='user',evidence=bad,
++                    **({'approve':False} if change=='no_private_admission' else {'approve':True,'user_approval':True,
++                    'cover_id':ctx['cover_id'],'automatic_pending':{'matcher_version':'fixture','work_id':result['work']['id']},'automatic_facts':result['metadata_facts']}))
++            self.assertEqual(stored(),before)
++
++
+ if __name__ == '__main__':
+     unittest.main()
+diff --git a/tolkien_trilogy.py b/tolkien_trilogy.py
+index c7ed2f6..716feeb 100644
+--- a/tolkien_trilogy.py
++++ b/tolkien_trilogy.py
+@@ -71,9 +71,9 @@ def apply(result):
+                                   'catalog_cycle':CYCLE,'original_title':out['work']['original_title'],
+                                   'binding':_binding(review,facts)}
+         evidence=out.setdefault('evidence',[])
++        from curated_decisions import evidence as decision_evidence
+         for field,value in (('series',SERIES),('universe',WORLD)):
+-            item={'field':field,'cited_value':value,'source_url':'','reviewer_actor':'user',
+-                  'reviewer_identity':'Sergei','basis':'Confirmed trilogy naming and author/world/series hierarchy, 2026-11-04.'}
++            item=decision_evidence(out,DECISION,field,value)
+             if item not in evidence:evidence.append(item)
+     return out
+ 
