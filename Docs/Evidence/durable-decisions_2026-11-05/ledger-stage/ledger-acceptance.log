@@ -1,0 +1,14 @@
+test_acceptance_does_not_wait_for_actual_merge_review_group_or_queue_locks (test_action_queue.DurableDecisionLedgerTests.test_acceptance_does_not_wait_for_actual_merge_review_group_or_queue_locks) ... ok
+test_acceptance_is_independent_of_worker_locks_and_survives_reopen (test_action_queue.DurableDecisionLedgerTests.test_acceptance_is_independent_of_worker_locks_and_survives_reopen) ... ok
+test_applied_payload_is_purged_but_request_reconciliation_and_conflict_guard_survive (test_action_queue.DurableDecisionLedgerTests.test_applied_payload_is_purged_but_request_reconciliation_and_conflict_guard_survive) ... ok
+test_disjoint_names_and_tracks_are_both_preserved_under_new_head_fence (test_action_queue.DurableDecisionLedgerTests.test_disjoint_names_and_tracks_are_both_preserved_under_new_head_fence) ... ok
+test_incompatible_late_request_is_saved_without_moving_valid_head (test_action_queue.DurableDecisionLedgerTests.test_incompatible_late_request_is_saved_without_moving_valid_head) ... ok
+test_replaced_payload_is_retained_until_explicit_successor_applies (test_action_queue.DurableDecisionLedgerTests.test_replaced_payload_is_retained_until_explicit_successor_applies) ... ok
+test_save_then_approve_waits_for_its_captured_names_receipt (test_action_queue.DurableDecisionLedgerTests.test_save_then_approve_waits_for_its_captured_names_receipt) ... ok
+test_sqlite_writer_contention_is_bounded_and_same_request_reconciles_once (test_action_queue.DurableDecisionLedgerTests.test_sqlite_writer_contention_is_bounded_and_same_request_reconciles_once) ... ok
+test_transaction_rollback_has_no_effect_or_step_receipt_then_recovery_applies_once (test_action_queue.DurableDecisionLedgerTests.test_transaction_rollback_has_no_effect_or_step_receipt_then_recovery_applies_once) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 1.533s
+
+OK

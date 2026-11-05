@@ -1,0 +1,67 @@
+{
+  "baseline": "eb38a3502286f6ab70d578df2d02447a9f68d93c",
+  "files": [
+    {
+      "path": "durable_decisions.py",
+      "bytes": 14783,
+      "sha256": "5e5c06ef1a66f9d6fe3e0044d9adfc08baaa906f46f74b5880a24aa53394611d",
+      "lf_sha256": "5e5c06ef1a66f9d6fe3e0044d9adfc08baaa906f46f74b5880a24aa53394611d",
+      "baseline_lf_sha256": null
+    },
+    {
+      "path": "tests/test_action_queue.py",
+      "bytes": 25969,
+      "sha256": "6207de72e492b102b98276eecf38b49e649f619cb2341e1b03a1a6392097cff7",
+      "lf_sha256": "ee9667d2c78fda908785da5cec5f036855ea4f3beb7badce56450e3f87a5a7c9",
+      "baseline_lf_sha256": "f530dfe8ef9b3564b4b5d10a00b4db2cecadc009a515617965b81186066f89f9"
+    }
+  ],
+  "patch_sha256": "1aae0cf58425ddba50a434569d1e2f39ce4f867d5bd2b633f8d65f33dff6014d",
+  "design": "eb38a35:Docs/BooksArranger_DurableDecisions_Design_2026-11-05.md",
+  "milestone": "Foundation only: new SQLite ledger/receipt/fence API and existing-suite private tests. NOT connected to live HTTP, Merge application, startup worker or frontend; no claim user-visible durable Save/Approve complete.",
+  "checks": "9/9 PASS1.533s (owned2.013s), closed/outputComplete/nativecompletezero/no force/timeout. Actual MergeService operation/review/group/AudioJobs locks held by another thread while acceptance commits under1s. RealSQLite writer contention boundedunder1s and cannot returndurableacceptance; sameclientrequestID retryafterrelease reconcilesexactlyonce. Reopen retainspayload; disjointeffects survive; incompatiblelateholddoesnotmovehead; oldgenerationfenced; substepconsumertransactionrollback atomic; payloadprunedonlyfulfilled withreceipt/hash tombstone.",
+  "remaining": "Wire existing source-safe consumers and their same-transaction receipts, server acceptance/reconciliation, restart worker, all existing Save/Approve UI including overlays/lostreply; ordinary review and independent focused QA required. No full/build/release.",
+  "scope": "Private fixtures only, no live DB/API/Z/focus. Current whole-feature scratch remains owned and active for following integration stage; no cleanup yet. Existing test_action_queue.py already in canonical check graph; newrootmodule automatically collected by packaging.",
+  "evidence": [
+    {
+      "path": "owned.mjs",
+      "bytes": 1985,
+      "sha256": "328e8f89372c9c511b54d14dc87ff7f7e36aea9c083f64a7558f460afef30c28"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 961,
+      "sha256": "be2e7c35c7e2dabe21ad28bfd99106f4fdab76d29916cccbcaa69db821b551ca"
+    },
+    {
+      "path": "ledger-first.json",
+      "bytes": 2194,
+      "sha256": "727a85914c8fdb8bd46b63727c2c76d2edc74e1eb883e0fe0468d0ff6f662a34"
+    },
+    {
+      "path": "ledger-first.log",
+      "bytes": 1486,
+      "sha256": "b8235963f8f8fe4baa9aa8562d7ca65811370cf0e5ec9281a980b6cb1a0221a5"
+    },
+    {
+      "path": "ledger-acceptance.json",
+      "bytes": 2607,
+      "sha256": "5a04c6bcf6345860d3b49de6b4be7049bef84448ca4d5dba3b663f0082a16cb1"
+    },
+    {
+      "path": "ledger-acceptance.log",
+      "bytes": 1894,
+      "sha256": "f9a462007a037c12d69add314fb2985b3ea128be70fe9181e96d9326edeb8082"
+    },
+    {
+      "path": "ledger.patch",
+      "bytes": 23991,
+      "sha256": "1aae0cf58425ddba50a434569d1e2f39ce4f867d5bd2b633f8d65f33dff6014d"
+    },
+    {
+      "path": "freeze-ledger.py",
+      "bytes": 3609,
+      "sha256": "ff50462f1a6735353149dc96505d1357f6ffdeedde666688193289f37f01e441"
+    }
+  ]
+}

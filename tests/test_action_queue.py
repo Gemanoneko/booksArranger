@@ -14,6 +14,127 @@ import book_delete
 from action_queue import ActionQueue
 
 
+class DurableDecisionLedgerTests(unittest.TestCase):
+    def setUp(self):
+        import pathlib,tempfile
+        from durable_decisions import Decisions
+        self.temp=tempfile.TemporaryDirectory(prefix='durable-decisions-');self.addCleanup(self.temp.cleanup)
+        self.database=pathlib.Path(self.temp.name)/'catalog.sqlite3';self.store=Decisions(self.database)
+        self.book=str(uuid.uuid4());self.fp='a'*64
+
+    def accept(self,action='names',effects=None,predecessor=None,**extra):
+        options={'request_id':str(uuid.uuid4()),'book_id':self.book,'action':action,'revision':1,
+                 'fingerprint':self.fp,'payload':{'value':'private choice'},'effects':effects or ['names.title'],
+                 'predecessor':predecessor,'current_revision':1,'current_fingerprint':self.fp}
+        options.update(extra);return self.store.accept(**options)
+
+    def finish(self,request_id,generation,label='saved'):
+        from scanner import connect
+        with connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE')
+            self.store.application(request_id,generation).commit_step(db,'final',{'value':'private choice'},{'outcome':label},final=True,applied_revision=2)
+
+    def test_acceptance_is_independent_of_worker_locks_and_survives_reopen(self):
+        from durable_decisions import Decisions
+        held=threading.Lock();held.acquire()
+        try:answer=self.accept()
+        finally:held.release()
+        self.assertEqual(answer['state'],'accepted')
+        reopened=Decisions(self.database).get(answer['request_id'],include_payload=True)
+        self.assertEqual(reopened['payload'],{'value':'private choice'})
+
+    def test_acceptance_does_not_wait_for_actual_merge_review_group_or_queue_locks(self):
+        from durable_decisions import Decisions
+        from test_merge_service import MergeTests
+        fixture=MergeTests();fixture.setUp();self.addCleanup(fixture.tearDown)
+        row=fixture.inv.candidates('Audiobooks')['rows'][0]
+        store=Decisions(fixture.inv.database);entered=threading.Event();release=threading.Event()
+        def hold():
+            with fixture.service.operation_lock,fixture.service.reviews.lock,fixture.inv.group_lock,fixture.service.jobs._lock:
+                entered.set();release.wait(5)
+        holder=threading.Thread(target=hold);holder.start();self.assertTrue(entered.wait(2))
+        try:
+            start=time.monotonic()
+            saved=store.accept(request_id=str(uuid.uuid4()),book_id=row['id'],action='names',revision=row['revision'],fingerprint=row['fingerprint'],
+                               payload={'names':{'title':'Saved despite unrelated work'}},effects=['names.title'],
+                               current_revision=row['revision'],current_fingerprint=row['fingerprint'])
+            self.assertLess(time.monotonic()-start,1.0);self.assertTrue(holder.is_alive());self.assertEqual(saved['state'],'accepted')
+        finally:release.set();holder.join(5)
+        self.assertFalse(holder.is_alive())
+
+    def test_sqlite_writer_contention_is_bounded_and_same_request_reconciles_once(self):
+        import sqlite3
+        from scanner import connect
+        request=str(uuid.uuid4())
+        with connect(self.database) as writer:
+            writer.execute('BEGIN IMMEDIATE');start=time.monotonic()
+            with self.assertRaises(sqlite3.OperationalError):self.accept(request_id=request)
+            self.assertLess(time.monotonic()-start,1.0)
+            self.assertIsNone(self.store.get(request),'A failed commit cannot claim durable acceptance')
+        first=self.accept(request_id=request);second=self.accept(request_id=request)
+        self.assertEqual(first,second);self.assertEqual(len(self.store.pending()),1)
+
+    def test_disjoint_names_and_tracks_are_both_preserved_under_new_head_fence(self):
+        from durable_decisions import DecisionChanged
+        from scanner import connect
+        names=self.accept();old_head=self.store.head(self.book)
+        tracks=self.accept('tracks',['tracks'],names['request_id']);head=self.store.head(self.book)
+        self.assertEqual(set(head['effects'].values()),{names['request_id'],tracks['request_id']})
+        with connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE')
+            with self.assertRaises(DecisionChanged):self.store.application(names['request_id'],old_head['generation']).check(db)
+        self.finish(names['request_id'],head['generation']);self.finish(tracks['request_id'],head['generation'])
+        self.assertEqual(self.store.get(names['request_id'])['state'],'applied')
+        self.assertEqual(self.store.get(tracks['request_id'])['state'],'applied')
+
+    def test_incompatible_late_request_is_saved_without_moving_valid_head(self):
+        first=self.accept();second=self.accept('tracks',['tracks'],first['request_id']);head=self.store.head(self.book)
+        late=self.accept('review',['review.topic'],first['request_id'])
+        self.assertEqual(late['state'],'needs_review');self.assertEqual(self.store.head(self.book),head)
+        self.assertIn(second['request_id'],{item['request_id'] for item in self.store.pending()})
+
+    def test_transaction_rollback_has_no_effect_or_step_receipt_then_recovery_applies_once(self):
+        from scanner import connect
+        accepted=self.accept();scope=self.store.application(accepted['request_id'],self.store.head(self.book)['generation'])
+        with connect(self.database) as db:db.execute('CREATE TABLE private_values(value TEXT)')
+        with self.assertRaisesRegex(RuntimeError,'private crash'):
+            with connect(self.database) as db:
+                db.execute('BEGIN IMMEDIATE');db.execute("INSERT INTO private_values VALUES('chosen')")
+                scope.commit_step(db,'names',{'field':'title'},{'press_id':'owned'})
+                raise RuntimeError('private crash')
+        with connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE')
+            self.assertIsNone(scope.prior_step(db,'names',{'field':'title'}));self.assertEqual(db.execute('SELECT count(*) FROM private_values').fetchone()[0],0)
+            db.execute("INSERT INTO private_values VALUES('chosen')")
+            scope.commit_step(db,'names',{'field':'title'},{'press_id':'owned'})
+        with connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE');self.assertEqual(scope.prior_step(db,'names',{'field':'title'}),{'press_id':'owned'})
+            self.assertEqual(db.execute('SELECT count(*) FROM private_values').fetchone()[0],1)
+
+    def test_applied_payload_is_purged_but_request_reconciliation_and_conflict_guard_survive(self):
+        from durable_decisions import DecisionChanged
+        accepted=self.accept();self.finish(accepted['request_id'],self.store.head(self.book)['generation'])
+        self.assertEqual(self.store.purge_fulfilled(),1);saved=self.store.get(accepted['request_id'],include_payload=True)
+        self.assertIsNone(saved['payload']);self.assertEqual(saved['result'],{'outcome':'saved'})
+        duplicate=self.accept(request_id=accepted['request_id']);self.assertEqual(duplicate['state'],'applied')
+        with self.assertRaises(DecisionChanged):self.accept(request_id=accepted['request_id'],payload={'value':'different'})
+
+    def test_save_then_approve_waits_for_its_captured_names_receipt(self):
+        names=self.accept();approval=self.accept('approve',['approval'],names['request_id'])
+        self.assertNotIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
+        self.finish(names['request_id'],self.store.head(self.book)['generation'])
+        self.assertIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
+        newer=self.accept('tracks',['tracks'],approval['request_id'])
+        self.assertEqual(newer['state'],'accepted');self.assertEqual(self.store.get(approval['request_id'])['state'],'needs_review')
+
+    def test_replaced_payload_is_retained_until_explicit_successor_applies(self):
+        old=self.accept();new=self.accept(predecessor=old['request_id'],payload={'value':'new explicit choice'})
+        self.assertEqual(self.store.get(old['request_id'])['state'],'superseded')
+        self.assertEqual(self.store.purge_fulfilled(),0)
+        self.finish(new['request_id'],self.store.head(self.book)['generation'])
+        self.assertEqual(self.store.purge_fulfilled(),2)
+
+
 class Merge:
     """Records each call; answers what the test sets."""
     def __init__(self):
