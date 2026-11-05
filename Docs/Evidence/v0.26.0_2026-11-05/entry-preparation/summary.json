@@ -1,0 +1,375 @@
+{
+  "schema": "books-0260-focused-readiness-handoff-v1",
+  "status": "PREPARED; full not invoked; no native app check",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "d6753c69ae01468693d8c77964893b1e259c9190",
+    "product_digest": "6ea741997a1f08b8e96696dfb5066fc2bcc15bb01902ff6ed92e8063780882e0",
+    "build_id": "7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9",
+    "artifact_manifest_sha256": "137258122f81fe9c365bbc11a7d5265c9b22354d46d6f0034b12a6baf84e125b",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "source_root": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1",
+  "runtime_pointer_sha256": "04bcb999b14343f36f9e8932cb6b0d32253feb7270c4de7d15cc5019a32d28d0",
+  "artifacts": [
+    {
+      "path": "builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/Books-Arranger-Setup-0.26.0.exe",
+      "sha256": "d93c7dcb0b450879e6912155acc2d89892b88f1ef340c80ad989aabebdedfb22",
+      "size": 174793043,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1/dist/builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/Books-Arranger-Setup-0.26.0.exe"
+    },
+    {
+      "path": "builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/Books-Arranger-Setup-0.26.0.exe.blockmap",
+      "sha256": "ee3db98bbe9b8a90e5f9d748b2a0a2f1e5d837c1fb7156ef70d2cc5706163971",
+      "size": 182221,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1/dist/builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/Books-Arranger-Setup-0.26.0.exe.blockmap"
+    },
+    {
+      "path": "builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/latest.yml",
+      "sha256": "eb720f8ed0968379e51a5ad591a2ea9245206515b9de01f5dd7df9fe7d5ba08b",
+      "size": 360,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1/dist/builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/latest.yml"
+    }
+  ],
+  "context": {
+    "path": "C:/Antigravity Projects/q26/context/context.json",
+    "sha256": "c9a979022a33967c5e29535c3b242f0df5af7a72bd249277bb07f6e769853365",
+    "schema": 3,
+    "deadlineMs": 900000
+  },
+  "assembler": {
+    "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0260-release-20261105-r1\\scripts\\qa-entry-context.mjs",
+    "sha256": "0789498b4798c95410bd0b9020c5a0b359601ef0a9a68754274608a494cd498d"
+  },
+  "graph": {
+    "path": "C:/Antigravity Projects/q26/context/harness/graph.json",
+    "sha256": "b7025f216db8926fdba7215167d03335ab9cf697090a7a09f03282c8f79d0f04",
+    "phases": {
+      "schema": "books-qa-phases-v1",
+      "canonical": {
+        "scope": "non-app; owned Python/codec CLI fixtures and Node/DOM doubles",
+        "node_entries": [
+          "tests/release-contract.test.mjs",
+          "tests/release-flow.test.mjs",
+          "tests/update-controller.test.mjs",
+          "tests/engine-update.test.mjs",
+          "tests/launch-options.test.mjs",
+          "tests/release-leased-executables.test.mjs",
+          "tests/status-flight.test.mjs",
+          "tests/quit-watch.test.mjs",
+          "tests/python-check-batches.test.mjs",
+          "tests/gate-source-guard.test.mjs",
+          "tests/load-state.test.mjs",
+          "tests/startup.test.mjs",
+          "tests/desktop-loading.test.mjs",
+          "tests/main-startup.test.mjs",
+          "tests/qa-entry-context.test.mjs",
+          "tests/desktop-folder-picker.test.mjs",
+          "tests/gate-scratch.test.mjs",
+          "tests/real-shell-update-contract.test.mjs"
+        ]
+      },
+      "native": {
+        "phase": "PA-1",
+        "entry": "tests/real-shell-update.test.mjs",
+        "title": "PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again",
+        "required": true,
+        "status": "PENDING; separate authority and normal native proof required"
+      },
+      "prior_node_entries": 18,
+      "total_node_entries": 19,
+      "contract": {
+        "path": "scripts/qa-phase-contract.mjs",
+        "sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+      }
+    },
+    "declared_scripts": {
+      "check": "node scripts/check-desktop.mjs"
+    }
+  },
+  "helper_root": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts",
+  "helper_pins": [
+    {
+      "path": "run_entry_checks.mjs",
+      "sha256": "226594d3b7d977c1396ed7580100f79b79cf219260ee954895b56f27a9846aba"
+    },
+    {
+      "path": "entry-main.mjs",
+      "sha256": "d2b7ad6cef1ffd71e1990e811797c9a60b74a94efa3d65f5ff9bc6512db384bf"
+    },
+    {
+      "path": "entry-identity.mjs",
+      "sha256": "b36b7b52f7c95868c79c494fbc629d5790886426669a8dbdda236248ba7e9856"
+    },
+    {
+      "path": "bounded-check.mjs",
+      "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc"
+    },
+    {
+      "path": "bounded-child.mjs",
+      "sha256": "240a6a96a32f08989439387d5d6ab75d17e1bcf243863d31d2ff7287f68d1e42"
+    }
+  ],
+  "runtime": {
+    "node": {
+      "name": "node",
+      "path": "C:\\Program Files\\nodejs\\node.exe",
+      "sha256": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5"
+    },
+    "npmCli": {
+      "name": "npmCli",
+      "path": "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+      "sha256": "3ce7cba6f5128dd5f54c98b6a5036b0f850496878cc2e21044b675fe3c594e3e"
+    },
+    "shell": {
+      "name": "shell",
+      "path": "C:\\Windows\\System32\\cmd.exe",
+      "sha256": "ccd79a7568ea9240ccd6fe124807b9d3e4dbc3a4cf92954299ac3029f4a91d02"
+    },
+    "npmShim": {
+      "name": "npmShim",
+      "path": "C:\\Program Files\\nodejs\\npm.cmd",
+      "sha256": "21b46c69ad6e2f231f02a9e120f4ba6c8e75fef5a45637103002eab99f888ab8"
+    },
+    "manifests": [
+      {
+        "name": "dependencies",
+        "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0260-release-20261105-r1\\node_modules",
+        "manifest": {
+          "path": "C:\\Antigravity Projects\\q26\\context\\runtime-dependencies.json",
+          "sha256": "7e209c84b87c6c758afa6d4ad24bf42eb0b72f4a80377fd9818a1433f08feaf6"
+        }
+      },
+      {
+        "name": "ownership",
+        "root": "C:\\Antigravity Projects\\q26\\ownership",
+        "manifest": {
+          "path": "C:\\Antigravity Projects\\q26\\context\\runtime-ownership.json",
+          "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+        }
+      },
+      {
+        "name": "bundled-media",
+        "root": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+        "manifest": {
+          "path": "C:\\Antigravity Projects\\q26\\context\\runtime-bundled-media.json",
+          "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31"
+        }
+      },
+      {
+        "name": "mp3-fixture",
+        "root": "C:/Antigravity Projects/q26/media",
+        "manifest": {
+          "path": "C:\\Antigravity Projects\\q26\\context\\runtime-mp3-fixture.json",
+          "sha256": "7ce16c974ba7947022126eb991b24c7d1f45071bbd6082222772b0b8317ce143"
+        }
+      },
+      {
+        "name": "node-installation",
+        "root": "C:\\Program Files\\nodejs",
+        "manifest": {
+          "path": "C:\\Antigravity Projects\\q26\\context\\runtime-node-installation.json",
+          "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca"
+        }
+      },
+      {
+        "name": "git",
+        "root": "C:\\Program Files\\Git",
+        "manifest": {
+          "path": "C:\\Antigravity Projects\\q26\\context\\runtime-git.json",
+          "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606"
+        }
+      },
+      {
+        "name": "powershell",
+        "root": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0",
+        "manifest": {
+          "path": "C:\\Antigravity Projects\\q26\\context\\runtime-powershell.json",
+          "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3"
+        }
+      }
+    ],
+    "git": {
+      "name": "git",
+      "path": "C:\\Program Files\\Git\\cmd\\git.exe",
+      "sha256": "20d0dde30a65afb6e5810a883700a94dcd77fbf3b44b32868d45bf7c9b30137c"
+    },
+    "koffiRoot": "C:\\Antigravity Projects\\q26\\ownership\\node_modules\\koffi"
+  },
+  "execution": {
+    "runRootParent": "C:/Antigravity Projects/q26",
+    "requiredFreePorts": [
+      5212
+    ],
+    "auditedNodes": [
+      {
+        "path": "scripts/check-desktop.mjs",
+        "sha256": "8feb2faae2e2799439e8b6c31858199834bc311993bd1171b5a78e8f3fae2322",
+        "kind": "pure-node",
+        "command": "node scripts/check-desktop.mjs"
+      }
+    ]
+  },
+  "assembly": {
+    "elapsedMs": 24550.342800000002,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 19,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 1557,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    }
+  },
+  "focused_sender_readiness": [
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/universe-options/summary.json",
+      "sha256": "bc4e5a2bf10a240ba712ab30b21713028da35496badec2d2a9ee1e78ce7cf26e",
+      "scope": "8 actual StoreTests plus full inline-series DOM; no source data changes or full entry"
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/startup-owner/summary.json",
+      "sha256": "eb3c9a5dcffbd8e964ec9f62a3ce48436af8ca28b8fd7bca2ddee3297dad52f9",
+      "scope": "Actual startup-owner RED then3 GREEN and17 startup/writer cases; all30 constructor calls/18files dispositioned"
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build/summary.json",
+      "sha256": "d667dd433728d2d9d348899f6b90e887416a19d6baf8171a88c8eae8040f1273",
+      "scope": "One canonical guarded pack, exact reviewed source+inputs before/after; accepted artifact equivalence"
+    }
+  ],
+  "single_full_policy": "Futaba alone invokes the reviewed canonical schema3 context once with900000 work/930000 transport. No Ender full sender receipt is claimed. Senua exact context review required first.",
+  "files": [
+    {
+      "path": "context.json",
+      "source": "C:/Antigravity Projects/q26/context/context.json",
+      "size": 4750,
+      "sha256": "c9a979022a33967c5e29535c3b242f0df5af7a72bd249277bb07f6e769853365"
+    },
+    {
+      "path": "source-manifest.json",
+      "source": "C:/Antigravity Projects/q26/context/source-manifest.json",
+      "size": 387726,
+      "sha256": "f4b2b19d6f8c48e19e11acfd84d668ac6b4f7c43e857c685a77b327abe3c51bf"
+    },
+    {
+      "path": "harness-manifest.json",
+      "source": "C:/Antigravity Projects/q26/context/harness-manifest.json",
+      "size": 248,
+      "sha256": "fbd14cd811806be1649797e094f0c053c30d75e6b75ef612655f876f36fa6c69"
+    },
+    {
+      "path": "runtime-dependencies.json",
+      "source": "C:/Antigravity Projects/q26/context/runtime-dependencies.json",
+      "size": 1052511,
+      "sha256": "7e209c84b87c6c758afa6d4ad24bf42eb0b72f4a80377fd9818a1433f08feaf6"
+    },
+    {
+      "path": "runtime-ownership.json",
+      "source": "C:/Antigravity Projects/q26/context/runtime-ownership.json",
+      "size": 13523,
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+    },
+    {
+      "path": "runtime-bundled-media.json",
+      "source": "C:/Antigravity Projects/q26/context/runtime-bundled-media.json",
+      "size": 5823,
+      "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31"
+    },
+    {
+      "path": "runtime-mp3-fixture.json",
+      "source": "C:/Antigravity Projects/q26/context/runtime-mp3-fixture.json",
+      "size": 133,
+      "sha256": "7ce16c974ba7947022126eb991b24c7d1f45071bbd6082222772b0b8317ce143"
+    },
+    {
+      "path": "runtime-node-installation.json",
+      "source": "C:/Antigravity Projects/q26/context/runtime-node-installation.json",
+      "size": 311392,
+      "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca"
+    },
+    {
+      "path": "runtime-git.json",
+      "source": "C:/Antigravity Projects/q26/context/runtime-git.json",
+      "size": 1381113,
+      "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606"
+    },
+    {
+      "path": "runtime-powershell.json",
+      "source": "C:/Antigravity Projects/q26/context/runtime-powershell.json",
+      "size": 146442,
+      "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3"
+    },
+    {
+      "path": "harness/graph.json",
+      "source": "C:/Antigravity Projects/q26/context/harness/graph.json",
+      "size": 2961,
+      "sha256": "b7025f216db8926fdba7215167d03335ab9cf697090a7a09f03282c8f79d0f04"
+    },
+    {
+      "path": "harness/run-entry.sh",
+      "source": "C:/Antigravity Projects/q26/context/harness/run-entry.sh",
+      "size": 809,
+      "sha256": "decf9cb857e001bb131092730042d06cc62ecf8ff73a4ae94ad382771676b472"
+    },
+    {
+      "path": "context-owned.mjs",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/context-owned.mjs",
+      "size": 2804,
+      "sha256": "03947cfbb8adda36edbf105f1191d9ca4000210ad20c1d5643a4c5554a209389"
+    },
+    {
+      "path": "context-owned.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/context-owned.json",
+      "size": 1273,
+      "sha256": "5afa56b8bbe3c18580a2a960e460732faadbaba29c8e8f209623b6a309b73da5"
+    },
+    {
+      "path": "context-owned.log",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/context-owned.log",
+      "size": 520,
+      "sha256": "05b86fd02dbe704026e97ae9154548624d024a0918ecc3d64effaa60eb26aaef"
+    },
+    {
+      "path": "prepare-qa-prereqs.mjs",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/prepare-qa-prereqs.mjs",
+      "size": 2293,
+      "sha256": "1af6879ad876674a39f8b366bdf4d3739d2671e00db3380c616d615f15b9c87d"
+    },
+    {
+      "path": "qa-prep-owned.mjs",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/qa-prep-owned.mjs",
+      "size": 1403,
+      "sha256": "085cbb043c8d448410765bd9fe88a2673337f3c6401ae54b7678429b562b79cd"
+    },
+    {
+      "path": "qa-prereqs-owned.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/qa-prereqs-owned.json",
+      "size": 1845,
+      "sha256": "44db466860d1e9d5b49de627de6e429dcd91bd53c94f153d665da442c1a1a49e"
+    },
+    {
+      "path": "qa-prereqs-corrected.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/qa-prereqs-corrected.json",
+      "size": 13858,
+      "sha256": "c4e69012f0ef318868dca690cca3ce57e6e3498b56b51da31dcb86782038d383"
+    },
+    {
+      "path": "private-prerequisites.json",
+      "source": "C:/Antigravity Projects/q26/preparation.json",
+      "size": 15601,
+      "sha256": "efde35dc595662665b8f5fe71e7827cb99b04358cf1c0fd81f1ceea5c729efed"
+    }
+  ]
+}

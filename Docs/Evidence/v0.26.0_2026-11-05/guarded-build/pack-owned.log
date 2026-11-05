@@ -1,0 +1,5 @@
+
+> books-arranger@0.26.0 pack
+> node scripts/build-step.mjs pack
+
+{"verified": true, "output": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0260-release-20261105-r1\\dist\\builds\\7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9", "build_id": "7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9", "manifest": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0260-release-20261105-r1\\dist\\release-artifacts.json", "manifest_sha256": "137258122f81fe9c365bbc11a7d5265c9b22354d46d6f0034b12a6baf84e125b", "prior_archived": {}, "staging_cleanup_removed": 801, "cleanup_warning": null}

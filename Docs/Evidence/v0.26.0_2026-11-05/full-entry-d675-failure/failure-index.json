@@ -1,0 +1,24 @@
+{
+  "tool": "books-arranger",
+  "version": "0.26.0",
+  "source_commit": "d6753c69ae01468693d8c77964893b1e259c9190",
+  "build_id": "7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9",
+  "context_sha256": "c9a979022a33967c5e29535c3b242f0df5af7a72bd249277bb07f6e769853365",
+  "source_dirty": "N",
+  "failures": [
+    {
+      "header": "FAIL: test_verified_tag_copy_used_only_as_derived_encoder_input (test_mp3_tag_repair.ActualPrivateStagingTests.test_verified_tag_copy_used_only_as_derived_encoder_input)",
+      "trace": "FAIL: test_verified_tag_copy_used_only_as_derived_encoder_input (test_mp3_tag_repair.ActualPrivateStagingTests.test_verified_tag_copy_used_only_as_derived_encoder_input)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\q26\\entry-run-T5PLOs\\scratch\\7\\tests\\test_mp3_tag_repair.py\", line 159, in test_verified_tag_copy_used_only_as_derived_encoder_input\r\n    self.assertEqual(hashlib.sha256(data).hexdigest(),'e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed')\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: '3fd8b5de3da373c69eff6a0eafe42ea313c15b04952523c3c3b2515505958288' != 'e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed'\r\n- 3fd8b5de3da373c69eff6a0eafe42ea313c15b04952523c3c3b2515505958288\r\n+ e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed\r\n\r\n\r\n----------------------------------------------------------------------\r\nRan 225 tests in 402.236s\r\n\r\nFAILED (failures=1)\r\ntest_exact_cleanup_preserves_unknown_and_refuses_mismatch (test_build_guard.GuardTests.test_exact_cleanup_preserves_unknown_and_refuses_mismatch) ... ok\r\ntest_fresh_native_write_and_collision (test_build_guard.GuardTests.test_fresh_native_write_and_collision) ... ok\r\ntest_junction_ancestor_refuses_without_touching_target (test_build_guard.GuardTests.test_junction_ancestor_refuses_without_touching_target) ... ok\r\ntest_output_parent_swap_denied_while_held (test_build_guard.GuardTests.test_output_parent_swap_denied_while_held) ... ok\r\ntest_source_hardlink_refused (test_build_guard.GuardTests.test_source_hardlink_refused) ... ok\r\ntest_zip_traversal_rejected_before_any_member_write (test_b"
+    },
+    {
+      "header": "FAIL: test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom (test_metadata_choices.MetadataChoiceBrowserContractTests.test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom)",
+      "trace": "FAIL: test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom (test_metadata_choices.MetadataChoiceBrowserContractTests.test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\q26\\entry-run-T5PLOs\\scratch\\9\\tests\\test_metadata_choices.py\", line 256, in test_native_radio_preparation_dirty_correction_stale_text_and_caret_in_isolated_dom\r\n    self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertIn('METADATA_CHOICE_DOM_CONTRACT_PASS',result.stdout)\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: 1 != 0 : TypeError: button.removeAttribute is not a function\r\n    at updateMetadataChoiceControls (evalmachine.<anonymous>:17:76)\r\n    at Object.renderMetadataQuestions (evalmachine.<anonymous>:61:3)\r\n    at [eval]:36:10\r\n    at [eval]:63:3\r\n    at runScriptInThisContext (node:internal/vm:219:10)\r\n    at node:internal/process/execution:485:12\r\n    at [eval]-wrapper:6:24\r\n    at runScriptInContext (node:internal/process/execution:483:60)\r\n    at evalFunction (node:internal/process/execution:317:30)\r\n    at evalTypeScript (node:internal/process/execution:329:3)\r\n\r\n\r\n----------------------------------------------------------------------\r\nRan 144 tests in 464.996s\r\n\r\nFAILED (failures=1)\r\ntest_approval_and_conversion_read_no_converted_set (test_automatic_media.AutomaticMediaTests.test_approval_and_conversion_read_no_converted_set) ... ok\r\ntest_confident_no_manual_form_to_verified_chapters_retained_recovery (test_automatic_media.AutomaticMediaTests.test_confident_no_manual_form_to_verified_chapters_retained_recovery) ... ok\r\ntest_c"
+    }
+  ],
+  "wrapper": "Python batch failed or exceeded output cap",
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "closed": true,
+  "nativeZero": true
+}

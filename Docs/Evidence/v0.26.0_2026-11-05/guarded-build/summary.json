@@ -1,0 +1,133 @@
+{
+  "schema": "books-0260-guarded-build-proof-v1",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "d6753c69ae01468693d8c77964893b1e259c9190",
+    "product_digest": "6ea741997a1f08b8e96696dfb5066fc2bcc15bb01902ff6ed92e8063780882e0",
+    "build_id": "7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9",
+    "artifact_manifest_sha256": "137258122f81fe9c365bbc11a7d5265c9b22354d46d6f0034b12a6baf84e125b",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "source_root": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1",
+  "source_dirty": "N",
+  "runtime_pointer_sha256": "04bcb999b14343f36f9e8932cb6b0d32253feb7270c4de7d15cc5019a32d28d0",
+  "artifacts": [
+    {
+      "path": "builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/Books-Arranger-Setup-0.26.0.exe",
+      "sha256": "d93c7dcb0b450879e6912155acc2d89892b88f1ef340c80ad989aabebdedfb22",
+      "size": 174793043,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1/dist/builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/Books-Arranger-Setup-0.26.0.exe"
+    },
+    {
+      "path": "builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/Books-Arranger-Setup-0.26.0.exe.blockmap",
+      "sha256": "ee3db98bbe9b8a90e5f9d748b2a0a2f1e5d837c1fb7156ef70d2cc5706163971",
+      "size": 182221,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1/dist/builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/Books-Arranger-Setup-0.26.0.exe.blockmap"
+    },
+    {
+      "path": "builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/latest.yml",
+      "sha256": "eb720f8ed0968379e51a5ad591a2ea9245206515b9de01f5dd7df9fe7d5ba08b",
+      "size": 360,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1/dist/builds/7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9/latest.yml"
+    }
+  ],
+  "plan_sha256": "b26653fb19aad4854c6722c05e94e33227967a9cc122f6d74ad2336dbae8cf08",
+  "operator_sha256": "4463ee1b6a21d7bddcab52ae956b305ca982ced85e4dded982068c6e9de7885e",
+  "result": {
+    "ok": true,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "elapsedMs": 75006.8189,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 62,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 4778,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    }
+  },
+  "files": [
+    {
+      "path": "build-plan.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/build-plan.json",
+      "size": 1255560,
+      "sha256": "b26653fb19aad4854c6722c05e94e33227967a9cc122f6d74ad2336dbae8cf08"
+    },
+    {
+      "path": "build-operator.mjs",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/build-operator.mjs",
+      "size": 4889,
+      "sha256": "4463ee1b6a21d7bddcab52ae956b305ca982ced85e4dded982068c6e9de7885e"
+    },
+    {
+      "path": "prepare-build-plan.py",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/prepare-build-plan.py",
+      "size": 5262,
+      "sha256": "daa27530309c8931ef40153b521820a2b2515befd2a9f9c7a852a803e240802f"
+    },
+    {
+      "path": "stage-inputs.mjs",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/stage-inputs.mjs",
+      "size": 3339,
+      "sha256": "14bc371b12dbb14ac8f54b53828338e56b38d8a1658b1ecbf556a7d14de6ff59"
+    },
+    {
+      "path": "stage-owned.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/stage-owned.json",
+      "size": 1359819,
+      "sha256": "b46feec41f8db213dc8afae7addee0d1652a1542aa7ab98dbc0c10973152e378"
+    },
+    {
+      "path": "stage-owned.log",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/stage-owned.log",
+      "size": 1279956,
+      "sha256": "d21aee20028d476a0faa25a3736ea82447d87e23c0d04b4580ef84184386bced"
+    },
+    {
+      "path": "pack-owned.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/pack-owned.json",
+      "size": 1313,
+      "sha256": "d16a9ab52bcb212437cb21e30c30ae1b44dd4185d7749faf980ee741cf770b1d"
+    },
+    {
+      "path": "pack-owned.log",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/pack-owned.log",
+      "size": 570,
+      "sha256": "ecbcdc250c6888e382996c1bd68f960f057a7cd213dfb03997f0d1d0156ee189"
+    },
+    {
+      "path": "empty-user-config.txt",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/empty-user-config.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "empty-global-config.txt",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/empty-global-config.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "release-artifacts.json",
+      "source": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1/dist/release-artifacts.json",
+      "size": 64765,
+      "sha256": "137258122f81fe9c365bbc11a7d5265c9b22354d46d6f0034b12a6baf84e125b"
+    },
+    {
+      "path": "runtime-pointer.json",
+      "source": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1/build-cache/runtime-pointer.json",
+      "size": 5819,
+      "sha256": "04bcb999b14343f36f9e8932cb6b0d32253feb7270c4de7d15cc5019a32d28d0"
+    }
+  ]
+}

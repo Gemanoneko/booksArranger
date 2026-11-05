@@ -1,0 +1,7 @@
+import fs from 'node:fs';
+import {pathToFileURL} from 'node:url';
+const root='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105',main='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger';
+const name=process.argv[2]||'qa-prereqs-owned';if(!/^[a-z0-9-]+$/.test(name)||fs.existsSync(root+'/'+name+'.json'))throw Error('Fresh unique result name required');
+const {runOwned}=await import(pathToFileURL('C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs').href);
+const result=await runOwned('C:/Program Files/nodejs/node.exe',[root+'/prepare-qa-prereqs.mjs'],{cwd:root,timeoutMs:600000,maxBytes:4194304,koffiRoot:main+'/build-cache/qa-ownership/node_modules/koffi',env:{SystemRoot:process.env.SystemRoot,WINDIR:process.env.WINDIR,PATH:'C:/Program Files/nodejs;C:/Windows/System32',TEMP:root+'/temp',TMP:root+'/temp',USERPROFILE:root+'/profile',APPDATA:root+'/profile/Roaming',LOCALAPPDATA:root+'/profile/Local',NODE_OPTIONS:'',NODE_PATH:'',PYTHONHOME:'',PYTHONPATH:''}});
+fs.writeFileSync(root+'/'+name+'.json',JSON.stringify(result,null,2),{flag:'wx'});console.log(JSON.stringify({ok:result.ok,code:result.code,closed:result.closed,outputComplete:result.outputComplete,native:result.native,elapsedMs:result.elapsedMs}));if(!result.ok)console.log((result.out||'')+(result.err||''));process.exitCode=result.ok?0:1;
