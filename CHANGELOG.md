@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.26.0] - 2026-11-05
+
+### Added
+
+- Save and Approve decisions promptly with durable receipts, restart recovery, and safe retry when an outcome needs review.
+- Offer Warhammer 40K, SCP, Eve Online, and World of Warcraft in the existing Universe field.
+
+### Fixed
+
+- Keep unrelated books moving when one book has a protected prior working attempt that cannot be restaged.
+- Distinguish conversion queue activity from metadata research and show a truthful reason when work is paused.
+- Accept curated Tolkien trilogy approvals while preserving strict evidence checks for other research.
+- Label paused automatic processing as Resume automatic processing.
+
 ## [v0.25.0] - 2026-11-05
 
 ### Added
