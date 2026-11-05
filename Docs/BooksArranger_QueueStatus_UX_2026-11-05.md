@@ -1,0 +1,40 @@
+# Books Arranger: paused audiobook jobs and queued Save copy
+
+Judy · 2026-11-05 · EXTEND the 0.25.0 **Audiobook jobs** card and existing queued-action status. Sergei's screenshot shows `Paused · 418 queued · 65 need attention` under an active `Updating series: Мухи · 0 of 292 · Looking up the series` row. A separate old `Похититель детей` cleanup hold can look like the reason for the pause; Ender's read-only diagnosis identifies a `Возрожденный Дракон` restage hold as the actual trigger. On `Count Zero`, a queued names Save says `Your choices are saved` although the queued arguments are only in memory and the durable Save has not run. This spec addresses those two visible mismatches. No app, live catalog, source drive or UI was operated for this document; no rects were measured.
+
+## Audiobook queue state is separate from metadata work
+
+Keep `#jobs-status`, `#jobs-help`, `#jobs-rows`, the current Pause/Resume buttons and the existing activity-row layout. **The first status line answers what the audiobook queue is doing.** Metadata research/series activity is a separately labelled activity below it. An active metadata row does not turn the paused conversion queue into `Running`, and its progress bar/count is never presented as audiobook conversion progress. Use the backend's current queue state and typed pause/hold cause, not the newest row in Output needs attention or the most visible activity, to explain a pause.
+
+| Authoritative state | Existing card presentation |
+|---|---|
+| Audiobook conversion or cleanup really running | `Running · {queued} queued · {attention} need attention` in the existing Audiobook jobs status line. The actual book/phase and truthful progress remain in their current activity row. Series activity, if concurrent, reads `Metadata: Updating series · {subject}` with its own `Looking up the series` or actual phase and its own `0 of 292` count. |
+| Queue paused by an exact book-scoped hold | `Paused · {queued} queued · {attention} need attention`. Existing help/status below the controls: `Audiobook jobs paused at {book}: {short actual reason}.` For the demonstrated case the book is `Возрожденный Дракон` only when a current backend hold names it. A separate `Похититель детей` cleanup issue remains visible on that book's own attention row, but is not called the queue's cause. No advancing conversion bar, timer or ETA. |
+| Pause requested, not yet settled | Preserve **Pausing** until the backend acknowledges the safe checkpoint. Name the current book/phase if supplied. Do not call it paused merely because metadata work continues. |
+| No converter currently working, but resume/start checks or other book work remains | Show the backend's actual **Checking pending audiobook work** / queued or waiting state. Do not show a running conversion or a completed queue because a series task has progress. |
+| Paused but no cause binding available | `Paused · {queued} queued · {attention} need attention`; help: `Audiobook jobs are paused. The app has not identified which book stopped them.` Keep the existing actionable Resume affordance only if the backend offers it. Do not guess the blocker from an old cleanup warning. |
+
+Retain the existing `converted out of approved` fact in the same status line, after the queue state. The numeric queue and attention counts keep their existing meanings; they do not count the series lookup's 292 books or imply 418 conversions are progressing. If Ender's restage correction prevents a global pause, show the resulting actual **Running** or waiting state and the held Jordan book on its own row; do not force a Paused example to appear. The backend needs a typed cause and book binding if a new global pause is attributed to a book. `pause.origin` alone (user/update/interrupted) is not that binding. If the backend cannot confirm the cause, use the unknown-cause line above.
+
+Keep **Resume audiobook jobs** in place with its existing size, focus treatment and keyboard action. Its tooltip and `aria-describedby` must agree with the current queue state: pending work can be resumed when the backend offers it; a held book stays held unless its own protection is cleared. Never promise that Resume fixes `Возрожденный Дракон` or `Похититель детей`. A disabled Resume gets the existing backend-supported reason; no new Retry/Skip control is introduced. Do not change the separate scanning controls or start work merely because the card is rendered.
+
+## Queued names Save has not saved the names
+
+The `Count Zero` case is the existing **Edit names → Save** and queued-action hint, not a new workflow. Keep the `Save` button, `Saving…` pending face, existing queued-action Cancel and in-row status position. Do not replace a saved value or lose the open draft while waiting. The wording follows the operation's actual durable state:
+
+| State | Copy in the existing row/status slot |
+|---|---|
+| Press accepted into the in-memory queue | `Save names queued{, n ahead} until {actual blocker} finishes. These edits are waiting in memory, not saved yet.` Omit the brace clause when zero are ahead. Tooltip on inert `Saving…`: `Names are queued in this session. They are not saved yet.` |
+| Queue action starts | `Saving these names…` (existing). Do not show a success result before the backend confirms a durable Save. |
+| Durable Save succeeds | Use the existing `Saved names for {book}.` receipt, plus the confirmed planned destination only when returned. The row and details then reflect the saved revision. |
+| Queued action cancelled or app closes before it runs | `Save cancelled. These edits were not saved.` only when the backend positively confirms no Save ran; preserve the draft while the page remains open. If closure cannot be observed, do not invent a cancellation receipt. |
+| Save refused | State the actual cause and supported fix in the existing error line; keep the draft. Do not say `saved`. |
+| Reply lost or outcome unknown | `Save not confirmed. Check this book before trying again.` Keep current data until the next authoritative refresh resolves the result; do not claim neither success nor failure. |
+
+The generic queued-action sentence `Your choices are saved` must not appear for any action whose choices have only been copied into the in-memory queue. For those actions, use the same tense distinction: **queued/waiting** until its own backend action records them; **saved/approved** only after that action confirms it. Name the actual action in its row rather than calling every queued press a names Save. A queued action may be lost on app exit; `in memory` is important user-facing information here. Do not display an indefinite `Saving…` after the queue action has ended.
+
+## Focused acceptance
+
+Private fixtures: paused audiobook queue plus concurrent `Мухи` series lookup at 0/292, with 418 queued/65 attention; the current typed Jordan hold; unrelated old Brom cleanup hold; unknown pause cause; actual running conversion plus concurrent series lookup; resume requested/accepted/refused. Verify job status/help/tooltip agree, activity bars belong to their labelled work, and an old held book cannot be mistaken for the current stop. Simulate names Save queued behind another action, with actions ahead, Cancel, durable success, refusal, app exit and lost reply. The queued line must never say `Your choices are saved`; only the confirmed success line says `Saved names`.
+
+At the existing 1280/960/760/600 CSS-pixel bands and 200% zoom, measure the changed status/help/activity row and adjacent buttons in running, pausing, paused, queued-save and error states. Same-plane hit-rect intersection area is **0 px²**; long Cyrillic book titles and reasons wrap without hiding Resume or Save. Keep the current dark theme, readable text contrast, visible keyboard focus and polite one-time status announcements. Polls do not move focus or repeatedly announce unchanged counts. This is a spec, not runtime verification. No disposable output was created. Sully commits this exact file before Ender implements/cites the UI contract.
