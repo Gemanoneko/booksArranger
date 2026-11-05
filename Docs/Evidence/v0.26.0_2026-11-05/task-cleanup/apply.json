@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0260-release-20261105",
+   "reason": "Ender-owned completed 0.26.0 temporary build/QA/native/publisher preparation; all required evidence committed and pushed c8b346df; Sully released all task inputs after remote three-asset SHA, tag and keep-four verification, 2026-11-05; user standing cleanup authorization and root exact-task cleanup direction.",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0260-release-20261105",
+   "isDir": true,
+   "before": {
+    "files": 840,
+    "bytes": 200575988
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 840,
+    "bytes": 200575988
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 840,
+    "bytes": 200575988
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 109114499072,
+   "after": 109316870144
+  }
+ ],
+ "removedFiles": 840,
+ "removedBytes": 200575988,
+ "keptCount": 0
+}

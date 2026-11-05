@@ -1,0 +1,34 @@
+{
+  "schema": "books-arranger-task-cleanup-v1",
+  "checked_utc": "2026-11-05T13:41:36.8561990Z",
+  "target": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105",
+  "target_absent": true,
+  "archival_commit": "c8b346dfc8a01d0487f784264dd194b96cb8381e",
+  "authorization": "Standing user own-temp cleanup; root exact-target direction; Sully confirmed archive pushed and all task-root consumers released after independent remote publication verification.",
+  "method": "Unchanged scripts/studio-sweep.mjs exact --approved literal target; dry-run then --apply; both exit zero.",
+  "measurement": "Planner before/after sum of regular file lengths; actual removed 840 files / 200575988 bytes; no links/protected/kept/skipped.",
+  "removed_files": 840,
+  "removed_bytes": 200575988,
+  "excluded": [
+    "q26",
+    "q27",
+    "q28",
+    "n26",
+    "all registered worktrees",
+    "accepted r3 installer and runtime",
+    "previously denied targets and parents",
+    "preexisting 0.24.2 targets"
+  ],
+  "records": [
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/task-cleanup/dry-run.json",
+      "bytes": 1158,
+      "sha256": "055c4967fe8f5771a467f6b40997d2562bb9ddb3110a73715d85b03b28143b45"
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/task-cleanup/apply.json",
+      "bytes": 1366,
+      "sha256": "d7c50cc1cf5d18081aa2e89454307107c942524dc93fd941129c28511b94af40"
+    }
+  ]
+}
