@@ -1,0 +1,32 @@
+{
+  "schema": "books-0260-remote-download-verify-v1",
+  "captured_utc": "2026-11-05T13:37:46.230317+00:00",
+  "tag": "v0.26.0",
+  "release_url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.26.0",
+  "manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+  "assets": {
+    "Books-Arranger-Setup-0.26.0.exe": {
+      "size": 174793046,
+      "sha256": "9aaf1b9f02b6097db413663f97692871cabc85a1366a8557ceb830e198ecbda7"
+    },
+    "Books-Arranger-Setup-0.26.0.exe.blockmap": {
+      "size": 182231,
+      "sha256": "eb6565c78fcb58a653ca3c5c52a27484bf3bfe9ea8ee8430bbe88e1dca6c7a16"
+    },
+    "latest.yml": {
+      "size": 360,
+      "sha256": "5ffaf848065f1859be5a7e9c46b1789f837d0bb1b4b27118a99e63a5d31dde0c"
+    }
+  },
+  "download_command": [
+    "gh",
+    "release",
+    "download",
+    "v0.26.0",
+    "--repo",
+    "Gemanoneko/booksArranger",
+    "--dir",
+    "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\0260-release-20261105\\r3\\remote-verify"
+  ],
+  "download_exit_code": 0
+}

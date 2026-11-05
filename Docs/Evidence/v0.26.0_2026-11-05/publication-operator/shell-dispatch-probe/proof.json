@@ -1,0 +1,78 @@
+{
+  "schema": "private-npm-dispatch-proof-v1",
+  "scope": "Harmless private npm probe only; NO release script, network, app, Git or user data action",
+  "node_sha256": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5",
+  "npm_cli_sha256": "3ce7cba6f5128dd5f54c98b6a5036b0f850496878cc2e21044b675fe3c594e3e",
+  "promise_spawn_source_sha256": "f719a74a22a682cba0ce99eb316b716111b9b3d4602a3dc7c8bcf38280dbbc01",
+  "source_branch": "@npmcli/promise-spawn/lib/index.js82 cmd regex accepts backslash separators only; false branch adds POSIX -c",
+  "records": [
+    {
+      "name": "forward",
+      "ComSpec": "C:/Windows/System32/cmd.exe",
+      "marker": false,
+      "executed": false,
+      "code": 0,
+      "normal_native_zero": true,
+      "elapsedMs": 751.3633000000001,
+      "owned_sha256": "e5834c80dbdf9fcc2a0e53429ad02e9633b1d2760f76601ce1099a43253fdc23",
+      "environment_diff_from_original": {
+        "TEMP": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/temp",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/forward/temp"
+        },
+        "TMP": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/temp",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/forward/temp"
+        },
+        "npm_config_userconfig": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/empty-user-config.txt",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/forward/user-config.txt"
+        },
+        "npm_config_globalconfig": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/empty-global-config.txt",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/forward/global-config.txt"
+        },
+        "npm_config_cache": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/npm-cache",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/forward/cache"
+        }
+      }
+    },
+    {
+      "name": "native",
+      "ComSpec": "C:\\Windows\\System32\\cmd.exe",
+      "marker": true,
+      "executed": true,
+      "code": 0,
+      "normal_native_zero": true,
+      "elapsedMs": 1008.8908,
+      "owned_sha256": "77773b9b86d2857e205bee618216baf3cfa2069c8a05d66f2556e42fff63e4e1",
+      "environment_diff_from_original": {
+        "ComSpec": {
+          "before": "C:/Windows/System32/cmd.exe",
+          "after": "C:\\Windows\\System32\\cmd.exe"
+        },
+        "TEMP": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/temp",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/native/temp"
+        },
+        "TMP": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/temp",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/native/temp"
+        },
+        "npm_config_userconfig": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/empty-user-config.txt",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/native/user-config.txt"
+        },
+        "npm_config_globalconfig": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/empty-global-config.txt",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/native/global-config.txt"
+        },
+        "npm_config_cache": {
+          "before": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/npm-cache",
+          "after": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/shell-dispatch-probe/native/cache"
+        }
+      }
+    }
+  ]
+}

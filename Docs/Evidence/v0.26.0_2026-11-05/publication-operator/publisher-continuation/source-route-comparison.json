@@ -1,0 +1,20 @@
+[
+  {
+    "path": "scripts/release.mjs",
+    "prior025_lf_sha256": "67a0aa95b1c77467420a8d6b839f6ec972b186a7fbf193b66b9cd1538c7cd3ea",
+    "current_lf_sha256": "67a0aa95b1c77467420a8d6b839f6ec972b186a7fbf193b66b9cd1538c7cd3ea",
+    "byte_equal_lf": true
+  },
+  {
+    "path": "scripts/guarded-io.mjs",
+    "prior025_lf_sha256": "37492ec19f43303a94c4b18648fb43ca82fc650ced8fbdf5800896dec4b74b1f",
+    "current_lf_sha256": "37492ec19f43303a94c4b18648fb43ca82fc650ced8fbdf5800896dec4b74b1f",
+    "byte_equal_lf": true
+  },
+  {
+    "path": "scripts/release-flow.mjs",
+    "prior025_lf_sha256": "cf68a9fe717597432101d774c2389923b0802dbeaf400f61d76a756171566551",
+    "current_lf_sha256": "cf68a9fe717597432101d774c2389923b0802dbeaf400f61d76a756171566551",
+    "byte_equal_lf": true
+  }
+]

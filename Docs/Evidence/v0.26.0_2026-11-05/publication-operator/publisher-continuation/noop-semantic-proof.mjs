@@ -1,0 +1,10 @@
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
+const root='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher-continuation';
+const old='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/publisher/release-owned.json';
+const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),text=fs.readFileSync(root+'/publish-owned.mjs','utf8');
+const start=text.indexOf('function publicationStatus('),end=text.indexOf('\nverify();',start);assert(start>=0&&end>start);
+const box={plan:{semantic_markers:JSON.parse(fs.readFileSync(root+'/semantic-expected.json','utf8'))}};vm.createContext(box);vm.runInContext(text.slice(start,end),box);
+const original=JSON.parse(fs.readFileSync(old,'utf8')),status=box.publicationStatus(original);
+assert.equal(original.ok,true);assert.equal(status.ownerNormal,true);assert.equal(status.ok,false);assert.equal(status.published,false);assert.equal(status.keepFour,false);
+const proof={schema:'publisher-noop-semantic-negative-v1',scope:'Pure consumer check of ACTUAL prior no-op owned result; no publisher/native/app/network execution and no synthetic success receipt',operator_sha256:sha(root+'/publish-owned.mjs'),original_result_sha256:sha(old),semantic:status,passed:true};
+fs.writeFileSync(root+'/noop-semantic-proof.json',JSON.stringify(proof,null,2),{flag:'wx'});console.log(JSON.stringify(proof));

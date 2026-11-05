@@ -1,0 +1,15 @@
+{
+  "schema": "publisher-noop-semantic-negative-v1",
+  "scope": "Pure consumer check of ACTUAL prior no-op owned result; no publisher/native/app/network execution and no synthetic success receipt",
+  "operator_sha256": "c7e083bc5c4ef78494cbd2eb103fee182aea75eee90ec04c200a067d536661ac",
+  "original_result_sha256": "4e1bfa8320b77240d7429bfc1c06e268678e7250818f879143de92eedbddbbcb",
+  "semantic": {
+    "ok": false,
+    "ownerNormal": true,
+    "published": false,
+    "keepFour": false,
+    "cleanupWarning": false,
+    "independentRemoteVerification": "PENDING Sully actual tag/version/3downloads SHA256/keep4 verification; no completion or cleanup from process exit alone"
+  },
+  "passed": true
+}

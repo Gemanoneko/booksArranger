@@ -1,0 +1,69 @@
+{
+  "schema": "books-0260-publisher-continuation-preflight-v1",
+  "captured_utc": "2026-11-05T13:25:31.433289+00:00",
+  "expected_head": "1b2f81a8f6d86995e937332e0c225837d05cbc20",
+  "prior_one_use_marker_sha256": "b0400025edda6254b92ee15cd04ae6d28945647a626f6ad4e0d1b82433dfcce7",
+  "prior_owned_result_sha256": "4e1bfa8320b77240d7429bfc1c06e268678e7250818f879143de92eedbddbbcb",
+  "checks": {
+    "head": {
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "1b2f81a8f6d86995e937332e0c225837d05cbc20\n",
+      "stderr": ""
+    },
+    "local_tag": {
+      "argv": [
+        "git",
+        "rev-parse",
+        "v0.26.0^{commit}"
+      ],
+      "exit_code": 0,
+      "stdout": "1b2f81a8f6d86995e937332e0c225837d05cbc20\n",
+      "stderr": ""
+    },
+    "remote_tag": {
+      "argv": [
+        "git",
+        "ls-remote",
+        "--tags",
+        "origin",
+        "refs/tags/v0.26.0",
+        "refs/tags/v0.26.0^{}"
+      ],
+      "exit_code": 0,
+      "stdout": "1b2f81a8f6d86995e937332e0c225837d05cbc20\trefs/tags/v0.26.0\n",
+      "stderr": ""
+    },
+    "release": {
+      "argv": [
+        "gh",
+        "release",
+        "view",
+        "v0.26.0",
+        "--repo",
+        "Gemanoneko/booksArranger",
+        "--json",
+        "tagName,id,assets"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "release not found\n"
+    },
+    "status": {
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "-uall"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  },
+  "conclusion": "Named local and remote tag resolve to accepted HEAD; GitHub release view reports not found, so no release/assets observed. Prior publisher attempt marker/result preserved. No mutation or retry performed."
+}

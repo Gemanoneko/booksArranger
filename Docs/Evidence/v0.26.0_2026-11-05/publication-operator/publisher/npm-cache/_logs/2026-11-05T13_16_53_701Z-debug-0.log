@@ -1,0 +1,18 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.20.0
+2 info using node@v26.13.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r3\.npmrc
+5 silly config load:file:C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0260-release-20261105\r3\publisher\empty-user-config.txt
+6 silly config load:file:C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0260-release-20261105\r3\publisher\empty-global-config.txt
+7 verbose title npm run release
+8 verbose argv "run" "release"
+9 verbose logfile logs-max:10 dir:C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0260-release-20261105\r3\publisher\npm-cache\_logs\2026-11-05T13_16_53_701Z-
+10 verbose logfile C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\0260-release-20261105\r3\publisher\npm-cache\_logs\2026-11-05T13_16_53_701Z-debug-0.log
+11 silly logfile done cleaning log files
+12 verbose cwd C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r3
+13 verbose os Windows_NT 10.0.26300
+14 verbose node v26.13.0
+15 verbose npm  v11.20.0
+16 verbose exit 0
+17 info ok

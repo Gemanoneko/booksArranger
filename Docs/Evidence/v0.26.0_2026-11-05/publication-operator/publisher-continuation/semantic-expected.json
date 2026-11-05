@@ -1,0 +1,9 @@
+{
+  "expected_lines": {
+    "published": "[release] Published v0.26.0 from 1b2f81a8f6d86995e937332e0c225837d05cbc20; verified 3 assets.",
+    "keep_four": "[release] Keep-four verified; Sully must now git fetch --prune --prune-tags and verify local tag parity.",
+    "cleanup_warning_prefix": "[release] Published successfully; cleanup warning:"
+  },
+  "producer": "scripts/release.mjs actual console.log expressions; data derived from fixed version/head/three accepted artifacts",
+  "independent_remote_evidence": "Sully must additionally verify actual remote tag/version, download all3assets and match manifest SHA256, and verify keep4 before completion or any input cleanup."
+}

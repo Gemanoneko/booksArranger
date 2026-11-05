@@ -1,0 +1,4 @@
+
+> books-arranger@0.26.0 release
+> node scripts/release.mjs
+

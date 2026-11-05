@@ -1,0 +1,54 @@
+{
+  "schema": "books-0260-publication-verification-v1",
+  "captured_utc": "2026-11-05T13:39:55.962741+00:00",
+  "tag": "v0.26.0",
+  "tag_commit": "1b2f81a8f6d86995e937332e0c225837d05cbc20",
+  "product_source_commit": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+  "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+  "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+  "native_qa_sha256": "ce4989c46fb193272f98cf0f0797d59a1a4e6ea8dd8dbb4c3a552670e67f8fff",
+  "release_url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.26.0",
+  "release_id": 435246719,
+  "stable": true,
+  "remote_tag_matches_local": true,
+  "publisher_owned_result_sha256": "9368e832fb44a8b3c3b6b069c07d97d7e8bc5983c0ba046676b3cad6746c2be3",
+  "publisher_normal_native_zero": true,
+  "canonical_published_line_verified": true,
+  "canonical_keep_four_line_verified": true,
+  "cleanup_warning": false,
+  "remote_assets": [
+    {
+      "name": "Books-Arranger-Setup-0.26.0.exe",
+      "size": 174793046,
+      "sha256": "9aaf1b9f02b6097db413663f97692871cabc85a1366a8557ceb830e198ecbda7",
+      "github_asset_id": 713532812,
+      "state": "uploaded",
+      "downloaded_sha256_verified": true
+    },
+    {
+      "name": "Books-Arranger-Setup-0.26.0.exe.blockmap",
+      "size": 182231,
+      "sha256": "eb6565c78fcb58a653ca3c5c52a27484bf3bfe9ea8ee8430bbe88e1dca6c7a16",
+      "github_asset_id": 713532811,
+      "state": "uploaded",
+      "downloaded_sha256_verified": true
+    },
+    {
+      "name": "latest.yml",
+      "size": 360,
+      "sha256": "5ffaf848065f1859be5a7e9c46b1789f837d0bb1b4b27118a99e63a5d31dde0c",
+      "github_asset_id": 713532810,
+      "state": "uploaded",
+      "downloaded_sha256_verified": true
+    }
+  ],
+  "actual_download_proof_sha256": "b4bd3500b0add882c2f71496eb1d6bfe72e658153c5f9c33e8c14badf224ad21",
+  "retained_releases": [
+    "v0.26.0",
+    "v0.25.0",
+    "v0.24.5",
+    "v0.24.4"
+  ],
+  "installed_app_changed": false,
+  "live_library_changed": false
+}
