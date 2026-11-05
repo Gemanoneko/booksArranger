@@ -1,0 +1,107 @@
+{
+  "baseline": "73926663a2045780509ca7ab1cdc6a2d31f6f449",
+  "files": [
+    {
+      "path": "working_lifecycle.py",
+      "bytes": 55779,
+      "sha256": "f57403018280271f97bc0c0f5d0c37d79df412af5f93d41164d23d0dd88dc28c",
+      "lf_sha256": "f5865ce17ad4e3a799b2b3375236137ed439f93ecd0f02faf9d74d3361ff123b",
+      "baseline_lf_sha256": "89019ed66911a6acde1d7338b72f41ac7aabb1cb3256e7261ee918a0ef849682"
+    },
+    {
+      "path": "tests/test_attempt_working_lifecycle.py",
+      "bytes": 44978,
+      "sha256": "b560db6b4394ad389523a3e42ee4fce14d2178f5daccc7a621d59ab781569c1b",
+      "lf_sha256": "8d85c01ff8dbabf3a24b8fbd98e7ab90cc1cb9c89fae4debee92985224f0eda9",
+      "baseline_lf_sha256": "046b4ed264b2504dac686bb4be659622e9869ab986276df5bd88a296f21f5472"
+    }
+  ],
+  "patch_sha256": "da7b3dde9bb3deae71d0877e2d71aad3e002ffa5f41f2313fcac0a5f388f07f2",
+  "cause": "Live catalog read-only: Jordan job204b6574 became needs attention07:50:40Z after closed prior attemptc0c01a82 retained uncaptured producer files. WorkingLifecycle.admit final nonretired check raised generic BoundaryError; AudioJobs preattempt generic handler globally stopped and invoked automatic.stop(force=True). Pauses recorded same instant. Prior Brom identity hold is unrelated and remains protected.",
+  "fix": "RestagingHeld inherits existing JobWorkingHold and BoundaryError only after retire returns normally and same attempt is durably producerclosed and attention/sources_retained. No new attempt admitted; retained bytes untouched. Unknown thrown ownership/native/IO/catalog errors retain global stop.",
+  "results": "NormalResume baseline private uncapturedclosedattempt reproduces3independentjobspending/globalstop. Corrected samefixture completes3independentbooks, preserves heldmanifest/attempt/journal/output/uncapturedbytes andoriginal. Unknownownershipboundary remainsglobalstop.5focusedPASS +31/31WorkingLifecycleTests PASS11.198s (owned11.805s); normalclosed/outputComplete/nativezero, noforce/timeout.",
+  "scope": "No live API/app/actions/focus/Zsource access. Live SQLite URI mode=ro+query_only, boundedqueries only; no mediafilesopened. Local failure records preserved; protected incomplete source snapshots not cleared. Injected validated output for independent continuation, no claim of codec regression beyond existing module.",
+  "ui": "Separate committed Judy11c4043 truthfulness work pending; this twofile source is frozen for independent integration now.",
+  "evidence": [
+    {
+      "path": "core.patch",
+      "bytes": 7479,
+      "sha256": "da7b3dde9bb3deae71d0877e2d71aad3e002ffa5f41f2313fcac0a5f388f07f2"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 955,
+      "sha256": "164d793cafec51b5d63eb5e8eea28b4a4c693e9433035d8fd0559b7a65a74343"
+    },
+    {
+      "path": "freeze-core.py",
+      "bytes": 3344,
+      "sha256": "ed8807fa135fe2f38f2f31b9acfae1d0237f0a800bcbc270d9c7dd883cff5972"
+    },
+    {
+      "path": "lifecycle-affected.json",
+      "bytes": 6420,
+      "sha256": "a54937436e48cb99cd65c6609ed5548ddaefd134ada7a6ef00ba2c26da7a041d"
+    },
+    {
+      "path": "lifecycle-affected.log",
+      "bytes": 5662,
+      "sha256": "36ee9004c385ae276e5699819465010b88e476944a3d5f72a1a854af6e911fbe"
+    },
+    {
+      "path": "owned.mjs",
+      "bytes": 1973,
+      "sha256": "d8c3986c1eefb8943ebb778ee29e17e13fbe5bc541be7b58a4290e4a9b6515b3"
+    },
+    {
+      "path": "readonly.json",
+      "bytes": 1035886,
+      "sha256": "75d2bb30121871834955eb54f469721ebfb0b2da95c30c93a589721c354f98e6"
+    },
+    {
+      "path": "readonly.py",
+      "bytes": 2330,
+      "sha256": "461f19a2eb8791c17ebe4002d858c6007d10e24d950c8cbb08c5b030bacb5849"
+    },
+    {
+      "path": "restage-baseline-2.json",
+      "bytes": 2296,
+      "sha256": "c3743a2d86bfd04a8b5db480489418d84a4812a9f90bca0241f09d049a77bb8e"
+    },
+    {
+      "path": "restage-baseline-2.log",
+      "bytes": 1557,
+      "sha256": "77e9eac3a023bfad520b056d6530c2964c5b3fc03e1f8c036992cbb22786a0ef"
+    },
+    {
+      "path": "restage-baseline.json",
+      "bytes": 2220,
+      "sha256": "090af756db8030e67e71569013d8a8f9c5dcd4049bcb33916beb7bf15dee0a84"
+    },
+    {
+      "path": "restage-baseline.log",
+      "bytes": 1484,
+      "sha256": "01192b4d8e4fdf0af00ecf83cdbbe93529bc41f369c310f054a4c7741c75e711"
+    },
+    {
+      "path": "restage-corrected.json",
+      "bytes": 1775,
+      "sha256": "efef0b7e9fd564a7aa727398f1db7cfb89f81f1882e133f7f9305b824a18d239"
+    },
+    {
+      "path": "restage-corrected.log",
+      "bytes": 1070,
+      "sha256": "811990a60c97d4b69852b1642f409b61f50491baf8ec8506147dd3c96716aaab"
+    },
+    {
+      "path": "working-readonly.json",
+      "bytes": 13746,
+      "sha256": "ed3047bba72c87cfc82d65c65f65cdd6249153d746cb3da8374c76c03ebe018c"
+    },
+    {
+      "path": "working-readonly.py",
+      "bytes": 1636,
+      "sha256": "50f179300033a383aa8f97a1440dd45958cbf54d0231f15cd8dcd34c1286a28b"
+    }
+  ]
+}

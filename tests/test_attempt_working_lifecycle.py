@@ -282,6 +282,64 @@ class WorkingLifecycleTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes(), self.original)
         self.assertEqual(self.life._attempt(self.job_id, attempt)['producer'], 'active')
 
+    def test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume(self):
+        attempt=str(uuid.uuid4());self.queue._update(self.job_id,state='running',attempt_id=attempt,journal='{}')
+        self.life.begin(dict(self.manifest,attempt_id=attempt))
+        parent=self.stage_root/self.job_id;parent.mkdir()
+        (parent/'ownership.json').write_text(packed({'job_id':self.job_id,'manifest':self.manifest}),encoding='utf-8')
+        stage=parent/attempt;stage.mkdir()
+        # A closed producer can leave only a creation intent after interruption.
+        # Its name is never adopted as native disposal or re-staging authority.
+        uncaptured=stage/'1234567890abcdef1234567890abcdef.stdout'
+        self.life.planned(stage,uncaptured);uncaptured.write_bytes(b'uncaptured retained producer bytes')
+        with patch.object(self.life,'_hash',side_effect=OSError('Private interrupted capture')):
+            with self.assertRaises(OSError):self.life.closed(stage)
+        self.queue._update(self.job_id,state='pending',stage='queued')
+        before=self.queue._rows('SELECT * FROM audio_jobs WHERE job_id=?',(self.job_id,))[0]
+        frozen_sources=self.source.read_bytes();retained=uncaptured.read_bytes()
+        independent=[]
+        for index in range(3):
+            manifest=copy.deepcopy(self.manifest)
+            manifest['job_id']=str(uuid.uuid4());manifest['candidate_id']=str(uuid.uuid4())
+            manifest['destination']=str(self.library/('continued%d.m4b'%index))
+            self.queue.enqueue(manifest);independent.append(manifest)
+        runner_calls=[]
+        def runner(manifest,stop,checkpoint):
+            runner_calls.append(manifest['job_id'])
+            self.assertNotEqual(manifest['job_id'],self.job_id)
+            output=Path(manifest['destination']);output.write_bytes(b'private validated continuation')
+            record={'job_id':manifest['job_id'],'final_path':str(output),'owned_temp':str(output),
+                    'sha256':hashlib.sha256(output.read_bytes()).hexdigest(),'size':output.stat().st_size,'validation':{'passed':True}}
+            checkpoint('publishing',record);return record
+        stopped=Mock();self.queue.on_working_hold=stopped;self.queue.runner=runner
+        self.queue.resume(settle=False);worker=self.queue._thread;worker.join(15)
+        self.assertFalse(worker.is_alive())
+        rows={row['job_id']:row for row in self.queue._rows('SELECT * FROM audio_jobs')}
+        held=rows[self.job_id]
+        self.assertEqual(held['state'],'needs attention');self.assertIn('Prior working sources cannot be restaged',held['reason'])
+        for field in ('attempt_id','manifest','manifest_hash','journal','output'):self.assertEqual(held[field],before[field],field)
+        self.assertEqual([rows[manifest['job_id']]['state'] for manifest in independent],['completed']*3)
+        self.assertEqual(set(runner_calls),{manifest['job_id'] for manifest in independent})
+        self.assertEqual(self.source.read_bytes(),frozen_sources);self.assertEqual(uncaptured.read_bytes(),retained)
+        receipt=next(value for value in self.life._files(self.job_id,attempt) if value['name']==uncaptured.name)
+        self.assertEqual(receipt['state'],'creation_intended');self.assertEqual(receipt['sha256'],'')
+        self.assertEqual(self.life._attempt(self.job_id,attempt)['state'],'attention')
+        self.assertFalse(self.queue._stop.is_set());stopped.assert_not_called()
+
+    def test_unknown_retirement_boundary_failure_still_stops_the_queue(self):
+        attempt,stage,_=self.stage();self.queue._update(self.job_id,state='pending',stage='queued')
+        marker=stage.parent/'ownership.json';marker.write_text('{}',encoding='utf-8')
+        other=copy.deepcopy(self.manifest);other['job_id']=str(uuid.uuid4());other['candidate_id']=str(uuid.uuid4())
+        self.queue.enqueue(other);self.queue.runner=Mock(side_effect=AssertionError('No producer after unknown ownership failure'))
+        stopped=Mock();self.queue.on_working_hold=stopped
+        self.queue.resume(settle=False);worker=self.queue._thread;worker.join(15)
+        self.assertFalse(worker.is_alive())
+        rows={row['job_id']:row for row in self.queue._rows('SELECT * FROM audio_jobs')}
+        self.assertEqual(rows[self.job_id]['state'],'needs attention');self.assertIn('Private staging ownership changed',rows[self.job_id]['reason'])
+        self.assertEqual(rows[other['job_id']]['state'],'pending');self.assertTrue(self.queue._stop.is_set())
+        self.queue.runner.assert_not_called();stopped.assert_called_once_with()
+        self.assertEqual(marker.read_text(encoding='utf-8'),'{}');self.assertEqual(self.source.read_bytes(),self.original)
+
     def test_a_current_failed_producer_hold_does_not_stop_the_queue(self):
         held = []
         self.queue.on_working_hold = lambda: held.append(True)

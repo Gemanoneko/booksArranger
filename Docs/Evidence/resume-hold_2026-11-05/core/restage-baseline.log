@@ -1,0 +1,18 @@
+test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume (test_attempt_working_lifecycle.WorkingLifecycleTests.test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume) ... ERROR
+test_unknown_retirement_boundary_failure_still_stops_the_queue (test_attempt_working_lifecycle.WorkingLifecycleTests.test_unknown_retirement_boundary_failure_still_stops_the_queue) ... ok
+
+======================================================================
+ERROR: test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume (test_attempt_working_lifecycle.WorkingLifecycleTests.test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\resume-hold-20261105\tests\test_attempt_working_lifecycle.py", line 290, in test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume
+    self.life.planned(stage,uncaptured);uncaptured.write_bytes(b'uncaptured retained producer bytes')
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\resume-hold-20261105\working_lifecycle.py", line 237, in planned
+    raise BoundaryError('Producer has already closed')
+native_io.BoundaryError: Producer has already closed
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.409s
+
+FAILED (errors=1)

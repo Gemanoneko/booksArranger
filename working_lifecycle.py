@@ -23,6 +23,10 @@ from audio_jobs import JobWorkingHold
 class ProducerNotClosed(BoundaryError, JobWorkingHold):
     """An earlier producer remains retained for this job alone."""
 
+
+class RestagingHeld(BoundaryError, JobWorkingHold):
+    """A checked, closed attempt retains files for this job alone."""
+
 TERMINAL = {'removed', 'absent_after_intent', 'not_created'}
 # tag-repair-<hex>.mp3/.json: the MP3 trailing-tag repair's private copy and its proof (audio_pipeline._mp3_tag_copy). Until
 # 0.21.1 they were missing here, so every repair was refused as an unknown artifact before it could run.
@@ -787,8 +791,14 @@ class WorkingLifecycle:
         prior_id=self._legacy_prior(row)
         for attempt in self._rows("SELECT * FROM working_attempts WHERE job_id=? AND (state!='retired' OR attempt_id=?) ORDER BY updated", (row['job_id'],prior_id)):
             self.retire(attempt['job_id'], attempt['attempt_id'])
-            if self._attempt(attempt['job_id'], attempt['attempt_id'])['state'] != 'retired':
-                raise BoundaryError('Prior working sources cannot be restaged; another attempt is not admitted')
+            current=self._attempt(attempt['job_id'], attempt['attempt_id'])
+            if current['state'] != 'retired':
+                # retire() returned after its ownership/native/source proofs and
+                # durably retained this attempt. No new producer is admitted, but
+                # this book's known hold must not stop independent queued books.
+                # Thrown boundary/IO/catalog failures still reach the global stop.
+                error=RestagingHeld if current['producer']=='closed' and current['state'] in ('attention','sources_retained') else BoundaryError
+                raise error('Prior working sources cannot be restaged; another attempt is not admitted')
 
     def reconcile(self, limit=1, storage=None):
         """One closed attempt per idle tick; audio/scan start preempts its hash IO.

@@ -1,0 +1,10 @@
+test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume (test_attempt_working_lifecycle.WorkingLifecycleTests.test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume) ... ok
+test_unknown_retirement_boundary_failure_still_stops_the_queue (test_attempt_working_lifecycle.WorkingLifecycleTests.test_unknown_retirement_boundary_failure_still_stops_the_queue) ... ok
+test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish (test_attempt_working_lifecycle.WorkingLifecycleTests.test_retained_producer_holds_only_its_book_and_three_independent_jobs_finish) ... ok
+test_uncertain_producer_closure_blocks_new_attempt (test_attempt_working_lifecycle.WorkingLifecycleTests.test_uncertain_producer_closure_blocks_new_attempt) ... ok
+test_legacy_snapshot_without_retirement_receipt_blocks_new_copy (test_attempt_working_lifecycle.WorkingLifecycleTests.test_legacy_snapshot_without_retirement_receipt_blocks_new_copy) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.037s
+
+OK

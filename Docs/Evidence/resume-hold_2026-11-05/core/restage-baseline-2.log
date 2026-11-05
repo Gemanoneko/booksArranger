@@ -1,0 +1,23 @@
+test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume (test_attempt_working_lifecycle.WorkingLifecycleTests.test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume) ... FAIL
+test_unknown_retirement_boundary_failure_still_stops_the_queue (test_attempt_working_lifecycle.WorkingLifecycleTests.test_unknown_retirement_boundary_failure_still_stops_the_queue) ... ok
+
+======================================================================
+FAIL: test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume (test_attempt_working_lifecycle.WorkingLifecycleTests.test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\resume-hold-20261105\tests\test_attempt_working_lifecycle.py", line 321, in test_uncaptured_closed_attempt_holds_only_its_book_after_normal_resume
+    self.assertEqual([rows[manifest['job_id']]['state'] for manifest in independent],['completed']*3)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['pending', 'pending', 'pending'] != ['completed', 'completed', 'completed']
+
+First differing element 0:
+'pending'
+'completed'
+
+- ['pending', 'pending', 'pending']
++ ['completed', 'completed', 'completed']
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.449s
+
+FAILED (failures=1)
