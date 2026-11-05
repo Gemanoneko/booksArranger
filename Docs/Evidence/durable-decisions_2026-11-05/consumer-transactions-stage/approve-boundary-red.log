@@ -1,0 +1,25 @@
+test_approve_overlapping_names_does_not_depend_on_its_superseded_owner (test_action_queue.DurableDecisionLedgerTests.test_approve_overlapping_names_does_not_depend_on_its_superseded_owner) ... FAIL
+test_approval_enqueue_and_applied_receipt_share_one_commit (test_action_queue.DurableDecisionLedgerTests.test_approval_enqueue_and_applied_receipt_share_one_commit) ... ERROR
+
+======================================================================
+ERROR: test_approval_enqueue_and_applied_receipt_share_one_commit (test_action_queue.DurableDecisionLedgerTests.test_approval_enqueue_and_applied_receipt_share_one_commit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_action_queue.py", line 163, in test_approval_enqueue_and_applied_receipt_share_one_commit
+    with self.assertRaisesRegex(RuntimeError,'private enqueue commit interruption'):queue.enqueue(manifest,**args)
+                                                                                    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+TypeError: AudioJobs.enqueue() got an unexpected keyword argument 'decision'
+
+======================================================================
+FAIL: test_approve_overlapping_names_does_not_depend_on_its_superseded_owner (test_action_queue.DurableDecisionLedgerTests.test_approve_overlapping_names_does_not_depend_on_its_superseded_owner)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_action_queue.py", line 134, in test_approve_overlapping_names_does_not_depend_on_its_superseded_owner
+    self.assertIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '31dc668e-a1a9-4228-a70a-ff4e2d011b9a' not found in set()
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.149s
+
+FAILED (failures=1, errors=1)

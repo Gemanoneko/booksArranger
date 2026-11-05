@@ -1,0 +1,44 @@
+test_durable_names_and_pending_hold_commit_with_the_applied_receipt (test_integration_242.IntegrationTests.test_durable_names_and_pending_hold_commit_with_the_applied_receipt) ... ERROR
+test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold (test_integration_242.IntegrationTests.test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold) ... ERROR
+test_durable_names_noop_also_has_an_atomic_terminal_receipt (test_integration_242.IntegrationTests.test_durable_names_noop_also_has_an_atomic_terminal_receipt) ... ERROR
+
+======================================================================
+ERROR: test_durable_names_and_pending_hold_commit_with_the_applied_receipt (test_integration_242.IntegrationTests.test_durable_names_and_pending_hold_commit_with_the_applied_receipt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_integration_242.py", line 214, in test_durable_names_and_pending_hold_commit_with_the_applied_receipt
+    f,store,saved,scope=self.durable_names()
+                        ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_integration_242.py", line 207, in durable_names
+    saved=store.accept(request_id=str(uuid.uuid4()),book_id=f.row['id'],action='names',revision=2,fingerprint=f.row['fingerprint'],
+                                      ^^^^
+NameError: name 'uuid' is not defined. Did you mean: 'build'? Or did you forget to import 'uuid'?
+
+======================================================================
+ERROR: test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold (test_integration_242.IntegrationTests.test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_integration_242.py", line 225, in test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold
+    f,store,saved,scope=self.durable_names();before=f.names_rows();context=f.current_context(f.row)
+                        ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_integration_242.py", line 207, in durable_names
+    saved=store.accept(request_id=str(uuid.uuid4()),book_id=f.row['id'],action='names',revision=2,fingerprint=f.row['fingerprint'],
+                                      ^^^^
+NameError: name 'uuid' is not defined. Did you mean: 'build'? Or did you forget to import 'uuid'?
+
+======================================================================
+ERROR: test_durable_names_noop_also_has_an_atomic_terminal_receipt (test_integration_242.IntegrationTests.test_durable_names_noop_also_has_an_atomic_terminal_receipt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_integration_242.py", line 236, in test_durable_names_noop_also_has_an_atomic_terminal_receipt
+    f,store,saved,scope=self.durable_names()
+                        ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_integration_242.py", line 207, in durable_names
+    saved=store.accept(request_id=str(uuid.uuid4()),book_id=f.row['id'],action='names',revision=2,fingerprint=f.row['fingerprint'],
+                                      ^^^^
+NameError: name 'uuid' is not defined. Did you mean: 'build'? Or did you forget to import 'uuid'?
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.287s
+
+FAILED (errors=3)

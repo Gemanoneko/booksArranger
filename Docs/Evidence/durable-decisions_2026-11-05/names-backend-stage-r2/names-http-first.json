@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart (test_lock_timing.SourceFolderDispatchTests.test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 1 test in 0.872s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 96576,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 8,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 100,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 1568.2257000000002,
+  "outputBytes": 321
+}

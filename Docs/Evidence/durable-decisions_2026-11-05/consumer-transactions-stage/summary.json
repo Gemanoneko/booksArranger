@@ -1,0 +1,124 @@
+{
+  "baseline": "9bcc58b5876e0ad2e6de8e4de39597f2bb9b7ac5",
+  "files": [
+    {
+      "path": "durable_decisions.py",
+      "bytes": 15850,
+      "sha256": "2fa422776827c0c3a1208883d42f71f60be480569b7068a8d82dd7f15558a9e8",
+      "lf_sha256": "2fa422776827c0c3a1208883d42f71f60be480569b7068a8d82dd7f15558a9e8",
+      "baseline_lf_sha256": "75ee349be3bf54df24be7233d89d272fd3cf59d810ec5bd43fe895c7c0e5ee13"
+    },
+    {
+      "path": "audio_jobs.py",
+      "bytes": 105495,
+      "sha256": "772fa97fba0881c6b5ef62b2602bee060338f3fe21ec18144385490cb589f7c2",
+      "lf_sha256": "09ad133ea315d841390cdc090797298cf445af382a205ec8b67d06a84e3e0182",
+      "baseline_lf_sha256": "a806d1a0c0c41709ca073e7ce4cfbf84d2f87b48c3d23a967cdb9a17c2ce49ce"
+    },
+    {
+      "path": "decision_effects.py",
+      "bytes": 1715,
+      "sha256": "6af2cafc9ddcd47f996039a2ad5729963447980f35d7845c977463d3d724c808",
+      "lf_sha256": "6af2cafc9ddcd47f996039a2ad5729963447980f35d7845c977463d3d724c808",
+      "baseline_lf_sha256": null
+    },
+    {
+      "path": "review_backend.py",
+      "bytes": 81816,
+      "sha256": "d14b7dcea5f89b306e8f8b6f13bd3e02a5812f7792b6b44aa86ea043920606cb",
+      "lf_sha256": "21120ce769869b6cda90772c8dc177a7cf5b1edf391ba47c942ec7f44c42259f",
+      "baseline_lf_sha256": "83cfa6c5091340221a49fe1d481cd708f376b78bc0a65aff1851c5f386552a0c"
+    },
+    {
+      "path": "tests/test_action_queue.py",
+      "bytes": 32693,
+      "sha256": "2995294441fd9f1d680e014b9ab96194d5dcea01320c456d9924d4045ef6ee81",
+      "lf_sha256": "9a8031562265f6f82ad9f81019bafe54406d627bb4fcd6c70eb5faf043f1a2be",
+      "baseline_lf_sha256": "5d98eaf712162d7c6c10e350376386c9cbb66c1bd6e25684e70ae2ff5b3f2f76"
+    },
+    {
+      "path": "tests/test_review_backend.py",
+      "bytes": 19681,
+      "sha256": "40e8747533cf9fb15cb823c15e10e6f8000f82b4d083ed04c8c89d40ec1422d4",
+      "lf_sha256": "515abf0a4cc5732984dd3ef8932809d0e763081a2547655c430e14b04033343c",
+      "baseline_lf_sha256": "19e1a60debd32db08546963a5522d7c1b111588b0ff309b7018b9ea156faf6cd"
+    }
+  ],
+  "patch_sha256": "2e543741e79b69393c95ee14acd0744e65d416ee327b1470a3f40b53c7056ae2",
+  "stage": "Unexposed transaction consumers only; Approve/review/choices/tracks durable HTTP still refused. Merge propagation and frontend are not included.",
+  "atomicity": "Canonical group review + context/manual/choice evidence + request step now commit together; track hashes/confirmations + step commit together. Reopening a partial review skips its committed mutation without a new revision. Private AudioJobs enqueue binds request/current book/source/head and commits final context + pending job + optional explicit English-name rule + final decision receipt in one transaction. Injected receipt failure rolls back all effects. Disjoint approval dependencies remain; fully overlapping superseded owners no longer strand approval.",
+  "results": "32 affected ledger/enqueue/review tests pass with owned native zero. Faults exercise review/context rollback, track/hash rollback, queued job/approval/rule rollback and restart partial-review replay. Existing public evidence actor/HTTPS/time validators unchanged; curated Tolkien dispatch preserved.",
+  "scope": "Private fixtures only, no live/source Z/API/focus, no full/build/release. Six paths frozen for bounded review while Merge propagation continues in separate files.",
+  "evidence": [
+    {
+      "path": "owned.mjs",
+      "bytes": 1985,
+      "sha256": "328e8f89372c9c511b54d14dc87ff7f7e36aea9c083f64a7558f460afef30c28"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 961,
+      "sha256": "be2e7c35c7e2dabe21ad28bfd99106f4fdab76d29916cccbcaa69db821b551ca"
+    },
+    {
+      "path": "freeze-consumers.py",
+      "bytes": 3419,
+      "sha256": "80d6443903c0cdf02fcd79502b9fde9ed7b2496f4a8c851759d2533ad2cc848b"
+    },
+    {
+      "path": "consumer-transactions.patch",
+      "bytes": 47348,
+      "sha256": "2e543741e79b69393c95ee14acd0744e65d416ee327b1470a3f40b53c7056ae2"
+    },
+    {
+      "path": "approve-boundary-red.json",
+      "bytes": 2951,
+      "sha256": "45c6cf4042d4b8c5b00c64715a44d44028b542558d4991ba69a19baf07191886"
+    },
+    {
+      "path": "approve-boundary-red.log",
+      "bytes": 2201,
+      "sha256": "6fb2d20d96de3e032b98699cf7a548eb3332cfa65e994008d162a8071b5d4d3b"
+    },
+    {
+      "path": "approve-boundary-green.json",
+      "bytes": 3563,
+      "sha256": "946338952bd43e9fc9738902c2f467ddd562a4687c095278cf08fb69231ffecd"
+    },
+    {
+      "path": "approve-boundary-green.log",
+      "bytes": 2840,
+      "sha256": "982725c5caad0b00bb193f63c9ae2327ab4bff12c20e25ce017e60751b54fd96"
+    },
+    {
+      "path": "review-atomic-first.json",
+      "bytes": 2167,
+      "sha256": "46e0e33eda3cb244602f67e0377873429065950baed286ead41c9fe5e3e671fb"
+    },
+    {
+      "path": "review-atomic-first.log",
+      "bytes": 1440,
+      "sha256": "b52a7e9f828d845ac331845f50be818f8066c44eb04397568c8a97885ea309d5"
+    },
+    {
+      "path": "review-atomic-corrected.json",
+      "bytes": 6488,
+      "sha256": "c6faef97ce0afe7f87510ec11a7605a86389eab0444d4340d3c4d05b33468a4c"
+    },
+    {
+      "path": "review-atomic-corrected.log",
+      "bytes": 5727,
+      "sha256": "f9783e006386ffcf111d192c3c94cce5bb6b9b7ba1d857908b34c53a1a2f5f01"
+    },
+    {
+      "path": "approve-review-consumers.json",
+      "bytes": 6488,
+      "sha256": "41ed470f7ba1c26e073164f22a1035a17e3e3f293a9c15015ddce7e177c8b8cb"
+    },
+    {
+      "path": "approve-review-consumers.log",
+      "bytes": 5727,
+      "sha256": "7e7186e7db1adf55d7c5cdd0ec084b8cabb6c8e9c7d41f9abea26f9c61ad105f"
+    }
+  ]
+}

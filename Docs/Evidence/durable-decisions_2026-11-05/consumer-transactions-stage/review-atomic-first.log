@@ -1,0 +1,17 @@
+test_durable_review_receipt_failure_rolls_back_group_context_and_manual_evidence (test_review_backend.ReviewTests.test_durable_review_receipt_failure_rolls_back_group_context_and_manual_evidence) ... ok
+test_durable_partial_review_reopens_without_repeating_its_committed_mutations (test_review_backend.ReviewTests.test_durable_partial_review_reopens_without_repeating_its_committed_mutations) ... ok
+test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations (test_review_backend.ReviewTests.test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations) ... ERROR
+
+======================================================================
+ERROR: test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations (test_review_backend.ReviewTests.test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_review_backend.py", line 103, in test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations
+    self.assertEqual(len(result['review_context']['source_hashes']),2)
+                         ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+KeyError: 'source_hashes'
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.804s
+
+FAILED (errors=1)

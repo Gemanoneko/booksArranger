@@ -1,0 +1,8 @@
+test_durable_names_and_pending_hold_commit_with_the_applied_receipt (test_integration_242.IntegrationTests.test_durable_names_and_pending_hold_commit_with_the_applied_receipt) ... ok
+test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold (test_integration_242.IntegrationTests.test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold) ... ok
+test_durable_names_noop_also_has_an_atomic_terminal_receipt (test_integration_242.IntegrationTests.test_durable_names_noop_also_has_an_atomic_terminal_receipt) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.508s
+
+OK

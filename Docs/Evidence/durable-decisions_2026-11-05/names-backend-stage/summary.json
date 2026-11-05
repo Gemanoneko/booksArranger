@@ -1,0 +1,137 @@
+{
+  "baseline": "c92b724e2969aa2d277f1fcac4216ec1fc122293",
+  "files": [
+    {
+      "path": "durable_decisions.py",
+      "bytes": 15591,
+      "sha256": "75ee349be3bf54df24be7233d89d272fd3cf59d810ec5bd43fe895c7c0e5ee13",
+      "lf_sha256": "75ee349be3bf54df24be7233d89d272fd3cf59d810ec5bd43fe895c7c0e5ee13",
+      "baseline_lf_sha256": "5e5c06ef1a66f9d6fe3e0044d9adfc08baaa906f46f74b5880a24aa53394611d"
+    },
+    {
+      "path": "decision_runtime.py",
+      "bytes": 4672,
+      "sha256": "878f3473237513df7f485e848f91eb296244cc5096a7b85456a88ec54d41ab85",
+      "lf_sha256": "878f3473237513df7f485e848f91eb296244cc5096a7b85456a88ec54d41ab85",
+      "baseline_lf_sha256": null
+    },
+    {
+      "path": "merge_service.py",
+      "bytes": 444567,
+      "sha256": "3c984b92212dfeb28125a902a8e199fc304b7a87ca737bd3f93cd51991c255bb",
+      "lf_sha256": "70880ee6577348b7bbc5c84984205c26e6b5c2ab14d8a3637fd12520ca80010f",
+      "baseline_lf_sha256": "0f842f02150a1bdc0dc4d051d817d5490cfec3b03ce94f12c1704dfb67ef33fc"
+    },
+    {
+      "path": "web_server.py",
+      "bytes": 115773,
+      "sha256": "4a1349fd89049ac61228cb58fdc584ab9c78a1c5e3ac6729ce0adaec870fa70b",
+      "lf_sha256": "c268d970c16819236f2abff61c745a9ae959001accee62b4e5e792abb8dc1fba",
+      "baseline_lf_sha256": "1695f1abc4a9d0470e4847800826103ba1cef2841de44ef9098401cac6edd233"
+    },
+    {
+      "path": "tests/test_integration_242.py",
+      "bytes": 26875,
+      "sha256": "25b8b28ad34654b48a93074c90056da246d5a4e551aceafc6e7e01d0025e097b",
+      "lf_sha256": "aaaca20ed8c96b6d361e32a8fe775297f49fff90dd4dc55bc7bcfca05378b76d",
+      "baseline_lf_sha256": "7293249ee2e9029e5d3a30307d343cda63a746d64304f6c1b09dac7a0cc3f8e6"
+    },
+    {
+      "path": "tests/test_lock_timing.py",
+      "bytes": 34508,
+      "sha256": "9669271917fe49878315a74416fccb2ef3105e9b4b712c608b0ae99e086d2546",
+      "lf_sha256": "1dcec531e43a6b76f1eed287fa18411f3e699c2bb9e38ad685ebe06a9df38c4f",
+      "baseline_lf_sha256": "011b2ebb6c316bc5a1d187f754210eee005e46000f1a556f5cf9bf4dc25dd30d"
+    }
+  ],
+  "patch_sha256": "ea3af812b7bab016cecb6c482b8cc5ffb4e9c708bc05305b1895c4909c713161",
+  "stage": "Names backend only; frontend and other Save/Approve consumers not switched. New authenticated /api/book-decisions accepts ONLY names, all other actions refuse before durable acceptance. /status reconciles same request ID fromSQLite.",
+  "atomicity": "Existing names transaction now verifies application/book/source/value/head binding and commits names entries+pending approval hold+terminal decision receipt together. No-op commits guarded terminalreceipt. Crashbeforecommit rollsbacknames/context/receipt; restartreadsappliedstate beforeanyrepeat. ApplicationpreparesoutsideSQLitewriter; acceptedintentstoredwithoutworkerlocks. No source fingerprint/revision drift auto-rebase.",
+  "runtime": "DecisionRuntime recovers accepted names at service start; consumer busy leaves accepted intent for later retry, independentbooks canproceed. Close signals and joins its catalogreader before teardown. No audiobook worker/start/conversion is invoked by names application. Fulfilled payload pruned onlyafterconsumerreceiptcommits; names evidence/tombstones remain.",
+  "results": "37/37 ledger+integration242+actualSourceFolderDispatchTests PASS6.082s(owned6.854s). LastnormalHTTPcase additionallycheckedtokenandunwiredapprove denialPASS1.551s. ActualMerge4workerlocks held during HTTPaccept<1s; requeststatusreconciles, runtimeclosed/reopenedbeforeapply, savednamesapplyonceafterrelease, sameIDreplayreturnsapplied, jobsremainempty/sourcebytesunchanged. Threeatomicnamescasesincludingrollback/noop passed separately. Initialtest-onlymissinguuidimport corrected with rawfailure preserved.",
+  "preserved_Tolkien": "Allfive imported11b1e0 source/test files normalized-equal verified, excluded; no evidence-dispatch overwrite.",
+  "remaining": "Senua code-boundaryreview before commit; then Approve/review/choices/tracks transaction consumers and frontend durable receipt/reconciliation. No full/build/release/productionfeaturecompletionclaim.",
+  "scope": "Private fixtures only; no liveDB/API/Z/focus. Scratch remainsownedactiveforfollowingstages. Existing test modules already canonical; newrootmodule collects automatically.",
+  "evidence": [
+    {
+      "path": "owned.mjs",
+      "bytes": 1985,
+      "sha256": "328e8f89372c9c511b54d14dc87ff7f7e36aea9c083f64a7558f460afef30c28"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 961,
+      "sha256": "be2e7c35c7e2dabe21ad28bfd99106f4fdab76d29916cccbcaa69db821b551ca"
+    },
+    {
+      "path": "freeze-names.py",
+      "bytes": 4833,
+      "sha256": "43827237eca2491bc83f611b4b357fe81e95df9d734217a4e42aa5dcd332e874"
+    },
+    {
+      "path": "names-backend.patch",
+      "bytes": 36652,
+      "sha256": "ea3af812b7bab016cecb6c482b8cc5ffb4e9c708bc05305b1895c4909c713161"
+    },
+    {
+      "path": "names-atomic-first.json",
+      "bytes": 4782,
+      "sha256": "8fb3b5d9015f8ba60c1479352b7ff07960f2cbdb230510bafb0207e75d1a0968"
+    },
+    {
+      "path": "names-atomic-first.log",
+      "bytes": 3952,
+      "sha256": "e0dfcb5dad153d712262f11cdcd60d6d6a59996b8ffb9e1ae0fd6619dfbd4920"
+    },
+    {
+      "path": "names-atomic-corrected.json",
+      "bytes": 1359,
+      "sha256": "f9b631e38e41b4ad99dc2cc8b37b8056ff662870e99af752d2af35f0904b81af"
+    },
+    {
+      "path": "names-atomic-corrected.log",
+      "bytes": 651,
+      "sha256": "fdd198e80531226a8d3c2375bfc4154778987d10a63bb81d8d41aea7e028e000"
+    },
+    {
+      "path": "names-binding.json",
+      "bytes": 1350,
+      "sha256": "4781817808f5e4335c0f4b2d58c909b24c73a70cb8c91d2ba8f831a61f948c81"
+    },
+    {
+      "path": "names-binding.log",
+      "bytes": 651,
+      "sha256": "07af9844828136f87b03e0deb6b16a7a0df89b9629869271ba7142a470d7d61b"
+    },
+    {
+      "path": "names-http-first.json",
+      "bytes": 1026,
+      "sha256": "551402cf5e76537212f9ea6594b90a58c5727387febfa2758bcf947a37c2b7b9"
+    },
+    {
+      "path": "names-http-first.log",
+      "bytes": 321,
+      "sha256": "0751eed172ee5f5784c24a8023dddbda4f505370d3b0e39e4f7da166f2054fc1"
+    },
+    {
+      "path": "names-backend-cohort.json",
+      "bytes": 7933,
+      "sha256": "2db4acb437e25b60d35907502e32bd62fe173175ca347423bc4d170ad64f5c8a"
+    },
+    {
+      "path": "names-backend-cohort.log",
+      "bytes": 7159,
+      "sha256": "ce53e5b5c6ebfc1d1dd3c1671b41e7ddca786d5f5c79a40f8e08a3b3667df529"
+    },
+    {
+      "path": "names-http-final.json",
+      "bytes": 1016,
+      "sha256": "0e182d21857d782809e5fc254502f54ee581bbf00f9f5c8d423fcc084242a6e0"
+    },
+    {
+      "path": "names-http-final.log",
+      "bytes": 321,
+      "sha256": "682fc16e162a398efe4a9393206f2a9d85ad3d770ceff13dac2b0af52011803a"
+    }
+  ]
+}

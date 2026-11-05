@@ -1,0 +1,280 @@
+{
+  "purpose": "Preserve superseded intermediate Names/consumer stage manifests and raw failed/passing receipts referenced by the committed patch-metadata erratum. These historical patches are not instructions to apply code; corrected latest patches and committed source raw/LF manifests are authoritative. No product files or other agent evidence included.",
+  "files": [
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/approve-boundary-green.json",
+      "bytes": 3563,
+      "sha256": "946338952bd43e9fc9738902c2f467ddd562a4687c095278cf08fb69231ffecd"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/approve-boundary-green.log",
+      "bytes": 2840,
+      "sha256": "982725c5caad0b00bb193f63c9ae2327ab4bff12c20e25ce017e60751b54fd96"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/approve-boundary-red.json",
+      "bytes": 2951,
+      "sha256": "45c6cf4042d4b8c5b00c64715a44d44028b542558d4991ba69a19baf07191886"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/approve-boundary-red.log",
+      "bytes": 2201,
+      "sha256": "6fb2d20d96de3e032b98699cf7a548eb3332cfa65e994008d162a8071b5d4d3b"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/approve-review-consumers.json",
+      "bytes": 6488,
+      "sha256": "41ed470f7ba1c26e073164f22a1035a17e3e3f293a9c15015ddce7e177c8b8cb"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/approve-review-consumers.log",
+      "bytes": 5727,
+      "sha256": "7e7186e7db1adf55d7c5cdd0ec084b8cabb6c8e9c7d41f9abea26f9c61ad105f"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/consumer-transactions.patch",
+      "bytes": 47348,
+      "sha256": "2e543741e79b69393c95ee14acd0744e65d416ee327b1470a3f40b53c7056ae2"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/focused.py",
+      "bytes": 961,
+      "sha256": "be2e7c35c7e2dabe21ad28bfd99106f4fdab76d29916cccbcaa69db821b551ca"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/freeze-consumers.py",
+      "bytes": 3419,
+      "sha256": "80d6443903c0cdf02fcd79502b9fde9ed7b2496f4a8c851759d2533ad2cc848b"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/owned.mjs",
+      "bytes": 1985,
+      "sha256": "328e8f89372c9c511b54d14dc87ff7f7e36aea9c083f64a7558f460afef30c28"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/review-atomic-corrected.json",
+      "bytes": 6488,
+      "sha256": "c6faef97ce0afe7f87510ec11a7605a86389eab0444d4340d3c4d05b33468a4c"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/review-atomic-corrected.log",
+      "bytes": 5727,
+      "sha256": "f9783e006386ffcf111d192c3c94cce5bb6b9b7ba1d857908b34c53a1a2f5f01"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/review-atomic-first.json",
+      "bytes": 2167,
+      "sha256": "46e0e33eda3cb244602f67e0377873429065950baed286ead41c9fe5e3e671fb"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/review-atomic-first.log",
+      "bytes": 1440,
+      "sha256": "b52a7e9f828d845ac331845f50be818f8066c44eb04397568c8a97885ea309d5"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/summary.json",
+      "bytes": 5731,
+      "sha256": "7b01dd1098c9571d07265b7dffb7e65a1e318630b1242a6574e802cce53a6c7e"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/focused.py",
+      "bytes": 961,
+      "sha256": "be2e7c35c7e2dabe21ad28bfd99106f4fdab76d29916cccbcaa69db821b551ca"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/freeze-names-r2.py",
+      "bytes": 5403,
+      "sha256": "70b04e915428d570a68b89ff7191e1afbbf72bb8cf58d5dbe4ab9ef0976bc710"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-atomic-corrected.json",
+      "bytes": 1359,
+      "sha256": "f9b631e38e41b4ad99dc2cc8b37b8056ff662870e99af752d2af35f0904b81af"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-atomic-corrected.log",
+      "bytes": 651,
+      "sha256": "fdd198e80531226a8d3c2375bfc4154778987d10a63bb81d8d41aea7e028e000"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-atomic-first.json",
+      "bytes": 4782,
+      "sha256": "8fb3b5d9015f8ba60c1479352b7ff07960f2cbdb230510bafb0207e75d1a0968"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-atomic-first.log",
+      "bytes": 3952,
+      "sha256": "e0dfcb5dad153d712262f11cdcd60d6d6a59996b8ffb9e1ae0fd6619dfbd4920"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-backend-cohort.json",
+      "bytes": 7933,
+      "sha256": "2db4acb437e25b60d35907502e32bd62fe173175ca347423bc4d170ad64f5c8a"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-backend-cohort.log",
+      "bytes": 7159,
+      "sha256": "ce53e5b5c6ebfc1d1dd3c1671b41e7ddca786d5f5c79a40f8e08a3b3667df529"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-backend-liveness-cohort.json",
+      "bytes": 8345,
+      "sha256": "24626f75a0c53d0352682b5b8e37c7e1e3eeee3ee80b0555b38e08f5ed698c1e"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-backend-liveness-cohort.log",
+      "bytes": 7567,
+      "sha256": "fda5f602e8d31b4a3a8de09091d47f34bdcee1387619e164271dc65bd8d00390"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-backend.patch",
+      "bytes": 41742,
+      "sha256": "4df09b2ebd68e327344f06c5a15885543c07dcc203a94f2fdb4e0ab10b809876"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-binding.json",
+      "bytes": 1350,
+      "sha256": "4781817808f5e4335c0f4b2d58c909b24c73a70cb8c91d2ba8f831a61f948c81"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-binding.log",
+      "bytes": 651,
+      "sha256": "07af9844828136f87b03e0deb6b16a7a0df89b9629869271ba7142a470d7d61b"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-http-final.json",
+      "bytes": 1016,
+      "sha256": "0e182d21857d782809e5fc254502f54ee581bbf00f9f5c8d423fcc084242a6e0"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-http-final.log",
+      "bytes": 321,
+      "sha256": "682fc16e162a398efe4a9393206f2a9d85ad3d770ceff13dac2b0af52011803a"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-http-first.json",
+      "bytes": 1026,
+      "sha256": "551402cf5e76537212f9ea6594b90a58c5727387febfa2758bcf947a37c2b7b9"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-http-first.log",
+      "bytes": 321,
+      "sha256": "0751eed172ee5f5784c24a8023dddbda4f505370d3b0e39e4f7da166f2054fc1"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/owned.mjs",
+      "bytes": 1985,
+      "sha256": "328e8f89372c9c511b54d14dc87ff7f7e36aea9c083f64a7558f460afef30c28"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/runtime-liveness-corrected.json",
+      "bytes": 1430,
+      "sha256": "2246197065697c23fe2f817af61feab32db4f7d0ce9f0cff631a5b2b998e1ff5"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/runtime-liveness-corrected.log",
+      "bytes": 730,
+      "sha256": "648a90edbc9ab6da415a42766e6c093323d5c62fc1d53f966e8679fafd4ffaac"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/runtime-liveness.json",
+      "bytes": 2190,
+      "sha256": "0ce4abe4fa773c1745d292da75ba2321657d6bfd4042af16fa3ecb914c5239a1"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/runtime-liveness.log",
+      "bytes": 1453,
+      "sha256": "b97affcfd6bd8171b1ce2b3d54073206e5da0a482c27dfc2a56cc744baf8557d"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/summary.json",
+      "bytes": 8720,
+      "sha256": "17c7ed7995aed1678ebf87f2d303f21eec365e3ff6fc89b34c9fcf3c229766c8"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/focused.py",
+      "bytes": 961,
+      "sha256": "be2e7c35c7e2dabe21ad28bfd99106f4fdab76d29916cccbcaa69db821b551ca"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/freeze-names.py",
+      "bytes": 4833,
+      "sha256": "43827237eca2491bc83f611b4b357fe81e95df9d734217a4e42aa5dcd332e874"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-atomic-corrected.json",
+      "bytes": 1359,
+      "sha256": "f9b631e38e41b4ad99dc2cc8b37b8056ff662870e99af752d2af35f0904b81af"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-atomic-corrected.log",
+      "bytes": 651,
+      "sha256": "fdd198e80531226a8d3c2375bfc4154778987d10a63bb81d8d41aea7e028e000"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-atomic-first.json",
+      "bytes": 4782,
+      "sha256": "8fb3b5d9015f8ba60c1479352b7ff07960f2cbdb230510bafb0207e75d1a0968"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-atomic-first.log",
+      "bytes": 3952,
+      "sha256": "e0dfcb5dad153d712262f11cdcd60d6d6a59996b8ffb9e1ae0fd6619dfbd4920"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-backend-cohort.json",
+      "bytes": 7933,
+      "sha256": "2db4acb437e25b60d35907502e32bd62fe173175ca347423bc4d170ad64f5c8a"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-backend-cohort.log",
+      "bytes": 7159,
+      "sha256": "ce53e5b5c6ebfc1d1dd3c1671b41e7ddca786d5f5c79a40f8e08a3b3667df529"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-backend.patch",
+      "bytes": 36652,
+      "sha256": "ea3af812b7bab016cecb6c482b8cc5ffb4e9c708bc05305b1895c4909c713161"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-binding.json",
+      "bytes": 1350,
+      "sha256": "4781817808f5e4335c0f4b2d58c909b24c73a70cb8c91d2ba8f831a61f948c81"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-binding.log",
+      "bytes": 651,
+      "sha256": "07af9844828136f87b03e0deb6b16a7a0df89b9629869271ba7142a470d7d61b"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-http-final.json",
+      "bytes": 1016,
+      "sha256": "0e182d21857d782809e5fc254502f54ee581bbf00f9f5c8d423fcc084242a6e0"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-http-final.log",
+      "bytes": 321,
+      "sha256": "682fc16e162a398efe4a9393206f2a9d85ad3d770ceff13dac2b0af52011803a"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-http-first.json",
+      "bytes": 1026,
+      "sha256": "551402cf5e76537212f9ea6594b90a58c5727387febfa2758bcf947a37c2b7b9"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-http-first.log",
+      "bytes": 321,
+      "sha256": "0751eed172ee5f5784c24a8023dddbda4f505370d3b0e39e4f7da166f2054fc1"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/owned.mjs",
+      "bytes": 1985,
+      "sha256": "328e8f89372c9c511b54d14dc87ff7f7e36aea9c083f64a7558f460afef30c28"
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/summary.json",
+      "bytes": 6902,
+      "sha256": "bb2772c89e6fc93df0b679f9cfec2bf4045f7db5c5a6334f24c0024c66727977"
+    }
+  ]
+}
