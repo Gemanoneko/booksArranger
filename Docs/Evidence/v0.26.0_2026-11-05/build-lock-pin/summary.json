@@ -1,0 +1,12 @@
+{
+  "baseline": "f04d05d3330e44550f4a84db880d996955a6ce50",
+  "path": "scripts/build-inputs.json",
+  "bytes": 442228,
+  "sha256": "ec6e1cab1d9721f55059e0415c40f66b869bb5f3e9a16a89709afa7db51386f7",
+  "lf_sha256": "01e56c9e7cf39875f84b52c3fbe5cd2c526957a689a562f873c4b65417073c1f",
+  "baseline_lf_sha256": "fe6c5eda4bafd4f340b959db4ec9ef3c45129000c478fa1627c621444d3199ba",
+  "package_lock_bytes": 129812,
+  "package_lock_sha256": "4793ceb09472d3381afc1acec949e4f9506cb31b311cbab4babdcceabafadd18",
+  "proof": "Parsed dependency graph equal after changing only root version and packages empty-key version0.25.0\u21920.26.0. build-inputs differs only packageLockSha256; all2301 seed members/tool/version pins unchanged. No dependency install/pack/check/native invoked. Digest uses main actual LF lock bytes, not CRLF implementation checkout.",
+  "patch_sha256": "8b33b5dc477d017234a2d483b7e6dcdcc60a0ffb4515f2d26e29e48dfe80dd2a"
+}
