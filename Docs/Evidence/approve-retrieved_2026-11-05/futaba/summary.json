@@ -1,0 +1,105 @@
+{
+  "schema": "books-tolkien-approval-futaba-focused-v1",
+  "source_commit": "11b1e0227812326da2ea4905a8ebedfe961d13a7",
+  "frozen_implementation_summary_sha256": "0beb853828a10b99189ebabfbdcc4701b94d4f9e932404ac1b54688f2864bb77",
+  "source_pin_sha256": "f0c437d18920200f5bced30aef13d0ce62d3b155d5802ccd8865792818a74e27",
+  "source_archive_sha256": "e426de43a67b39268dc9fd6aa9a4b7cd4fad8a5f2ff49c5feb07dde879f384fd",
+  "private_arena": "C:/Antigravity Projects/f26",
+  "first_attempt": {
+    "ran": 74,
+    "setup_errors": 9,
+    "reason": "Narrow QA archive omitted the committed Docs/BooksArranger_DiagnosisEvidence_2026-11-01.json fixture used by RetainedResearchTests; no product assertion failed",
+    "code": 1,
+    "closed": true,
+    "outputComplete": true,
+    "nativeZero": true,
+    "preserved": true
+  },
+  "fixture_correction": {
+    "source": "Exact file from committed Git archive",
+    "path": "Docs/BooksArranger_DiagnosisEvidence_2026-11-01.json",
+    "sha256": "d75d210472e9c20a1b2713ec6d72327dce6db75f339202dc5d1234146840b8c5",
+    "source_or_test_code_changed": false
+  },
+  "final": {
+    "ran": 74,
+    "passed": 74,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "forced": false,
+    "timedOut": false,
+    "nativeComplete": true,
+    "nativeZero": true,
+    "nativeActive": 0,
+    "nativeUnsignaled": 0,
+    "elapsedMs": 15649.9783,
+    "target_cases": [
+      {
+        "name": "test_fellowship_actual_approve_persists_and_queues",
+        "passed": true
+      },
+      {
+        "name": "test_two_towers_actual_approve_persists_and_queues",
+        "passed": true
+      },
+      {
+        "name": "test_return_king_actual_approve_persists_and_queues",
+        "passed": true
+      },
+      {
+        "name": "test_legacy_middle_earth_actual_approve_persists_and_queues",
+        "passed": true
+      },
+      {
+        "name": "test_private_review_consumer_refuses_malformed_or_mismatched_curated_records_before_writes",
+        "passed": true
+      },
+      {
+        "name": "test_generic_manual_rules_keep_https_time_and_field_requirements",
+        "passed": true
+      }
+    ]
+  },
+  "scope": "Private generated 0.4 s M4B sources, real approve_book persistence and pending job manifest; no conversion started. Generic manual and typed mismatch refusals. No packaged build/full/native app/live/Z/focus/user data.",
+  "files": [
+    {
+      "name": "focused.py",
+      "bytes": 653,
+      "sha256": "beb582cdfd1de910c6293114de6a13406d72f56aa1b8875ee360bbd23bb93744"
+    },
+    {
+      "name": "omitted-fixture-result.json",
+      "bytes": 25999,
+      "sha256": "89182e47e65197a330380552b7629a6b97d0fdf42478152aa0b81915d4403c9a"
+    },
+    {
+      "name": "omitted-fixture-result.log",
+      "bytes": 24482,
+      "sha256": "c26af14afc6cdea8d2d9c311271bbb7c36b28d553c455183a4270e624ca7ff02"
+    },
+    {
+      "name": "owned.mjs",
+      "bytes": 1645,
+      "sha256": "9ee608b52c248c433f9b04610a1d1d58895e4e145f679d07378b6101ab62d68c"
+    },
+    {
+      "name": "result.json",
+      "bytes": 13568,
+      "sha256": "53f314666260da94e19219786475a27495d926551d01e9b4f7b11e8e6cc82375"
+    },
+    {
+      "name": "result.log",
+      "bytes": 12721,
+      "sha256": "f258cabd1b28dd1f8fb66609ba38a9bf9f6514344c939a56bf9410bd8d9cff87"
+    },
+    {
+      "name": "source-pin.json",
+      "bytes": 2228,
+      "sha256": "f0c437d18920200f5bced30aef13d0ce62d3b155d5802ccd8865792818a74e27"
+    }
+  ]
+}

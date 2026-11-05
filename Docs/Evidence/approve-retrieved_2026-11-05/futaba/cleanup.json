@@ -1,0 +1,17 @@
+{
+  "schema": "books-tolkien-approval-futaba-cleanup-v1",
+  "source_commit": "11b1e0227812326da2ea4905a8ebedfe961d13a7",
+  "roots": [
+    "C:/Antigravity Projects/f26",
+    "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/futaba-approve-20261105"
+  ],
+  "roots_absent": true,
+  "removed_files": 329,
+  "removed_mib": 54.12,
+  "kept_targets": 0,
+  "dryrun_sha256": "2499be917bdc51f4ce39826743ec47a0e261f2bb3f95a8171288882d29d96e15",
+  "apply_sha256": "12eddf92963947d5378da5829f31c67dc4d48b8b99f2157d31d04816338b5a2b",
+  "summary_sha256": "e4543294efeda220da0cdde49c892d9f21e533c2a29fd4e574cde924c476d16f",
+  "report_sha256": "06484d7acb7fd2b258cf04fafc422eba5629dd752c2d1f50893a0f917c8900e7",
+  "excluded": "Ender a26/sa26 and approve-retrieved scratch, live collection/Z, packaged app, current worktrees"
+}

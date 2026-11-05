@@ -1,0 +1,6 @@
+studio-sweep approved targets (apply): removed 329 file(s), 54.12 MB; refused or kept 0 target(s).
+  REMOVED      C:\Antigravity Projects\f26  [Sergei standing cleanup of Futaba private Tolkien approval fixture arena; no remaining test files]
+               before 0 files, 0 B; removed 0 files, 0 B; after 0 files, 0 B
+  REMOVED      C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\futaba-approve-20261105  [Sergei standing cleanup of Futaba pinned 11b1e02 QA archive and scripts; evidence retained in Docs]
+               before 329 files, 54.12 MB; removed 329 files, 54.12 MB; after 0 files, 0 B
+  free space on C:\: 95.70 GB -> 95.76 GB (+54.96 MB, statfs)

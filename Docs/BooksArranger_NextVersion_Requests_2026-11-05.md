@@ -24,3 +24,15 @@ Reported by Sergei on 2026-11-05 while using 0.25.0. Implemented and pushed thro
 - Queued Edit names text distinguishes in-memory pending edits from a successful durable save, including cancel and uncertain-response states. This copy change does not make pending actions durable across restart.
 
 Futaba independently passed 31 focused lifecycle tests on `433885d` and 26 progress/status Python tests plus three DOM scripts on `885264e`, using private fixtures. These are focused source checks, not packaged-build or release clearance. Live files and app controls were not changed. See the dated ResumeHold focused QA reports and evidence for exact identities and limitations.
+
+## Tolkien approval error — prepared for next release
+
+Sergei reported `Approve cancelled: 'retrieved_utc'` for The Return of the King and The Two Towers and explicitly requested its repair. Source commit `11b1e0227812326da2ea4905a8ebedfe961d13a7` repairs the curated-decision producer/consumer contract without weakening generic manual/public evidence rules. The Fellowship of the Ring and legacy Middle-earth path are covered too.
+
+Senua's bounded source review is clear. Futaba independently passed 74 focused checks on the committed source after correcting one omitted committed evidence fixture in her private test copy. This is not packaged-build or release clearance. Own Tolkien implementation scratch cleanup was refused before command launch; retained paths are recorded in `Docs/Evidence/approve-retrieved_2026-11-05/cleanup-status.json` and must not be removed through an alternate route.
+
+## Persistent Save/Approve and automatic Resume label — in progress
+
+Sergei explicitly superseded the queued Save UX: Save and Approve must promptly retain decisions on disk rather than cancel because another book is busy, survive restarts, and clean temporary payloads after application. Committed design and UX contracts are `BooksArranger_DurableDecisions_Design_2026-11-05.md` and `BooksArranger_DurableDecisions_UX_2026-11-05.md`. The prior queued-save wording above is an intermediate fix, not the final requested behavior.
+
+Ledger foundation is committed as `c92b724`; actual Save/Approve transaction, HTTP and frontend wiring remain under implementation. This foundation alone does not change the running app. The same UX contract calls for Resume automatic processing when an existing pass is paused, with matching help and tooltip text.
