@@ -1,0 +1,81 @@
+{
+  "schema": "books-0260-native-recipe-v1",
+  "status": "OPERATOR PREPARED ONLY; no native arena, authority, plan, launch or PASS receipt created",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "canonical": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/converted-duplicate_2026-11-04/native-recipe-0250/native-once.mjs",
+    "sha256": "6e4f1761b7edc0bb0b5906a1dc92364867a05fc5826236d425b1a8bc99816e78"
+  },
+  "operator": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/native-once.mjs",
+    "sha256": "07577db9f9c22c25a40f7500fa89ed6fd6898267520a18bd34f8e056f1c09336"
+  },
+  "literal_adaptation_patch_sha256": "ea5c196b4e28fb27be6c28617b55ddaf881ba6ac18dfba6f85f413d514ae70e8",
+  "context": {
+    "path": "C:/Antigravity Projects/q28/context/context.json",
+    "sha256": "3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267"
+  },
+  "runtime_pointer_sha256": "fe93797d34dece7d0bef2426f9e6bffa028ba78b0be5c7e418200c3ce041ca77",
+  "code": {
+    "scripts/qa-phase-contract.mjs": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f",
+    "scripts/qa-real-shell-phase.mjs": "49a0a2fae1f29b0dd0631644be168fa321df4a4689a9cf59dbc076da5e6f32af",
+    "tests/real-shell-update-support.mjs": "fd3f0c9c5d0af1bbf877b089781e718092b64c6488d483ba2c925c3326975c90",
+    "tests/real-shell-update.test.mjs": "0a4a48db35c05214c1ac5e9cd9cb536fc73fd3989664685f0f376975e2ee4ee2"
+  },
+  "native_arena": "C:/Antigravity Projects/n26",
+  "ownership_root": "C:/Antigravity Projects/q28/ownership",
+  "release_root": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3",
+  "deadline_ms": 600000,
+  "authority_template": {
+    "schema": "books-native-qa-authority-v1",
+    "binding": null,
+    "approved_by": "Sergei",
+    "decision_ref": "Current user message in this release chat, client date 2026-11-05; exact message sent time unavailable",
+    "decision_text": "Current user message, quoted verbatim: \"Add the four Universe options too, then have Sully release the next version with all these fixes. Don't stop until it's released unless there's a serious stopper.\" Jane and Senua interpret the existing canonical private PA-1 as necessary release workflow within that request: one hidden private copied app, invalid fake installer refusal, deletion of the exact newly created own HKCU tray numeric leaf, and ONE added 8-byte numeric history reference while preserving every preexisting UIOrderList byte. These enumerated registry effects are producer/reviewer scope interpretation, not words attributed to Sergei. No focus, installed app changes, live library or Z: access. No old 0.25 authority or proof is reused. approved_at records actual new preparation UTC, not the unavailable user-message sent time.",
+    "approved_at": null,
+    "effects": {
+      "hidden_private_app": true,
+      "invalid_installer_attempt": true,
+      "own_new_leaf_delete": true,
+      "leave_numeric_history_reference": true,
+      "ui_order_list_write": false
+    }
+  },
+  "preconditions": [
+    "One original exact current full PASS receipt; no Ender full repeat",
+    "Senua reviews actual operator and fresh pure-prepared authority/plan before single launch",
+    "n26 must be absent and is created exclusively by prepare; no adoption or recovery bypass"
+  ],
+  "invocation_templates": {
+    "prepare": [
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/native-once.mjs",
+      "prepare",
+      "07577db9f9c22c25a40f7500fa89ed6fd6898267520a18bd34f8e056f1c09336",
+      "<EXACT_ORIGINAL_FULL_RECEIPT_PATH>",
+      "<EXACT_ORIGINAL_FULL_RECEIPT_SHA256>"
+    ],
+    "run": [
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/native-once.mjs",
+      "run",
+      "07577db9f9c22c25a40f7500fa89ed6fd6898267520a18bd34f8e056f1c09336",
+      "<EXACT_REVIEWED_PLAN_SHA256>"
+    ],
+    "accept": [
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/native-once.mjs",
+      "accept",
+      "07577db9f9c22c25a40f7500fa89ed6fd6898267520a18bd34f8e056f1c09336",
+      "<EXACT_REVIEWED_PLAN_SHA256>"
+    ]
+  }
+}

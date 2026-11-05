@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "{\"context\":{\"path\":\"C:\\\\Antigravity Projects\\\\q28\\\\context\\\\context.json\",\"sha256\":\"3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267\"},\"assembler\":{\"path\":\"C:\\\\Antigravity Projects\\\\Worktrees\\\\Books Arranger\\\\0260-release-20261105-r3\\\\scripts\\\\qa-entry-context.mjs\",\"sha256\":\"0789498b4798c95410bd0b9020c5a0b359601ef0a9a68754274608a494cd498d\"},\"sourceFiles\":2491,\"runtimeCounts\":{\"dependencies\":7589,\"ownership\":92,\"bundled-media\":47,\"mp3-fixture\":1,\"node-installation\":1936,\"git\":9625,\"powershell\":898}}\n",
+  "err": "",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 128540,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 19,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 1082,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 16926.3227,
+  "outputBytes": 520
+}

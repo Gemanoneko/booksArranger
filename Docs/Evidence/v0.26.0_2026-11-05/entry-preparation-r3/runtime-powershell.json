@@ -1,0 +1,3596 @@
+{
+ "files": [
+  {
+   "path": "Certificate.format.ps1xml",
+   "sha256": "031bdb9c0a1b9f05d3916d6ef18f9e85446c5aa903040df3a6d0c773014770c3"
+  },
+  {
+   "path": "Diagnostics.Format.ps1xml",
+   "sha256": "1bd3f9d3e8aa3d4edc020f59a42e4b8eadd77b424bbbb8b08d5245f240be8f8a"
+  },
+  {
+   "path": "DotNetTypes.format.ps1xml",
+   "sha256": "e6ddbb0d0ff6b5296d9f0433c1ade6a6fa24debdad8e3a9b70da26f45921f925"
+  },
+  {
+   "path": "Event.Format.ps1xml",
+   "sha256": "dc2af273eca5fc9e691f60610eb95d76c2c48903a4fbb35ad4b0866aa5d010da"
+  },
+  {
+   "path": "Examples/profile.ps1",
+   "sha256": "9f51461c6bb0fa44dea4b80d3bfd23e266ba2592e2f4c29d004c7f01a14e078a"
+  },
+  {
+   "path": "FileSystem.format.ps1xml",
+   "sha256": "9076d6b6d9d22d33a7363bddbb3fc5d84b3a7f3c41a9380c05ab1eef2190ca61"
+  },
+  {
+   "path": "Help.format.ps1xml",
+   "sha256": "21701fbd643a1c8246989a9aefd43afb07ab0ae4de5bc65ac3ce36dd1a785768"
+  },
+  {
+   "path": "HelpV3.format.ps1xml",
+   "sha256": "b89c3b982c87290debbcd5fd1424a161eec6727aeb2ca2ac5044b4fcfc441c70"
+  },
+  {
+   "path": "Modules/AppBackgroundTask/AppBackgroundTask.psd1",
+   "sha256": "930b3f897095f52aaaf60b5cd7555825795a0365ecccb76fdbd1e510fc36654d"
+  },
+  {
+   "path": "Modules/AppBackgroundTask/MSFT_BackgroundTask.Format.ps1xml",
+   "sha256": "2306d7187dd8363510bdea30286f94c66d79b7d49839127bb3d8ebc0a5c92931"
+  },
+  {
+   "path": "Modules/AppBackgroundTask/Microsoft.Windows.AppBackgroundTask.Commands.dll",
+   "sha256": "f6efe52ad125baf196310d44fea95ce8d627fe72213be655052df83195a019c3"
+  },
+  {
+   "path": "Modules/AppBackgroundTask/PS_BackgroundTask.cdxml",
+   "sha256": "a742e5566f7995c67e0bed3a57e2132b86b2b5145b77a2ceb0b05311cf210d8b"
+  },
+  {
+   "path": "Modules/AppLocker/AppLocker.psd1",
+   "sha256": "2a11875ce8b2af63dcf03758bd164de36bdfd2d3a68fc7db6ef53e113584c32d"
+  },
+  {
+   "path": "Modules/AppvClient/AppVClientCmdlets.format.ps1xml",
+   "sha256": "e742a405fae2d9ea37ae7b16e9866afadf75b1dde2940a520aa0417dc5f91a52"
+  },
+  {
+   "path": "Modules/AppvClient/AppVClientCmdlets.psm1",
+   "sha256": "cd32996ba34772f476b8182ef2ceec35db676a6b7ef464a4cfd19711d9008f5c"
+  },
+  {
+   "path": "Modules/AppvClient/AppvClient.psd1",
+   "sha256": "a7048bdebfc44f5a61a059748f38374ff0df7f5a18defd9ee79cac84f9eaac93"
+  },
+  {
+   "path": "Modules/AppvClient/Microsoft.AppV.AppVClientPowerShell.dll",
+   "sha256": "a3ac883ccfb3aa14827f2a0c1ef5e3c5ec7f730305639016f0b196b80012cd0f"
+  },
+  {
+   "path": "Modules/AppvClient/Microsoft.AppV.AppvClientComConsumer.dll",
+   "sha256": "ef6630304f81a086cc720b2e08bf1aaec2b0dfa149a8434e24c7a1f49056f282"
+  },
+  {
+   "path": "Modules/AppvClient/Microsoft.AppV.ClientProgrammability.Eventing.dll",
+   "sha256": "f879f59f11f6a0e8be810fbcc6891bd134673c2cf638ee7979be0479ce376a6b"
+  },
+  {
+   "path": "Modules/AppvClient/en/Microsoft.AppV.AppVClientPowerShell.resources.dll",
+   "sha256": "a95e150360b135c9e47016fee043f1a7ae845596336cdb94b7387c7bde9f9976"
+  },
+  {
+   "path": "Modules/AppvClient/en/Microsoft.AppV.AppvClientComConsumer.resources.dll",
+   "sha256": "be3a4456bae7b61a9a204d409301a56e2eb19de2e1f6f7185ddfa4013f4abb70"
+  },
+  {
+   "path": "Modules/AppvClient/ru/Microsoft.AppV.AppVClientPowerShell.resources.dll",
+   "sha256": "83130743c1b938206ef1746eb5b9ba21128f3c311f33d8ae3502d79100c084d1"
+  },
+  {
+   "path": "Modules/AppvClient/ru/Microsoft.AppV.AppvClientComConsumer.resources.dll",
+   "sha256": "732d2f7f71fcecd75b003edc65eab2b2842d77445065edc63a12e50ee99a7b71"
+  },
+  {
+   "path": "Modules/Appx/Appx.format.ps1xml",
+   "sha256": "c2cf76052458beb9fee5859215168ceb6359eb88059db32afee5faae19f61556"
+  },
+  {
+   "path": "Modules/Appx/Appx.psd1",
+   "sha256": "a8b7ab1d1fe4d4daa59b89a258707e1b89136f00be37e5a80c74b6a2099cf548"
+  },
+  {
+   "path": "Modules/Appx/Appx.psm1",
+   "sha256": "cff246d3b92240af105149363b6869edad9136ca67b607dafe9486da1d697276"
+  },
+  {
+   "path": "Modules/Appx/Microsoft.Windows.Appx.PackageManager.Commands.Core.dll",
+   "sha256": "d9764db5e5d4d9173d068582accaed920e5ab1fe40bfc646a910d7ce47f0822f"
+  },
+  {
+   "path": "Modules/Appx/en-GB/Microsoft.Windows.Appx.PackageManager.Commands.Core.Resources.dll",
+   "sha256": "c34f6be3993ed8c21b2deb396df41050f9b811027e2520d22943b7707dc568e9"
+  },
+  {
+   "path": "Modules/Appx/en-US/Appx.psd1",
+   "sha256": "5fa24e10a6e0fe3ac91dc042dab534fb74dea4de88f9a20af4abc9a25a5aacae"
+  },
+  {
+   "path": "Modules/Appx/en/Microsoft.Windows.Appx.PackageManager.Commands.Core.Resources.dll",
+   "sha256": "c34f6be3993ed8c21b2deb396df41050f9b811027e2520d22943b7707dc568e9"
+  },
+  {
+   "path": "Modules/Appx/he/Microsoft.Windows.Appx.PackageManager.Commands.Core.Resources.dll",
+   "sha256": "c34f6be3993ed8c21b2deb396df41050f9b811027e2520d22943b7707dc568e9"
+  },
+  {
+   "path": "Modules/Appx/ru-RU/Appx.psd1",
+   "sha256": "44d56329735c085ab2205fb7f75b5d44f2c702973ef0b2191374aabe67d21e43"
+  },
+  {
+   "path": "Modules/Appx/ru/Microsoft.Windows.Appx.PackageManager.Commands.Core.Resources.dll",
+   "sha256": "c34f6be3993ed8c21b2deb396df41050f9b811027e2520d22943b7707dc568e9"
+  },
+  {
+   "path": "Modules/AssignedAccess/AssignedAccess.psd1",
+   "sha256": "0f60cad1e90eeff56079b2d4601b4caf76cec4e252eaf897081338f85320948a"
+  },
+  {
+   "path": "Modules/AssignedAccess/AssignedAccess.psm1",
+   "sha256": "b4247c8500b73e30c4e523a110c9ebbef6e6c8663dc9b9233d9ef0c6d1867e38"
+  },
+  {
+   "path": "Modules/AssignedAccess/en-GB/AssignedAccessMsg.psd1",
+   "sha256": "c60da2ac4961e2039c2125cf8c974fe86a5b7b56121d8a18f3a445cbf48bd9b0"
+  },
+  {
+   "path": "Modules/AssignedAccess/en-US/AssignedAccessMsg.psd1",
+   "sha256": "894e9ea6138331e27164579c2c913d1e771f87cced4c01cbb74701d60c2e935b"
+  },
+  {
+   "path": "Modules/AssignedAccess/he-IL/AssignedAccessMsg.psd1",
+   "sha256": "a8b4c40bd1e9646ff86f69b8dbcb0141ddc87a53d9e00cb953ff9096c025bb36"
+  },
+  {
+   "path": "Modules/AssignedAccess/ru-RU/AssignedAccessMsg.psd1",
+   "sha256": "2dfe792eb9268aae001fe1316f58707566b57fdd90471ac320e8adb51a5cfd3d"
+  },
+  {
+   "path": "Modules/BitLocker/BitLocker.Format.ps1xml",
+   "sha256": "3c2c92a8a68795d13565610906665fdfd709dfbdbd3d0f6be91a9d40a93f0521"
+  },
+  {
+   "path": "Modules/BitLocker/BitLocker.psd1",
+   "sha256": "e858bd29d01ee2da09c9a1cb8cc5f6031004226dd49ed811b5e04cfdf6cf25ca"
+  },
+  {
+   "path": "Modules/BitLocker/BitLocker.psm1",
+   "sha256": "fdbab85ed698fe2fb6364be3ccb7335099c11f04407259a979e263aa87b3d210"
+  },
+  {
+   "path": "Modules/BitLocker/Microsoft.BitLocker.Structures.dll",
+   "sha256": "07934c6c2a0f89d6aafc897e69307d9d7e3aad7f7354e2ca1a23aaf47aac90c3"
+  },
+  {
+   "path": "Modules/BitLocker/en-US/BitLocker.psd1",
+   "sha256": "408c997c830dd1b45ebc677eede18f451a4468b9aacfcd750ae0d6d0058cb2ab"
+  },
+  {
+   "path": "Modules/BitLocker/ru-RU/BitLocker.psd1",
+   "sha256": "ac63e93b208a5be317d7c1ff3438f73f31e4487d102eed7bd9ba23a34ac3efb3"
+  },
+  {
+   "path": "Modules/BitsTransfer/BitsTransfer.Format.ps1xml",
+   "sha256": "ab6343c1fd520fe43e4ec89bab6e3e945f4e6703fd2329887f09bac45890e09d"
+  },
+  {
+   "path": "Modules/BitsTransfer/BitsTransfer.psd1",
+   "sha256": "5e9827bdcdfa84e2ecb147160c25023fc8bfc07a5fd91314cd0c99c22cfd5942"
+  },
+  {
+   "path": "Modules/BitsTransfer/BitsTransfer.psm1",
+   "sha256": "4722903505a42f37eac54cc56e48582b7bcb4d140743dfa74ccf7a5481852f28"
+  },
+  {
+   "path": "Modules/BitsTransfer/Microsoft.BackgroundIntelligentTransfer.Management.Interop.dll",
+   "sha256": "d44492841b3aed3e5db42c2a563245a15f3fc926285dbb8aac4801cdcccd03bc"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCache.format.ps1xml",
+   "sha256": "7cd52e70816111f951cb473c4bea471e731a5dfa4deb4cc57ced7d0cf53d489a"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCache.psd1",
+   "sha256": "087598b93aab85ef3fbf7a1b17a00d15f60feeee812c0b8f01c01c5b4b084c66"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCache.types.ps1xml",
+   "sha256": "0214cfb03a45a95bf041d1a50f93dc22fedb716829e75d3e915b885f855324be"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCacheClientSettingData.cdxml",
+   "sha256": "f90edd92216e86f7ea6bb1cd5ef9643520d5dbaf294e98a44e241a0b82657ea8"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCacheContentServerSettingData.cdxml",
+   "sha256": "695349743c236b086562684ef0bf244aab7e4e6981ad98fb1612040c13e88c37"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCacheHostedCacheServerSettingData.cdxml",
+   "sha256": "c9c7ff32576b0d7bc0c304fb6b48ec498e89d6090feaaeba2a90c4ad522304e5"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCacheNetworkSettingData.cdxml",
+   "sha256": "77b6db163d784157463c178d9a7bade936afb7b19a7613bf4ee9668c0d8ba8d0"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCacheOrchestrator.cdxml",
+   "sha256": "7a83fc9f8f9b3e566ce8024e309d26cf559346b7cda870aace2f84375795ea27"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCachePrimaryPublicationCacheFile.cdxml",
+   "sha256": "ba530a1c4e71a38bdfb6d08fa13afc1184267f485c322c803c3efbe80069e73a"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCachePrimaryRepublicationCacheFile.cdxml",
+   "sha256": "ace02a1ae15c0b26e5de01bd4151cf4f141bd7e143eb193d45cb0dbb0db6f467"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCacheSecondaryRepublicationCacheFile.cdxml",
+   "sha256": "30c6d5f7f4826c1349dbd91b0916480951fbaa4b0241e253ba42da6b02810efe"
+  },
+  {
+   "path": "Modules/BranchCache/BranchCacheStatus.cdxml",
+   "sha256": "961c9473ecfddddea46518847db34540cdc03218447596c7e4e8ff43bf0f8736"
+  },
+  {
+   "path": "Modules/CimCmdlets/CimCmdlets.psd1",
+   "sha256": "c11649524f29913c6b6c2bfdaf87d21d4d04699c71c9a8dab370265786603902"
+  },
+  {
+   "path": "Modules/ConfigCI/ConfigCI.psd1",
+   "sha256": "294f6a1cc7b38d72c07d9603bd48fe897d711f9fe29ae16f738cb7d0628a5ca2"
+  },
+  {
+   "path": "Modules/ConfigDefender/ConfigDefender.psd1",
+   "sha256": "35f0f510b1ce3e362972fee04a6b5dc93c4b7aef24acf2b2202b4bc75768d655"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpBehavioralNetworkBlockingRules.cdxml",
+   "sha256": "e43a7edb2a394cb0467217ca8c08602495bd176b9d4a4877d444b21c39d2e3fb"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpComputerStatus.cdxml",
+   "sha256": "524401d609fa2a5597ade7fc26df0f72a2272afc0d6e7e303dea564b5fe41ba3"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpPreference.cdxml",
+   "sha256": "1001ca1a93ce4ccbb75bf421b0d901b5a5f1e601404428653f4f18bf79d35de6"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpRollback.cdxml",
+   "sha256": "2e9112d17c12d5741e43ef76506eaf5f72ab59b72de392273d23ee655d925412"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpScan.cdxml",
+   "sha256": "e67cd2ab35423bdcaec5819fd333c7d0bdd20eb48923e676072e783c2cdc6d8a"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpSignature.cdxml",
+   "sha256": "529bb267988b32310f6d8f99064e802438db4d765e7572cb717f94e64b096810"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpThreat.cdxml",
+   "sha256": "40df053ec8245aa48c5df2d04e3aefbd3e74252497f327b00eac1e8e371392cb"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpThreatCatalog.cdxml",
+   "sha256": "782bbf841367f74190135850ca4826cfa4fc87be84727a85776dc00446022325"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpThreatDetection.cdxml",
+   "sha256": "2ada23cf48991fcb7771d8da6b581a41dfc3c09706ff998310bac25a8c985176"
+  },
+  {
+   "path": "Modules/ConfigDefender/MSFT_MpWDOScan.cdxml",
+   "sha256": "8e1ae7dc6269aca6326d238fbd337d127cdd9098f1c97eb8a7b829f6e389d711"
+  },
+  {
+   "path": "Modules/ConfigDefenderPerformance/ConfigDefenderPerformance.psd1",
+   "sha256": "edbc890d0216c3d9dc84ebf4b4603edc7a426a431620833003a919c93e192ff3"
+  },
+  {
+   "path": "Modules/ConfigDefenderPerformance/MSFT_MpPerformanceRecording.psm1",
+   "sha256": "d2dc3a8246e26453243820aa3cc7274d79b56a3de3f9f100dbbfeb7dcdf80ade"
+  },
+  {
+   "path": "Modules/ConfigDefenderPerformance/MSFT_MpPerformanceRecording.wprp",
+   "sha256": "e796454fee4cf17efdc25db5feef00a5d7c1b335e6c4b4fe996e8ad7cab01bc8"
+  },
+  {
+   "path": "Modules/ConfigDefenderPerformance/MSFT_MpPerformanceReport.Format.ps1xml",
+   "sha256": "128b441711058765f48a79f1526b17f2bb93319b4dc99924d9e6cf4743fd3395"
+  },
+  {
+   "path": "Modules/Defender/Defender.psd1",
+   "sha256": "f1e919257ce73ab1ac76626c213ee5e9d816c4eebae107567bf1ab5e22d3d4f5"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpBehavioralNetworkBlockingRules.cdxml",
+   "sha256": "85aee30151a1a3b3a129eb6c2174d7ef39b08a3ca043694032eedf0474885226"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpComputerStatus.cdxml",
+   "sha256": "74c36d9d17e200d25d4b289eb461b28e705e8dd553cb48dbb3bdda4b23fed9ae"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpPreference.cdxml",
+   "sha256": "87fa2edf53d2f6982b724b7c7c5ee4696a4cd0e660887872d7749664e0c27079"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpRollback.cdxml",
+   "sha256": "5c7fbf29cd415f6de8c23f3225be69c5df555045d13ea9a439291891d8659a45"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpScan.cdxml",
+   "sha256": "5b11bd38e185e6220939e12a3d4e9baa82bb168880f356d5781c2b638b10c98f"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpSignature.cdxml",
+   "sha256": "9025f595008cacdb70274189d78c2d2f09f709198942f64a25d155b2e8e2719d"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpThreat.cdxml",
+   "sha256": "5ab5f3b2c8a0019253bd14ecdf4e496ab6b35ba85b4e82efd7c97f04fbe28a84"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpThreatCatalog.cdxml",
+   "sha256": "74a1a4acdf39f4119e35e0b0daeabf471ee269065dec20b114192cfb036d8da6"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpThreatDetection.cdxml",
+   "sha256": "8fad3c4c8188c4022169f5a3aed7b5678f42dcd85e11605b1e9c80fd9f7ce329"
+  },
+  {
+   "path": "Modules/Defender/MSFT_MpWDOScan.cdxml",
+   "sha256": "925d7df24b343634c265458136ca2735a95a05b649768cbaca8c42c6c5f495cf"
+  },
+  {
+   "path": "Modules/DefenderPerformance/DefenderPerformance.psd1",
+   "sha256": "7a9e8aac39bec96d75a3a95a13b31843b8844d64f1701c7d5a0c606627c0be79"
+  },
+  {
+   "path": "Modules/DefenderPerformance/MSFT_MpPerformanceRecording.psm1",
+   "sha256": "9bb282cbe5fbd3e62cca24305d0f5a48ab3afdce277c0d1ea56ad0c3a1d7e95c"
+  },
+  {
+   "path": "Modules/DefenderPerformance/MSFT_MpPerformanceRecording.wprp",
+   "sha256": "e796454fee4cf17efdc25db5feef00a5d7c1b335e6c4b4fe996e8ad7cab01bc8"
+  },
+  {
+   "path": "Modules/DefenderPerformance/MSFT_MpPerformanceReport.Format.ps1xml",
+   "sha256": "c2147d606246d424ebae96c6919ff21c4bb0d7d7fc42ba004ad464ab7a18ccc1"
+  },
+  {
+   "path": "Modules/DeliveryOptimization/DeliveryOptimization.psd1",
+   "sha256": "33202b9bcb7493e23e05ef8cabfe14dad274470caf4cffe1aedb6cf1c3ac6aee"
+  },
+  {
+   "path": "Modules/DeliveryOptimization/DeliveryOptimizationSettings.psm1",
+   "sha256": "7cfa4ff7f4276635d72c0dd4a9314833528dd458e9b8a7ac141155b0bd29cf01"
+  },
+  {
+   "path": "Modules/DeliveryOptimization/DeliveryOptimizationStatus.psm1",
+   "sha256": "c9a101b0280789f865dcacf40ca621468859f62d28d9b04479768dfbd609cafe"
+  },
+  {
+   "path": "Modules/DeliveryOptimization/DeliveryOptimizationVerboseLogs.psm1",
+   "sha256": "150f0b0a5e679b0bdc01fabc1bc45585d3675199e5ef3fb3ea57f7b14a70c80f"
+  },
+  {
+   "path": "Modules/DeliveryOptimization/Microsoft.Windows.DeliveryOptimization.AdminCommands.dll",
+   "sha256": "5ecd45d2ac5ecec61b5d265e7ac6fc2f227e226d973fb5cdf130776715a12af5"
+  },
+  {
+   "path": "Modules/DirectAccessClientComponents/DirectAccessClientComponents.psd1",
+   "sha256": "62f69cb2655856567ab8b75944b18428da8cb0a5c1553f8bdc179f63b3555131"
+  },
+  {
+   "path": "Modules/DirectAccessClientComponents/MSFT_DAClientExperienceConfiguration.cdxml",
+   "sha256": "3840e12f34d3781ef36d7acad8309de15bf484c0d03e39707d29d9979f1bf517"
+  },
+  {
+   "path": "Modules/DirectAccessClientComponents/MSFT_DAClientExperienceConfiguration.format.ps1xml",
+   "sha256": "fb096f9e59001b782cb9145dfb39bffd6950288322ba6789042b81da37e5d862"
+  },
+  {
+   "path": "Modules/DirectAccessClientComponents/MSFT_DAClientExperienceConfiguration.types.ps1xml",
+   "sha256": "6158b7913517c7e3bc1076d5998521e1edbe1e73a04b1fb1edc4021978cb9c6c"
+  },
+  {
+   "path": "Modules/DirectAccessClientComponents/MSFT_DASiteTableEntry.cdxml",
+   "sha256": "b0d80e25db7d980c1a768e12d4b1f9cf80666c66706af0fb0d7088a387c6d95a"
+  },
+  {
+   "path": "Modules/DirectAccessClientComponents/MSFT_DASiteTableEntry.format.ps1xml",
+   "sha256": "e9fc2f9a15ed1a4405013bed890c78f2f7da3876903928ddd7607bcdcc4f39c9"
+  },
+  {
+   "path": "Modules/DirectAccessClientComponents/MSFT_DASiteTableEntry.types.ps1xml",
+   "sha256": "3af43939f7a45eac8a1827fefae57a1165eeceacdd2acb93840e5b1d978af6ae"
+  },
+  {
+   "path": "Modules/Dism/Dism.Format.ps1xml",
+   "sha256": "3dedad2e97a73ec903d228b363d7ebffb3350a72b267b8447c55eacaea5acd7b"
+  },
+  {
+   "path": "Modules/Dism/Dism.Types.ps1xml",
+   "sha256": "79ded6bbd74c833bb715b33687fe1ca9eff8a769a7938ec3c81935530e042749"
+  },
+  {
+   "path": "Modules/Dism/Dism.psd1",
+   "sha256": "8dea6d0685d5f1b2571bd6039acb466bcbd737e8298d992d1f4d95b6bfab7d30"
+  },
+  {
+   "path": "Modules/Dism/Dism.psm1",
+   "sha256": "ed4cfd877babd4acb9c3166cdbecf5c1cdb3de40e91b4b15a3efb7ca3c31d65f"
+  },
+  {
+   "path": "Modules/Dism/Microsoft.Dism.PowerShell.dll",
+   "sha256": "1a78a5aab00ef16699028acc51e93e67365a547629f081f132f800faed20b2a5"
+  },
+  {
+   "path": "Modules/Dism/en/Microsoft.Dism.Powershell.Resources.dll",
+   "sha256": "fe6222a655d9fca8e29c2c8efabfd0bded20221283f204c7d47753125d9f8e4d"
+  },
+  {
+   "path": "Modules/Dism/ru/Microsoft.Dism.Powershell.Resources.dll",
+   "sha256": "3b1fdd436d7d3dcc9cf8f61b985fa1c5b943d3099d44a7746089edaea0eb05b4"
+  },
+  {
+   "path": "Modules/DnsClient/DnsClient.psd1",
+   "sha256": "8624a1df79addc99c8717a29a8ff26393d4f78b9c595df768d1ffac66f3cfd32"
+  },
+  {
+   "path": "Modules/DnsClient/DnsClientPSProvider.Format.ps1xml",
+   "sha256": "4a5c4aaf62f04c58c7d035179c8e768dee9a972b005fb51dfb17bad28918c151"
+  },
+  {
+   "path": "Modules/DnsClient/DnsClientPSProvider.Types.ps1xml",
+   "sha256": "4f04f1eadb52a7ebe493976a327d9cbad60c1926031e353f5631717b317ac971"
+  },
+  {
+   "path": "Modules/DnsClient/DnsCmdlets.Format.ps1xml",
+   "sha256": "842653872866b3422c194bee8007f0285d7cde7fdbdb065a81fa06035721ebfe"
+  },
+  {
+   "path": "Modules/DnsClient/DnsCmdlets.Types.ps1xml",
+   "sha256": "1463a274001f867a273f29e1d1e4834203151160fd49c3266766de9886ca6489"
+  },
+  {
+   "path": "Modules/DnsClient/DnsConfig.Format.ps1xml",
+   "sha256": "dce2c0978f59a46edcb0eeab3ff46a3b9d2d0f79da714ad65c99526cc315c54a"
+  },
+  {
+   "path": "Modules/DnsClient/DnsConfig.Types.ps1xml",
+   "sha256": "e1c39934a3d412c8ed17172ee8181a12742d3000bd49f3dab6556cf83dc35a6c"
+  },
+  {
+   "path": "Modules/DnsClient/MSFT_DnsClient.cdxml",
+   "sha256": "281e5fc467866287f81d2e7322406896e2e2f4de1017662b9ff0beadb65242bf"
+  },
+  {
+   "path": "Modules/DnsClient/MSFT_DnsClientCache.cdxml",
+   "sha256": "2e7294b4056fa1028420aabd18e922e137e6a35e1ca41a9565d11f1dde4510bb"
+  },
+  {
+   "path": "Modules/DnsClient/MSFT_DnsClientDohServerAddress.cdxml",
+   "sha256": "866246e70d26c512141651e3b3b8e1047427a25d027f992c6f7fe18d39a298b3"
+  },
+  {
+   "path": "Modules/DnsClient/MSFT_DnsClientGlobalSetting.cdxml",
+   "sha256": "a82f047f55d7cc3ec36c99c6921a9e84d910c4cbd0a3c26045d2573e276a713a"
+  },
+  {
+   "path": "Modules/DnsClient/MSFT_DnsClientServerAddress.cdxml",
+   "sha256": "c9c4d7b70a5eb077da900d4f26498467dad2590f19ddb4a17a8cb307bba8752d"
+  },
+  {
+   "path": "Modules/DnsClient/PS_DnsClientNRPTGlobal_v1.0.0.cdxml",
+   "sha256": "89ef0d018376588c68a9fad3afa3fd78ea514ec621a6ffd1aed84ef43094a7f0"
+  },
+  {
+   "path": "Modules/DnsClient/PS_DnsClientNRPTRule_v1.0.0.cdxml",
+   "sha256": "ad8ab81921e50fa931100574c9e04ce34aa5c10cbc26f520114216d7d371217f"
+  },
+  {
+   "path": "Modules/DnsClient/PS_DnsClientNrptPolicy_v1.0.0.cdxml",
+   "sha256": "8497ebc5d6a30c5b6b30e95a150e8ec180fb16352dbd58e779ec94ce3e08ad86"
+  },
+  {
+   "path": "Modules/DnsClient/dnslookup.dll",
+   "sha256": "42dba2e1460f27e9966a56a2f06fc440cd5ff70c7ecbddd8a20d532217dd0a7f"
+  },
+  {
+   "path": "Modules/EventTracingManagement/EventTracingManagement.Types.ps1xml",
+   "sha256": "b98312b115628733df49feb692e9921943f591527381f8e37d1c42ae5e7ab7a8"
+  },
+  {
+   "path": "Modules/EventTracingManagement/EventTracingManagement.psd1",
+   "sha256": "ba0e5c62ad00e0413205abbd32895f999e3e80eef2b2d6d465693fd3c320798b"
+  },
+  {
+   "path": "Modules/EventTracingManagement/EventTracingManagement.psm1",
+   "sha256": "bf1ac625d4ac36bf25358f6d52e5b5fbd1700718ceccfcaa2b82c7f15d4142ac"
+  },
+  {
+   "path": "Modules/EventTracingManagement/MSFT_AutologgerConfig_v1.0.cdxml",
+   "sha256": "f41d85870b1f7f97640df0b76935546f93913dbf61de9834f304b36b9a6f258e"
+  },
+  {
+   "path": "Modules/EventTracingManagement/MSFT_AutologgerConfig_v1.0.format.ps1xml",
+   "sha256": "6ee0cbfda1850f8304692529b88037c1530b3a805eef3aff1c2dbbfc64cb730b"
+  },
+  {
+   "path": "Modules/EventTracingManagement/MSFT_EtwTraceProvider_v1.0.cdxml",
+   "sha256": "c1b442eaa1ca0d9889fd72e0a23ea869237203858db00686ffba7000317c6e69"
+  },
+  {
+   "path": "Modules/EventTracingManagement/MSFT_EtwTraceProvider_v1.0.format.ps1xml",
+   "sha256": "da4b0c55d3e24ae419945d1d6ba3c185aa09985a0d34493a09cca13acf655636"
+  },
+  {
+   "path": "Modules/EventTracingManagement/MSFT_EtwTraceSession_v1.0.cdxml",
+   "sha256": "13333b64bcea4268c685b53ef0c53d9de5e3ed695cf7da3d997301b8ad93340f"
+  },
+  {
+   "path": "Modules/EventTracingManagement/MSFT_EtwTraceSession_v1.0.format.ps1xml",
+   "sha256": "342e409e3dba8fc0feec43001005bd222565246b5f16dd670860679118ca7909"
+  },
+  {
+   "path": "Modules/Get-NetView/Get-NetView.psd1",
+   "sha256": "7fb2edddb49e7b2b3e025805aa07fb253957dd9923021eadf1f31c550d30e720"
+  },
+  {
+   "path": "Modules/Get-NetView/Get-NetView.psm1",
+   "sha256": "a667b4d16647253c27ea74e04d438ca0f2d700adcde293d15221f820171ce5fc"
+  },
+  {
+   "path": "Modules/HgsClient/HgsClient.format.ps1xml",
+   "sha256": "ba2dac037fc6d8557978e1b2a5aea11533957fadec91b44c5787575015e79562"
+  },
+  {
+   "path": "Modules/HgsClient/HgsClient.psd1",
+   "sha256": "5fa7d08fef65bef57ac9eda552aadc18712d6fdc7b83c946165cbaa52f202ce4"
+  },
+  {
+   "path": "Modules/HgsClient/HgsClient.psm1",
+   "sha256": "89f24cc57188a7cd30d9f6c0b3ba24d626cd6f24bfc26285c29a4ed5cc7fac47"
+  },
+  {
+   "path": "Modules/HgsClient/HgsClient.types.ps1xml",
+   "sha256": "773d3fb1ad410e111d9a5df4bceb4101d0d0dff7d350bdadffec038a727d7bf1"
+  },
+  {
+   "path": "Modules/HgsClient/MSFT_HgsClientConfiguration_v1.0.cdxml",
+   "sha256": "197d43492271e65100b727327eaafa4ab441cb6b0d2038e0473c98207cc70bad"
+  },
+  {
+   "path": "Modules/HgsClient/MSFT_HgsGuardian_v1.0.cdxml",
+   "sha256": "6aaa1ea419e38475fd77ab48723e7e6d12e5c74a853faa8dc9b0be1b07a36b93"
+  },
+  {
+   "path": "Modules/HgsClient/MSFT_HgsKeyProtector_v1.0.cdxml",
+   "sha256": "a3189f7ac9559d7f2c9b51a943ce38f489932a18f71d4bdcd9a17146a478843b"
+  },
+  {
+   "path": "Modules/HgsClient/en-US/HgsClient.psd1",
+   "sha256": "9a4119f543499988b2dfdcc0faf0b94bc5da8071baa5fae43c5a081cc0e4a1d7"
+  },
+  {
+   "path": "Modules/HgsClient/ru-RU/HgsClient.psd1",
+   "sha256": "3b8d19d3d387684cae677154c474d6233b8bef86f7013d51389be7b3b6c1dc0c"
+  },
+  {
+   "path": "Modules/HgsDiagnostics/HgsDiagnostics.psd1",
+   "sha256": "88759e1e3fa66756fb7709d805f5ca0e8d5f64c8f85855b469d577d58842607f"
+  },
+  {
+   "path": "Modules/HgsDiagnostics/ResultSet.format.ps1xml",
+   "sha256": "2082674dd7ca086c9c2efc06ed9c004326c299e2a13ee279e4f5f277bf741356"
+  },
+  {
+   "path": "Modules/HgsDiagnostics/ResultSet.types.ps1xml",
+   "sha256": "915d6fbd66f3244ea05eb0dc54d829654cccff7f68d689e9b67ef14700139ba7"
+  },
+  {
+   "path": "Modules/HostNetworkingService/HostNetworkingService.psd1",
+   "sha256": "12316ae6e857c8d91045b7c61c51ddfc6942a88c9f499815977e7f78f9346434"
+  },
+  {
+   "path": "Modules/HostNetworkingService/HostNetworkingService.psm1",
+   "sha256": "5f0c074592933f9db34d43ca3f393f3b8b22e0403aab827ca553074fadf73edc"
+  },
+  {
+   "path": "Modules/Hyper-V/2.0.0.0/Hyper-V.Format.ps1xml",
+   "sha256": "74d796d686b3f721d1c6848cf2200023e3a29c3e1ee6fe60141ac4e4bc880f66"
+  },
+  {
+   "path": "Modules/Hyper-V/2.0.0.0/Hyper-V.Types.ps1xml",
+   "sha256": "0374faf68c64080b25c8f159505a4941293e31d8727af995824ef05474d8760f"
+  },
+  {
+   "path": "Modules/Hyper-V/2.0.0.0/Hyper-V.psd1",
+   "sha256": "5f4568b7825fed4c960ff3d0fbcf2d847d67b8ac4d5ec2b069339f5b3b4f4978"
+  },
+  {
+   "path": "Modules/ISE/ise.psd1",
+   "sha256": "4114f14d6a47aa303b3ff7aeee97fa0575393cac95d849bc7db86d65268aabde"
+  },
+  {
+   "path": "Modules/ISE/ise.psm1",
+   "sha256": "4f8c9a82730090babbdd39c009ac3043072a16a788a70356622c2fc98603a6b9"
+  },
+  {
+   "path": "Modules/International/International.psd1",
+   "sha256": "b53296a80457e42fbfc1da098e8a96408dedd68e7bb6f270c36bea5fcbac1db4"
+  },
+  {
+   "path": "Modules/Kds/Kds.psd1",
+   "sha256": "a11d4040bd51b80a94710f094d942925a1bcd360a7164b909c92e072318be5b3"
+  },
+  {
+   "path": "Modules/LAPS/LAPS.psd1",
+   "sha256": "ec1717a0d231c976ff8b2201daa7e5bf2ec8ee75f6a018f78c4b23ca05a1da87"
+  },
+  {
+   "path": "Modules/LAPS/LAPS.psm1",
+   "sha256": "aea348ac0d28d8e5446b42c5cd1837837b1182149a0b8ac0a559fea37468b149"
+  },
+  {
+   "path": "Modules/LAPS/lapspsh.dll",
+   "sha256": "ce99c092a618f61395080b835dad09b690e71c966ca11e5ccaafe7940595908c"
+  },
+  {
+   "path": "Modules/LAPS/lapsutil.dll",
+   "sha256": "942414d82fca90afb5ba090426293f0e0e369bd3fc62e1c4db92393a5f29d774"
+  },
+  {
+   "path": "Modules/LanguagePackManagement/LanguagePackManagement.psd1",
+   "sha256": "26004872c5986870cc3bbf748adbd4af4f12653a28fd019e168882cde4c002d1"
+  },
+  {
+   "path": "Modules/LanguagePackManagement/LanguagePackManagementViews.ps1xml",
+   "sha256": "173a226dd8d22a7e3f699e705984f37c39ce463cee2929eef73389eb807cc516"
+  },
+  {
+   "path": "Modules/LanguagePackManagement/Microsoft.LanguagePackManagement.Powershell.Commands.dll",
+   "sha256": "6e4cc98e2a2e65452820c20cdd887a00d3f48e20f40291db45aa8abedda8b986"
+  },
+  {
+   "path": "Modules/LanguagePackManagement/en/Microsoft.LanguagePackManagement.Powershell.Commands.Resources.dll",
+   "sha256": "13cf19ae19fe714cf5810b81774c2652717a85049b727097af915ef9cd7f65d1"
+  },
+  {
+   "path": "Modules/LanguagePackManagement/ru/Microsoft.LanguagePackManagement.Powershell.Commands.Resources.dll",
+   "sha256": "1f291e3413fddf29f559ce1ebaa73e1b10151db5fd9bbc6c478d2c2e8026db5b"
+  },
+  {
+   "path": "Modules/MMAgent/MMAgent.psd1",
+   "sha256": "13eb1afcf5bc7c3ea622e6c6d0508236d0e2ea1a4b5194c3e08a62490d0c51e7"
+  },
+  {
+   "path": "Modules/MMAgent/ps_mmagent_v1.0.cdxml",
+   "sha256": "0b0192e30756cfa0e813d5f345898f19679bf381ea333b42ff3490cc803f9d81"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Archive/Microsoft.PowerShell.Archive.psd1",
+   "sha256": "a32bb336c0c6021c85b93f5ae1bdb8174d2df091e0536411c1773b27e76ebbf1"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Archive/Microsoft.PowerShell.Archive.psm1",
+   "sha256": "1653f6a8e17c5f30d962bbb9d64f9f293b5c488be48651491545fbe03ee04e73"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Archive/en-US/ArchiveResources.psd1",
+   "sha256": "a9aa49ff320668585cb613f65040fc6ee8b57d95906825254c6712e27a7dc21b"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Archive/ru-RU/ArchiveResources.psd1",
+   "sha256": "ccea1b396d129f55014930579f083a44c617633e15ac399be3dcd55bdf6a024f"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Diagnostics/Microsoft.PowerShell.Diagnostics.psd1",
+   "sha256": "3c59b91b00f9fe6cdf7cdef9265c7517ebe0c26f8cff70f3c5fc15e3bf7e67f0"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Host/Microsoft.PowerShell.Host.psd1",
+   "sha256": "c13dac2037187b2fd18598e611137c5fd540050d5a85cedb44d06f05f1fbb852"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.LocalAccounts/1.0.0.0/LocalAccounts.format.ps1xml",
+   "sha256": "0b5b8eecd3e4d9b12ab98fd98dd9551d27dd01fdadf5f118f1ef52834d483281"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.LocalAccounts/1.0.0.0/Microsoft.PowerShell.LocalAccounts.dll",
+   "sha256": "e3fd92382a1ffc15724b215dcc3729961d0af730c93362db317d98b43c54c9ce"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.LocalAccounts/1.0.0.0/Microsoft.PowerShell.LocalAccounts.psd1",
+   "sha256": "cda4e020d5a53973f1290db25cad7e2cb746993d4fd12a68431db54681afd0cc"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.LocalAccounts/1.0.0.0/en/Microsoft.PowerShell.LocalAccounts.Resources.dll",
+   "sha256": "3c71f8a817efa5c9cd88fe96fdeb78bb0c7372bfd328ac69cd9e72b6fa339bd5"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.LocalAccounts/1.0.0.0/ru/Microsoft.PowerShell.LocalAccounts.Resources.dll",
+   "sha256": "55cf63304310378822845e7192b69488cc4a149e299cf7c98c65bf3d64fc98fb"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1",
+   "sha256": "91ea580e6bbc54148eadac5e8018f6e6edfd04bcd3cf07489a9028fdeea948a0"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.ODataUtils/Microsoft.PowerShell.ODataAdapter.ps1",
+   "sha256": "04f67ace87fce03e811a73d893b600f91aa1eca385fe96c38a1f69e6f69ac58d"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.ODataUtils/Microsoft.PowerShell.ODataUtils.psd1",
+   "sha256": "0772d101921bb12f7d7a07f5fa795a04dacebb1bec33111f89b2d2f1740ea8c3"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.ODataUtils/Microsoft.PowerShell.ODataUtils.psm1",
+   "sha256": "21c72045ff2f61561e406aac0cca7ae789513a14f4924a9120abef9881c47a85"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.ODataUtils/Microsoft.PowerShell.ODataUtilsHelper.ps1",
+   "sha256": "0d905709ab1174f8e12a063f259a52dabe85caeb8018985f5411f1ce9c6c99c3"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.ODataUtils/Microsoft.PowerShell.ODataV4Adapter.ps1",
+   "sha256": "2c9f934922d801cb46c389069dbbfc29b34bc8b4aec612aa74682e46bd2c0dc5"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.ODataUtils/en-US/Microsoft.PowerShell.ODataUtilsStrings.psd1",
+   "sha256": "141bf7596e412b0696ef89e667c6ffd881c13e94f05fecba25cdb1f03baf29b7"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.ODataUtils/ru-RU/Microsoft.PowerShell.ODataUtilsStrings.psd1",
+   "sha256": "e0a8bcfa2ee4f9d648765c47dca746ef380d555faf80487180ee110682772b09"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1",
+   "sha256": "fa7150089e8a67a0aad27cd324d119b9778ccbead6242397780c5d5077246d30"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1",
+   "sha256": "c09df190addc67f7c6c38e7ea1dca719fd87807107f688c3f60ed8816e1c48a6"
+  },
+  {
+   "path": "Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psm1",
+   "sha256": "f9232f3de3c94dd03caf40f54b22876c9d810c657c41e54ab2d10469b45f26b5"
+  },
+  {
+   "path": "Modules/Microsoft.ReFsDedup.Commands/Microsoft.ReFSDedup.Interop.dll",
+   "sha256": "be38778a6d38a82d1e48b975d3a0a8270022eebf650a93ccbbb36f7367642e91"
+  },
+  {
+   "path": "Modules/Microsoft.ReFsDedup.Commands/Microsoft.ReFsDedup.Commands.dll",
+   "sha256": "a5ecb95517ff4a4bd76858f3596dbc54aa6cdd7cd1328d9a587120550281eb13"
+  },
+  {
+   "path": "Modules/Microsoft.ReFsDedup.Commands/Microsoft.ReFsDedup.Commands.format.ps1xml",
+   "sha256": "d036d62b542e306450e06d6e98772a766dfe6df546afcb9b93f9d4b1b4c558b8"
+  },
+  {
+   "path": "Modules/Microsoft.ReFsDedup.Commands/Microsoft.ReFsDedup.Commands.psd1",
+   "sha256": "2e5d50b62b3e8524622e46cd70fb8270ba8d3cd130fdc9934af6578f1993d8f6"
+  },
+  {
+   "path": "Modules/Microsoft.WSMan.Management/Microsoft.WSMan.Management.psd1",
+   "sha256": "96973a7f69c967fe665cde9ef7b82423f34ad5248f2fd35f88d25fcda3fb9035"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/Microsoft.Windows.Bcd.Cmdlets.Format.ps1xml",
+   "sha256": "a31837f742c1cc25397d8b06bf182b71f926035554cf575bbba34029f3da3403"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/Microsoft.Windows.Bcd.Cmdlets.dll",
+   "sha256": "9253b353343c875d723fc7868fd33a6570a9647f6415094715cfdd30348fcfa5"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/Microsoft.Windows.Bcd.Cmdlets.psd1",
+   "sha256": "4682c9befcb26a9905eabc732dba13adefc2e06fbc086e979c2e0c1b77a528ad"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/Microsoft.Windows.Bcd.Utils.dll",
+   "sha256": "c4dc33f0fddbaada7a0726b3cbdecb1a89b034a0bd1a5f4a8780ec898eac564f"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/Microsoft.Windows.Bcd.dll",
+   "sha256": "b912c1d005fd9fa8b528f55554373f82d2b76f4ecf969aabeb9719bd6d7bcbb6"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/en/Microsoft.Windows.Bcd.Cmdlets.Resources.dll",
+   "sha256": "b434af98b4d36b70ac2d11e574a2ec4cfecffeb4e0b2fde5be1d9345eebfc4cb"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/en/Microsoft.Windows.Bcd.Resources.dll",
+   "sha256": "945ada9083e6c3cec47b5932b00213af420eed04ee0477f710abcb95c3b29b09"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/ru/Microsoft.Windows.Bcd.Cmdlets.Resources.dll",
+   "sha256": "a985a5fccd035206db7c2bcaedb09e954f37dae4dee6e17cffc12bca6eedac1e"
+  },
+  {
+   "path": "Modules/Microsoft.Windows.Bcd.Cmdlets/ru/Microsoft.Windows.Bcd.Resources.dll",
+   "sha256": "55ffb3065847d83ee5ac729bbfeaa9fab5a44af1df9caa5803bb4659931aa0b2"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcAdvancedHostSettingTask_v1.0.cdxml",
+   "sha256": "ef1d87489f53c6fac620fc4e1656931ac6b4050b2bba6ff03412417b5006ddc1"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcAdvancedSettingTask_v1.0.cdxml",
+   "sha256": "2d892e242e809f9f00a74788aae4238f444c89457a14938fb8aad4368c69d107"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcClusterDefaultTask_v1.0.cdxml",
+   "sha256": "3df4b2418ca164d47955513e8a3c3f15d8feac815b5f67b73530246477709814"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcClusterTMMappingTask_v1.0.cdxml",
+   "sha256": "d66f1c4770afa3db635f84db8b4add3b9b6d020e7debe749a8320acdac6b6bcb"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcDefaultTask_v1.0.cdxml",
+   "sha256": "d1fa336196a61b2f2cdc2fa0e8dd9db072d72ad6e7b2bc58300b762dbcc7d66f"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcLogTask_v1.0.cdxml",
+   "sha256": "3ea3a4f320845ed6ff4258f47ebf2d9c466824eb44a9d00d160d09036727a35a"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcNetworkSettingTask_v1.0.cdxml",
+   "sha256": "ae8c0349056d6e162b3d423a0e9c6faac580373f800b2fbc907185d924f0dc28"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcTask_v1.0.cdxml",
+   "sha256": "534633ee211af1662bcff0ddeb8f9058f5c11d0784ab043859b630ed3df624d3"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcTransactionTask_v1.0.cdxml",
+   "sha256": "42da5609c849364a8f6bd51ce759dd053968cd5cfbb42819e3f7bd69679567af"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcTransactionsStatisticsTask_v1.0.cdxml",
+   "sha256": "3e8fd53f1c7e0dc176729db6a665e6315d979b931a757a72b4d4818f9bc268bd"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcTransactionsTraceSessionTask_v1.0.cdxml",
+   "sha256": "4b1f9346487f65d2062231e588da9e11c86e0af0384f3350b2d2dfe130f518a9"
+  },
+  {
+   "path": "Modules/MsDtc/MSFT_DtcTransactionsTraceSettingTask_v1.0.cdxml",
+   "sha256": "ebd91535d9d0ef35ad934c0d32bde20099d96d63605c3244bc73619a17d2b2dd"
+  },
+  {
+   "path": "Modules/MsDtc/MsDtc.Formats.ps1xml",
+   "sha256": "31eff0bdb13cc1847329d024abb6ae1223b03f5acd918d1b43f8977311e6ce22"
+  },
+  {
+   "path": "Modules/MsDtc/MsDtc.Types.ps1xml",
+   "sha256": "bc1c68a0aa0dafa70b005b71cf4bb5a7ded934b9e540dc110096bca3e9a106e7"
+  },
+  {
+   "path": "Modules/MsDtc/MsDtc.psd1",
+   "sha256": "1c22736487b9d09f4e031dd201f1febd0d90739159ff70891b5d36e447642e59"
+  },
+  {
+   "path": "Modules/MsDtc/TestDtc.psm1",
+   "sha256": "b548f01cd3a09293cfb7820aad0cd1b715710840850efdb78b2744ed2a734ba8"
+  },
+  {
+   "path": "Modules/MsDtc/en-US/TestDtc.psd1",
+   "sha256": "34ab7d576211cdd48ef04f67a7fd2eb02fd429c1dae488102d871c155d5ef7f1"
+  },
+  {
+   "path": "Modules/MsDtc/en/Microsoft.Dtc.PowerShell.Resources.dll",
+   "sha256": "6b29e271a707e9a4747ca51aed531903035149f399d9de5cf045acc201649c8c"
+  },
+  {
+   "path": "Modules/MsDtc/ru-RU/TestDtc.psd1",
+   "sha256": "9bcaa08f2b7d707cf221e40f96f457656f88402f6c58f067ea5ed019fbc3144d"
+  },
+  {
+   "path": "Modules/MsDtc/ru/Microsoft.Dtc.PowerShell.Resources.dll",
+   "sha256": "d4a1a15ac61f98a6a326ec74a0d152d7a3731b461359124b5906b92f11641252"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapter.Format.ps1xml",
+   "sha256": "c36cc9cc863e0391cb7bd5b4c89ab0b40677a9548f25d16d37b441882899bac8"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapter.cmdletDefinition.cdxml",
+   "sha256": "1510bc1b21e886e0f619025d259536f820e8aba13be2b8480cecd6031d2814c8"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterAdvancedProperty.Format.ps1xml",
+   "sha256": "a1f44b15c987896824eb59274d766dea15e1bcbdcdf9a1da2e57ea549a515aaa"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterAdvancedProperty.cmdletDefinition.cdxml",
+   "sha256": "254509e1660d6f586f2c72213ad7e47f4cb13538a9728a7cbcbea0bc2e17d7f7"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterBinding.Format.ps1xml",
+   "sha256": "28dbce575a029a851038b4c90caf07e24dc87239a27e3bb63a31bae6a6a77bf1"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterBinding.cmdletDefinition.cdxml",
+   "sha256": "db64403c661e731e8459586861e6768904445ed4103fe3066636e19f723a4cdf"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterChecksumOffload.Format.ps1xml",
+   "sha256": "2f569cbfdb4045643767365879953ea30c05945d21b249bc44cfbf05fb4a5d1f"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterChecksumOffload.cdxml",
+   "sha256": "baa7653c70d536c8d6e7752eb40e412b63a4cace508d7036a72f1e19a96eae6f"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterDataPathConfiguration.Format.ps1xml",
+   "sha256": "322d0a979b5f4b71fad54961a0ef8d96b56a5c7d4b4e5903a18f46f084e4bd3c"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterDataPathConfiguration.cdxml",
+   "sha256": "2e692440651e168cb5d2ea94b8574b16ce29e79165f48487be94a1a6785a5b80"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterEncapsulatedPacketTaskOffload.Format.ps1xml",
+   "sha256": "922116b807e767220d7a2e480fd8e0b9901bc83cc3a14a5319e3d1c4f0639f6b"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterEncapsulatedPacketTaskOffload.cdxml",
+   "sha256": "30fe2b5cf197bccb718f64eb6ccb54282a6f09353b68bd2aabaa908bfe0e2267"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterHardwareInfo.Format.ps1xml",
+   "sha256": "496853fdb75b9b43409f5d0fbbf8158df1c2af062a7444e1c8bbd383496b4e6f"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterHardwareInfo.cmdletDefinition.cdxml",
+   "sha256": "3b81f23fbaf92641f010e186efd8b9078db9838a96562dd3ef69590b68d9d6e6"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterIPsecOffload.Format.ps1xml",
+   "sha256": "00542164350543c87562ec352ebaab32267be77164a9231c62db9c8a5f7fa287"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterIPsecOffload.cdxml",
+   "sha256": "6ba87b055fe0ea1db73f4e4e77558bfa1150aa10366f66230505d5084c008456"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterLso.Format.ps1xml",
+   "sha256": "434e20ccfba384950e4a01c725fa8169acab62f5951ba57f7f08cef2e6522649"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterLso.cdxml",
+   "sha256": "27053cee5b602bbc4f5232b272c1ca25cbef9c147fca0c0cd22fb9cf3df3ee88"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterPacketDirect.Format.ps1xml",
+   "sha256": "956d8c2b0d3d9bf2065ec63c3bbb6eca9bce8fe3db4b795ead43583a038c720e"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterPacketDirect.cdxml",
+   "sha256": "d62fda37d436844f7c835e1d0f3573285c74973e8b8da262e561c84ae1a645fa"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterPowerManagement.Format.Helper.psm1",
+   "sha256": "57d7228d727fec39efef71b92a3805fbb57c82cf7d3d6ee9a3a9cb5ba22e4cba"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterPowerManagement.Format.ps1xml",
+   "sha256": "0a5a7050a065343725b013ab2af721e81031436c869707e223f51f7007084a2e"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterPowerManagement.cmdletDefinition.cdxml",
+   "sha256": "d8801aa416a5238e213a18be1fe7e064001c33927b65f3c8940913ff25af1380"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterQos.Format.Helper.psm1",
+   "sha256": "d2887f2d82d8593cbe47b4ddf25db6bfe60fa05da458d3f1170b8e02e2b402af"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterQos.Format.ps1xml",
+   "sha256": "fa92de3f057fc4e5dfac7c3cbc6fbf01cf436efdee2f1baba52a64732ae5d7fd"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterQos.cdxml",
+   "sha256": "a08ce5230d3462fc93a0b1bdfbfde387e253100f1d6f8d20f1c7d465fe6f557e"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterRdma.Format.ps1xml",
+   "sha256": "d6ce8abca24c1bd80748d45c515c0d4f80e22f29962da128515b970aed15acfe"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterRdma.cdxml",
+   "sha256": "29ac1b9aa7f81a007ea41af031184672a9ef3acda1b8dab2e8ef3d7bed398ea1"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterRsc.Format.ps1xml",
+   "sha256": "5cc8e8ff3c0245234802149804b1a50d315f67afb019633b14d178ccd0673164"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterRsc.cdxml",
+   "sha256": "366ffe0606f65d716052bf8e446caa74e7bae4a2fba07b1ab557b7a067b85eb0"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterRss.Format.ps1xml",
+   "sha256": "617a02f9e38b8d8e55379e64319c1e9d8ef6e62dc24ed22049a533d45c703b7b"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterRss.cmdletDefinition.cdxml",
+   "sha256": "78b22c3afd7ef26b07e57057f59c548774a465581eb3a4f9d61ea025c9766df9"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterSriov.Format.ps1xml",
+   "sha256": "32adacd2af92df6d299f63548a8f0d743b6f2044b526ccd5412341465aa04f77"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterSriov.cdxml",
+   "sha256": "b15115218ec4c69c94ca7a8bcbf660b15c843842270dadb83af528991fa07b16"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterSriovVf.Format.ps1xml",
+   "sha256": "d6ad3ea4d3e1c7e17f1901b1785e4d75f5b137965da81822d8f8ca1e3d9f1134"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterSriovVf.cmdletDefinition.cdxml",
+   "sha256": "063713d6f5565ec5f7d51746ad56743c1a3239cbc658d3df79503467dd7efd8d"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterStatistics.Format.ps1xml",
+   "sha256": "381317b48d91710db3ba4fd899fbd8f4d8a1edc7686b4c618980d6baf9ff7df8"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterStatistics.cmdletDefinition.cdxml",
+   "sha256": "7a96e4cf8687c31722d4ee538bf48cd4749462c8b7babaed49d9d5d6ad88b7ce"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterUro.Format.ps1xml",
+   "sha256": "56d105b04cc55d5decacd4bd64e567cddc9d55fe8d152ae2c90898108bf049e3"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterUro.cdxml",
+   "sha256": "8da32e3b8a750378d38c13d2db0691b44c49234d7b4c042112dfc7466eb185aa"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterUso.Format.ps1xml",
+   "sha256": "d779fb3ddfd74ad27e2a64e87b37d015501a62508689500a4fec201f3fe3c0ae"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterUso.cdxml",
+   "sha256": "5a1dd6623cd064b00b3d57e019a6cfb23508b482e2b21f7f9201415ea85bf1ad"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterVPort.Format.ps1xml",
+   "sha256": "523cdbd926cd3a5cfd04f2b45e5ca0f4dd288f7112f1a66a37fddc0dc02bcebc"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterVPort.cmdletDefinition.cdxml",
+   "sha256": "cc173476a9371d17e69d394a7173ce198bf03759b8837a31ae17ecf2dad48b74"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterVmq.Format.ps1xml",
+   "sha256": "58b784f3592d08726c82ccc02223bb65f8e3e988d25a8cfc7897a920fe9e5015"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterVmq.cmdletDefinition.cdxml",
+   "sha256": "2d755d555204f459f1826d87719a89bf76d26547dc661ff9f3689c0c18c7dbcf"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterVmqQueue.Format.ps1xml",
+   "sha256": "9d0e5d0594be2ee71f070f04cd1ad347cfdb3b08e51cea6a5c31cfef5fa56692"
+  },
+  {
+   "path": "Modules/NetAdapter/MSFT_NetAdapterVmqQueue.cmdletDefinition.cdxml",
+   "sha256": "7dd22810c50096d4fa873f96aee6f78886c30a66eea35457d9cfe7af8b9365ea"
+  },
+  {
+   "path": "Modules/NetAdapter/NetAdapter.Format.Helper.psm1",
+   "sha256": "ec12ad3fb2b7f67cfe18a0dd2c9cb6304872ca42433416adbc8aea081a55a482"
+  },
+  {
+   "path": "Modules/NetAdapter/NetAdapter.Types.ps1xml",
+   "sha256": "253fc0ee25ba381010fab3003ae2e76dc1c1cf21aaee6097f23d9df2942b0d9d"
+  },
+  {
+   "path": "Modules/NetAdapter/NetAdapter.psd1",
+   "sha256": "add6032b01ddf56b1b343d4a8e550c44b7efea10b5b4502f1eb64d176d3070c5"
+  },
+  {
+   "path": "Modules/NetConnection/MSFT_NetConnectionProfile.cdxml",
+   "sha256": "5121854fb637c1b2a937d545d99a7a63449085eeb782370c2228baac5bfb2c46"
+  },
+  {
+   "path": "Modules/NetConnection/MSFT_NetConnectionProfile.format.ps1xml",
+   "sha256": "d33336aa12dbd09179083b1a8f1c071c3acb526860dc5c97d247b0976daa5d1e"
+  },
+  {
+   "path": "Modules/NetConnection/MSFT_NetConnectionProfile.types.ps1xml",
+   "sha256": "fce47dd296de96e207f086393c5f9f66c33d7b645af83d2fa4c4240b9b8f5f6a"
+  },
+  {
+   "path": "Modules/NetConnection/NetConnection.psd1",
+   "sha256": "375909b7300ed8a4457c2e8aeacde8a00eacaee710aae77835c2d2aa6e7aea46"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventNetworkAdapter.cdxml",
+   "sha256": "6355ec7ca6972fa5ad39d5098d3fd3510d90d862e4696d1075af06141011469b"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventNetworkAdapter.format.ps1xml",
+   "sha256": "6acfca4a288af9ec206f32cecead339d90fff94e16ce5957220962f3c83d64ec"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventPacketCaptureProvider.cdxml",
+   "sha256": "080440de410aa7da41107adfc54792e1d058d8381b5288754de8022c9ac9f704"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventPacketCaptureProvider.format.ps1xml",
+   "sha256": "2d57220046856b8a8df9a687ffd13f8b89c9d8e0edaabd0bba96c2e9159849c4"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventProvider.cdxml",
+   "sha256": "726a57e2a72f25ae2f0e932e7e8c76f427f4ac208cd1443acd14f32d987911fc"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventProvider.format.ps1xml",
+   "sha256": "3ecbd7b91d15b6c612498ecb6603bae4962338371e9ad830732271b396973a72"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventSession.cdxml",
+   "sha256": "37aab6ea73be67cd520058152248255736f61e444f6108e22706964b4dac3147"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventSession.format.ps1xml",
+   "sha256": "c377f91d8a012e43d16d0396cab7fe52b10addd389788650779cf882af9e10c7"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventVFPProvider.cdxml",
+   "sha256": "c6453bd3ff8d4cb4235a59d30c18919b27e98d66d74b877b6082ffc1d4e446bf"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventVFPProvider.format.ps1xml",
+   "sha256": "aca8ec825a6f8c32c9b94960d591b07a215e9df8d17ce74aaaa4cd84de4323c0"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventVmNetworkAdatper.cdxml",
+   "sha256": "9e474cee5053cd1f9b17f798f16e476d49d9bf3e2b5c7fb38b2dcc845ed13fd1"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventVmNetworkAdatper.format.ps1xml",
+   "sha256": "77ffee03d27d4cc8e488e81e10434aa1d0fa334f40359459eb00738753b78e61"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventVmSwitch.cdxml",
+   "sha256": "c99e21ad6e2b263defa187b199f74059505a47ee9b12acb95c6709c30fda999b"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventVmSwitch.format.ps1xml",
+   "sha256": "70676591c78caf3b8c6db7cdc7f51fe3e442fc6f901ae84e02fb82b6be4860be"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventVmSwitchProvider.cdxml",
+   "sha256": "5327d592dcf88253a70b1eaf9d07373c86725f8229872867da11f9c6171d07fb"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventVmSwitchProvider.format.ps1xml",
+   "sha256": "ac552d0297d5ee6552a684d17c082693322601a72e11f7663897417529af7193"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventWFPCaptureProvider.cdxml",
+   "sha256": "3990bc1b3db2120788e7abb1b069270cd9bb876ef02043c99b9d0dd932b709b9"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/MSFT_NetEventWFPCaptureProvider.format.ps1xml",
+   "sha256": "01e4637e9ad8a11775c98bb243bc673acd1a888719e68c645feabc1491e2af14"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/NetEventPacketCapture.Types.ps1xml",
+   "sha256": "cf4173d3e5985827cb472a77c61efe9d3c939fd27648a1c955d9c8c0c27e4695"
+  },
+  {
+   "path": "Modules/NetEventPacketCapture/NetEventPacketCapture.psd1",
+   "sha256": "6036b54bb43edee3fc4c4fd2e4532d40dcccb7bedd6054efc3ef929bb15ec151"
+  },
+  {
+   "path": "Modules/NetLbfo/MSFT_NetLbfoTeam.cdxml",
+   "sha256": "743c452d5aadda348e251e28e4941d76c822c6edc8ab0a2e4905c4fb950090e0"
+  },
+  {
+   "path": "Modules/NetLbfo/MSFT_NetLbfoTeam.format.ps1xml",
+   "sha256": "e825bc188ff2a2202a86e25fa64101d81fdae255bd741adf2f2295eda3ad6823"
+  },
+  {
+   "path": "Modules/NetLbfo/MSFT_NetLbfoTeamMember.cdxml",
+   "sha256": "10989b4f2b921f097a347f6ce7e0e18b7805e4d6eee13f8e23d44e8ab34bf176"
+  },
+  {
+   "path": "Modules/NetLbfo/MSFT_NetLbfoTeamMember.format.ps1xml",
+   "sha256": "d31ca9becc8572ddfd6426488018cf37027d45e72cb2194c3ceee0cd4d4e8036"
+  },
+  {
+   "path": "Modules/NetLbfo/MSFT_NetLbfoTeamNic.cdxml",
+   "sha256": "c2058523fa272372325fe3751b3e4f7d6fa17c0379603b522b8b25165ac7caec"
+  },
+  {
+   "path": "Modules/NetLbfo/MSFT_NetLbfoTeamNic.format.ps1xml",
+   "sha256": "cf1e54646cf534c0bfec6c438211aeff2a1f12cefa0a54c86749f6599115bf42"
+  },
+  {
+   "path": "Modules/NetLbfo/NetLbfo.Types.ps1xml",
+   "sha256": "8c88fca63eecd62aad4fbbd3ec5252d24d9fd4d367f7f4c4dc2af85bdadceeb1"
+  },
+  {
+   "path": "Modules/NetLbfo/NetLbfo.psd1",
+   "sha256": "ab413a672c8b79ff2be7a313d9d3f62a2052524033c3fc16ca2dff3a7796b4de"
+  },
+  {
+   "path": "Modules/NetNat/MSFT_NetNat.Format.ps1xml",
+   "sha256": "74359d7dec7e1e43f3f36b64df5f57de508d5e2dfdb8742302a81ee711412629"
+  },
+  {
+   "path": "Modules/NetNat/MSFT_NetNat.Types.ps1xml",
+   "sha256": "630091e245474e21ee0e4d3d48a75484d38e9440bbc41bdc16acd368adc4d64c"
+  },
+  {
+   "path": "Modules/NetNat/MSFT_NetNat.cdxml",
+   "sha256": "930ef275739595f09f77970a54e0c0d6883344edc98e1e8f40f37de5c11f168a"
+  },
+  {
+   "path": "Modules/NetNat/MSFT_NetNatExternalAddress.cdxml",
+   "sha256": "b574c3d2f19e931ffc7c8ebd166123a442f42e6b6e0e855ceb773540ab6daf88"
+  },
+  {
+   "path": "Modules/NetNat/MSFT_NetNatGlobal.cdxml",
+   "sha256": "8af8241fceca6cd5a5e367275e8eb23deac2315e3d672812d76520f4850ab760"
+  },
+  {
+   "path": "Modules/NetNat/MSFT_NetNatSession.cdxml",
+   "sha256": "9c9f92c7756f6d20947fb71505fe1a1578f63251ec20dd2b9a265cb0f77a7b0e"
+  },
+  {
+   "path": "Modules/NetNat/MSFT_NetNatStaticMapping.cdxml",
+   "sha256": "7681c1363eea68bd83710c9f9a845cae75ddba4a70ad002aa5288d79e5b1b6db"
+  },
+  {
+   "path": "Modules/NetNat/NetNat.psd1",
+   "sha256": "8ad5b554020f6876c50c3bfb0a1e2e800d8cfff30d1cf13e687511a93c1da97d"
+  },
+  {
+   "path": "Modules/NetQos/MSFT_NetQosPolicy.Format.Helper.psm1",
+   "sha256": "23c5c7e533bdefb7f511db967e427106fe6f6d925846b4242a90cfe78e6ec2d3"
+  },
+  {
+   "path": "Modules/NetQos/MSFT_NetQosPolicy.Format.ps1xml",
+   "sha256": "654b6c53568b04433a905963bac52b4b63cb7d8ff7607c5dba497d9ef331224b"
+  },
+  {
+   "path": "Modules/NetQos/MSFT_NetQosPolicy.Types.ps1xml",
+   "sha256": "816cf941508d82afaf616d7fb101d9d8a79b24e1aed9eee4ac2c310f90bdd600"
+  },
+  {
+   "path": "Modules/NetQos/MSFT_NetQosPolicy.cdxml",
+   "sha256": "084944f2eea172b984b9de66c333deb831baf508b74db765222293e91f087078"
+  },
+  {
+   "path": "Modules/NetQos/NetQos.psd1",
+   "sha256": "29885761b371cee1fa6b532118ad06e46ff93cdc43eb4412172cbd7c9b32da51"
+  },
+  {
+   "path": "Modules/NetSecurity/Microsoft.Windows.Firewall.Commands.dll",
+   "sha256": "387f0ed64dae94a3a09b2282076d81918a09c57a53761743d109076d451afea3"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallAddressFilter.cmdletDefinition.cdxml",
+   "sha256": "3cf638cceb1d58f23cbe7cb30d6a052702c6d3c51aae1924d88d25effb59a6d9"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallApplicationFilter.cmdletDefinition.cdxml",
+   "sha256": "1a625d3b4bef73993484ce15de0fcb7e8a2845f136b81bb8dd83bee82ca4d097"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallDynamicKeywordAddress.cmdletDefinition.cdxml",
+   "sha256": "b31e8ccf9691eb23b1b30e16b09822f132029afa0e6d2d72666b5668f19d883b"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallHyperVPort.cmdletDefinition.cdxml",
+   "sha256": "f6789294cb789bce4f7c49922864d728a6922954d1ca001fee41651d149bfa23"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallHyperVProfile.cmdletDefinition.cdxml",
+   "sha256": "82f3463785f451870d0cbab38f5cb826042a0a981445589567fa8c6f7716aa03"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallHyperVRule.cmdletDefinition.cdxml",
+   "sha256": "046bc104c6907af9edf73812dfd11d2a3bd873c097983f0f552c9f0fc82f801d"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallHyperVVMCreator.cmdletDefinition.cdxml",
+   "sha256": "43239304bcf94ebf97ed906207c06d6e4f73472bf6808b29a7da6aead124ef16"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallHyperVVMSetting.cmdletDefinition.cdxml",
+   "sha256": "0bf863056e748216720f82104cddaa6705b1522b891fe21277caa2ca71371417"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallInterfaceFilter.cmdletDefinition.cdxml",
+   "sha256": "be7fb78b1e95714a4b825dacf80057cb8c614fff87b53c6c264a86a502c2a802"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallInterfaceTypeFilter.cmdletDefinition.cdxml",
+   "sha256": "62b2bae6ad5acf437d32fb877271d64575eaf50a8ab777cab43f0208a59a5bd5"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallPortFilter.cmdletDefinition.cdxml",
+   "sha256": "60d8c2d146fb0db9a14c11a3551855d192601b69ed96b10dcd59ac9ddcafe624"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallProfile.cmdletDefinition.cdxml",
+   "sha256": "e093c5442458c8c1f8c1616b23eda1714170f2d91b85ca5794562e54197b8f46"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallRule.cmdletDefinition.cdxml",
+   "sha256": "a09ae05b98912e67029766eb460d48ec3124cf93f9a0cd2abdfedf59546ee60e"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallSecurityFilter.cmdletDefinition.cdxml",
+   "sha256": "c3b985e9098c5842818fbf27d9a8b0993a6b3a0b167c160fffc35aa128af9bae"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallServiceFilter.cmdletDefinition.cdxml",
+   "sha256": "6eb759630b1796d56dad73ca8037c817ac5bbe9a5251077329f6b55bed9749c0"
+  },
+  {
+   "path": "Modules/NetSecurity/NetFirewallSetting.cmdletDefinition.cdxml",
+   "sha256": "9b953e6eea5deddb77d986645b40ff7364a71f22335a08347dee6719a8ae10c1"
+  },
+  {
+   "path": "Modules/NetSecurity/NetGPO.cmdletDefinition.cdxml",
+   "sha256": "bbd234eadf2c42a38ebb75a09dc2a319e85025858394ec80f539d5a4832d159e"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecDospSetting.cmdletDefinition.cdxml",
+   "sha256": "f76889f42a82c961d642e7b6807b3634b7cddd9d0c1a80e2c680c0e8b564d268"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecIdentity.cmdletDefinition.cdxml",
+   "sha256": "a8057d208a15a14e769d2b4dd681e444cbe9a7593a1ca4c9644785c07bc895d3"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecMainModeCryptoSet.cmdletDefinition.cdxml",
+   "sha256": "25e255590f3a77ae81e4e70feb28766b35ca92f0108c5de98c9b570a1d9f65fb"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecMainModeRule.cmdletDefinition.cdxml",
+   "sha256": "9943c5f92448eb570e68fb9866059fa7d0c5c6bc63d0906db8a2400ef8b96ab7"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecMainModeSA.cmdletDefinition.cdxml",
+   "sha256": "e2ac10ac29ddca53609bb367bac88351533a47035a69f614f21ffb3d293e6024"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecPhase1AuthSet.cmdletDefinition.cdxml",
+   "sha256": "a59fbbf35b9127ed9924bb9db97f3dc76ae752988fb899af6aad3452125e7110"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecPhase2AuthSet.cmdletDefinition.cdxml",
+   "sha256": "c91e591f95cd79302fe3edd4238472e421e198f1bbe4cd60280b29caac5ac557"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecPolicyChange.cmdletDefinition.cdxml",
+   "sha256": "e609a15ec0ee6b112a4092193c1bd47e9fc2447af9a68d3bde6baaebfa64daf1"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecQuickModeCryptoSet.cmdletDefinition.cdxml",
+   "sha256": "c22735da93b9da06502837cefb1178331e6139c1a28f59f1dc2ceede212cfb92"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecQuickModeSA.cmdletDefinition.cdxml",
+   "sha256": "76aca78b5783b7e04764a0ddac2dde863085c17a4df391b7ac21eebb99804327"
+  },
+  {
+   "path": "Modules/NetSecurity/NetIPsecRule.cmdletDefinition.cdxml",
+   "sha256": "bb45b5e1b1a9fb5649a607060157b2ffb65d568ea9c113c3632bce14af4d49c7"
+  },
+  {
+   "path": "Modules/NetSecurity/NetSecurity.formats.ps1xml",
+   "sha256": "2c31e22232eda6a756969ae4d8698652a5c2c29019ac7d7afe37adf61d78f3eb"
+  },
+  {
+   "path": "Modules/NetSecurity/NetSecurity.psd1",
+   "sha256": "04028a016fa8757a2c2c78d6045e27a2ebc968d5bd9e25cf81ff8d070fa716d5"
+  },
+  {
+   "path": "Modules/NetSecurity/NetSecurity.types.ps1xml",
+   "sha256": "68731bce0d53d0b7bc8d3348eeb3d39c393ac7db9ba3cec019db58f546636874"
+  },
+  {
+   "path": "Modules/NetSecurity/en/Microsoft.Windows.Firewall.Commands.Resources.dll",
+   "sha256": "0e59c2895b147c3d3965b18159f3b9c139533b8d3aa57b1acb4b989b49fc89c0"
+  },
+  {
+   "path": "Modules/NetSecurity/ru/Microsoft.Windows.Firewall.Commands.Resources.dll",
+   "sha256": "0e59c2895b147c3d3965b18159f3b9c139533b8d3aa57b1acb4b989b49fc89c0"
+  },
+  {
+   "path": "Modules/NetSwitchTeam/MSFT_NetSwitchTeam.cdxml",
+   "sha256": "e671e58a8c5e241f1c9bd6cb1d563bb3db6278dc14f15601b60c78d9ad1ce951"
+  },
+  {
+   "path": "Modules/NetSwitchTeam/MSFT_NetSwitchTeam.format.ps1xml",
+   "sha256": "d408e47789de22336f229e630a5e8b3c345185a11f0396c1ce27b62e0af45498"
+  },
+  {
+   "path": "Modules/NetSwitchTeam/MSFT_NetSwitchTeamMember.cdxml",
+   "sha256": "11c97107e3de6561140d4533be2fcaf6681c864a88498f9bdc6503e3c39a361f"
+  },
+  {
+   "path": "Modules/NetSwitchTeam/MSFT_NetSwitchTeamMember.format.ps1xml",
+   "sha256": "40b43037b0da5fac2ac139be644e97d2ebb3552a5180c6e6e0a44c24ccb4bc2e"
+  },
+  {
+   "path": "Modules/NetSwitchTeam/NetSwitchTeam.psd1",
+   "sha256": "32ee0b7ac7e6991461ddaa4314dc11e20805ed9c8ba61e5311bac62f4a262adb"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetCompartment.cdxml",
+   "sha256": "2b5bf105fbfe70e8de50b5bbff1f331005c42f77bffcb0b0f91ebbd27ac14ce8"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetIPAddress.cdxml",
+   "sha256": "b1ef9d2787020392154a761dc2a0bb58d8292e9adf409006f94acbfe6e93e69a"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetIPInterface.cdxml",
+   "sha256": "2e2e101eb0eb991798da1236ee27e56854bdbe1f1db20edff4247a5dee49b9ec"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetIPv4Protocol.cdxml",
+   "sha256": "d0b8c41a6f668a4b34148a4955b0a848b4a37011e4a0a54424a14cb577d4a0fc"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetIPv6Protocol.cdxml",
+   "sha256": "1fbb4f288aa0937da2bbea1137ae8cd6e62c586c6a34709dd208cccb6dac7264"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetNeighbor.cdxml",
+   "sha256": "d23762d80b2893d40bcbd54a662a68a3e77f26eb59cd542d08f26445f8673e13"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetOffloadGlobalSetting.cdxml",
+   "sha256": "8e658f08b149dedea38207efa53bada3375d7ab8bc50521a88a6b920a25a5d8d"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetPrefixPolicy.cdxml",
+   "sha256": "bca8922e63dd4b8ba470a613a40517797e7c770cd57baedbec1ec42426c8fbf2"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetRoute.cdxml",
+   "sha256": "153102a950b23c749bda65447dcf3755e0d083557d05ec2dbc1ade7d17836ad1"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetTCPConnection.cdxml",
+   "sha256": "7c7960c53b42ab74a2b3346510ef65cfbfcc4b418a980a6b2cebca7a81c203b4"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetTCPSetting.cdxml",
+   "sha256": "4c3ad4de6963dce150ace07dd245c8776f1a167fd373d743390dc8642558451d"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetTransportFilter.cdxml",
+   "sha256": "913634a83b2c4066af38e15d6363baa2aa080f27550d4cfcae8c7a8b53a1202f"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetUDPEndpoint.cdxml",
+   "sha256": "802bf4d3cd99ddf65ab8966e512476d0e9677f6ab6b6ec2facaeff725ef86240"
+  },
+  {
+   "path": "Modules/NetTCPIP/MSFT_NetUDPSetting.cdxml",
+   "sha256": "ceb2b35340ddbcaedec3a17786b7e3b7dbf5865d46c2abd3c71f0f1df8916942"
+  },
+  {
+   "path": "Modules/NetTCPIP/NetIPConfiguration.psm1",
+   "sha256": "0c1d9e5342da99c4cdbcf5a698cb17d17fa23217bdd1755565e5a83f134c0b9d"
+  },
+  {
+   "path": "Modules/NetTCPIP/NetTCPIP.psd1",
+   "sha256": "e93bb8e6ccb4b0abd3e9d7a31735b08a9024292cd7e10679be6acf0510be129a"
+  },
+  {
+   "path": "Modules/NetTCPIP/Tcpip.Format.ps1xml",
+   "sha256": "8622d7ba44a043480d709e4114b0cda543bd3357a86d5aa239ba8cf3ed5c76b4"
+  },
+  {
+   "path": "Modules/NetTCPIP/Tcpip.Types.ps1xml",
+   "sha256": "ea86534b19cd5c6ac468cba33e63ae70a729b9535edf9d28bfdd570ca4e2ce26"
+  },
+  {
+   "path": "Modules/NetTCPIP/Test-NetConnection.psm1",
+   "sha256": "4c79584054c4f84614963514af7afe4ac9af50f55de745757828f0da60171036"
+  },
+  {
+   "path": "Modules/NetworkConnectivityStatus/MSFT_DAConnectionStatus.cdxml",
+   "sha256": "4716f0c1edc87c5e936bec7a858a81ce307ffe670dded714504279266e8bedd6"
+  },
+  {
+   "path": "Modules/NetworkConnectivityStatus/MSFT_DAConnectionStatus.format.ps1xml",
+   "sha256": "9714b7b1890400fc73a2d37e67cb0579fc6daf701e9a622fc16d2e5f9f406f0a"
+  },
+  {
+   "path": "Modules/NetworkConnectivityStatus/MSFT_DAConnectionStatus.types.ps1xml",
+   "sha256": "a388859fa814b36cc0b8524e1254a08851ceab3b7d4db5521422d6b640e7e4ae"
+  },
+  {
+   "path": "Modules/NetworkConnectivityStatus/MSFT_NCSIPolicyConfiguration.cdxml",
+   "sha256": "bcbda5b2edd5cac40cabcc5b80f8d0f195b479a7b6991d0c68c4da3805e8e07e"
+  },
+  {
+   "path": "Modules/NetworkConnectivityStatus/MSFT_NCSIPolicyConfiguration.format.ps1xml",
+   "sha256": "7e7208229d3a968c19ff2e16450f2022cf757571d651cca895541d1e44af7ba0"
+  },
+  {
+   "path": "Modules/NetworkConnectivityStatus/NetworkConnectivityStatus.psd1",
+   "sha256": "2f855d5b57b457ad577970b93c6641fb81beb1e919f451c628363d4f1e7ad3d7"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/CmdletHelpers.psm1",
+   "sha256": "c401a74d86f136decdb4d028338253eb7feb6707693fa88f951af711bb0eeca3"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/NetworkSwitchConfiguration.psm1",
+   "sha256": "c13a79f9947212d8eb2c4b4d3bc673a7f27d0f7f948e8f43163d8785bc5372f0"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/NetworkSwitchEthernetPort.psm1",
+   "sha256": "17e7840a49011b17f5f8ba6eae0fb907084a6345d056e864c8c77e5172d11d52"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/NetworkSwitchFeature.psm1",
+   "sha256": "4a38b11198a87f72f71e54364d0058d246203f46e795de15418720c2ad848d9d"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/NetworkSwitchGlobalSettingData.psm1",
+   "sha256": "22a5811db8a92e07b09f8f0c90e9dda757c1beb997baea166904fed911595f1f"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/NetworkSwitchManager.format.ps1xml",
+   "sha256": "39c7c6a50ff1eb1ae461abfcc67112f579154b6cafc8fda98a989738d15dc56f"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/NetworkSwitchManager.psd1",
+   "sha256": "b8c9b416ce56bd29e7d28e604abc96eb25be2e4b1424bee6b2fa1dae3a9e217b"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/NetworkSwitchManager.types.ps1xml",
+   "sha256": "6121307644f65eb1a92a326b3aad97f5d74145e8799443530b256245df86d754"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/NetworkSwitchVlan.psm1",
+   "sha256": "30270aea789f660d9d5d15a28dc63f0e9f7f0eca786bfec6392c4bfb5f380aa5"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/en-US/NetworkSwitchManager.Resource.psd1",
+   "sha256": "b1c70d618c88e30dd5df905e0ddb1aee445d2d49091bbe8b7c49104e1ffa0eb7"
+  },
+  {
+   "path": "Modules/NetworkSwitchManager/ru-RU/NetworkSwitchManager.Resource.psd1",
+   "sha256": "c02447cf553b8bd7d83a336682572fdbf55e16c5ac8932e0873d641d74ab3495"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_Net6to4Configuration.cdxml",
+   "sha256": "4683adcafc0abbcba69d393383653828ff5f0f77d935a522e9f00073df669722"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_Net6to4Configuration.format.ps1xml",
+   "sha256": "b6e1570e9a1965d98f563fb88171d0ec7985ab95b55ec0135fda465d3fef62f9"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_Net6to4Configuration.types.ps1xml",
+   "sha256": "78582df9eef3d4e39b13b27474e0701a98f22cb28dea105a529b433af06f566c"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetDnsTransitionConfiguration.cdxml",
+   "sha256": "ffda890cce00da546894a1c9843637e8542d22c8123d3b9163d4de007f23a3fb"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetDnsTransitionConfiguration.format.ps1xml",
+   "sha256": "c7f1acfc304302d1e04cb66523ee984efedce926e1734984c6d4972485d28d2b"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetDnsTransitionConfiguration.types.ps1xml",
+   "sha256": "74a665ea7c4c30c7f0a0d85d92057d5ba8e699cfc59e0e55665c7ff9a6600239"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetDnsTransitionMonitoring.cdxml",
+   "sha256": "ab53312b6b33ea6335130de0780db8a89552afee484c4c7fd416365f6a0b6148"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetDnsTransitionMonitoring.format.ps1xml",
+   "sha256": "6be44ddf36bee4abc6e43fe4c99521869363997929f47942fb4a7c4ffcebbbfb"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetISATAPConfiguration.cdxml",
+   "sha256": "c7ff7163d74d19aecc7805e9ff002d765e9f15b0bd0d8a175147877e935040c1"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetISATAPConfiguration.format.ps1xml",
+   "sha256": "68518201a8c57a006bd44f79f1eafb3e26ed1d19a7a7d463814ee58b6bed78d9"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetISATAPConfiguration.types.ps1xml",
+   "sha256": "aefab556919e34955b6214db4112b31c29ab82b48605ef3813e5c1b7937ddd35"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetIpHTTPsConfiguration.cdxml",
+   "sha256": "ed1ccad3c548728d2eb58065f0469e8b8d22e04f8be57013016180777fcfcfd6"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetIpHTTPsConfiguration.format.ps1xml",
+   "sha256": "87edc09a33c0f6cfb801b426201bd977ebfc8ea55e0ccc65bf37c9d0b4e22f80"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetIpHTTPsConfiguration.types.ps1xml",
+   "sha256": "d67f848f9adc70856bfb03769bf15457c1f68d8ac5d9dd574a43e47bf46d194d"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetIpHTTPsState.cdxml",
+   "sha256": "9fb50d68e5be3c35259c446f8500c2b1bac39217a9f075af4585a2310d2598e8"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetIpHTTPsState.format.ps1xml",
+   "sha256": "50564e130102f13f23fd7bee83cc65aa8a856138f1fb09fa2431e14e93613ac1"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetNatTransitionConfiguration.cdxml",
+   "sha256": "bd627bc27e25ae36aa23496556599f49176eb22688e609882be1cceb4c2f5766"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetNatTransitionConfiguration.format.ps1xml",
+   "sha256": "4ac1c12d379a5f723eee7759f1d6a08a56d84335a2fa3be6234cf37e74370dc9"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetNatTransitionConfiguration.types.ps1xml",
+   "sha256": "2b6a1c46f49c826acfce44f35e727194d7283c199a80ed0ccea834d0be3d72c2"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetNatTransitionMonitoring.cdxml",
+   "sha256": "178d65f671b5b271ba70cf4efb1ae6f5ad9d79f3f5434f5178e1a100f0a93f61"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetNatTransitionMonitoring.format.ps1xml",
+   "sha256": "a69f31bbb5e9ea7ce5282242469fbea9139a734fcc8bcc35fc1fff3fbe49e70c"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetTeredoConfiguration.cdxml",
+   "sha256": "e1708797a38e4ce716e1f4a4d667f883acdb36c6609d3a4a8638c02a133dce81"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetTeredoConfiguration.format.ps1xml",
+   "sha256": "cb764e38cf4e88cd645fd6e09ced711c08cc68677bb2273896556b48c6e884be"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetTeredoConfiguration.types.ps1xml",
+   "sha256": "6dd77198ea247f41c3a398c3a288ad249a27d7ab741d965eb4e0eacd21858899"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetTeredoState.cdxml",
+   "sha256": "8bb1bb563a5f72c5ca7179f44013e5cb69ed5065bc224b920155a3511dae514c"
+  },
+  {
+   "path": "Modules/NetworkTransition/MSFT_NetTeredoState.format.ps1xml",
+   "sha256": "9c8abd638cdf9a65517a1aba1d6344ab0ce7c1b56d1e9ab737a636f3cfce272b"
+  },
+  {
+   "path": "Modules/NetworkTransition/NetworkTransition.psd1",
+   "sha256": "aa9d723d79abe88b9303e16ac3ceea1e3bb4cbc413fd19cbc7c624a8210ca564"
+  },
+  {
+   "path": "Modules/OSLicense/ADLicenseInfo.psm1",
+   "sha256": "cea96c5cceb0b90a65986dff20ab89b8710441bac0a88d6d1ce855d7ac04d136"
+  },
+  {
+   "path": "Modules/OSLicense/KmsLicenseInfo.psm1",
+   "sha256": "47a796db5ca9d377402ad02e542a714f506ea3a232a177ebf5e6aa6d0a56df77"
+  },
+  {
+   "path": "Modules/OSLicense/LicenseInfoData.psd1",
+   "sha256": "41a91f9265f77133a24681ded7b4f684adcf4253317754952b86ce2085a91533"
+  },
+  {
+   "path": "Modules/OSLicense/OSLicense.psd1",
+   "sha256": "7d5cbb3f7e120bf0a3ac8adde27e12c323e76ff11224b0038b889719630491c9"
+  },
+  {
+   "path": "Modules/OSLicense/OSLicenseInfo.psm1",
+   "sha256": "cfab88f69bb94422d517965de66ef7653cc38d7a2d2f5d120b9560ccbfcd2524"
+  },
+  {
+   "path": "Modules/OSLicense/SubscriptionLicenseInfo.psm1",
+   "sha256": "f65abecba975b8765a208a350d45e1b72add37155669e51aeeb81453dcfc3662"
+  },
+  {
+   "path": "Modules/OsConfiguration/DmOsConfigurationDocumentInfo.ps1xml",
+   "sha256": "c248d3b198bdf6c4cfd4960e644d2bb55693c1cdaf3960153245465cb97fb4ba"
+  },
+  {
+   "path": "Modules/OsConfiguration/DmScenarioDefinitionInfo.ps1xml",
+   "sha256": "28f1462f2896670896197795b105808ea61eeb473c40d8340d6005fac4361d3e"
+  },
+  {
+   "path": "Modules/OsConfiguration/Microsoft.Management.OsConfiguration.Commands.dll",
+   "sha256": "466d6103d498f64836874ec2c54e6fd0ba9ff06e61c7f6cd98dffc5b9348df54"
+  },
+  {
+   "path": "Modules/OsConfiguration/OsConfiguration.psd1",
+   "sha256": "75c9eee4f0850ab191743e23de93dece5204a84ca3cd1cf2b39787140a1a3007"
+  },
+  {
+   "path": "Modules/OsConfiguration/OsConfigurationInfo.ps1xml",
+   "sha256": "f5c26afb750d9b812efca0fcec8a146aa545439da31d87ec601a0deadb0ca409"
+  },
+  {
+   "path": "Modules/OsConfiguration/en/Microsoft.Management.OsConfiguration.Commands.Resources.dll",
+   "sha256": "c95576629c0787f2fdbc015357a2ded6ca06a645eeb7abd0a08a5d3e7a18a168"
+  },
+  {
+   "path": "Modules/OsConfiguration/ru/Microsoft.Management.OsConfiguration.Commands.Resources.dll",
+   "sha256": "22cf34ae76e0d4a947d569fccbd565b7c6c07652c36111b170f2d127cd6d1d52"
+  },
+  {
+   "path": "Modules/PKI/pki.psd1",
+   "sha256": "d9d247b797d491a0a6e1ceaa4ef072ba3581a4408805983bdb08e0cf6dc45c34"
+  },
+  {
+   "path": "Modules/PKI/pki.types.ps1xml",
+   "sha256": "44c15216ca58d891ba6ce087d01a91c174a673966ba8083ce89008cf2c6c120e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCClassResources/WindowsPackageCab/WindowsPackageCab.psd1",
+   "sha256": "a09054f40694d5472f1f7814d0136de0225ed15d38f522df3bcc2b50d7752192"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCClassResources/WindowsPackageCab/WindowsPackageCab.psm1",
+   "sha256": "326669c4a31e2049e3750bcf4287241bb8b555b3670d31a1aca74c3ac598df81"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCClassResources/WindowsPackageCab/en-GB/WindowsPackageCab.Strings.psd1",
+   "sha256": "5c63b91693dfe3ad4cef1685f3bead6e758011378b98e266c966f6a21fd111b9"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCClassResources/WindowsPackageCab/en-US/WindowsPackageCab.Strings.psd1",
+   "sha256": "674a4e0fcf26df00399f6ec8bed97b8a28a13fd2c5394fcb023aaae23a1e5c1e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCClassResources/WindowsPackageCab/he-IL/WindowsPackageCab.Strings.psd1",
+   "sha256": "5c63b91693dfe3ad4cef1685f3bead6e758011378b98e266c966f6a21fd111b9"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCClassResources/WindowsPackageCab/ru-RU/WindowsPackageCab.Strings.psd1",
+   "sha256": "0287e658b058d74934d0a830a6d6f3303505d7c50dec7a9d8eaa6202bee94dbc"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/CompositeResourceHelper.psm1",
+   "sha256": "4fb57f6a5fe776a46f8a7631d461c43ad103931b45ed674dc5bbd837195591bf"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/DSCResourceHelper.psm1",
+   "sha256": "278e816943020aa1ef6c585636da1035e4d456cb1fb07e9a34a21d2690ef573f"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/GroupSet/GroupSet.Schema.psm1",
+   "sha256": "5bd66229fcadf1fcc0ccfc7f880d44c8e5fa06e4e861b6504d41a553a50cf262"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/GroupSet/GroupSet.psd1",
+   "sha256": "53d46f56059fbe503a776e041154d15c1842ec705374d7d3fca5dcc880d7594c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/MSFT_ArchiveResource.psm1",
+   "sha256": "163b8f591fe315b00ad753c5450316cb9eef82b4cc53d0b24573aad40547cc35"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/MSFT_ArchiveResource.schema.mof",
+   "sha256": "6460c5cba74d8661e8167b0371a470cf73cb1fd3e60be83fc8ba2d273fb1a41d"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/en-GB/ArchiveProvider.psd1",
+   "sha256": "9fec73cc8a7288fe6767f1199665da32f776741db23023267f50d29364bba813"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/en-GB/MSFT_ArchiveResource.schema.mfl",
+   "sha256": "9a78a6416c8b68888bd190bfd0df2b6b63b2419e43a24d49b80978a160923bf9"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/en-US/ArchiveProvider.psd1",
+   "sha256": "727fbf9e5f46cd5ca94ad807dd171059f8ecc0185119d1451ff0f684f75cc6a1"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/en-US/MSFT_ArchiveResource.schema.mfl",
+   "sha256": "e4476197e59eeff050d75e20a0189054079038c9f6fb689ae54312055d4e1de2"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/he-IL/ArchiveProvider.psd1",
+   "sha256": "9fec73cc8a7288fe6767f1199665da32f776741db23023267f50d29364bba813"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/he-IL/MSFT_ArchiveResource.schema.mfl",
+   "sha256": "69598bfb995348998f0c478ecdf12319414f58dcf9bf239fe9c59000648e106b"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/ru-RU/ArchiveProvider.psd1",
+   "sha256": "b9281688a27832dc4f87cfb6f1af8bf9b998f112be0f8b863b25e67252d773ad"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ArchiveResource/ru-RU/MSFT_ArchiveResource.schema.mfl",
+   "sha256": "58a0bb8f6f795f2165124b5f867d92ed1ce76d5faaa0e858934273bb77d32a36"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/MSFT_EnvironmentResource.psm1",
+   "sha256": "4bc67e09711eca67ad549ee28478dd742a1fa8a8b2f220249add6aede0245981"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/MSFT_EnvironmentResource.schema.mof",
+   "sha256": "e8fd9bcb6a370470aab8fcf7a1330e50791b8e514d85c641ec3f3251b9013505"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/en-GB/MSFT_EnvironmentResource.schema.mfl",
+   "sha256": "47bcb5d0db55660c5e14d303d49bb8f617e73afd675c281fd6dab370b44d8924"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/en-GB/MSFT_EnvironmentResource.strings.psd1",
+   "sha256": "b1f924dc74f2eebca134c75ddf1d505497abb7f72d58a880195b2e38cb1ebce5"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/en-US/MSFT_EnvironmentResource.schema.mfl",
+   "sha256": "7d0b369fabe9292c23790a828653f3e9e6f656a1425a44573318a4ec0b57a8c9"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/en-US/MSFT_EnvironmentResource.strings.psd1",
+   "sha256": "02ceec1a9ebb65238ea63a0503d1d9778f9ad7a809e225f1c751e0e06b5b6d76"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/he-IL/MSFT_EnvironmentResource.schema.mfl",
+   "sha256": "863e6eaac9644672c326816181124a5d38efbb60771a27ae1a4c0221cad0cfcf"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/he-IL/MSFT_EnvironmentResource.strings.psd1",
+   "sha256": "b1f924dc74f2eebca134c75ddf1d505497abb7f72d58a880195b2e38cb1ebce5"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/ru-RU/MSFT_EnvironmentResource.schema.mfl",
+   "sha256": "50f82ccf6786d2a2e00844261df6037162f3b4e9b4f4059ee3bd12bd418bd270"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_EnvironmentResource/ru-RU/MSFT_EnvironmentResource.strings.psd1",
+   "sha256": "f6a4f03412cd63ead1be38bb84d3d7110b5387685a158075bbe0e887e539a557"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/MSFT_GroupResource.psm1",
+   "sha256": "4614034b07246b4ad4e1ba3e3c657e19395eba7b6c2111262166695a505515a4"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/MSFT_GroupResource.schema.mof",
+   "sha256": "65d99b6f571d95c173569ab6e01a70f550c5a8ac0905e06d56358bd87fc999d4"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/en-GB/MSFT_GroupResource.schema.mfl",
+   "sha256": "8abe9f02520481573989cc70d0bd976ca9ef8549f0120b8d6a1c06ad49718c05"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/en-GB/MSFT_GroupResource.strings.psd1",
+   "sha256": "bab00e37bb417fd3badf3b9f81e0a3be4f6862b63a76ffc9ddba6274d17ac0b7"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/en-US/MSFT_GroupResource.schema.mfl",
+   "sha256": "99f65f364bbf96d2577978e0d560fb41b13171dfbceef1b48a16131e8084f120"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/en-US/MSFT_GroupResource.strings.psd1",
+   "sha256": "efe68164b7c9ae42d6edfcd67f8e411adfd2ec7b82469e9858bc3e4e3cd84917"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/he-IL/MSFT_GroupResource.schema.mfl",
+   "sha256": "482085345a6cdf40d65bb35598061d1acbddcdba979abd8b418a02d26da38464"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/he-IL/MSFT_GroupResource.strings.psd1",
+   "sha256": "bab00e37bb417fd3badf3b9f81e0a3be4f6862b63a76ffc9ddba6274d17ac0b7"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/ru-RU/MSFT_GroupResource.schema.mfl",
+   "sha256": "d5d994ce9722a9760d976612388e83ba5d99cceca7f7e9e55f4c6ad29aa757aa"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_GroupResource/ru-RU/MSFT_GroupResource.strings.psd1",
+   "sha256": "899e00fc6d57d35af4791249f8d963abddf3f1757d51c2cd7215a226aa705ecc"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_LogResource/MSFT_LogResource.schema.mof",
+   "sha256": "df2549abd05b7bd92aa38188297364a47faea4c356c6cdd5c8aaefdc6dde2f83"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_LogResource/en-GB/MSFT_LogResource.schema.mfl",
+   "sha256": "1ffc3d43b796839367fa3a1b33137d01c90bd4a9163384dccdac6b3a1eada89c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_LogResource/en-US/MSFT_LogResource.schema.mfl",
+   "sha256": "bc7f9a1911e25f6da3dd2dc12a2a477699fdff0df0c5286cb9e347f5ab36b690"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_LogResource/he-IL/MSFT_LogResource.schema.mfl",
+   "sha256": "fa9b6b3ff28240d06b397f187cd24608b2a30a09a2d6d6fa6b2cbf099a005077"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_LogResource/ru-RU/MSFT_LogResource.schema.mfl",
+   "sha256": "c368d90926bed58d824ab0d8373ab5eb2200b26f84f66b8a2f8518c0a7c6ae1e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/MSFT_PackageResource.psm1",
+   "sha256": "e375fa32e10537d28e279379c3bf4c0a761f6a33c88dbcbd9b34c13173fa3c07"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/MSFT_PackageResource.schema.mof",
+   "sha256": "e0a12c369e966f9bc9f0ff061905bd031c2fe7dab0ccb23fe1aa8f17fd4ee91c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/en-GB/MSFT_PackageResource.schema.mfl",
+   "sha256": "25f9273624d04cf9eb422ccff9f7ec577fe1f2df05af5a15cb0814e465468e5e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/en-GB/PackageProvider.psd1",
+   "sha256": "7bc5409e83634d50a54688c6679ace89759dcd394136f8d7a57707e7d48168ec"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/en-US/MSFT_PackageResource.schema.mfl",
+   "sha256": "0d74e906193ead56aaabb217870296888f07cd9e7e093eb69c5d68fc48c2f5b3"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/en-US/PackageProvider.psd1",
+   "sha256": "6f4b5260a730ce0e0d417dbdc6a250917e1caa74aa63a916ee60564ff433ad88"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/he-IL/MSFT_PackageResource.schema.mfl",
+   "sha256": "1345aa8c0578443b5cf65ed53ab0090e760e6c2afc5e6f9366d616a1db8268f8"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/he-IL/PackageProvider.psd1",
+   "sha256": "7bc5409e83634d50a54688c6679ace89759dcd394136f8d7a57707e7d48168ec"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/ru-RU/MSFT_PackageResource.schema.mfl",
+   "sha256": "e98e35303b99c46c519cff951919808691b818847d4519c0bc889e00fcae4c8e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_PackageResource/ru-RU/PackageProvider.psd1",
+   "sha256": "14ba81dfa9994a3a1a19b1ed80e5aeb377b110ef1469c8b39db2445fa141606e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/MSFT_ProcessResource.psm1",
+   "sha256": "45c656815feded87c81c9ad5566ac6e11468441206e6737199ef9dcd5310037d"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/MSFT_ProcessResource.schema.mof",
+   "sha256": "928f2e3837700addc79e624cad1d3c24576db28b0fe8de661820549af30766f6"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/en-GB/MSFT_ProcessResource.schema.mfl",
+   "sha256": "98ccfbc3eeb753b378827a9560f5fb96e7df89e687713910d08a1f44dd61bfdb"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/en-GB/MSFT_ProcessResource.strings.psd1",
+   "sha256": "fabc2c41c89239e933a9882d8789026f796ccee006be55969b00e41f13029805"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/en-US/MSFT_ProcessResource.schema.mfl",
+   "sha256": "457eb6a8630569e6387274f000e152ba8c3ef5290f5d55cbc892c4b2a4e24a42"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/en-US/MSFT_ProcessResource.strings.psd1",
+   "sha256": "5b9e7a6af2c7864f82617b12150d773d815ba0adbc187c10f554f2351cadc631"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/he-IL/MSFT_ProcessResource.schema.mfl",
+   "sha256": "0e18529889ed5f07f97dd811d55d37cb467176b2f3741d8d4ae91c2298382dce"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/he-IL/MSFT_ProcessResource.strings.psd1",
+   "sha256": "fabc2c41c89239e933a9882d8789026f796ccee006be55969b00e41f13029805"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/ru-RU/MSFT_ProcessResource.schema.mfl",
+   "sha256": "8b93c33147f084876e4d3f8eeb4be24df7c7d2d1cfd9ecb508005cbc31558dd9"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ProcessResource/ru-RU/MSFT_ProcessResource.strings.psd1",
+   "sha256": "7ec43d3ad0ee6eba312e9f24e7d97d40295275ac2e0890bacc471f030e7bd669"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/MSFT_RegistryResource.psm1",
+   "sha256": "2014d15de845491a80be1132ca3784d60ed8e1315cf5942912956163d4bf6f4f"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/MSFT_RegistryResource.schema.mof",
+   "sha256": "128afa2a25ed05d4ab9e4364074768b2ff252ce083cac61d10b9e5606c87d1fb"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/en-GB/MSFT_RegistryResource.schema.mfl",
+   "sha256": "5f578a28cf57e594cf2b56d1f5248154ab6bd148090d1e1a599599e91741e111"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/en-GB/MSFT_RegistryResource.strings.psd1",
+   "sha256": "d38f221f2fd9c54229122873bd751744ead6e5a9dd776078e8796a0745605f94"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/en-US/MSFT_RegistryResource.schema.mfl",
+   "sha256": "ff7deff24198633f8a9c762713fc8738c6a3722fd36576d31ca9eacc5de079d2"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/en-US/MSFT_RegistryResource.strings.psd1",
+   "sha256": "c1c44d154f39b6d5a879c3da090629dead43b87a6ebe3b81afa0a7d91fc0cc40"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/he-IL/MSFT_RegistryResource.schema.mfl",
+   "sha256": "edd25fdf033bd87abe8cc45046a6c528e5714155d8c35d5da6a8fe55c419eb77"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/he-IL/MSFT_RegistryResource.strings.psd1",
+   "sha256": "9ebb781e691d0c125b80d241abc75a0e7eaef58897d352034e9647d3fc9ab192"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/ru-RU/MSFT_RegistryResource.schema.mfl",
+   "sha256": "e337c551d08a422071e3b919c34d5a662e99387fa31f4d9c452a85edb0b21798"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RegistryResource/ru-RU/MSFT_RegistryResource.strings.psd1",
+   "sha256": "ab599cfb65a4510f324b3fbd06da0e70018dbdbbf8f9e0a455d89a68394c46f5"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/MSFT_RoleResource.psm1",
+   "sha256": "cf3074aeb3ae3a5ccfa7286f25beb0b4ea71bf2444d5efa045ec20ab259d1695"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/MSFT_RoleResource.schema.mof",
+   "sha256": "6e7488da1aa1cdc8c52b2b7581cd54f61abdeef093b0471538b18e791706f89a"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/en-GB/MSFT_RoleResource.schema.mfl",
+   "sha256": "aad1973f72947b087ee011fc1d2a13aa52a873b4fd1b5c7b0078c3e1110b510e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/en-GB/MSFT_RoleResourceStrings.psd1",
+   "sha256": "1063e3f812624e4b5fe1315effb78c3fb6d39054b85f9f2de08b3244a991423c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/en-US/MSFT_RoleResource.schema.mfl",
+   "sha256": "fd72773feca569d0b37e4db00f33eea2abe11a89c4a8f487646f37cb0b8723f0"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/en-US/MSFT_RoleResourceStrings.psd1",
+   "sha256": "f011e0bce8798b1416123cea1525caa3a0268420f6c7643da7bffc15bd6c6a83"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/he-IL/MSFT_RoleResource.schema.mfl",
+   "sha256": "21f7c31226dbd8a84fb5d90f4af9a8ec76d82de756aca02552a94b8774eb8f82"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/he-IL/MSFT_RoleResourceStrings.psd1",
+   "sha256": "1063e3f812624e4b5fe1315effb78c3fb6d39054b85f9f2de08b3244a991423c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/ru-RU/MSFT_RoleResource.schema.mfl",
+   "sha256": "e6497efd0470cda66e0b84c353c73d8e4fd8e08f2e223dfcb35fa55af7b2852b"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_RoleResource/ru-RU/MSFT_RoleResourceStrings.psd1",
+   "sha256": "f20119c9823e46105246c0ec3f9a3dacdc0d1d4ec52ec9931e48f32dafb13e67"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/MSFT_ScriptResource.psm1",
+   "sha256": "74d9287f86c0eac13fe5301dc7988eadc9447fbe4829e97e394872e57240be54"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/MSFT_ScriptResource.schema.mof",
+   "sha256": "a9f8d741bf705cef818cd0b047429512fee3a4dd5e7f0ae5df97879c87fbfc29"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/en-GB/MSFT_ScriptResource.schema.mfl",
+   "sha256": "5b3a3e3fffa6518c62cc2b51a79481ae158f2340cf1ed904310e0583f1573bde"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/en-GB/MSFT_ScriptResourceStrings.psd1",
+   "sha256": "426f25f2517be6ab7a3e7b23c202594ed4ddca2450ba361eeea979e5af921cc8"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/en-US/MSFT_ScriptResource.schema.mfl",
+   "sha256": "b9ada6d24a9305283bf29590200c42051d1ad74ea6d1ebe56c4ded4ad00c8de0"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/en-US/MSFT_ScriptResourceStrings.psd1",
+   "sha256": "ff806c715296bd5bc1e5184101a7abf3869154a67dc4dc88a5df1c82a141e776"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/he-IL/MSFT_ScriptResource.schema.mfl",
+   "sha256": "f2c1e07f712290461ca4423c82245bf0524f413a10e94af49ccadb4027a93eaf"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/he-IL/MSFT_ScriptResourceStrings.psd1",
+   "sha256": "426f25f2517be6ab7a3e7b23c202594ed4ddca2450ba361eeea979e5af921cc8"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/ru-RU/MSFT_ScriptResource.schema.mfl",
+   "sha256": "4665c342cb204e519fa980a7f1e7e9382b534b1a2940d7842ed50b9156351b18"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ScriptResource/ru-RU/MSFT_ScriptResourceStrings.psd1",
+   "sha256": "c4776ca428585e8ae6cc5f17f1e2fbd7e04946f05bb93704cced7bc28e65a799"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/MSFT_ServiceResource.psm1",
+   "sha256": "689f3392d1057dfdbf5a08902440cb616ae5105d0c161de313305391e7a518ef"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/MSFT_ServiceResource.schema.mof",
+   "sha256": "54d658650d6fcd394ce69fa082617f74b17c06fdad590385dd860f7b819a77a0"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/en-GB/MSFT_ServiceResource.schema.mfl",
+   "sha256": "f794aef8a804962aab06c20688f40dc5aa1b6355dde603a2aa03efb2df67d31c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/en-GB/MSFT_ServiceResource.strings.psd1",
+   "sha256": "1cc8ff9311d2e115b7b33b25b8a727dd05b433f88b62a7f1451fd541dc42a3d3"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/en-US/MSFT_ServiceResource.schema.mfl",
+   "sha256": "21966d3c6c3287311f9038c302405bf07481b05fdc3c23280b742801cabbc358"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/en-US/MSFT_ServiceResource.strings.psd1",
+   "sha256": "b783ae0a22436a91699df8482cbdbcc3d57a5178434ce840bd1b367949a9f048"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/he-IL/MSFT_ServiceResource.schema.mfl",
+   "sha256": "6ce6e2be169838a566aece6f7efc116cb96a28b706a99273abe106977d4e82aa"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/he-IL/MSFT_ServiceResource.strings.psd1",
+   "sha256": "1cc8ff9311d2e115b7b33b25b8a727dd05b433f88b62a7f1451fd541dc42a3d3"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/ru-RU/MSFT_ServiceResource.schema.mfl",
+   "sha256": "71e0a27cb07c698a4634dbb8d0f14dd3422309bc5d315541ef09e335a2f4ac63"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_ServiceResource/ru-RU/MSFT_ServiceResource.strings.psd1",
+   "sha256": "f1de61aff947f308f2dabf8ee081a788bd211a794470e6c16d8772d534665e90"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/MSFT_UserResource.psm1",
+   "sha256": "b0caa0c3b9535c57a965610a2ab3c3554b34038f4d9460050ab02753c96845f9"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/MSFT_UserResource.schema.mof",
+   "sha256": "ef18de853f4c9da6a357e8ac90b05ba3683e2c813e5167681dc6c1431ea31a34"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/en-GB/MSFT_UserResource.schema.mfl",
+   "sha256": "11dd0089ca3ad92ba10a1d83661014ebf12d0146575ca2609c0e57c420f4f7b3"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/en-GB/MSFT_UserResource.strings.psd1",
+   "sha256": "70b25a21ad35269789c4db3951243c435afd1f1e891c16fb242f8e00f5f8bb81"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/en-US/MSFT_UserResource.schema.mfl",
+   "sha256": "bf0b0205e5dbff14989c01e06eb5b3fefb4eacde886b1199f4766ebbff5738d5"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/en-US/MSFT_UserResource.strings.psd1",
+   "sha256": "b85ad99591b18df96398dd79c965468919100d537a88274ca3823f9d34e6e068"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/he-IL/MSFT_UserResource.schema.mfl",
+   "sha256": "00565c8ac2fde0b2d8e2fd7ffa9fe37a3f11d44da899ef80b2f148f34f5a2808"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/he-IL/MSFT_UserResource.strings.psd1",
+   "sha256": "70b25a21ad35269789c4db3951243c435afd1f1e891c16fb242f8e00f5f8bb81"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/ru-RU/MSFT_UserResource.schema.mfl",
+   "sha256": "6df4ad054e33f717b10685d402887cf1ebd314637df1a63ddaa58b17d6cf98f5"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_UserResource/ru-RU/MSFT_UserResource.strings.psd1",
+   "sha256": "67a745e7f60d3a0f10aa2f04c7fe630074440437c7174e209c61878fefb3f06b"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAll/MSFT_WaitForAll.psm1",
+   "sha256": "8f9c7d26ed10799531c06c98baf259a64f1fe87e14a5494ad4b2fe156bd385ce"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAll/MSFT_WaitForAll.schema.mof",
+   "sha256": "db4444e40caa425235233eb7bae84868e8f11b34f54fd97960a2dbdd488ea58c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAll/en-GB/MSFT_WaitForAll.schema.mfl",
+   "sha256": "00bc673451815e05886cf16ddb2f7e7aedcc7a71fbe755f2cf55207680399e75"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAll/en-US/MSFT_WaitForAll.schema.mfl",
+   "sha256": "5e21ed0c370f484f5ad1e25a2a4577c9da13722045a26172575df7965f897fe6"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAll/he-IL/MSFT_WaitForAll.schema.mfl",
+   "sha256": "32069910707f78e933be7efd8dae12a0b933213198ca6f18eabd4bd12a394395"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAll/ru-RU/MSFT_WaitForAll.schema.mfl",
+   "sha256": "5fcf123a78570f062fde488be1cc0299233eb31ca3afe25852681971172e1d42"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAny/MSFT_WaitForAny.psm1",
+   "sha256": "d479eebaa37f5dfc4a40c67eda296371801c2ec7c44f934c462557063dac3ac3"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAny/MSFT_WaitForAny.schema.mof",
+   "sha256": "cd45e7e7262eaf927047e8e2cf4b624a1bcd70f421bc7175132fed60fa0ad347"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAny/en-GB/MSFT_WaitForAny.schema.mfl",
+   "sha256": "ff320df48cf85f08b6198259a2fe1efcb803546adf7d97a87b41888b0335bf1e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAny/en-US/MSFT_WaitForAny.schema.mfl",
+   "sha256": "e0ab0246aa1f009b19afcc2f18f57563a05a40e4136c0d811a0ae99feb129383"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAny/he-IL/MSFT_WaitForAny.schema.mfl",
+   "sha256": "bba0d8be20d6706d656c7cf1b5e55c3bb3ae94b8184893524732a8edc759a659"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForAny/ru-RU/MSFT_WaitForAny.schema.mfl",
+   "sha256": "f15e9e361991371e29b92fccdef38ee70825da8676df0f3defa761b2ef1d2091"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForSome/MSFT_WaitForSome.psm1",
+   "sha256": "8468b18057c3c04fa429e2be4a0efec159b412a83c5b35f4ad84317194819701"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForSome/MSFT_WaitForSome.schema.mof",
+   "sha256": "c83b8198fcf5829439b1182dfc08a0ac699a3db82848b93a5ba1ae317ad19f57"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForSome/en-GB/MSFT_WaitForSome.schema.mfl",
+   "sha256": "e1319f8a6599dc07cb80aeda05f9afc51ea3a835b018b4f276d1a7fb328ea633"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForSome/en-US/MSFT_WaitForSome.schema.mfl",
+   "sha256": "6a3024b10891b462bb5eae01a53dd19bc4967abfac4039b1b544517fc7c1e955"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForSome/he-IL/MSFT_WaitForSome.schema.mfl",
+   "sha256": "4e7fd61d19af2e3b3b3800a42cbdfd4ceaa5a336739855564f5c51d59268c6db"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WaitForSome/ru-RU/MSFT_WaitForSome.schema.mfl",
+   "sha256": "5fae10efe963e5fcf41db685d39f10de1ce067d6ab8e7a370aec392a0fab90d3"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/MSFT_WindowsOptionalFeature.psm1",
+   "sha256": "7a4f80f5756f37e0ee9e7046028b8ce110c5358eba1807f8276ea853bcfae975"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/MSFT_WindowsOptionalFeature.schema.mof",
+   "sha256": "7f54ddfcf2cbfb6f6b140a5f14bd41ed571ce15276de2ca6b169eb1437a5cfb0"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/en-GB/MSFT_WindowsOptionalFeature.schema.mfl",
+   "sha256": "fb205ed0533280cdf8a26873c20b125919c30a737861cdef482d78251f3d0d93"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/en-GB/MSFT_WindowsOptionalFeature.strings.psd1",
+   "sha256": "79d600ec6659f6c04ff8ea852140474d1a3d2817ff01e97fc925746f590b6111"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/en-US/MSFT_WindowsOptionalFeature.schema.mfl",
+   "sha256": "05422b66ca4e99bdbec0d6b3a816c045bc82dd4d9a86159603d15d4c723390f4"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/en-US/MSFT_WindowsOptionalFeature.strings.psd1",
+   "sha256": "680310b412cc28857e337b8fd85f51a8303c7edc5b28cafb31b7cc9805f1f251"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/he-IL/MSFT_WindowsOptionalFeature.schema.mfl",
+   "sha256": "8692bc339c0ea4da172e178ea66cf3f0fb87aece68cee03ed88453c4b0bdaeb2"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/he-IL/MSFT_WindowsOptionalFeature.strings.psd1",
+   "sha256": "79d600ec6659f6c04ff8ea852140474d1a3d2817ff01e97fc925746f590b6111"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/ru-RU/MSFT_WindowsOptionalFeature.schema.mfl",
+   "sha256": "cfb5436a513b60acec498ffa1bce1502ff014ec84d813671021b8b8c14e6f387"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/MSFT_WindowsOptionalFeature/ru-RU/MSFT_WindowsOptionalFeature.strings.psd1",
+   "sha256": "a6bdd53597fd04c981ff45f12e87bea49a5c8b85b9a79203a2c1ccf8f5c491dc"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/ProcessSet/ProcessSet.Schema.psm1",
+   "sha256": "0faeacc069d77763372bf508c524ba6b9909c4f6aa7bbd72f37fff297b69471c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/ProcessSet/ProcessSet.psd1",
+   "sha256": "5b729ab531dc9a64d0dc16004fdebf328a42aa5f54065ac155f3ad2fcdae0532"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/RunAsHelper.psm1",
+   "sha256": "59f938afb4337387be4420467d75699ac08cc8b1faa2bd1358db5b982dc4f1a4"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/ServiceSet/ServiceSet.Schema.psm1",
+   "sha256": "f6fed7406d3f4c4a03e2fc160a82c9d0d0ec2ae0022dc699903d76ebe1232f6b"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/ServiceSet/ServiceSet.psd1",
+   "sha256": "6e6a0a78c98b47009cd4fd13710a177bdd8399144946768ea82bcab3e93ac992"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/WindowsFeatureSet/WindowsFeatureSet.Schema.psm1",
+   "sha256": "f2b39854023ead7462a840360af4d186f51cbf79adb943905a7b89ad9fc03bbc"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/WindowsFeatureSet/WindowsFeatureSet.psd1",
+   "sha256": "52b913b22cf378dbf33c69f8202fe11521af27fb0f899386a920930767bcbbd2"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/WindowsOptionalFeatureSet/WindowsOptionalFeatureSet.Schema.psm1",
+   "sha256": "3caea9d6fc5760f5bb1cd0df9e2b644b78a73be54a8af3146189afdfc2481f5a"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/WindowsOptionalFeatureSet/WindowsOptionalFeatureSet.psd1",
+   "sha256": "47245d3f4b730861a4160a6b35722d0b584f7633a4bc99643ab7a9d3956fe42f"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/en-GB/RunAsHelper.strings.psd1",
+   "sha256": "39e4df0fff694467a32d0fb9b55b56fb8be04d6e0045244977af9a36f1497395"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/en-US/RunAsHelper.strings.psd1",
+   "sha256": "e5de1b3c3a62625752ff47192b10b293fdcd6b21b41d564a020d7041bffec3b0"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/he-IL/RunAsHelper.strings.psd1",
+   "sha256": "b391e7456d4c77b22445c5b1aab0760fa084e364b7f76cb3b1cf405ddf9bff6f"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DSCResources/ru-RU/RunAsHelper.strings.psd1",
+   "sha256": "7720a6a58618d43afbd615613241bdda92f130acda0fa8d092f5a29913ac2ff6"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/Disable-DscDebug.cdxml",
+   "sha256": "4f6c08753a6e90148d73c58b94c28b32652b9f366a2f7845d989bc5d1f3fae9e"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DownloadManager/DSCFileDownloadManager/DSCFileDownloadManager.psd1",
+   "sha256": "ede9278ae4d20a65d3e28c491038cfec58a2e81ee31ed1bbcce51b67bbfc08a6"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DownloadManager/DSCFileDownloadManager/Microsoft.PowerShell.DSC.FileDownloadManager.dll",
+   "sha256": "9f0e9d3207e0088b17813c7806f358b37eecdced9106fcc88ed31a8c5ac42377"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DownloadManager/DSCFileDownloadManager/en/Microsoft.PowerShell.DSC.FileDownloadManager.Resources.dll",
+   "sha256": "a7d6895db6ef66eec7a53ad0b3ea7860db28d3e09804403f90df0c0eddbf062c"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/DownloadManager/DSCFileDownloadManager/ru/Microsoft.PowerShell.DSC.FileDownloadManager.Resources.dll",
+   "sha256": "a0db45d511a88cfff756e602fddaf4385e3269aef706c4952cec4bce52af7ded"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/Enable-DscDebug.cdxml",
+   "sha256": "79b1eefa10e1834b42c6b29ea56daa8307d9b80a1735ec2761170a8cef9f06cd"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/Get-DSCLocalConfigurationManager.cdxml",
+   "sha256": "8abbb428ffdf34840f3aa23a15386c00032c27a5b7a2ba8409625f16ef93de0b"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/Get-DscConfiguration.cdxml",
+   "sha256": "66a94fdda0448ae28fe13ab652d4fa9bfaec981f7cf193fee3222eb07d08d690"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/Get-DscConfigurationStatus.cdxml",
+   "sha256": "e69e30a599199dbd7b3a1fc8e32dd93dd166ed06d0a748054eeec06fb22759ee"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/PSDesiredStateConfiguration.format.ps1xml",
+   "sha256": "9d19b663e2cfa9b44378f03731ed26c9659f44471b41913ea423988831350dac"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/PSDesiredStateConfiguration.psd1",
+   "sha256": "e1c03ba87f29a66b54e7a005ddcc9d667825f02fa25c29f0a1d5b3032e0f3639"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/PSDesiredStateConfiguration.psm1",
+   "sha256": "5bafab560092dcbf6592b4cee564adf515e1839a3d724f2e4ef9bb5a1191704d"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/PSDesiredStateConfiguration.types.ps1xml",
+   "sha256": "df8c8f079f8a51ca49cdd9383b8aca7bee7d8e9a4bcd87a99a889eefa10726d8"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/PSDscXMachine.psm1",
+   "sha256": "e1a8a19e675bf45db4aa23f2a01ff65612c888d732939ddfa4f531ae02318bd2"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/Remove-DscConfigurationDocument.cdxml",
+   "sha256": "0c36f3b7a2a2cd921c9b980c20a934446889a0a40dcba7ff0c65771e0d0f09c0"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/Restore-DscConfiguration.cdxml",
+   "sha256": "346b03a09311230d898e44126f0b7c4d01475e487477a4439fb232eb04aed743"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/Stop-DscConfiguration.cdxml",
+   "sha256": "4680815d78af71b69f8e4866c13f179304115fa154b2adc378dba8b86bd3c436"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/WebDownloadManager/WebDownloadManager.psd1",
+   "sha256": "e1175f160a717e16d6d9d16f1ab86dc686cdb4a2a34d63b2d52d9bec3f7fcb02"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/en-GB/PSDSCxMachine.strings.psd1",
+   "sha256": "955b64d587927bff0e5e71ec2adbf0dd1432f063d14b5e6c4f9b24b867adeb35"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/en-US/PSDSCxMachine.strings.psd1",
+   "sha256": "5d425ea27909c5ab6cb526700f07cfad739a9c50b96e5dd89339a5ff35d3131b"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/en-US/PSDesiredStateConfiguration.Resource.psd1",
+   "sha256": "be1278028ecf00902c830a7e1671d1b849c87987699edddc18e3a95f9c22a70a"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/he-IL/PSDSCxMachine.strings.psd1",
+   "sha256": "955b64d587927bff0e5e71ec2adbf0dd1432f063d14b5e6c4f9b24b867adeb35"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/ru-RU/PSDSCxMachine.strings.psd1",
+   "sha256": "8dca7500d9fe21c3febbe495d43daafedc5e0b9cf5276dc400d495129c03ff1a"
+  },
+  {
+   "path": "Modules/PSDesiredStateConfiguration/ru-RU/PSDesiredStateConfiguration.Resource.psd1",
+   "sha256": "cebd0d8149886ac15e4b7800c17672749f3f670c5e5b3a57e8c2df38b67ac765"
+  },
+  {
+   "path": "Modules/PSDiagnostics/PSDiagnostics.psd1",
+   "sha256": "72e31dc9cf2f59e0076a9d5f93255e4e0299db97571eb35b19719e065d34a05d"
+  },
+  {
+   "path": "Modules/PSDiagnostics/PSDiagnostics.psm1",
+   "sha256": "96faaefd5ccdce0d86fd1ecb9b8be594aa3fb32d4bcd8fb1254304a8cd9a7d07"
+  },
+  {
+   "path": "Modules/PSScheduledJob/PSScheduledJob.Format.ps1xml",
+   "sha256": "68d0b9ca9c489a224c10c34d22cc19a525a401a1b06f77169a8662a6cbeeb614"
+  },
+  {
+   "path": "Modules/PSScheduledJob/PSScheduledJob.psd1",
+   "sha256": "20c488d46f6ad75573a08c2ad05359efe59a38bdb8cd7f2a4c47f92a5673dfd6"
+  },
+  {
+   "path": "Modules/PSScheduledJob/PSScheduledJob.types.ps1xml",
+   "sha256": "31e61807232cff0795a03bf1dfeadaf901b48d81219a1a4a0f3fa23982747fe8"
+  },
+  {
+   "path": "Modules/PSWorkflow/PSWorkflow.psd1",
+   "sha256": "2ae866eb1140ec491383774a5b2e97443b6e0316aa6abb96ee214bdd7216f7e9"
+  },
+  {
+   "path": "Modules/PSWorkflow/PSWorkflow.psm1",
+   "sha256": "9611e4caabe1165f8b81adb966fc5c14f61618260ef8df7e1ad3183fdd41ee5e"
+  },
+  {
+   "path": "Modules/PSWorkflow/PSWorkflow.types.ps1xml",
+   "sha256": "b0406932b25eb94811086c9f430b3cdb63e5dfcce9fbdd698c6c9dc9b1a0b179"
+  },
+  {
+   "path": "Modules/PSWorkflowUtility/PSWorkflowUtility.psd1",
+   "sha256": "17b968cbdb055752e5b24070c41e165104103eb311a2d55165ce1e49a41e96da"
+  },
+  {
+   "path": "Modules/PSWorkflowUtility/PSWorkflowUtility.psm1",
+   "sha256": "cd83c3c293ec4d24d3328c74881fa04aaf9ccf73e099631a9eb100bd0f384f58"
+  },
+  {
+   "path": "Modules/PcsvDevice/CIM_PhysicalComputerSystemView.cdxml",
+   "sha256": "47b2e09bda9af107a84682c3f54fa26e75d3496ee10400c24b2028d5bacbad5e"
+  },
+  {
+   "path": "Modules/PcsvDevice/PcsvDevice.format.ps1xml",
+   "sha256": "181421a2cd108fed2ac056c645d5092d36c05de452befe56cb06b537ed398701"
+  },
+  {
+   "path": "Modules/PcsvDevice/PcsvDevice.psd1",
+   "sha256": "4bd165da7727b147929abdc1c7d254312ad1124c873c7d76ef953331efeaf0d1"
+  },
+  {
+   "path": "Modules/PcsvDevice/PcsvDevice.types.ps1xml",
+   "sha256": "ccb4e9503f0ac02e4e31839811fc9a43e245f6953a4055e8603ec85a431cc94d"
+  },
+  {
+   "path": "Modules/PersistentMemory/Microsoft.Storage.PersistentMemory.Management.Commands.dll",
+   "sha256": "3d4a24394db0617d3d86038ecb9873bc9ef6902f058feb70423f42bd8b841eff"
+  },
+  {
+   "path": "Modules/PersistentMemory/PersistentMemory.psd1",
+   "sha256": "20c1d4da9ab7c81007643772adc605046d7c8d6c724786f181b02352795486c3"
+  },
+  {
+   "path": "Modules/PersistentMemory/PmemDedicatedMemory.ps1xml",
+   "sha256": "48ee48c7a2e270c72e8c0deb95bbb3946f95e6d8a27cf2d9e80b5b46b66f7a54"
+  },
+  {
+   "path": "Modules/PersistentMemory/PmemDisk.ps1xml",
+   "sha256": "ae224999119a7e47931bed30caaad6c2a04bbfe9e66717b1b1e5508a1c81f96a"
+  },
+  {
+   "path": "Modules/PersistentMemory/PmemPhysicalDevice.ps1xml",
+   "sha256": "513254c013c3701d81c355541808c9a8ffb45c1001fcb71f44ddac5369a6fa6b"
+  },
+  {
+   "path": "Modules/PersistentMemory/en/Microsoft.Storage.PersistentMemory.Management.Commands.Resources.dll",
+   "sha256": "6d7d8d6f8612f4d35032f8ffbcf513ae42488c9e571dd0dcaf7c17095eb97c90"
+  },
+  {
+   "path": "Modules/PersistentMemory/ru/Microsoft.Storage.PersistentMemory.Management.Commands.Resources.dll",
+   "sha256": "972e3dca0193ce5a0e2644432295003f055c451ce642c2ee1733750c2db0cacb"
+  },
+  {
+   "path": "Modules/PersistentMemory/scmbridge.dll",
+   "sha256": "a04bde50be6ccecdcd0ee1964ae7921a73d99597179221c39c1365b04a164a6f"
+  },
+  {
+   "path": "Modules/PnpDevice/PnpDevice.Format.ps1xml",
+   "sha256": "47e2dd726147db239d5ad7a9d8086520fd08e7eb72bdb00cf7ffec167852e3da"
+  },
+  {
+   "path": "Modules/PnpDevice/PnpDevice.Resource.psd1",
+   "sha256": "aec014ca069e65487f9fff58618025db6efb0cac83a33c441c64f810714376c4"
+  },
+  {
+   "path": "Modules/PnpDevice/PnpDevice.Types.ps1xml",
+   "sha256": "96203e525b864d7b9e9ea6de2428639ed3e78dc760cd564c3265433e405f9ad9"
+  },
+  {
+   "path": "Modules/PnpDevice/PnpDevice.cdxml",
+   "sha256": "eeee9d7d08f4d90065ced2c4a70e2b67a851571442a5c1f80f1e25fd772fdbf1"
+  },
+  {
+   "path": "Modules/PnpDevice/PnpDevice.psd1",
+   "sha256": "978d316760e812815e783f4ecd0231b4510d1ead318c9b60830fc5c74ec14146"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_3DPrinter.format.ps1xml",
+   "sha256": "cce9b9ba02595f8cc2c2b370f3da12bace94b5f122221bb6b108635beb548a0e"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_3DPrinter_v1.0.cdxml",
+   "sha256": "08a11cd3a4b17dadf03953d43d510f986aa82793e91b5f4f438f800e7ba0e00e"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_AdaptivePrinterPort.format.ps1xml",
+   "sha256": "8ecc18d5baf05ddee5d4a572323c7fcff5624363eb4eab83f0f0aa9b83e15e1f"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_AdaptivePrinterPort.types.ps1xml",
+   "sha256": "8c59a57c21e5c3dd06233451d98e838af49a7e10fc9d3103c9593c10b78e482b"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_AdaptivePrinterPort_v1.0.cdxml",
+   "sha256": "e9e92ae1ff5071270c4d038891ad9fe10ce324b30afc5c85efe36fae055ba305"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_LocalPrinterPort.format.ps1xml",
+   "sha256": "655ac8125376791fd7c2321d46a483ea54bbac303a9a686b3aa6561337bbcfc6"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_LocalPrinterPort_v1.0.cdxml",
+   "sha256": "87d4225e8793a4724303873146257533036f5bc0a334a788cded0a7d0a7a5eb1"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_LprPrinterPort.format.ps1xml",
+   "sha256": "718b001c655a8e1400b5da9729f9f32f43533707b89aa840e6f1da49d350135d"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_LprPrinterPort_v1.0.cdxml",
+   "sha256": "6ecfd6a2f8000b34afc6c2f7a26147d5a8d2e930bb2aa1d516ff102be6a86b2e"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrintJob.format.ps1xml",
+   "sha256": "016aaafcca7368033f0c29b5efff36fd066eda1fc9b1a3c580945e7dbe2278a5"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrintJob.types.ps1xml",
+   "sha256": "f02e5009294f69f0b463696ec1bece35e38bf04c8dce0a997e2555743f0f1d6d"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrintJob_v1.0.cdxml",
+   "sha256": "197bf166d3e73d0708c432df38d355b4869a0dd536650ae6f42a00319c6e3374"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_Printer.format.ps1xml",
+   "sha256": "59001b48956aa379378209c2101d249349e2c7c0c28836926c1d95d822b71709"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_Printer.types.ps1xml",
+   "sha256": "296a94e270b11bcec87e143bbf4fbb8ad490c2bec3944f549c2be5b12d7639ef"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterConfiguration.format.ps1xml",
+   "sha256": "bfc587c5239252cbffc62c45985c8664f0ddc55bd76e5ca758ba48e17b870771"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterConfiguration.types.ps1xml",
+   "sha256": "6219f5647f5eeadac3faf14c3be37c94070077f0881a2189f8f115001a4ba18f"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterConfiguration_v1.0.cdxml",
+   "sha256": "a06be7821e451af3bee29ea21a55cf13b5a807ce8c98cb495061875407231a19"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterDriver.format.ps1xml",
+   "sha256": "fed8b34f445524d263176cf6b473bbbd27e45082828769a6b29a05f122983e8d"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterDriver_v1.0.cdxml",
+   "sha256": "bbde456aa0d5748e4d307600863f1a42b63101936723c7c9ffa661b8fcf527d8"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterNfcTag.format.ps1xml",
+   "sha256": "bec21af9ab592094cd0dac559cd07208150b91e7b5c76272763e6f04bcff7199"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterNfcTagTasks_v1.0.cdxml",
+   "sha256": "a644f0539a7c33d102d9ef62f8a853101fb4db31e8dbcb89db41095c2553f0e1"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterNfcTag_v1.0.cdxml",
+   "sha256": "19872ed930eabb23cc924ee57f2eab769ee74b7e95f62b3d44b293319820fa71"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterPort.format.ps1xml",
+   "sha256": "de498ef8a7c8a9d566cfcc2f4950535a9ac1ab438c279c236e40dc02fd3f9b33"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterPortTasks_v1.0.cdxml",
+   "sha256": "266b4ce4b9533a4372f7fd528a2e3eb1c55206ac484b5bdcead1b245d9421030"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterPort_v1.0.cdxml",
+   "sha256": "c969e064f82b151f82ef83143658aec143f23596fa9f5ac1e2dcdf5b38ea83c0"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterProperty.format.ps1xml",
+   "sha256": "4870d589e7688b1a0df158de7521dc10a9e7c191b47c01b50b5a3b3d432bf395"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterProperty.types.ps1xml",
+   "sha256": "4a160259294e48439fe9a9b66b92810bc704e9e6018d20e41c13761dc7f4e614"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_PrinterProperty_v1.0.cdxml",
+   "sha256": "a67cd064180b8715bbeb242ec78524da95772a6eb9ff08a128c41ff750778107"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_Printer_v1.0.cdxml",
+   "sha256": "092849896a9f92bdb4418f6fb8cf39fb19db123189c1e97013e51de782fe9b2b"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_TcpIpPrinterPort.format.ps1xml",
+   "sha256": "5f78d5ddc4343c01bedb64c97e35a83775b151b1927e8502da2c70b9aa8700cc"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_TcpIpPrinterPort.types.ps1xml",
+   "sha256": "1f2b002790792c5af32ea6f5aa2458de020a789dd57d848566e109c7fbd99691"
+  },
+  {
+   "path": "Modules/PrintManagement/MSFT_TcpIpPrinterPort_v1.0.cdxml",
+   "sha256": "24ec3a5f5c37a3972b17faf6ef826becc16d8f0946ab0d966a8e788e297302d1"
+  },
+  {
+   "path": "Modules/PrintManagement/PrintManagement.psd1",
+   "sha256": "42fec744d9a0cd84e626a80e5fa4bd3d8fdcac54ddd871b6aedc43325bc4cfbb"
+  },
+  {
+   "path": "Modules/ProcessMitigations/Microsoft.ProcessMitigations.Commands.dll",
+   "sha256": "702da853b7151c6637d0724da7d6552b8a0197602c0c606a727305f8d0e3d810"
+  },
+  {
+   "path": "Modules/ProcessMitigations/Microsoft.ProcessMitigations.Commands.dll-Help.xml",
+   "sha256": "488df1a2a405f47a4c6de13825710ae7cbb5528f20446be33d88a0e9212837d6"
+  },
+  {
+   "path": "Modules/ProcessMitigations/Microsoft.ProcessMitigations.Commands.ps1xml",
+   "sha256": "6da0635898f2f4752855572c73397a0cd6dd24a97e499ce082ed32c9472678b2"
+  },
+  {
+   "path": "Modules/ProcessMitigations/ProcessMitigations.psd1",
+   "sha256": "0b560e768f58ebf3955d4d3ba24b0ef7cc7c96ed03628bc3b0363bf1daefbc82"
+  },
+  {
+   "path": "Modules/Provisioning/provautologger_add.reg",
+   "sha256": "451aaf39c7bf952b9006f4782d9a4972e70fd95f1a0c2597c6e2fd65df27bf01"
+  },
+  {
+   "path": "Modules/Provisioning/provautologger_del.reg",
+   "sha256": "3bdc2df1b8f05636fb82ccdf9924f7adae0d085adb5f8968114ff31c36f968e9"
+  },
+  {
+   "path": "Modules/Provisioning/provcmdlets.dll",
+   "sha256": "29d7499dfd99947df9d8241bed07c73dcea794ea86b91f3b1f09ffb8e8ea7299"
+  },
+  {
+   "path": "Modules/Provisioning/provcommon.dll",
+   "sha256": "b2658e07ba3100649677c39b8163f0c2eba4b2e81fdc118b6c9846a6b2fdb4ce"
+  },
+  {
+   "path": "Modules/Provisioning/provisioning.psd1",
+   "sha256": "5a97b8f410da671d9dfeb4cc26e08989d2f8f76c6b99f113322b1bda002c17e6"
+  },
+  {
+   "path": "Modules/Provisioning/provisioning.psm1",
+   "sha256": "9ada2eecb0a578c8b4e861f4cca8fb9f0ce09608bec9912ba40faf2759d2ee78"
+  },
+  {
+   "path": "Modules/Provisioning/provpackageapi.dll",
+   "sha256": "9e050071d8593d4782d2e37ac1397e140de366a854b0a1dd4d453438daaeb475"
+  },
+  {
+   "path": "Modules/Provisioning/provtrace.wprp",
+   "sha256": "220367734fa373b7ac044f5be8c46ec82aede78fcc1a63515240893707223dce"
+  },
+  {
+   "path": "Modules/Provisioning/wiminterop.dll",
+   "sha256": "d6c2f9c5f1872a5c5b32b147bc6ad65b029d6f0b3b1e3fc5b4bd4df70753463f"
+  },
+  {
+   "path": "Modules/ScheduledTasks/MSFT_ScheduledTask.format.ps1xml",
+   "sha256": "d9ebfa9a210f3b00f65161593c956764a89841a3ccee18ba3c155a7dd1c81cb2"
+  },
+  {
+   "path": "Modules/ScheduledTasks/MSFT_ScheduledTask.types.ps1xml",
+   "sha256": "9c78ec8fbcfa79f569e94f1c9c3c26f07dc848ffe338c17fad42129854d42883"
+  },
+  {
+   "path": "Modules/ScheduledTasks/MSFT_ScheduledTask_v1.0.cdxml",
+   "sha256": "692e53a278ccae9fcbc9449f68dabdf62cc69f2fec3295e2b37e1fef472efc69"
+  },
+  {
+   "path": "Modules/ScheduledTasks/PS_ClusteredScheduledTask_v1.0.cdxml",
+   "sha256": "71bf9ab1b5fd88586638e640fe90237a511ebc8e5ca4552950201b686ff17c5b"
+  },
+  {
+   "path": "Modules/ScheduledTasks/PS_ScheduledTask.types.ps1xml",
+   "sha256": "3497ae4ac5e29c7db92e8bd6fbc0ac1e507be3f78da0e6f464b5b4347f00e76d"
+  },
+  {
+   "path": "Modules/ScheduledTasks/PS_ScheduledTask_v1.0.cdxml",
+   "sha256": "fc7f13065f81d1141240d6e2f195ffb7ebffee4ebcdab06f057d8b25f78d86d2"
+  },
+  {
+   "path": "Modules/ScheduledTasks/ScheduledTasks.psd1",
+   "sha256": "907d371581ca7c44dcc226c35e9f93b690f6b1d28b1619efdcf898d4ace4dfc5"
+  },
+  {
+   "path": "Modules/SecureBoot/SecureBoot.psd1",
+   "sha256": "09673875f8d6658c7ef9ec78fc14620adc74feb7ccc989ed71cd76d39d944ffd"
+  },
+  {
+   "path": "Modules/SecureBoot/hashes.json",
+   "sha256": "a1be1fdea78b86fb1a32ef79f0491f5b4e51e98c0db560b7b246956a0e72b3eb"
+  },
+  {
+   "path": "Modules/SmbShare/Smb.format.ps1xml",
+   "sha256": "cc21c3434f31efeff70c0cea452edfe6565451b864611c3af6e47e570c4a8f1d"
+  },
+  {
+   "path": "Modules/SmbShare/Smb.types.ps1xml",
+   "sha256": "d1617a68bc4728610476bc7a1d308e8228190fff5e8e22fee8942b55b3b564ef"
+  },
+  {
+   "path": "Modules/SmbShare/SmbBandwidthLimit.cdxml",
+   "sha256": "89a7e18790628f19f6cf5d238eb27fb3fd1536aeae63048cb5166d5bbba9de7c"
+  },
+  {
+   "path": "Modules/SmbShare/SmbClientCertificateMapping.cdxml",
+   "sha256": "db3c79643031a5015f09f9ddc97202ceebf9227a9427a7d8797eba55f52cb364"
+  },
+  {
+   "path": "Modules/SmbShare/SmbClientConfiguration.cdxml",
+   "sha256": "fd2ea78519dce5e97974344eb5213e30098d82fcbade381812889a49234f6adf"
+  },
+  {
+   "path": "Modules/SmbShare/SmbClientNetworkInterface.cdxml",
+   "sha256": "ae755d15c10f66e4f8ae54dbfb8edbc54c361db924a16f6a735ba3ef7f1aff1f"
+  },
+  {
+   "path": "Modules/SmbShare/SmbComponent.cdxml",
+   "sha256": "eb80f90128ac82750d845e30546c0184c65491f6b64a790bc2db6c170ead5eb8"
+  },
+  {
+   "path": "Modules/SmbShare/SmbConnection.cdxml",
+   "sha256": "73726993aa6f52331954c9377f12d351834b14be702fa708270baf45bbca41a4"
+  },
+  {
+   "path": "Modules/SmbShare/SmbGlobalMapping.cdxml",
+   "sha256": "7d8a42acf449d7a3a0bcd4b4dbe256aa1f862da1052b4c825bd68791eecef753"
+  },
+  {
+   "path": "Modules/SmbShare/SmbMapping.cdxml",
+   "sha256": "67d49a5c6165d41207a3697c2ce5067af865f253bfa3ab527e1b52237e4a7b17"
+  },
+  {
+   "path": "Modules/SmbShare/SmbMultichannelConnection.cdxml",
+   "sha256": "cee9b9bbff90ba0995ee61fa483c20819291a65f7a152641ccfebfd875c836d3"
+  },
+  {
+   "path": "Modules/SmbShare/SmbMultichannelConstraint.cdxml",
+   "sha256": "ed6fa51c18a38c7d7b5d6099cdbad4556c4f8477eb7a48bbe8a449c54cc7c084"
+  },
+  {
+   "path": "Modules/SmbShare/SmbOpenFile.cdxml",
+   "sha256": "1c73bba7c7f1a0b311b2e0a9ffdbe70655f94b9421f8c51e1cf3dbc58e5bc3be"
+  },
+  {
+   "path": "Modules/SmbShare/SmbScriptModule.psm1",
+   "sha256": "10788de36bdad74d6d1c063242a6e03a8f27011fbbfbeca5c608af8ae20ef0cc"
+  },
+  {
+   "path": "Modules/SmbShare/SmbServerAlternativePort.cdxml",
+   "sha256": "7ab37c515b106374aa58c7c83e46d25844949fa055504044b404b5eb1e97c260"
+  },
+  {
+   "path": "Modules/SmbShare/SmbServerCertificateMapping.cdxml",
+   "sha256": "8a45709227e07ef8dc44bb6eac035d143c855ce7f7d874c2706a190c8c52e5b8"
+  },
+  {
+   "path": "Modules/SmbShare/SmbServerConfiguration.cdxml",
+   "sha256": "39b3b31d16b960eaf881bb909a19adbcd7c8af08d399ed76640d7e1d41adc04b"
+  },
+  {
+   "path": "Modules/SmbShare/SmbServerNetworkInterface.cdxml",
+   "sha256": "11f06a41538b9750c31c3f984aab7432867bf21ed2cb58b0b41eb07acccf76a5"
+  },
+  {
+   "path": "Modules/SmbShare/SmbSession.cdxml",
+   "sha256": "be71895d5331e5af1995580367882fa15d06170e8221fdd298620fabca9d960b"
+  },
+  {
+   "path": "Modules/SmbShare/SmbShare.Format.Helper.psm1",
+   "sha256": "c862a888b7fcbeb212fe3a6d8ae3849db607fb7b51abdbfe80965bb778658af5"
+  },
+  {
+   "path": "Modules/SmbShare/SmbShare.cdxml",
+   "sha256": "3ba854f12a8603dfe8ae383979468f4e0daa6aff3d540db6e804d067d38f2a3e"
+  },
+  {
+   "path": "Modules/SmbShare/SmbShare.psd1",
+   "sha256": "d626bcb06ba6fc6f075f089f92844a4820d3df490bb8ec8bda180db58c261ac2"
+  },
+  {
+   "path": "Modules/SmbShare/en-US/SmbLocalization.psd1",
+   "sha256": "9aa943df6fc9a840ef17d96f730ec8dd534a4820a724ba74c9339dc52d57ddca"
+  },
+  {
+   "path": "Modules/SmbWitness/SmbWitness.Format.ps1xml",
+   "sha256": "f332bd31019502c966f806d6c338f73b2d4f24bef76957af5ef220af80dca791"
+  },
+  {
+   "path": "Modules/SmbWitness/SmbWitness.psd1",
+   "sha256": "4ee33747661da4febbe37eaa471ccc5ca602d6536852f16ca5f803873b53a60e"
+  },
+  {
+   "path": "Modules/SmbWitness/SmbWitness.types.ps1xml",
+   "sha256": "96ba4bd8eb1d894ff061b29993a5099a049d7568546b452df8b9ba912b0d7778"
+  },
+  {
+   "path": "Modules/SmbWitness/SmbWitnessWmiClient.cdxml",
+   "sha256": "06d705ae5f818ba19ce3ce31058e00301b95a7ed133c7d62b034f5f40f494872"
+  },
+  {
+   "path": "Modules/StartLayout/GetStartApps.psm1",
+   "sha256": "ce3c0c03f9cb681776fd41142655f2a475643a0eff0ded73772360e1e89d540f"
+  },
+  {
+   "path": "Modules/StartLayout/StartLayout.psd1",
+   "sha256": "00aa15aa840bd47dc2feb6698d987f42e3f8c3e3d73cb0ab3b987b5159d5c5e7"
+  },
+  {
+   "path": "Modules/Storage/Disk.cdxml",
+   "sha256": "22c23c6bf0bce59c6ed6338681260f2c336ffdb5dd09ba4a27c916167a1b5adc"
+  },
+  {
+   "path": "Modules/Storage/DiskImage.cdxml",
+   "sha256": "ae21a287d12d28d7b51cb16eacc7e8aeb6ab29e88a800044882ca6225595c6c5"
+  },
+  {
+   "path": "Modules/Storage/FileIntegrity.cdxml",
+   "sha256": "86fa94f294f6bda4f68c0d9ad2d37b67eaf81592b1c89e25a95f8b3290948e8b"
+  },
+  {
+   "path": "Modules/Storage/FileServer.cdxml",
+   "sha256": "dd5c550dc9fdf10f96a7a92a615625d0eb587db32535e6a62d14a0ace131420f"
+  },
+  {
+   "path": "Modules/Storage/FileShare.cdxml",
+   "sha256": "646d6857e4697606c91cd275c5b9e0fe3df07c28af5cda68f624a61a5afa8a8c"
+  },
+  {
+   "path": "Modules/Storage/FileStorageTier.cdxml",
+   "sha256": "d5b609ce8c40dc4f7481f54be713d212d9281fc0403bb504a69b81b7deedc325"
+  },
+  {
+   "path": "Modules/Storage/InitiatorId.cdxml",
+   "sha256": "a7b58fc9d28ebe0a9c76fec791f317d464f52089018f31b9bb387db0808b62f5"
+  },
+  {
+   "path": "Modules/Storage/InitiatorPort.cdxml",
+   "sha256": "abdd4f64504e4756db8ff2775ed1128ace27d7df27c3a81687dcce48a544560d"
+  },
+  {
+   "path": "Modules/Storage/MaskingSet.cdxml",
+   "sha256": "38d01b6992c1687f3c83a966476d45b065e3a0fbbfec58f0cc0dfbcd41195d28"
+  },
+  {
+   "path": "Modules/Storage/OffloadDataTransferSetting.cdxml",
+   "sha256": "197197af71078a53cea6ce3fd8d177204a3823bf784d5b840c8ca4aa67592905"
+  },
+  {
+   "path": "Modules/Storage/Partition.cdxml",
+   "sha256": "bc6c894fc306390b4497fe1e08dbb4b7d96c2a33e98ab4f7a7a584dab4d622e1"
+  },
+  {
+   "path": "Modules/Storage/PhysicalDisk.cdxml",
+   "sha256": "1cf415d4db533109258245221c1c2f2079fa79f1aca31fcd63ec81c798e1e858"
+  },
+  {
+   "path": "Modules/Storage/ResiliencySetting.cdxml",
+   "sha256": "666e4ca38ef937465ee865d2424859140d3ffb53a55daa91c7b76d2584bb1f22"
+  },
+  {
+   "path": "Modules/Storage/Storage.format.ps1xml",
+   "sha256": "6920b7d6473519b4e7729bbf34b26034bd91d3d8e5ff7194d20550aed7148c51"
+  },
+  {
+   "path": "Modules/Storage/Storage.psd1",
+   "sha256": "6119dede705a58fd4d3cce00688dca1ab88b49fa25bf5c98239cc0853b2b135f"
+  },
+  {
+   "path": "Modules/Storage/Storage.types.ps1xml",
+   "sha256": "db71b33d7895e4ec7c61f09faabf4b118e2aa5bbba0ffd8725cc154f8334c74e"
+  },
+  {
+   "path": "Modules/Storage/StorageCmdlets.cdxml",
+   "sha256": "909a52ec284847474a6c3529939c2d01dbde6c6a14035d0f63f3ed082043e8e9"
+  },
+  {
+   "path": "Modules/Storage/StorageEnclosure.cdxml",
+   "sha256": "0c833dc98364faf0c5579eb2705f71e9177c48901772407f4749de67bbcd3dd7"
+  },
+  {
+   "path": "Modules/Storage/StorageHealth.cdxml",
+   "sha256": "7be1f9e9da6c3090812eeb080dc3ffcade80aea2a20c0d5784c8d2077f9435ef"
+  },
+  {
+   "path": "Modules/Storage/StorageJob.cdxml",
+   "sha256": "2c6595611bb589bc292a3048467af64e09ea73c7e1eb65a51df0caa43b802e9e"
+  },
+  {
+   "path": "Modules/Storage/StorageNode.cdxml",
+   "sha256": "e5adcadbdab3aae64ba5352cde721de8fcf9aa60cd9a0cc478047b5e94d35ee7"
+  },
+  {
+   "path": "Modules/Storage/StoragePool.cdxml",
+   "sha256": "b60f9b3afde490ddb9749432846f027cff97429932704d8132ad8fd1d440d6eb"
+  },
+  {
+   "path": "Modules/Storage/StorageProvider.cdxml",
+   "sha256": "c1565dee35dd91e96f376b73ae82a07c077c957e3a3a094a26d7de918b474822"
+  },
+  {
+   "path": "Modules/Storage/StorageReliabilityCounter.cdxml",
+   "sha256": "d695ad7dcf3e8d05e893b3fda226f158f5e8c8e49f4670c2232247a3170fd7e7"
+  },
+  {
+   "path": "Modules/Storage/StorageScripts.psm1",
+   "sha256": "afd50555239a33f5b2278b17bd7eff45177d3a525f9b3cf4155084479b6fe1db"
+  },
+  {
+   "path": "Modules/Storage/StorageSetting.cdxml",
+   "sha256": "14712cfc29699959b7d806c22dac37f63787295979b0e8dbf3a8cef61457b523"
+  },
+  {
+   "path": "Modules/Storage/StorageSubSystem.cdxml",
+   "sha256": "90891a6f0f3d1a1166352926a84de42ebe14d5f890980e110fb0e3b9c01061b4"
+  },
+  {
+   "path": "Modules/Storage/StorageTier.cdxml",
+   "sha256": "3c1d1966784b274fa488a5a48594f1346ebeb9530c66e32a5f766e4019cc0cfa"
+  },
+  {
+   "path": "Modules/Storage/TargetPort.cdxml",
+   "sha256": "28d6f256c55edf482ceb6e0f1c9922eabfeeb5269b7d3dc56d83a6f46f09f20c"
+  },
+  {
+   "path": "Modules/Storage/TargetPortal.cdxml",
+   "sha256": "80d39f2fb8d8309c1c17b68b87db525422068f3a007ec0b862ef44850dfb875d"
+  },
+  {
+   "path": "Modules/Storage/VirtualDisk.cdxml",
+   "sha256": "e49e1efb59f8bae9b001e900bbc399de268ac4b66d51f2ac834ea684a8ced2ed"
+  },
+  {
+   "path": "Modules/Storage/Volume.cdxml",
+   "sha256": "2ad55befa8050a5c033c6a382560c4e1e19618cb8e75f69c1d9cf34378b8b8f3"
+  },
+  {
+   "path": "Modules/StorageBusCache/StorageBusCache.format.ps1xml",
+   "sha256": "c1155c9695cd224c3bd6ad48b54561566b012829a485bdfa09a4b22ef307d547"
+  },
+  {
+   "path": "Modules/StorageBusCache/StorageBusCache.psd1",
+   "sha256": "45b677c1147ac6cb0a4f3b5d1939602811d8213e2522b00973d8f8a1b7eeeee4"
+  },
+  {
+   "path": "Modules/StorageBusCache/StorageBusCache.psm1",
+   "sha256": "da81e9c27694974d8a4db5dc8644273daec88148c9ee5ba431b357ccc01d5eaf"
+  },
+  {
+   "path": "Modules/StorageBusCache/StorageBusCache.types.ps1xml",
+   "sha256": "81cc2470dbd7021d3bdc0334017f481f4cb1b55f4d6648d496c25190667b681f"
+  },
+  {
+   "path": "Modules/StorageBusCache/StorageBusClientDevice.cdxml",
+   "sha256": "f553a958b1be9b1ac07b66ec9e7bbeaed75633bba917d886409500e0511a1bba"
+  },
+  {
+   "path": "Modules/StorageBusCache/StorageBusTargetCacheStoresInstance.cdxml",
+   "sha256": "9606ec766ce7eba587ad324058eb7cb7a53162bf86672f191f5907ecbe36a3b8"
+  },
+  {
+   "path": "Modules/StorageBusCache/StorageBusTargetDeviceInstance.cdxml",
+   "sha256": "1e0f0f8bf1da866b64bf4f325455176982f6fe90fe7e7a7b23ebf89f1a02fee8"
+  },
+  {
+   "path": "Modules/TLS/tls.psd1",
+   "sha256": "0973c33156fc6c4481657a8c604407ac777cce7e21cdd01c2c9b111a4049d7ba"
+  },
+  {
+   "path": "Modules/TroubleshootingPack/TroubleshootingPack.format.ps1xml",
+   "sha256": "6dd7dded2fd500f185b4ed8b2dcdbbec1dda0625b6ac0006f4b3e92b7365f120"
+  },
+  {
+   "path": "Modules/TroubleshootingPack/TroubleshootingPack.psd1",
+   "sha256": "0e2e5471b9a532fd416c6f63c0291cb4c6f1dc403f217c0b1acd39d5b6718f89"
+  },
+  {
+   "path": "Modules/TrustedPlatformModule/TrustedPlatformModule.psd1",
+   "sha256": "b8c0fe75e14de99a32a0dd81a4055d7a44336a58fca8746be8c382904e585bf1"
+  },
+  {
+   "path": "Modules/UEV/Microsoft.Uev.Commands.dll",
+   "sha256": "02d3b8b1d79161bfc15e4cb995b97d8a9faa1135d5b76c0891b362b50e0c85fd"
+  },
+  {
+   "path": "Modules/UEV/UEV.Types.ps1xml",
+   "sha256": "4ca3c0bdf4beda3d56647317d0ecc8d3ad6fc3d6afda727b518f9ee8afc9db8e"
+  },
+  {
+   "path": "Modules/UEV/UEV.psd1",
+   "sha256": "64d384ad7bcc40400d6d13663538dc808d6959a2192d328fee879b781e8e6cd0"
+  },
+  {
+   "path": "Modules/VMDirectStorage/VMDirectStorage.format.ps1xml",
+   "sha256": "e9755fc8c1f065e111561c5fe0a88cd09c13dab00132aaef8c98b8cc8c854c39"
+  },
+  {
+   "path": "Modules/VMDirectStorage/VMDirectStorage.psd1",
+   "sha256": "669dc66326ce15b9dc0ed9472d587c6ef3660f54904b5e36ddec51ef18d53d6c"
+  },
+  {
+   "path": "Modules/VMDirectStorage/VMDirectStorage.psm1",
+   "sha256": "56c95545b3fc02e4a06c3ebb3132d836a314f89b315302973723c86107ec3d38"
+  },
+  {
+   "path": "Modules/VpnClient/PS_EapConfiguration_v1.0.0.cdxml",
+   "sha256": "4f5069b41e20e57de8752dd1ccff7c735f6976b41b23eefbb5abc2cb4e13a383"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnConnectionIPsecConfiguration_v1.0.cdxml",
+   "sha256": "997459330be897f55c224991c7fc219cbd08ab04314ec0f81fc1bfa51cdda949"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnConnectionProxy_v1.0.cdxml",
+   "sha256": "b86cd123b669cb821824e0cc1b45c98e7384c9478764596698a07327b90830b9"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnConnectionRoute_v1.0.cdxml",
+   "sha256": "1b39888baa7f873a28840775ea09f2aa3f279ec112cb47822667abe5cf0596df"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnConnectionTriggerApplication_v1.0.cdxml",
+   "sha256": "16cd7fb56ed6e04dc9ed32aebf5a4a6ddcf58e6259dc39fd0ee332cfa1b79e04"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnConnectionTriggerDnsConfiguration_v1.0.cdxml",
+   "sha256": "c769d90bcc1dd174d0fe5ac2b9a4332e31fff17653d3bbdc84d36e56f1ec79cd"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnConnectionTriggerTrustedNetwork_v1.0.cdxml",
+   "sha256": "d2071f450973df41c36dbd6fa60a4347e8dc99cbb9231e1459a209c7e97b840d"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnConnectionTrigger_v1.0.cdxml",
+   "sha256": "bc833fcaa178d0dd3c330bd0a92376d4718fc71a86f16d11449e4bf255b54e3c"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnConnection_v1.0.0.cdxml",
+   "sha256": "784191dcc63f1faacb881a14e3e6c3b2fd95871d2ad91543c9e590650b1866ad"
+  },
+  {
+   "path": "Modules/VpnClient/PS_VpnServerAddress_v1.0.cdxml",
+   "sha256": "71813b448a93a70d846dee293ebee26d0f3d75d2601c96e8a25a954857045622"
+  },
+  {
+   "path": "Modules/VpnClient/VpnClient.psd1",
+   "sha256": "34dcc10b34bd0a457ca72a211cac976bf6d59da6e96d8bbbf1489c23d935d682"
+  },
+  {
+   "path": "Modules/VpnClient/VpnClientPSProvider.Format.ps1xml",
+   "sha256": "36fa753598e1f6b20a679d761f4c1c72fd0393fc4a737c65dc7a519faa11ef2c"
+  },
+  {
+   "path": "Modules/VpnClient/VpnClientPSProvider.Types.ps1xml",
+   "sha256": "5cc1b2a29b0400d759f09f08c7987660535e377a2a68079a2342f17616859783"
+  },
+  {
+   "path": "Modules/Wdac/MSFT_OdbcDriverTask_v1.0.cdxml",
+   "sha256": "61e113dc19c5fa4c8acf2d03ae935352e6e748e05596ba51650222b7f96d8fe6"
+  },
+  {
+   "path": "Modules/Wdac/MSFT_OdbcDsnTask_v1.0.cdxml",
+   "sha256": "1fd8d24c788600c778d14e99b9e461036973528c1d8b14efd77a0453ce9c1a65"
+  },
+  {
+   "path": "Modules/Wdac/MSFT_OdbcPerfCounterTask_v1.0.cdxml",
+   "sha256": "faae5376fcf629bba777997eef233fd233c1d27d8c5e3e847cbc08427dd6a9ac"
+  },
+  {
+   "path": "Modules/Wdac/MSFT_WdacBidTraceTask_v1.0.cdxml",
+   "sha256": "a014065c1bfb2b07095c6c358ac8329e25083490057ec04a4d2ef8ff1f770deb"
+  },
+  {
+   "path": "Modules/Wdac/Wdac.format.ps1xml",
+   "sha256": "204d30898f420ed3b8c3812868cc03a533b29a1c2b2ec1d286a4bb887d846ae7"
+  },
+  {
+   "path": "Modules/Wdac/Wdac.psd1",
+   "sha256": "51c39aed4182dfe053158502aad98159c87e59858323ef61678c7dba70cf51cd"
+  },
+  {
+   "path": "Modules/Wdac/Wdac.types.ps1xml",
+   "sha256": "09cac75304fbf32247f9892fc0b039fced48f1de04bb3114469d44b7db684a72"
+  },
+  {
+   "path": "Modules/Whea/Microsoft.Windows.Whea.WheaMemoryPolicy.dll",
+   "sha256": "069746e7e8cefe7b4af6b59abbf8e44b24423d77add9451bdb87a13f0fae70f5"
+  },
+  {
+   "path": "Modules/Whea/Whea.psd1",
+   "sha256": "89e04013a5c58180b6cff349ec039bd587fcb995dc76370f1c9fc3bde2383cfc"
+  },
+  {
+   "path": "Modules/WinHttpProxy/WinHttpProxy.psd1",
+   "sha256": "855d51c5871e6e0870acae76248040011e166c65fd13130d8b31e067e079eb8b"
+  },
+  {
+   "path": "Modules/WinHttpProxy/WinHttpProxy.psm1",
+   "sha256": "8ff935981a97ec59de641dc34d130f72baaf4cb1563ec13dfbb1c9923abf1aac"
+  },
+  {
+   "path": "Modules/WindowsDeveloperLicense/WindowsDeveloperLicense.psd1",
+   "sha256": "d2e936b78e73287f68f7f668338de08b3829dfab22c563bd1df640160b512786"
+  },
+  {
+   "path": "Modules/WindowsErrorReporting/Microsoft.WindowsErrorReporting.PowerShell.dll",
+   "sha256": "a158e07c47410649c8e5147634cc4e24b41774fa95181b80fe5e2b15070841f6"
+  },
+  {
+   "path": "Modules/WindowsErrorReporting/WindowsErrorReporting.psd1",
+   "sha256": "e672ed9d8a566368454c724f3d2889314838d1c3110acc2ba62863dddfb04c64"
+  },
+  {
+   "path": "Modules/WindowsErrorReporting/WindowsErrorReporting.psm1",
+   "sha256": "29245ff2ef90b5f27a53019f746cb35a7114bfa9fb87bbd2fd4b036fece646e1"
+  },
+  {
+   "path": "Modules/WindowsSearch/Microsoft.WindowsSearch.Commands.dll",
+   "sha256": "237482480aad9fa0a0b8f34d6923b177151f9998c7c41182f095df41158e93f9"
+  },
+  {
+   "path": "Modules/WindowsSearch/WindowsSearch.Format.ps1xml",
+   "sha256": "88d02f2ae50ce0f322a376ba68c77aec4d4d5123ae510cec4b1778268d8de283"
+  },
+  {
+   "path": "Modules/WindowsSearch/WindowsSearch.psd1",
+   "sha256": "dab238291fcbc35408ea5412412b73748b3210ab8d2bc1618b469c24b9f43d80"
+  },
+  {
+   "path": "Modules/WindowsSearch/en/Microsoft.WindowsSearch.Commands.Resources.dll",
+   "sha256": "0e45695f0524f2d5d0fd9555f7535c3702536002fc69174edf849afbc9823437"
+  },
+  {
+   "path": "Modules/WindowsSearch/ru/Microsoft.WindowsSearch.Commands.Resources.dll",
+   "sha256": "29b88e1b7fcf7ca3843db4a630c455ac98016bd14b65647b766dd67d94262941"
+  },
+  {
+   "path": "Modules/WindowsUpdate/WindowsUpdate.psd1",
+   "sha256": "e75d7d097c9a85198492dc8ddf631d9af6e02a0f8dbbcdf76ccce4541dcf40ce"
+  },
+  {
+   "path": "Modules/WindowsUpdate/WindowsUpdateLog.psm1",
+   "sha256": "5833329e5eb7e4190403eca32101de1422d04bb58aed8c7392d008bc0cf753f8"
+  },
+  {
+   "path": "Modules/iSCSI/iSCSI.psd1",
+   "sha256": "79603e1deb7c9a360d695102862afcefa66b908dfd685bf6b0cc2384b85bf81c"
+  },
+  {
+   "path": "Modules/iSCSI/iSCSIConnection.cdxml",
+   "sha256": "a3741cc9d216a61cb356826634e73671474a5a4649ed31cb3692417056d5f7ae"
+  },
+  {
+   "path": "Modules/iSCSI/iSCSISession.cdxml",
+   "sha256": "ab146392e486df12e9a3720230dab4a59f41ef15fb029ac8fb050f2309cccf4b"
+  },
+  {
+   "path": "Modules/iSCSI/iSCSITarget.cdxml",
+   "sha256": "7a6831c0a5624c4dfed49c5668208abc4d48a3f133b751629380cdedb4f5e7d4"
+  },
+  {
+   "path": "Modules/iSCSI/iSCSITargetPortal.cdxml",
+   "sha256": "dcfaa4f6d95b6ec19a18d13716fd2fcca9044c6b8a40be5fa00a4ab91340ec08"
+  },
+  {
+   "path": "PSEvents.dll",
+   "sha256": "f0f040c7864ed46125a8692d0f3e70c1f3b2340eed7fb500a95776d9b48e9fc2"
+  },
+  {
+   "path": "PowerShellCore.format.ps1xml",
+   "sha256": "a344b541aee304edb759687f5e6b708b14b969da454e7499ee3f7a7460396ede"
+  },
+  {
+   "path": "PowerShellTrace.format.ps1xml",
+   "sha256": "1d8df6c3347c3277fdadc4595cf1af904ac688c56d3b8376dfd49a40529a3869"
+  },
+  {
+   "path": "Registry.format.ps1xml",
+   "sha256": "b4ed1a89f947a045f4dbb69da4fd0a8dcd14f96c401567063c1546dd6cf6f53e"
+  },
+  {
+   "path": "Schemas/PSMaml/ITPro.xsd",
+   "sha256": "767328ad7b14ec90731e52d04ef27873ea674d34dd30297cb0fba2a11242e96e"
+  },
+  {
+   "path": "Schemas/PSMaml/Maml.rld",
+   "sha256": "a711a691fdfdbeeef09cb23543a8ac3d6bbf92aabeec05939fca51665229e710"
+  },
+  {
+   "path": "Schemas/PSMaml/Maml.tbr",
+   "sha256": "618c1a7d6abeba9fb2ecd5850e5968c6a47d51880d1a78273ee29d63c4cba91c"
+  },
+  {
+   "path": "Schemas/PSMaml/Maml.xsd",
+   "sha256": "5fb264d1440fe551365d2ede3749b6c096c524dc14b580034dd0fbc5d74c6020"
+  },
+  {
+   "path": "Schemas/PSMaml/Maml.xsx",
+   "sha256": "639e5ed55bb9fd20672c74c20020c6c96b5ff721e45e9a337133af858998b08c"
+  },
+  {
+   "path": "Schemas/PSMaml/Maml_HTML.xsl",
+   "sha256": "90eb38c9ad75c164fa9cc413f6a200b790692587fb2f679ad1b7b14821536577"
+  },
+  {
+   "path": "Schemas/PSMaml/Maml_HTML_Style.xsl",
+   "sha256": "bf908402a044e7261bc8a23718f6986a923f6499d2ce38b81d6564f8305aa267"
+  },
+  {
+   "path": "Schemas/PSMaml/ManagedDeveloper.xsd",
+   "sha256": "333990ca8818c059c171d5f8936b23c26dc028f8d6625836c7ef7a2e0575db48"
+  },
+  {
+   "path": "Schemas/PSMaml/ManagedDeveloperStructure.xsd",
+   "sha256": "d527564e49a3a5c8ea6ec21326affe99c54aceb8adf891c3cf1550a0e98240d1"
+  },
+  {
+   "path": "Schemas/PSMaml/ProviderHelp.xsd",
+   "sha256": "d282204df33ffbbc2e2b097a5eba9bdfa068ca2bf3d16aaac0e62cb7c3150671"
+  },
+  {
+   "path": "Schemas/PSMaml/base.xsd",
+   "sha256": "b860ef30b01c57486a56948800e9b2da116ec473cbecbb33fa9f71b8ceab90ae"
+  },
+  {
+   "path": "Schemas/PSMaml/baseConditional.xsd",
+   "sha256": "d26d4ef29124b2f9107b167d73e611f649fb2021d30c48a8616c6cc96230de81"
+  },
+  {
+   "path": "Schemas/PSMaml/block.xsd",
+   "sha256": "9a8b3c184394711480c38d71db4850659b87729df9eac5a2235bdcf37a2020cf"
+  },
+  {
+   "path": "Schemas/PSMaml/blockCommon.xsd",
+   "sha256": "928717b190b014f271c09c2ffb7633c1e660b26f0ecbdd926662121914795789"
+  },
+  {
+   "path": "Schemas/PSMaml/blockSoftware.xsd",
+   "sha256": "88aa3462598b7c394350f83ef366e5f83885c50a9c6966f02179228277358334"
+  },
+  {
+   "path": "Schemas/PSMaml/command.xsd",
+   "sha256": "cb0bc72f1db11db895c73767d53961ff2e2fa8f8b00b6ae14f12bd37a6bda5b2"
+  },
+  {
+   "path": "Schemas/PSMaml/conditionSet.xsd",
+   "sha256": "506415cd77ede25b33c3e28fb89012b282e90b5d01f266323a83fea9625f8eab"
+  },
+  {
+   "path": "Schemas/PSMaml/developer.xsd",
+   "sha256": "ab9a7ddb85084f331ed79cb34374509767d9a64c510b0264682d5e682dc59497"
+  },
+  {
+   "path": "Schemas/PSMaml/developerCommand.rld",
+   "sha256": "cd8a9a6b113db5005f2a5c8321e52368411691b5f0c5eb90595e2a97b0fdee89"
+  },
+  {
+   "path": "Schemas/PSMaml/developerCommand.xsd",
+   "sha256": "bbc9b2dd6d4473f09ce95a4e44b7f654a8d34a70197beabacd1c9ff5233c3dec"
+  },
+  {
+   "path": "Schemas/PSMaml/developerDscResource.xsd",
+   "sha256": "d612c2068540041bfa636f1f8eb3df8a6d236eba83de9c6e314dd75c3e871928"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManaged.xsd",
+   "sha256": "5585fd25ed4fa8d39b75e9a83082eab1d305b00839e7bcf05a24530e3d91d6ea"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedClass.xsd",
+   "sha256": "4cb1c23d86d22b4bcc5aca98cd309c37f54a30358d673115d460feeacb78df9a"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedConstructor.xsd",
+   "sha256": "0ca55a744ad968b537742ed37cd62852df01cd96533d4e17874ad4f75271c8dc"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedDelegate.xsd",
+   "sha256": "961daa1c4b3513b83cf2e37fdb1361be0d123e8b2cfe7f32510ad534fea98e3d"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedEnumeration.xsd",
+   "sha256": "3ab7329914d7a9a6d711a62405089e736ce714ee4de72f3493222887a72fdd39"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedEvent.xsd",
+   "sha256": "93ebd3af5a078830839b10c9db753cd445dc2d1a78a5449c90ac605e7ffc397c"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedField.xsd",
+   "sha256": "b17f73add6678c4bc259065add380a9070531bc24a66af3c4cad3cf3d811f3a5"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedInterface.xsd",
+   "sha256": "b851d8be146f1f51e5857045c28726585cc96a29c5a5a57dfc86cf7c509d8234"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedMethod.xsd",
+   "sha256": "36eb2bc76b2cdbfd908df62e16ca915f7490ce75cf7bc386974ef89aa77b32ff"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedNamespace.xsd",
+   "sha256": "68d68d8cec8181c0c3046b419426ee1bd4d0371abfdbf9a6789755b0f5764d91"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedOperator.xsd",
+   "sha256": "053c18557be353860222e14d7ce5e5844f5a746ba45347a9e08da1d5a2b29f3b"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedOverload.xsd",
+   "sha256": "7d2695d2f6ab6eb3c0bab6125eee415545c3eabe0923b1b37519f2d4a8b9251d"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedProperty.xsd",
+   "sha256": "832a25485eaa9060868e9258aa1f93626804ed439ee2b43b2d74f9cb0dc438c4"
+  },
+  {
+   "path": "Schemas/PSMaml/developerManagedStructure.xsd",
+   "sha256": "b7d1f7ddbcfef43bd171fd78d5a255089a97762ad67c116b6a6998815905901f"
+  },
+  {
+   "path": "Schemas/PSMaml/developerReference.xsd",
+   "sha256": "42c585d48c418c7eb47cba298a147923597b967e236997bb815301b57e31cb92"
+  },
+  {
+   "path": "Schemas/PSMaml/developerStructure.xsd",
+   "sha256": "d1c0e02bb7207095e49efc216a574b596a82e97b88e686e1c7a9717362623c44"
+  },
+  {
+   "path": "Schemas/PSMaml/developerXaml.xsd",
+   "sha256": "83ed2ee26cf6ab4c95a880f1424f7d5e09385b71239b84b3cffb58288eeff3b2"
+  },
+  {
+   "path": "Schemas/PSMaml/endUser.xsd",
+   "sha256": "20f6249b11c4c43623164d18daa3b4462e1e7d89038732d9b6a02e8767eeee75"
+  },
+  {
+   "path": "Schemas/PSMaml/faq.xsd",
+   "sha256": "9183b6396ec8261cb70d9d1b8a1e7f28f98c7cf65ed43a70e224cfff54eba0c1"
+  },
+  {
+   "path": "Schemas/PSMaml/glossary.xsd",
+   "sha256": "553ae3f435e321c383cdd5f4d08621ec48f5a1531fe5724d8464f285eb6ebb62"
+  },
+  {
+   "path": "Schemas/PSMaml/hierarchy.xsd",
+   "sha256": "d50d8096a11350a8e3b6873cf9cbc173b8a4322324b16f949538b1b98857c5b4"
+  },
+  {
+   "path": "Schemas/PSMaml/inline.xsd",
+   "sha256": "5a1a2d4586203bb3d6a4e6ec93e4d09d0ab66d33539b88a2550a36100d1e16fd"
+  },
+  {
+   "path": "Schemas/PSMaml/inlineCommon.xsd",
+   "sha256": "02071402b963966ad574ab09bb42719bdb1ce6cd7e9af260a13faf9ebb580c55"
+  },
+  {
+   "path": "Schemas/PSMaml/inlineSoftware.xsd",
+   "sha256": "c444cd1121a8b83b0ffe5a8467cc10d2d810c5a7765f4b4406d1eb329cd8901d"
+  },
+  {
+   "path": "Schemas/PSMaml/inlineUi.xsd",
+   "sha256": "e7ff025576e482632878709e208b95916ccdca2af108c1c7b9218fb8472c1ae3"
+  },
+  {
+   "path": "Schemas/PSMaml/shellExecute.xsd",
+   "sha256": "52f48b0830346e30c782aa5c379dc547d0f40265ff1504276c904b819446409e"
+  },
+  {
+   "path": "Schemas/PSMaml/structure.xsd",
+   "sha256": "f35e24830e9e1a6ac79dedfbc3f2ef03eff8d41ef8c2414e8ba1c1a52e527391"
+  },
+  {
+   "path": "Schemas/PSMaml/structureGlossary.xsd",
+   "sha256": "4425e365ba3b646b11e5625644d5f98b0151f60ed2ba0a28316570d7d68f6fa5"
+  },
+  {
+   "path": "Schemas/PSMaml/structureList.xsd",
+   "sha256": "176d55d7715ddecccbe51330e9c012e09972ae3e4a9c9ac8d1c5869b9510540a"
+  },
+  {
+   "path": "Schemas/PSMaml/structureProcedure.xsd",
+   "sha256": "d323aeb14f98a01583e538dd92ef445e1094db861dc7205d5d2062976de539b3"
+  },
+  {
+   "path": "Schemas/PSMaml/structureTable.xsd",
+   "sha256": "63d397b018e5d3783ae3057658d7adcb44f968bfd81329d2fcea1abb91f2c7b8"
+  },
+  {
+   "path": "Schemas/PSMaml/structureTaskExecution.xsd",
+   "sha256": "c37308c8cdb9ac988c94a850a848fc79707fb5d268f7e17072d6d2fb8e83e852"
+  },
+  {
+   "path": "Schemas/PSMaml/task.xsd",
+   "sha256": "808a13ceeebda94c0152b93a52a7825e20b5c01780a3ec6c2ae0c8ac0230ed74"
+  },
+  {
+   "path": "Schemas/PSMaml/troubleshooting.xsd",
+   "sha256": "fba82fda979c33074968ed01ad95970fcf1151f3e7c298955bd501d5ca554633"
+  },
+  {
+   "path": "WSMan.Format.ps1xml",
+   "sha256": "b2736057781d56d20815d4bc170ba74efb7a61b1c5b1d83c7dfc7e3277c4036c"
+  },
+  {
+   "path": "en-US/PSEvents.dll.mui",
+   "sha256": "b7879213b87094678245982416923a95b9247164a72ee77203e47c1f6da84cf4"
+  },
+  {
+   "path": "en-US/default.help.txt",
+   "sha256": "bd823039e74d2138875997a4f14e502732becd5824da9f51cc9609ca09857c26"
+  },
+  {
+   "path": "en-US/powershell.exe.mui",
+   "sha256": "b723a37f047968776c5823a5412ed0ce6028ffbdf526c5d1aaa5349cdaeb5c24"
+  },
+  {
+   "path": "en-US/pwrshmsg.dll.mui",
+   "sha256": "4d86dd29d3b29bae8d55454deca73ebf9d5b61df27da4f854d9de91148d52b26"
+  },
+  {
+   "path": "en/powershell_ise.resources.dll",
+   "sha256": "73e0e0736a65a0a60ac1d3ef2a91bd37054f9736d0e6e0d59ca9e9c2733a5565"
+  },
+  {
+   "path": "getevent.types.ps1xml",
+   "sha256": "2255fe380c7d946c82dea10be0287327ebf399f392bf5f482d88cc88b559d10e"
+  },
+  {
+   "path": "powershell.exe",
+   "sha256": "d8f182560210d43baaf767d482ad1dc1207372522e91413b9d5e515a875e552d"
+  },
+  {
+   "path": "powershell.exe.config",
+   "sha256": "7bd3f01f04332f1657494e879e861500d520f49b8f9a2a2d511d1d6736c85656"
+  },
+  {
+   "path": "powershell_ise.exe",
+   "sha256": "1d77a88cb779f73a8388cf8dfd55c6480ec9e164371897666e22ef3c880458ce"
+  },
+  {
+   "path": "powershell_ise.exe.config",
+   "sha256": "62ddfeb64c3a1885a27a171cf83ee41da14b329a6c567bb2335349fd98626fd3"
+  },
+  {
+   "path": "pwrshmsg.dll",
+   "sha256": "cd3b09ea520d4347465e299e6f0496fcadc8a78097594446ad5f0e51932e28a5"
+  },
+  {
+   "path": "ru-RU/PSEvents.dll.mui",
+   "sha256": "4191e1d6389567822ea6b41ebb8234ae30da54eb3e02587e30dcf0a2867dde05"
+  },
+  {
+   "path": "ru-RU/default.help.txt",
+   "sha256": "7325ba7ab9e9c237cd97fab9b6f68be2d21fe03c05c0f2c35b9e0dac21eb878b"
+  },
+  {
+   "path": "ru-RU/powershell.exe.mui",
+   "sha256": "1fe124969e1ba6ebead553898a8d63d7a34b4413b9e62709628a252eddf70ea3"
+  },
+  {
+   "path": "ru-RU/pwrshmsg.dll.mui",
+   "sha256": "6c93bdf4ee8c178c56894c1c1898f27cdb46ed563912d3bfa364c7c26b49ea3e"
+  },
+  {
+   "path": "ru/powershell_ise.resources.dll",
+   "sha256": "eebb4dd8a4bec87a9ea16266b133062ba2ca6472249f52f111967c100b6e0e5a"
+  },
+  {
+   "path": "types.ps1xml",
+   "sha256": "1f4990c289b2466c61c3cbd35edeaaf99430a3492340d52a84f5d8a0ef6be1a0"
+  },
+  {
+   "path": "typesv3.ps1xml",
+   "sha256": "6160f07fc4681c61a1ca33940b5e4f366c73fba86c2671b037d05fdd5eadaf64"
+  }
+ ]
+}

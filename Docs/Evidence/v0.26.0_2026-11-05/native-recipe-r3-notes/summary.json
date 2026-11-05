@@ -1,0 +1,112 @@
+{
+  "schema": "books-0260-native-receipt-compatibility-v1",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "context": {
+    "path": "C:/Antigravity Projects/q28/context/context.json",
+    "sha256": "3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267"
+  },
+  "source_change": "NONE; product source3932155, canonical checker and source/context/build remain unchanged",
+  "before_operator": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/native-once.mjs",
+    "sha256": "07577db9f9c22c25a40f7500fa89ed6fd6898267520a18bd34f8e056f1c09336"
+  },
+  "operator": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-once.mjs",
+    "sha256": "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3"
+  },
+  "operator_patch_sha256": "557830c789f4ccfd5ef962cc9ea86e1a3d3d59bae43c765bf324870d9b4d5515",
+  "recipe_sha256": "a8b2e68ed37fe2347a4c06a68c1fcb810db4d25c0f23732b50cb87d9e30616c6",
+  "change": "One suffix expression in fullPass accepts exact canonical clean or clean (positive decimal N subfolder note/notes), with correct singular/plural and no leading zero. This is a consumer CODE compatibility correction, NOT merely a pin-only substitution.",
+  "canonical_producer": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-identity.mjs",
+    "lines": "300-311",
+    "meaning": "isPersonalClean checks no added/changed/removed/errors. personalFolderVerdict can append advisory deeper-subfolder notes while remaining clean. Actual exported producer functions generate synthetic positives; clean=true and the actual canonical clean verdict are asserted."
+  },
+  "unchanged_boundaries": {
+    "canonical": {
+      "before_sha256": "6912b17a77d6ebd564258daed32d65361cee5e7dc040f4ce7ccb06fa4725ea11",
+      "after_sha256": "6912b17a77d6ebd564258daed32d65361cee5e7dc040f4ce7ccb06fa4725ea11",
+      "byte_equal": true
+    },
+    "readPlan": {
+      "before_sha256": "647b0cbc48accf47235c176d8571c5c48d1e0d83248903cdf78a3b412dc65caf",
+      "after_sha256": "647b0cbc48accf47235c176d8571c5c48d1e0d83248903cdf78a3b412dc65caf",
+      "byte_equal": true
+    },
+    "prepare": {
+      "before_sha256": "2877e9fcef2d29dfb57638799e0faa5836e721eb4d1c3a6b692675241c021d5a",
+      "after_sha256": "2877e9fcef2d29dfb57638799e0faa5836e721eb4d1c3a6b692675241c021d5a",
+      "byte_equal": true
+    },
+    "run": {
+      "before_sha256": "f55fba6725c6a2f9758e8dc1b4d728df5b536a48f61a34a0239621d48bb62481",
+      "after_sha256": "f55fba6725c6a2f9758e8dc1b4d728df5b536a48f61a34a0239621d48bb62481",
+      "byte_equal": true
+    },
+    "accept": {
+      "before_sha256": "30017ed34727a479ac7ddf7125161e99c04a3930ff5c3991c3e6a0bc7255b442",
+      "after_sha256": "30017ed34727a479ac7ddf7125161e99c04a3930ff5c3991c3e6a0bc7255b442",
+      "byte_equal": true
+    }
+  },
+  "final_pure_red": {
+    "path": "native-clean-notes-red-boundaries.json",
+    "tests": 25,
+    "failed_cases": [
+      {
+        "name": "canonical clean notes=1",
+        "pass": false,
+        "error": "Got unwanted exception.\nActual message: \"Exact clean full PASS required\""
+      },
+      {
+        "name": "canonical clean notes=2",
+        "pass": false,
+        "error": "Got unwanted exception.\nActual message: \"Exact clean full PASS required\""
+      },
+      {
+        "name": "canonical clean notes=10",
+        "pass": false,
+        "error": "Got unwanted exception.\nActual message: \"Exact clean full PASS required\""
+      },
+      {
+        "name": "canonical clean notes=21",
+        "pass": false,
+        "error": "Got unwanted exception.\nActual message: \"Exact clean full PASS required\""
+      }
+    ],
+    "meaning": "Old operator rejects precisely four legitimate positive-note forms; all strict negative conditions still refuse.",
+    "elapsed_ms": 269.6553,
+    "normal_native_zero": true
+  },
+  "final_pure_green": {
+    "path": "native-clean-notes-green-boundaries.json",
+    "tests": 25,
+    "passed": 25,
+    "elapsed_ms": 232.5161,
+    "normal_native_zero": true
+  },
+  "vectors": [
+    "canonical clean with0/1/2/10/21 advisory notes; exact positive decimal N grammar",
+    "failed owned check; listed changes; canonical NOT CHECKED; missing personal verdict all refused",
+    "wrong version/source/dirty source/multiple receipts/missing receipt refused",
+    "zero/leading-zero/wrong-plural/new-file/trailing-text suffixes refused",
+    "actual context accepted and changed context refused by unchanged real hash guard",
+    "wrong build/source refused by exact unchanged readPlan prefix before canonical imports",
+    "failed native owner refused by unchanged pure phase-contract normalOwned guard"
+  ],
+  "unit_scope": "All receipt vectors stay in memory and are explicitly SYNTHETIC PURE UNIT INPUTS ONLY. No fake standalone PASS receipt file, authority/plan, adapter, actual prepare invocation or native app is created. Wrong build is checked at the real unchanged readPlan prefix because receipt v2 has no build field.",
+  "initial_harness_receipts": "Initial import.meta compilation and non-exported-helper fixture errors, intermediate21/22-vector runs and final25-vector results are preserved. Only the final boundaries pair binds the current parser-contract source.",
+  "actual_fullpass_receipt": null,
+  "actual_native_authority": null,
+  "actual_native_plan": null,
+  "n26_absent": true,
+  "required_next": "Senua reviews exact code patch/proof. Actual pure prepare remains forbidden until ORIGINAL current q28 fullPASS; its generated authority/plan need separate pure review before one native launch."
+}

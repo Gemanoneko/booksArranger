@@ -1,0 +1,324 @@
+{
+  "schema": "books-0260-native-actual-inputs-v1",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "plan": {
+    "path": "C:/Antigravity Projects/n26/plan.json",
+    "sha256": "5ad8fe4e1eaa5dcc259365d5d844beab567dda10ffe8691614528798936ccec7"
+  },
+  "authority": {
+    "path": "C:/Antigravity Projects/n26/authority.json",
+    "sha256": "ff14b7a2e7d7447879c4ff4619af6928143c9ea79c6c7e6f33fc32a1d5fabdad",
+    "size": 1757
+  },
+  "operator": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-once.mjs",
+    "sha256": "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3",
+    "size": 13274,
+    "identity": {
+      "dev": "2803554832",
+      "ino": "14355223819457059",
+      "nlink": 1
+    }
+  },
+  "original_full_receipt": {
+    "path": "C:/Antigravity Projects/q28/receipt.txt",
+    "sha256": "c6e4e84bcff6947e439c8867733566a870080c489187ee9206be3a5605365fee",
+    "size": 500,
+    "identity": {
+      "dev": "2803554832",
+      "ino": "75153818788783889",
+      "nlink": 1
+    }
+  },
+  "helper": {
+    "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+    "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc",
+    "size": 14108,
+    "identity": {
+      "dev": "2803554832",
+      "ino": "2251799820517571",
+      "nlink": 1
+    }
+  },
+  "node": {
+    "path": "C:/Program Files/nodejs/node.exe",
+    "sha256": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5",
+    "size": 100097864,
+    "identity": {
+      "dev": "2803554832",
+      "ino": "63331869760192827",
+      "nlink": 1
+    }
+  },
+  "inputs": [
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/dist/release-artifacts.json",
+      "sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+      "size": 64765,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "4785074611196708",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/build-cache/runtime-pointer.json",
+      "sha256": "fe93797d34dece7d0bef2426f9e6bffa028ba78b0be5c7e418200c3ce041ca77",
+      "size": 5819,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "3940649681064743",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+      "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc",
+      "size": 14108,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "2251799820517571",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-child.mjs",
+      "sha256": "240a6a96a32f08989439387d5d6ab75d17e1bcf243863d31d2ff7287f68d1e42",
+      "size": 1258,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "2251799820517574",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Program Files/nodejs/node.exe",
+      "sha256": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5",
+      "size": 100097864,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "63331869760192827",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-once.mjs",
+      "sha256": "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3",
+      "size": 13274,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "14355223819457059",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/receipt.txt",
+      "sha256": "c6e4e84bcff6947e439c8867733566a870080c489187ee9206be3a5605365fee",
+      "size": 500,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "75153818788783889",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Windows/System32/kernel32.dll",
+      "sha256": "11db2fee643262b9c7916fac0b2ed592cb51d1ec480cac6a0fcc81492d6c7167",
+      "size": 862016,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "50946970790736788",
+        "nlink": 2
+      }
+    },
+    {
+      "path": "C:/Windows/System32/advapi32.dll",
+      "sha256": "0cd55279ff31adfa5f4ee974acc841f1e77f53f6469a3606a755bb4d09efae08",
+      "size": 791112,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "2533274796497926",
+        "nlink": 2
+      }
+    },
+    {
+      "path": "C:/Windows/System32/ntdll.dll",
+      "sha256": "b072efaeac06c558b1ab71d7e91f2d7c14903262af53e33bd277edc4ce5aed21",
+      "size": 2575064,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "162974011521581323",
+        "nlink": 2
+      }
+    },
+    {
+      "path": "C:/Windows/System32/user32.dll",
+      "sha256": "4f66c3c584276f7df0dbfb78332315990ef81276661c8eacd8ba93197931ff91",
+      "size": 2003968,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "90071992553539146",
+        "nlink": 2
+      }
+    },
+    {
+      "path": "C:/Windows/System32/iphlpapi.dll",
+      "sha256": "75c96c32969e9e1c13590287a63fb124af734bf4984fcb545cbc95523405cb2b",
+      "size": 232544,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "104427216365780562",
+        "nlink": 2
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/context/source/scripts/qa-phase-contract.mjs",
+      "sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f",
+      "size": 14734,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "9570149215280272",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/context/source/scripts/qa-real-shell-phase.mjs",
+      "sha256": "49a0a2fae1f29b0dd0631644be168fa321df4a4689a9cf59dbc076da5e6f32af",
+      "size": 8539,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "9007199261858961",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/context/source/tests/real-shell-update-support.mjs",
+      "sha256": "fd3f0c9c5d0af1bbf877b089781e718092b64c6488d483ba2c925c3326975c90",
+      "size": 41396,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "4785074611199166",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/context/source/tests/real-shell-update.test.mjs",
+      "sha256": "0a4a48db35c05214c1ac5e9cd9cb536fc73fd3989664685f0f376975e2ee4ee2",
+      "size": 18177,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "7036874424884415",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/context/context.json",
+      "sha256": "3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267",
+      "size": 4750,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "4503599634488791",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/context/source-manifest.json",
+      "sha256": "d578a0bbf44355727051229cdf0f47f74e6cd8fafd8f29d3f0bfd28032bf50c6",
+      "size": 417556,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "4503599634488776",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/context/runtime-node-installation.json",
+      "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca",
+      "size": 311392,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "3940649681067474",
+        "nlink": 1
+      }
+    },
+    {
+      "path": "C:/Antigravity Projects/q28/context/runtime-ownership.json",
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617",
+      "size": 13523,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "5066549587910094",
+        "nlink": 1
+      }
+    }
+  ],
+  "trees": [
+    {
+      "root": "C:/Antigravity Projects/q28/context/source",
+      "files": 2491
+    },
+    {
+      "root": "C:/Program Files/nodejs",
+      "files": 1936
+    },
+    {
+      "root": "C:/Antigravity Projects/q28/ownership",
+      "files": 92
+    },
+    {
+      "root": "C:/Antigravity Projects/q28/ownership/node_modules/koffi",
+      "files": 87
+    }
+  ],
+  "payload": {
+    "root": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/dist/builds/82b4dac4-0aad-453a-a013-d3486cc431eb/win-unpacked",
+    "manifest": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/dist/release-artifacts.json",
+      "sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+      "size": 64765,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "4785074611196708",
+        "nlink": 1
+      }
+    },
+    "files": 332,
+    "runtime_files": 48,
+    "installer_equivalent": true
+  },
+  "environment": {
+    "SystemRoot": "C:/Windows",
+    "WINDIR": "C:/Windows",
+    "PATH": "C:/Program Files/nodejs;C:/Windows/System32",
+    "TEMP": "C:/Antigravity Projects/n26/pa1-82b4dac4-0aad-453a-a013-d3486cc431eb/temp",
+    "TMP": "C:/Antigravity Projects/n26/pa1-82b4dac4-0aad-453a-a013-d3486cc431eb/temp",
+    "USERPROFILE": "C:/Antigravity Projects/n26/pa1-82b4dac4-0aad-453a-a013-d3486cc431eb/home",
+    "APPDATA": "C:/Antigravity Projects/n26/pa1-82b4dac4-0aad-453a-a013-d3486cc431eb/home/Roaming",
+    "LOCALAPPDATA": "C:/Antigravity Projects/n26/pa1-82b4dac4-0aad-453a-a013-d3486cc431eb/home/Local"
+  },
+  "deadline_ms": 600000,
+  "invocations": {
+    "run": [
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-once.mjs",
+      "run",
+      "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3",
+      "5ad8fe4e1eaa5dcc259365d5d844beab567dda10ffe8691614528798936ccec7"
+    ],
+    "accept": [
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-once.mjs",
+      "accept",
+      "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3",
+      "5ad8fe4e1eaa5dcc259365d5d844beab567dda10ffe8691614528798936ccec7"
+    ]
+  }
+}

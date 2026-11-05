@@ -1,0 +1,40 @@
+{
+  "schema": "books-0260-native-recipe-files-v1",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "status": "Preparation only; no native authority/plan/launch exists",
+  "files": [
+    {
+      "path": "native-once.mjs",
+      "size": 13212,
+      "sha256": "07577db9f9c22c25a40f7500fa89ed6fd6898267520a18bd34f8e056f1c09336"
+    },
+    {
+      "path": "recipe.json",
+      "size": 4967,
+      "sha256": "ea792c371fe3157f3ae7d173a77199e346bea0df58a3e0dbc26448a7bc2c9d27"
+    },
+    {
+      "path": "pin-only.patch",
+      "size": 11679,
+      "sha256": "ea5c196b4e28fb27be6c28617b55ddaf881ba6ac18dfba6f85f413d514ae70e8"
+    },
+    {
+      "path": "publisher-readiness.json",
+      "size": 4180,
+      "sha256": "9b1aecca5040915fe47c6d295a750874e4870ffe87a1b7e325e2355a1c3c98f6"
+    },
+    {
+      "path": "prepare-native-operator.py",
+      "size": 6964,
+      "sha256": "c144f09af4931a9fda50c18ae3f9c86b271c6b558cee9308efe291954d187e0e"
+    }
+  ]
+}

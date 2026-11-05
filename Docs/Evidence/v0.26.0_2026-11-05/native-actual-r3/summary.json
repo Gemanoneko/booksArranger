@@ -1,0 +1,95 @@
+{
+  "schema": "books-0260-native-pure-preparation-v1",
+  "status": "FRESH PURE PREPARATION COMPLETE; no launch. Separate Senua actual-input clearance required before Futaba uses ONE native invocation.",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "plan_sha256": "5ad8fe4e1eaa5dcc259365d5d844beab567dda10ffe8691614528798936ccec7",
+  "authority_sha256": "ff14b7a2e7d7447879c4ff4619af6928143c9ea79c6c7e6f33fc32a1d5fabdad",
+  "operator_sha256": "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3",
+  "full_receipt_sha256": "c6e4e84bcff6947e439c8867733566a870080c489187ee9206be3a5605365fee",
+  "context_sha256": "3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267",
+  "approved_at_actual_preparation_utc": "2026-11-05T12:50:19.531Z",
+  "authority_attribution": "Exact current user quote and inferred canonical private own-HKCU effects are distinct. approved_at is actual preparation UTC, not unavailable user-message time. No old authority/proof reuse.",
+  "n26_members": [
+    "authority.json",
+    "plan.json"
+  ],
+  "launch_marker_absent": true,
+  "input_pins_verified": 20,
+  "payload_files": 332,
+  "tree_counts": [
+    {
+      "root": "C:/Antigravity Projects/q28/context/source",
+      "files": 2491
+    },
+    {
+      "root": "C:/Program Files/nodejs",
+      "files": 1936
+    },
+    {
+      "root": "C:/Antigravity Projects/q28/ownership",
+      "files": 92
+    },
+    {
+      "root": "C:/Antigravity Projects/q28/ownership/node_modules/koffi",
+      "files": 87
+    }
+  ],
+  "invocations": {
+    "run": [
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-once.mjs",
+      "run",
+      "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3",
+      "5ad8fe4e1eaa5dcc259365d5d844beab567dda10ffe8691614528798936ccec7"
+    ],
+    "accept": [
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-once.mjs",
+      "accept",
+      "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3",
+      "5ad8fe4e1eaa5dcc259365d5d844beab567dda10ffe8691614528798936ccec7"
+    ]
+  },
+  "acceptance_consumer": "Unchanged operator accept -> q28/source/scripts/qa-real-shell-phase.mjs evidenceSummary -> qa-phase-contract.validateNativeEvidence. Requires12originalroles, original callback streams, complete normal owner/controller/nativezero, exact functional marker, unchanged postflight and exact own tray-leaf cleanup; no synthetic substitute.",
+  "boundaries": "Only fresh n26 fixture/profile/copied app/fake installer and exact newly created own HKCU numeric leaf cleanup. Leave one8byte history reference while all preexisting UIOrderList bytes remain unchanged. No focus, installed app, live catalog or Z: access.",
+  "cleanup": "Retain q28/r3/n26 and task scratch through owner closure, evidence commit and final native/publication reference checks. No deletion yet.",
+  "files": [
+    {
+      "path": "plan.json",
+      "sha256": "5ad8fe4e1eaa5dcc259365d5d844beab567dda10ffe8691614528798936ccec7",
+      "size": 711168,
+      "original": "C:/Antigravity Projects/n26/plan.json"
+    },
+    {
+      "path": "authority.json",
+      "sha256": "ff14b7a2e7d7447879c4ff4619af6928143c9ea79c6c7e6f33fc32a1d5fabdad",
+      "size": 1757,
+      "original": "C:/Antigravity Projects/n26/authority.json"
+    },
+    {
+      "path": "receipt.txt",
+      "sha256": "c6e4e84bcff6947e439c8867733566a870080c489187ee9206be3a5605365fee",
+      "size": 500,
+      "original": "C:/Antigravity Projects/q28/receipt.txt"
+    },
+    {
+      "path": "full-outer-result.json",
+      "sha256": "d4b5a95d9bf012ad76eeaf334e4a1c91f97fdc234533874fb4dcbf7db633712a",
+      "size": 143,
+      "original": "C:/Antigravity Projects/q28/outer-result.json"
+    },
+    {
+      "path": "inputs.json",
+      "sha256": "b4b4e54fd2eed39fa0f8606850d6a5e4cd3df7f1451ab555ad4ad6415629342f",
+      "size": 11154
+    }
+  ]
+}

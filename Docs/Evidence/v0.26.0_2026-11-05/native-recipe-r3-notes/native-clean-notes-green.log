@@ -1,0 +1,11 @@
+evalmachine.<anonymous>:5
+ need(p.operator.sha256===await selfHash()&&p.operator.path===fileURLToPath(import.meta.url).replaceAll('\\','/'),'Operator differs');
+                                                                                   ^^^^
+
+SyntaxError: Cannot use 'import.meta' outside a module
+    at new Script (node:vm:118:7)
+    at createScript (node:vm:270:10)
+    at Object.runInContext (node:vm:301:10)
+    at file:///C:/Antigravity%20Projects/Studio%20Illuminati/WIP/Books%20Arranger/Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/parser-contract.mjs:43:28
+
+Node.js v26.13.0

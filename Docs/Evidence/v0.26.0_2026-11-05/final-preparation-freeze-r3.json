@@ -1,0 +1,395 @@
+{
+  "schema": "books-0260-ender-final-preparation-files-v1",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "scope": "Exact Ender-owned source-free candidate3 preparation/operator/pureparser/actualnativehandoff evidence. Futaba owns actual full/native final results. No additional tests/code changes.",
+  "files": [
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/build-plan.json",
+      "sha256": "5698ebbd60bbdab31fc3ec45d724aaa3d2dd3de2d69de06d43de54823496b843",
+      "size": 1287732
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/build-operator.mjs",
+      "sha256": "99e6e40801346af66e849c94b4854bde2a8ced098821525f1be87354270697dc",
+      "size": 4892
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/prepare-build-plan.py",
+      "sha256": "a70dffb9f5e454e53418b0b14a12a938a11414ab544021e545b4b7d3666b8a11",
+      "size": 5262
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/stage-inputs.mjs",
+      "sha256": "647c0cd5bd247be72a9916940f9ae7dc1185a8266998db5ac3c3c12a9ef15900",
+      "size": 3339
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/stage-owned.json",
+      "sha256": "fba9bf3924fda02eee7c8e6f15441e2af124b8211c5acecfca0291ac318f2b36",
+      "size": 1359819
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/stage-owned.log",
+      "sha256": "c0a98d484eadcc8d02a3c762769cca46db0c76941592f9177009f9aa3726873b",
+      "size": 1279956
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/pack-owned.json",
+      "sha256": "afcc2d401cdc3a0b1835fc36154c470c06bdd157d4e08f1914e50f834f930e7a",
+      "size": 1321
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/pack-owned.log",
+      "sha256": "1db1455356715fca9c1fa3f80681c800e9419ed3c8a4da6790b10f5f36358dd2",
+      "size": 570
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/empty-user-config.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/empty-global-config.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/release-artifacts.json",
+      "sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+      "size": 64765
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/runtime-pointer.json",
+      "sha256": "fe93797d34dece7d0bef2426f9e6bffa028ba78b0be5c7e418200c3ce041ca77",
+      "size": 5819
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/guarded-build-r3/summary.json",
+      "sha256": "e31a6237be22051fe3acef33339779e68d179b5e770943e91ddfaac8d6d9fe0d",
+      "size": 6004
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/context.json",
+      "sha256": "3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267",
+      "size": 4750
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/source-manifest.json",
+      "sha256": "d578a0bbf44355727051229cdf0f47f74e6cd8fafd8f29d3f0bfd28032bf50c6",
+      "size": 417556
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/harness-manifest.json",
+      "sha256": "c9275d3fa2fed0088c9494480467435a7e6902c76ff5d5eeb855017e63c12f82",
+      "size": 248
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/runtime-dependencies.json",
+      "sha256": "7e209c84b87c6c758afa6d4ad24bf42eb0b72f4a80377fd9818a1433f08feaf6",
+      "size": 1052511
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/runtime-ownership.json",
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617",
+      "size": 13523
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/runtime-bundled-media.json",
+      "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31",
+      "size": 5823
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/runtime-mp3-fixture.json",
+      "sha256": "7ce16c974ba7947022126eb991b24c7d1f45071bbd6082222772b0b8317ce143",
+      "size": 133
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/runtime-node-installation.json",
+      "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca",
+      "size": 311392
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/runtime-git.json",
+      "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606",
+      "size": 1381113
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/runtime-powershell.json",
+      "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3",
+      "size": 146442
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/harness/graph.json",
+      "sha256": "ee37ac7da59788bb94f27e8c21c7ddbc19555acaa2d673c07a5a80100aa25544",
+      "size": 2961
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/harness/run-entry.sh",
+      "sha256": "90e8e61eabe490f68100d39dd1b0b28a7fc7db656f4ee3b3f42c0dc833449db8",
+      "size": 809
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/context-owned.mjs",
+      "sha256": "4f524b8c025fff0712fa396ada1f43ca4e9ce320170850740b39ab7761d16dd2",
+      "size": 2807
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/context-owned.json",
+      "sha256": "df928610dfd7e6bbad57d0b61b84ee90b641d2a4961360dee345ff404c4fad08",
+      "size": 1267
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/context-owned.log",
+      "sha256": "0f9d5f7261a105a5d7465d68e665df26288b72d6f085345e766cee483d794c43",
+      "size": 520
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/prepare-qa-prereqs.mjs",
+      "sha256": "e92143e73859039433769a27a95d9f57a87a392acc0f9e8fa9232b44e63a49ea",
+      "size": 2293
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/qa-prep-owned.mjs",
+      "sha256": "19c7e0039226559d4c74c6b6433a9733f3aa3efee6ce9e07235cff16468fa12e",
+      "size": 1406
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/qa-prereqs-owned.json",
+      "sha256": "33be97b7040cfcd29303763cdfa33fbf32d7e08bd83775058f85eb9b9f0b3234",
+      "size": 13868
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/private-prerequisites.json",
+      "sha256": "9349895e6a2795c8ef544b843e0abf2511a5d1ff479d475dce810079fa0aa2cc",
+      "size": 15601
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/entry-preparation-r3/summary.json",
+      "sha256": "5fee6d8456f79ad4640da600e05ebd4a1c89b2d5f78d17c440fb68a288788845",
+      "size": 16403
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/preparation-freeze-r3.json",
+      "sha256": "007fc20428915041bcd34ab70de587193434da26137017ef1c2836e25b472de5",
+      "size": 6329
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/native-once.mjs",
+      "sha256": "07577db9f9c22c25a40f7500fa89ed6fd6898267520a18bd34f8e056f1c09336",
+      "size": 13212
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/recipe.json",
+      "sha256": "ea792c371fe3157f3ae7d173a77199e346bea0df58a3e0dbc26448a7bc2c9d27",
+      "size": 4967
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/pin-only.patch",
+      "sha256": "ea5c196b4e28fb27be6c28617b55ddaf881ba6ac18dfba6f85f413d514ae70e8",
+      "size": 11679
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/publisher-readiness.json",
+      "sha256": "9b1aecca5040915fe47c6d295a750874e4870ffe87a1b7e325e2355a1c3c98f6",
+      "size": 4180
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/prepare-native-operator.py",
+      "sha256": "c144f09af4931a9fda50c18ae3f9c86b271c6b558cee9308efe291954d187e0e",
+      "size": 6964
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3/freeze.json",
+      "sha256": "f075646b6d215aecdc98ca9ac486bc15a9d2416f3d1aea2e0ebc5aba1485d8c8",
+      "size": 1452
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/adapt-native-notes.py",
+      "sha256": "0bd852b11026df670822ca83523e2b8c2f4ada2a826166fee82f1e7fc3f6cfe1",
+      "size": 3014
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green-boundaries.json",
+      "sha256": "0172e32b6265a5c1246b5a192823c40a4e28ea16bec5f709aff1a58def083413",
+      "size": 1133
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green-boundaries.log",
+      "sha256": "c2174e16ca76b0bba6acc7779df8cb533cf821fd1acae945dcb1d133c82da1ae",
+      "size": 426
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green-canonical.json",
+      "sha256": "e20cfcb258840b5bfaacac472b6c55291fde0ab08c77ebf37411a4836c7bf1f1",
+      "size": 1134
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green-canonical.log",
+      "sha256": "067042547ce1a57dbcd746c6a7a75d86628fb9424d890fa1adea617ada26ba51",
+      "size": 426
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green-final.json",
+      "sha256": "a37018cfaf701cabecbe1a27bea28cb5baf729350e4a73f0831db32a3eb48d1d",
+      "size": 1646
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green-final.log",
+      "sha256": "e511b995d589a8f0705a4c222de38f19bf97dea24df24a081b7cba2481f0a3a7",
+      "size": 887
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green-v2.json",
+      "sha256": "44ef18dff738465ab2decb0b38d26e28becb4b4b620cc3db4abf92ed383b95bd",
+      "size": 1133
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green-v2.log",
+      "sha256": "887c60aafa544c222687cd0530d4569f695fb362f7d26d42d5ffd68481890edb",
+      "size": 426
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green.json",
+      "sha256": "9cf3c40ce7b834cdd38e9ccc8bdd0ed04fcff2e92951f9a241e2466be25bceba",
+      "size": 1330
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-green.log",
+      "sha256": "df373468ca69d66012a43d1612b61d3897e1ff55059ae8bbeb8b10d2f874a6d6",
+      "size": 613
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red-boundaries.json",
+      "sha256": "8f085c5e17e77030112797da4021cec88426b76db72df5f2a342db107d14d987",
+      "size": 1725
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red-boundaries.log",
+      "sha256": "d246420e11dea8375b11279684ef418ee60b95f84573bc035418c1a71611a287",
+      "size": 957
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red-canonical.json",
+      "sha256": "14edaa9aa3b5148e19104fe8f9e714de07644949a1ff28644f9a0ddf89dc5925",
+      "size": 1725
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red-canonical.log",
+      "sha256": "a161f2ee2c960353a5db397891a469e530709244f50651102743b4f519eff969",
+      "size": 957
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red-final.json",
+      "sha256": "fb33dbcc79e6e9683a660b8db7a0e0b06bb92f088325fe22d6d10589c2284ac8",
+      "size": 1640
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red-final.log",
+      "sha256": "eb92cb9d050a973ca001dd7c380636cb9acd7b00edb01dbc3394732550c3c432",
+      "size": 881
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red-v2.json",
+      "sha256": "cc95c80e79e3d8c989ca29abb4a9a392542c39c8ec637e2e3928ed7e4673e0f4",
+      "size": 1726
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red-v2.log",
+      "sha256": "275b3098bd2bb3367612c70902f1fd71fe8bb82c15dfbfd4883273bc686bf1ff",
+      "size": 957
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red.json",
+      "sha256": "fb11b47c69c1bf66ab64f20a81bd2f183ec2a432af418b9e39f0490c7b846a29",
+      "size": 1321
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-clean-notes-red.log",
+      "sha256": "df373468ca69d66012a43d1612b61d3897e1ff55059ae8bbeb8b10d2f874a6d6",
+      "size": 613
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/native-once.mjs",
+      "sha256": "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3",
+      "size": 13274
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/operator-diff.patch",
+      "sha256": "557830c789f4ccfd5ef962cc9ea86e1a3d3d59bae43c765bf324870d9b4d5515",
+      "size": 945
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/owned-node.mjs",
+      "sha256": "15687e98a0b0f0b7bad1b33806d97bdd5a5e089dade9f0496587c9b3450cb034",
+      "size": 2113
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/parser-contract.mjs",
+      "sha256": "dd78d2486e5d8056b521b0d386e440042585e123a53273fdbd242060e13a6365",
+      "size": 6872
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/publisher-readiness.json",
+      "sha256": "9b1aecca5040915fe47c6d295a750874e4870ffe87a1b7e325e2355a1c3c98f6",
+      "size": 4180
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/recipe.json",
+      "sha256": "a8b2e68ed37fe2347a4c06a68c1fcb810db4d25c0f23732b50cb87d9e30616c6",
+      "size": 7325
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/summary.json",
+      "sha256": "1921e1255b5316054aca157d000a7cd8cd05c03dd5f935909958e4c98753c6f7",
+      "size": 6340
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-recipe-r3-notes/freeze.json",
+      "sha256": "f635b3f5a79578684f83396b804c6885e982aa13199b2090a56f7b32334823ff",
+      "size": 5335
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-actual-r3/plan.json",
+      "sha256": "5ad8fe4e1eaa5dcc259365d5d844beab567dda10ffe8691614528798936ccec7",
+      "size": 711168
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-actual-r3/authority.json",
+      "sha256": "ff14b7a2e7d7447879c4ff4619af6928143c9ea79c6c7e6f33fc32a1d5fabdad",
+      "size": 1757
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-actual-r3/receipt.txt",
+      "sha256": "c6e4e84bcff6947e439c8867733566a870080c489187ee9206be3a5605365fee",
+      "size": 500
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-actual-r3/full-outer-result.json",
+      "sha256": "d4b5a95d9bf012ad76eeaf334e4a1c91f97fdc234533874fb4dcbf7db633712a",
+      "size": 143
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-actual-r3/inputs.json",
+      "sha256": "b4b4e54fd2eed39fa0f8606850d6a5e4cd3df7f1451ab555ad4ad6415629342f",
+      "size": 11154
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-actual-r3/summary.json",
+      "sha256": "b23cb0e30fd785380212464c654fd64fc737324aa833d05421b9bd42e48ad483",
+      "size": 4663
+    },
+    {
+      "path": "Docs/Evidence/v0.26.0_2026-11-05/native-actual-r3/freeze.json",
+      "sha256": "b64f87ae9b2003a20d7cbc08a0144934aba0917f892a80713a6b560ac0c0254c",
+      "size": 1802
+    }
+  ]
+}

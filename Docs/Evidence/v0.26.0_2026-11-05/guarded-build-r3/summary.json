@@ -1,0 +1,133 @@
+{
+  "schema": "books-0260-guarded-build-proof-v1",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "source_root": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3",
+  "source_dirty": "N",
+  "runtime_pointer_sha256": "fe93797d34dece7d0bef2426f9e6bffa028ba78b0be5c7e418200c3ce041ca77",
+  "artifacts": [
+    {
+      "path": "builds/82b4dac4-0aad-453a-a013-d3486cc431eb/Books-Arranger-Setup-0.26.0.exe",
+      "sha256": "9aaf1b9f02b6097db413663f97692871cabc85a1366a8557ceb830e198ecbda7",
+      "size": 174793046,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/dist/builds/82b4dac4-0aad-453a-a013-d3486cc431eb/Books-Arranger-Setup-0.26.0.exe"
+    },
+    {
+      "path": "builds/82b4dac4-0aad-453a-a013-d3486cc431eb/Books-Arranger-Setup-0.26.0.exe.blockmap",
+      "sha256": "eb6565c78fcb58a653ca3c5c52a27484bf3bfe9ea8ee8430bbe88e1dca6c7a16",
+      "size": 182231,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/dist/builds/82b4dac4-0aad-453a-a013-d3486cc431eb/Books-Arranger-Setup-0.26.0.exe.blockmap"
+    },
+    {
+      "path": "builds/82b4dac4-0aad-453a-a013-d3486cc431eb/latest.yml",
+      "sha256": "5ffaf848065f1859be5a7e9c46b1789f837d0bb1b4b27118a99e63a5d31dde0c",
+      "size": 360,
+      "absolute": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/dist/builds/82b4dac4-0aad-453a-a013-d3486cc431eb/latest.yml"
+    }
+  ],
+  "plan_sha256": "5698ebbd60bbdab31fc3ec45d724aaa3d2dd3de2d69de06d43de54823496b843",
+  "operator_sha256": "99e6e40801346af66e849c94b4854bde2a8ced098821525f1be87354270697dc",
+  "result": {
+    "ok": true,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "elapsedMs": 76305.50289999999,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 62,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 4859,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    }
+  },
+  "files": [
+    {
+      "path": "build-plan.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/build-plan.json",
+      "size": 1287732,
+      "sha256": "5698ebbd60bbdab31fc3ec45d724aaa3d2dd3de2d69de06d43de54823496b843"
+    },
+    {
+      "path": "build-operator.mjs",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/build-operator.mjs",
+      "size": 4892,
+      "sha256": "99e6e40801346af66e849c94b4854bde2a8ced098821525f1be87354270697dc"
+    },
+    {
+      "path": "prepare-build-plan.py",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/prepare-build-plan.py",
+      "size": 5262,
+      "sha256": "a70dffb9f5e454e53418b0b14a12a938a11414ab544021e545b4b7d3666b8a11"
+    },
+    {
+      "path": "stage-inputs.mjs",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/stage-inputs.mjs",
+      "size": 3339,
+      "sha256": "647c0cd5bd247be72a9916940f9ae7dc1185a8266998db5ac3c3c12a9ef15900"
+    },
+    {
+      "path": "stage-owned.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/stage-owned.json",
+      "size": 1359819,
+      "sha256": "fba9bf3924fda02eee7c8e6f15441e2af124b8211c5acecfca0291ac318f2b36"
+    },
+    {
+      "path": "stage-owned.log",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/stage-owned.log",
+      "size": 1279956,
+      "sha256": "c0a98d484eadcc8d02a3c762769cca46db0c76941592f9177009f9aa3726873b"
+    },
+    {
+      "path": "pack-owned.json",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/pack-owned.json",
+      "size": 1321,
+      "sha256": "afcc2d401cdc3a0b1835fc36154c470c06bdd157d4e08f1914e50f834f930e7a"
+    },
+    {
+      "path": "pack-owned.log",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/pack-owned.log",
+      "size": 570,
+      "sha256": "1db1455356715fca9c1fa3f80681c800e9419ed3c8a4da6790b10f5f36358dd2"
+    },
+    {
+      "path": "empty-user-config.txt",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/empty-user-config.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "empty-global-config.txt",
+      "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105/r3/empty-global-config.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "release-artifacts.json",
+      "source": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/dist/release-artifacts.json",
+      "size": 64765,
+      "sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f"
+    },
+    {
+      "path": "runtime-pointer.json",
+      "source": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r3/build-cache/runtime-pointer.json",
+      "size": 5819,
+      "sha256": "fe93797d34dece7d0bef2426f9e6bffa028ba78b0be5c7e418200c3ce041ca77"
+    }
+  ]
+}

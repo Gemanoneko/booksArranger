@@ -1,0 +1,154 @@
+{
+  "schema": "books-0260-native-receipt-compatibility-freeze-v1",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "files": [
+    {
+      "path": "adapt-native-notes.py",
+      "size": 3014,
+      "sha256": "0bd852b11026df670822ca83523e2b8c2f4ada2a826166fee82f1e7fc3f6cfe1"
+    },
+    {
+      "path": "native-clean-notes-green-boundaries.json",
+      "size": 1133,
+      "sha256": "0172e32b6265a5c1246b5a192823c40a4e28ea16bec5f709aff1a58def083413"
+    },
+    {
+      "path": "native-clean-notes-green-boundaries.log",
+      "size": 426,
+      "sha256": "c2174e16ca76b0bba6acc7779df8cb533cf821fd1acae945dcb1d133c82da1ae"
+    },
+    {
+      "path": "native-clean-notes-green-canonical.json",
+      "size": 1134,
+      "sha256": "e20cfcb258840b5bfaacac472b6c55291fde0ab08c77ebf37411a4836c7bf1f1"
+    },
+    {
+      "path": "native-clean-notes-green-canonical.log",
+      "size": 426,
+      "sha256": "067042547ce1a57dbcd746c6a7a75d86628fb9424d890fa1adea617ada26ba51"
+    },
+    {
+      "path": "native-clean-notes-green-final.json",
+      "size": 1646,
+      "sha256": "a37018cfaf701cabecbe1a27bea28cb5baf729350e4a73f0831db32a3eb48d1d"
+    },
+    {
+      "path": "native-clean-notes-green-final.log",
+      "size": 887,
+      "sha256": "e511b995d589a8f0705a4c222de38f19bf97dea24df24a081b7cba2481f0a3a7"
+    },
+    {
+      "path": "native-clean-notes-green-v2.json",
+      "size": 1133,
+      "sha256": "44ef18dff738465ab2decb0b38d26e28becb4b4b620cc3db4abf92ed383b95bd"
+    },
+    {
+      "path": "native-clean-notes-green-v2.log",
+      "size": 426,
+      "sha256": "887c60aafa544c222687cd0530d4569f695fb362f7d26d42d5ffd68481890edb"
+    },
+    {
+      "path": "native-clean-notes-green.json",
+      "size": 1330,
+      "sha256": "9cf3c40ce7b834cdd38e9ccc8bdd0ed04fcff2e92951f9a241e2466be25bceba"
+    },
+    {
+      "path": "native-clean-notes-green.log",
+      "size": 613,
+      "sha256": "df373468ca69d66012a43d1612b61d3897e1ff55059ae8bbeb8b10d2f874a6d6"
+    },
+    {
+      "path": "native-clean-notes-red-boundaries.json",
+      "size": 1725,
+      "sha256": "8f085c5e17e77030112797da4021cec88426b76db72df5f2a342db107d14d987"
+    },
+    {
+      "path": "native-clean-notes-red-boundaries.log",
+      "size": 957,
+      "sha256": "d246420e11dea8375b11279684ef418ee60b95f84573bc035418c1a71611a287"
+    },
+    {
+      "path": "native-clean-notes-red-canonical.json",
+      "size": 1725,
+      "sha256": "14edaa9aa3b5148e19104fe8f9e714de07644949a1ff28644f9a0ddf89dc5925"
+    },
+    {
+      "path": "native-clean-notes-red-canonical.log",
+      "size": 957,
+      "sha256": "a161f2ee2c960353a5db397891a469e530709244f50651102743b4f519eff969"
+    },
+    {
+      "path": "native-clean-notes-red-final.json",
+      "size": 1640,
+      "sha256": "fb33dbcc79e6e9683a660b8db7a0e0b06bb92f088325fe22d6d10589c2284ac8"
+    },
+    {
+      "path": "native-clean-notes-red-final.log",
+      "size": 881,
+      "sha256": "eb92cb9d050a973ca001dd7c380636cb9acd7b00edb01dbc3394732550c3c432"
+    },
+    {
+      "path": "native-clean-notes-red-v2.json",
+      "size": 1726,
+      "sha256": "cc95c80e79e3d8c989ca29abb4a9a392542c39c8ec637e2e3928ed7e4673e0f4"
+    },
+    {
+      "path": "native-clean-notes-red-v2.log",
+      "size": 957,
+      "sha256": "275b3098bd2bb3367612c70902f1fd71fe8bb82c15dfbfd4883273bc686bf1ff"
+    },
+    {
+      "path": "native-clean-notes-red.json",
+      "size": 1321,
+      "sha256": "fb11b47c69c1bf66ab64f20a81bd2f183ec2a432af418b9e39f0490c7b846a29"
+    },
+    {
+      "path": "native-clean-notes-red.log",
+      "size": 613,
+      "sha256": "df373468ca69d66012a43d1612b61d3897e1ff55059ae8bbeb8b10d2f874a6d6"
+    },
+    {
+      "path": "native-once.mjs",
+      "size": 13274,
+      "sha256": "66d479924947dedd3f0e9b657278a49b93bb2cd073de3b89049ac7169a7b8de3"
+    },
+    {
+      "path": "operator-diff.patch",
+      "size": 945,
+      "sha256": "557830c789f4ccfd5ef962cc9ea86e1a3d3d59bae43c765bf324870d9b4d5515"
+    },
+    {
+      "path": "owned-node.mjs",
+      "size": 2113,
+      "sha256": "15687e98a0b0f0b7bad1b33806d97bdd5a5e089dade9f0496587c9b3450cb034"
+    },
+    {
+      "path": "parser-contract.mjs",
+      "size": 6872,
+      "sha256": "dd78d2486e5d8056b521b0d386e440042585e123a53273fdbd242060e13a6365"
+    },
+    {
+      "path": "publisher-readiness.json",
+      "size": 4180,
+      "sha256": "9b1aecca5040915fe47c6d295a750874e4870ffe87a1b7e325e2355a1c3c98f6"
+    },
+    {
+      "path": "recipe.json",
+      "size": 7325,
+      "sha256": "a8b2e68ed37fe2347a4c06a68c1fcb810db4d25c0f23732b50cb87d9e30616c6"
+    },
+    {
+      "path": "summary.json",
+      "size": 6340,
+      "sha256": "1921e1255b5316054aca157d000a7cd8cd05c03dd5f935909958e4c98753c6f7"
+    }
+  ]
+}

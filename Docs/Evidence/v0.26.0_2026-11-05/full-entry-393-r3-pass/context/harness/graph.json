@@ -1,0 +1,78 @@
+{
+ "schema": "books-entry-graph-v4",
+ "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+ "version": "0.26.0",
+ "assembler": {
+  "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\0260-release-20261105-r3\\scripts\\qa-entry-context.mjs",
+  "sha256": "0789498b4798c95410bd0b9020c5a0b359601ef0a9a68754274608a494cd498d"
+ },
+ "phases": {
+  "schema": "books-qa-phases-v1",
+  "canonical": {
+   "scope": "non-app; owned Python/codec CLI fixtures and Node/DOM doubles",
+   "node_entries": [
+    "tests/release-contract.test.mjs",
+    "tests/release-flow.test.mjs",
+    "tests/update-controller.test.mjs",
+    "tests/engine-update.test.mjs",
+    "tests/launch-options.test.mjs",
+    "tests/release-leased-executables.test.mjs",
+    "tests/status-flight.test.mjs",
+    "tests/quit-watch.test.mjs",
+    "tests/python-check-batches.test.mjs",
+    "tests/gate-source-guard.test.mjs",
+    "tests/load-state.test.mjs",
+    "tests/startup.test.mjs",
+    "tests/desktop-loading.test.mjs",
+    "tests/main-startup.test.mjs",
+    "tests/qa-entry-context.test.mjs",
+    "tests/desktop-folder-picker.test.mjs",
+    "tests/gate-scratch.test.mjs",
+    "tests/real-shell-update-contract.test.mjs"
+   ]
+  },
+  "native": {
+   "phase": "PA-1",
+   "entry": "tests/real-shell-update.test.mjs",
+   "title": "PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again",
+   "required": true,
+   "status": "PENDING; separate authority and normal native proof required"
+  },
+  "prior_node_entries": 18,
+  "total_node_entries": 19,
+  "contract": {
+   "path": "scripts/qa-phase-contract.mjs",
+   "sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  }
+ },
+ "declared_scripts": {
+  "check": "node scripts/check-desktop.mjs"
+ },
+ "audited_nodes": [
+  {
+   "path": "scripts/check-desktop.mjs",
+   "sha256": "8feb2faae2e2799439e8b6c31858199834bc311993bd1171b5a78e8f3fae2322",
+   "kind": "pure-node",
+   "command": "node scripts/check-desktop.mjs"
+  }
+ ],
+ "required_free_ports": [
+  5212
+ ],
+ "environment": {
+  "BOOKS_QA_RUNTIME_ROOT": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+  "BOOKS_MP3_REAL_FIXTURE": "C:/Antigravity Projects/q28/media/private.mp3",
+  "SystemRoot": "C:\\Windows",
+  "WINDIR": "C:\\Windows"
+ },
+ "metadata_hygiene": {
+  "powershell": {
+   "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+   "sha256": "d8f182560210d43baaf767d482ad1dc1207372522e91413b9d5e515a875e552d"
+  },
+  "system_root": "C:\\Windows",
+  "helper": "entry-identity.mjs",
+  "scope": "Existing hidden no-profile known-folder/drive metadata query; read-only User Shell Folders, no registry/settings writes"
+ },
+ "limits": "Canonical non-app phase only: pinned Python/codec CLI fixtures and Node/DOM doubles. No GUI/tray/installer/live catalog/library access. Mandatory PA-1 native phase remains PENDING; this receipt alone cannot authorize release."
+}

@@ -1,0 +1,302 @@
+{
+  "tool": "books-arranger",
+  "version": "0.26.0",
+  "full_entry_result": "PASS",
+  "release_verdict": "PENDING native packaged QA and final dual clearance",
+  "source_commit": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+  "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+  "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+  "runtime_pointer_sha256": "fe93797d34dece7d0bef2426f9e6bffa028ba78b0be5c7e418200c3ce041ca77",
+  "context_sha256": "3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267",
+  "source_dirty": "N",
+  "run_root": "C:/Antigravity Projects/q28",
+  "run_child": "C:/Antigravity Projects/q28/entry-run-QyFYbY",
+  "invocations_on_build": 1,
+  "work_deadline_ms": 900000,
+  "transport_timeout_ms": 930000,
+  "outer": {
+    "started_at": "2026-11-05T12:38:57.104Z",
+    "finished_at": "2026-11-05T12:48:14.331Z",
+    "exit_code": 0,
+    "error": null
+  },
+  "owned_check": {
+    "code": 0,
+    "ok": true,
+    "elapsed_ms": 521725.97370000003,
+    "closed": true,
+    "output_complete": true,
+    "forced": false,
+    "timed_out": false,
+    "overflow": false,
+    "truncated": false,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 11281,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 18785,
+        "incompleteQueries": 442,
+        "firstIncomplete": {
+          "assigned": 51,
+          "listed": 49,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 9,
+          "listed": 8,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    }
+  },
+  "python": {
+    "batches": 13,
+    "discovered": 2447.0,
+    "completed": 2447.0,
+    "skipped": 0.0,
+    "failures": 0.0,
+    "errors": 0.0,
+    "rows": [
+      {
+        "batch": 0,
+        "discovered": 384,
+        "completed": 384,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 1,
+        "discovered": 46,
+        "completed": 46,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 2,
+        "discovered": 122,
+        "completed": 122,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 3,
+        "discovered": 145,
+        "completed": 145,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 4,
+        "discovered": 160,
+        "completed": 160,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 5,
+        "discovered": 221,
+        "completed": 221,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 6,
+        "discovered": 108,
+        "completed": 108,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 7,
+        "discovered": 225,
+        "completed": 225,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 8,
+        "discovered": 196,
+        "completed": 196,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 9,
+        "discovered": 144,
+        "completed": 144,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 10,
+        "discovered": 283,
+        "completed": 283,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 11,
+        "discovered": 134,
+        "completed": 134,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 12,
+        "discovered": 279,
+        "completed": 279,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      }
+    ]
+  },
+  "node_frontend": {
+    "syntax_files": 11,
+    "node_tap_cases": 242,
+    "frontend_scripts_declared": 41,
+    "frontend_pass_lines_count": 44
+  },
+  "receipt_sha256": "c6e4e84bcff6947e439c8867733566a870080c489187ee9206be3a5605365fee",
+  "receipt": "Entry-check receipt v2: books-arranger v0.26.0 @ 3932155e9f3ceac00632d2d82a4e91315f7c832f (dirty: N) [source:a8c0b46ea1408a56f23aae0c0b2e957280fdc6d3d335097a2180ac8264357d4a; harness:5218f39bd78b546b4516fb6459a98fca53771ec1986f7e3eadf5e160535a4ae4; runtime:7156e0d940c5e5df988b2406f509620647af07b755a405bc4d73508a5f2d4eca; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a; personal-folders clean",
+  "native_hidden_check": "PENDING separate actual plan and clearance",
+  "raw_file_index": [
+    {
+      "path": "batch-summary.json",
+      "bytes": 2370,
+      "sha256": "f79a0661f4f473383c39606a2d0a058c5a1af2c40287eab75824e90334e0f89e"
+    },
+    {
+      "path": "context/source-manifest.json",
+      "bytes": 417556,
+      "sha256": "d578a0bbf44355727051229cdf0f47f74e6cd8fafd8f29d3f0bfd28032bf50c6"
+    },
+    {
+      "path": "context/runtime-powershell.json",
+      "bytes": 146442,
+      "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3"
+    },
+    {
+      "path": "context/runtime-ownership.json",
+      "bytes": 13523,
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+    },
+    {
+      "path": "context/runtime-node-installation.json",
+      "bytes": 311392,
+      "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca"
+    },
+    {
+      "path": "context/runtime-mp3-fixture.json",
+      "bytes": 133,
+      "sha256": "7ce16c974ba7947022126eb991b24c7d1f45071bbd6082222772b0b8317ce143"
+    },
+    {
+      "path": "context/runtime-git.json",
+      "bytes": 1381113,
+      "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606"
+    },
+    {
+      "path": "context/runtime-dependencies.json",
+      "bytes": 1052511,
+      "sha256": "7e209c84b87c6c758afa6d4ad24bf42eb0b72f4a80377fd9818a1433f08feaf6"
+    },
+    {
+      "path": "context/runtime-bundled-media.json",
+      "bytes": 5823,
+      "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31"
+    },
+    {
+      "path": "context/harness/graph.json",
+      "bytes": 2961,
+      "sha256": "ee37ac7da59788bb94f27e8c21c7ddbc19555acaa2d673c07a5a80100aa25544"
+    },
+    {
+      "path": "context/harness-manifest.json",
+      "bytes": 248,
+      "sha256": "c9275d3fa2fed0088c9494480467435a7e6902c76ff5d5eeb855017e63c12f82"
+    },
+    {
+      "path": "context/context.json",
+      "bytes": 4750,
+      "sha256": "3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267"
+    },
+    {
+      "path": "receipt.txt",
+      "bytes": 500,
+      "sha256": "c6e4e84bcff6947e439c8867733566a870080c489187ee9206be3a5605365fee"
+    },
+    {
+      "path": "phase-summary.json",
+      "bytes": 12453,
+      "sha256": "cdf71ed9e308b459c16a16bf6b9e2efbeaba4b04f4d111566235e08ca4efefb7"
+    },
+    {
+      "path": "outer-stdout.log",
+      "bytes": 769879,
+      "sha256": "f74f71afd586d7099727c482705b9a390cae084b291acdc88e0072be2d366cc8"
+    },
+    {
+      "path": "outer-stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "outer-result.json",
+      "bytes": 143,
+      "sha256": "d4b5a95d9bf012ad76eeaf334e4a1c91f97fdc234533874fb4dcbf7db633712a"
+    },
+    {
+      "path": "operator.mjs",
+      "bytes": 2593,
+      "sha256": "70eb220328307d62689108a789e924b52b36ba785dde4fbd89a85a4b8f8714a2"
+    },
+    {
+      "path": "invocation.json",
+      "bytes": 1826,
+      "sha256": "4c8f0a453e6cb50c82f0362f71cfc33c2e431ccb715a9f4bfa24dbf4e42cf761"
+    },
+    {
+      "path": "context/context.json.sha256",
+      "bytes": 65,
+      "sha256": "fb08426cabfdded6266b504ef2c77a10286b0e56b33e46aeae704a781c70b5f5"
+    },
+    {
+      "path": "context/harness/run-entry.sh",
+      "bytes": 809,
+      "sha256": "90e8e61eabe490f68100d39dd1b0b28a7fc7db656f4ee3b3f42c0dc833449db8"
+    }
+  ]
+}

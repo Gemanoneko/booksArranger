@@ -1,0 +1,11 @@
+--- pin-only-r3/native-once.mjs
++++ clean-notes-r3/native-once.mjs
+@@ -42,7 +42,7 @@
+ function fullPass(text){
+  const receipts=text.split(/\r?\n/).filter(line=>line.startsWith('Entry-check receipt v2:'));
+  need(receipts.length===1,'One exact original full receipt required');const line=receipts[0];
+- need(line.startsWith('Entry-check receipt v2: books-arranger v0.26.0 @ '+BINDING.source_head+' (dirty: N) ')&&/ — .*\bcheck pass,/.test(line)&&line.endsWith('; personal-folders clean'),'Exact clean full PASS required');
++ need(line.startsWith('Entry-check receipt v2: books-arranger v0.26.0 @ '+BINDING.source_head+' (dirty: N) ')&&/ — .*\bcheck pass,/.test(line)&&/; personal-folders clean(?: \((?:1 subfolder note|(?:[2-9]|[1-9]\d+) subfolder notes)\))?$/.test(line),'Exact clean full PASS required');
+ }
+ const selfHash=async()=>hash(await fs.readFile(fileURLToPath(import.meta.url)));
+ async function prepare(receiptPath,receiptSha){

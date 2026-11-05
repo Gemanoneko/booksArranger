@@ -1,0 +1,179 @@
+{
+  "schema": "books-0260-preparation-files-v1",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "3932155e9f3ceac00632d2d82a4e91315f7c832f",
+    "product_digest": "6e9a3f3a785eb5fe243f032d6ccc30b9352518ef1efba1739aba57501a17b5c3",
+    "build_id": "82b4dac4-0aad-453a-a013-d3486cc431eb",
+    "artifact_manifest_sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "files": [
+    {
+      "path": "guarded-build-r3/build-plan.json",
+      "sha256": "5698ebbd60bbdab31fc3ec45d724aaa3d2dd3de2d69de06d43de54823496b843",
+      "size": 1287732
+    },
+    {
+      "path": "guarded-build-r3/build-operator.mjs",
+      "sha256": "99e6e40801346af66e849c94b4854bde2a8ced098821525f1be87354270697dc",
+      "size": 4892
+    },
+    {
+      "path": "guarded-build-r3/prepare-build-plan.py",
+      "sha256": "a70dffb9f5e454e53418b0b14a12a938a11414ab544021e545b4b7d3666b8a11",
+      "size": 5262
+    },
+    {
+      "path": "guarded-build-r3/stage-inputs.mjs",
+      "sha256": "647c0cd5bd247be72a9916940f9ae7dc1185a8266998db5ac3c3c12a9ef15900",
+      "size": 3339
+    },
+    {
+      "path": "guarded-build-r3/stage-owned.json",
+      "sha256": "fba9bf3924fda02eee7c8e6f15441e2af124b8211c5acecfca0291ac318f2b36",
+      "size": 1359819
+    },
+    {
+      "path": "guarded-build-r3/stage-owned.log",
+      "sha256": "c0a98d484eadcc8d02a3c762769cca46db0c76941592f9177009f9aa3726873b",
+      "size": 1279956
+    },
+    {
+      "path": "guarded-build-r3/pack-owned.json",
+      "sha256": "afcc2d401cdc3a0b1835fc36154c470c06bdd157d4e08f1914e50f834f930e7a",
+      "size": 1321
+    },
+    {
+      "path": "guarded-build-r3/pack-owned.log",
+      "sha256": "1db1455356715fca9c1fa3f80681c800e9419ed3c8a4da6790b10f5f36358dd2",
+      "size": 570
+    },
+    {
+      "path": "guarded-build-r3/empty-user-config.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "guarded-build-r3/empty-global-config.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "guarded-build-r3/release-artifacts.json",
+      "sha256": "8d170ee68ad1e5cccca5be024cf23aaa0893c4b12b4c8ebdfb1dbd9a4086574f",
+      "size": 64765
+    },
+    {
+      "path": "guarded-build-r3/runtime-pointer.json",
+      "sha256": "fe93797d34dece7d0bef2426f9e6bffa028ba78b0be5c7e418200c3ce041ca77",
+      "size": 5819
+    },
+    {
+      "path": "guarded-build-r3/summary.json",
+      "sha256": "e31a6237be22051fe3acef33339779e68d179b5e770943e91ddfaac8d6d9fe0d",
+      "size": 6004
+    },
+    {
+      "path": "entry-preparation-r3/context.json",
+      "sha256": "3181ef027e64c0af6ce8746dd0d5ee3d1df3d78a795ec03edb9c371512abd267",
+      "size": 4750
+    },
+    {
+      "path": "entry-preparation-r3/source-manifest.json",
+      "sha256": "d578a0bbf44355727051229cdf0f47f74e6cd8fafd8f29d3f0bfd28032bf50c6",
+      "size": 417556
+    },
+    {
+      "path": "entry-preparation-r3/harness-manifest.json",
+      "sha256": "c9275d3fa2fed0088c9494480467435a7e6902c76ff5d5eeb855017e63c12f82",
+      "size": 248
+    },
+    {
+      "path": "entry-preparation-r3/runtime-dependencies.json",
+      "sha256": "7e209c84b87c6c758afa6d4ad24bf42eb0b72f4a80377fd9818a1433f08feaf6",
+      "size": 1052511
+    },
+    {
+      "path": "entry-preparation-r3/runtime-ownership.json",
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617",
+      "size": 13523
+    },
+    {
+      "path": "entry-preparation-r3/runtime-bundled-media.json",
+      "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31",
+      "size": 5823
+    },
+    {
+      "path": "entry-preparation-r3/runtime-mp3-fixture.json",
+      "sha256": "7ce16c974ba7947022126eb991b24c7d1f45071bbd6082222772b0b8317ce143",
+      "size": 133
+    },
+    {
+      "path": "entry-preparation-r3/runtime-node-installation.json",
+      "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca",
+      "size": 311392
+    },
+    {
+      "path": "entry-preparation-r3/runtime-git.json",
+      "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606",
+      "size": 1381113
+    },
+    {
+      "path": "entry-preparation-r3/runtime-powershell.json",
+      "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3",
+      "size": 146442
+    },
+    {
+      "path": "entry-preparation-r3/harness/graph.json",
+      "sha256": "ee37ac7da59788bb94f27e8c21c7ddbc19555acaa2d673c07a5a80100aa25544",
+      "size": 2961
+    },
+    {
+      "path": "entry-preparation-r3/harness/run-entry.sh",
+      "sha256": "90e8e61eabe490f68100d39dd1b0b28a7fc7db656f4ee3b3f42c0dc833449db8",
+      "size": 809
+    },
+    {
+      "path": "entry-preparation-r3/context-owned.mjs",
+      "sha256": "4f524b8c025fff0712fa396ada1f43ca4e9ce320170850740b39ab7761d16dd2",
+      "size": 2807
+    },
+    {
+      "path": "entry-preparation-r3/context-owned.json",
+      "sha256": "df928610dfd7e6bbad57d0b61b84ee90b641d2a4961360dee345ff404c4fad08",
+      "size": 1267
+    },
+    {
+      "path": "entry-preparation-r3/context-owned.log",
+      "sha256": "0f9d5f7261a105a5d7465d68e665df26288b72d6f085345e766cee483d794c43",
+      "size": 520
+    },
+    {
+      "path": "entry-preparation-r3/prepare-qa-prereqs.mjs",
+      "sha256": "e92143e73859039433769a27a95d9f57a87a392acc0f9e8fa9232b44e63a49ea",
+      "size": 2293
+    },
+    {
+      "path": "entry-preparation-r3/qa-prep-owned.mjs",
+      "sha256": "19c7e0039226559d4c74c6b6433a9733f3aa3efee6ce9e07235cff16468fa12e",
+      "size": 1406
+    },
+    {
+      "path": "entry-preparation-r3/qa-prereqs-owned.json",
+      "sha256": "33be97b7040cfcd29303763cdfa33fbf32d7e08bd83775058f85eb9b9f0b3234",
+      "size": 13868
+    },
+    {
+      "path": "entry-preparation-r3/private-prerequisites.json",
+      "sha256": "9349895e6a2795c8ef544b843e0abf2511a5d1ff479d475dce810079fa0aa2cc",
+      "size": 15601
+    },
+    {
+      "path": "entry-preparation-r3/summary.json",
+      "sha256": "5fee6d8456f79ad4640da600e05ebd4a1c89b2d5f78d17c440fb68a288788845",
+      "size": 16403
+    }
+  ]
+}
