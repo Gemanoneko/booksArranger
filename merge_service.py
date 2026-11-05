@@ -3228,8 +3228,7 @@ class MergeService:
         return {'state':state,'row':row}
 
     def _names_lists(self):
-        """The editor's pick-lists (Judy 3): the universes and series already in use, from the audiobooks queued or made
-        and from Sergei's saved names."""
+        """The existing learned pick-lists plus Sergei's always-available Universe choices."""
         import entered_names
         from audio_jobs import CURRENT
         universes,series=set(),set()
@@ -3239,7 +3238,10 @@ class MergeService:
                 if isinstance(name,str) and name.strip():series.add(name.strip())
         universes.update(entered_names.in_use(self.inventory.database,'universe'));series.update(entered_names.in_use(self.inventory.database,'series'))
         order=lambda values:sorted(values,key=str.casefold)[:2000]
-        return order(universes),order(series)
+        # Add these after the learned-list bound so none displaces an existing
+        # offered custom value, and all remain available on large catalogs.
+        offered=set(order(universes))|{'Warhammer 40K','SCP','Eve Online','World of Warcraft'}
+        return sorted(offered,key=str.casefold),order(series)
 
     def _names_others(self,row,entries,research):
         """[(row, read, scope)] of the other current books a press's fixes may reach: those whose folder, file names or tags

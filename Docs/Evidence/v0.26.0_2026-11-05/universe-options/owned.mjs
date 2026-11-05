@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+import {pathToFileURL} from 'node:url';
+const root='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/0260-release-20261105';
+const source='C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1';
+const main='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger';
+const [name,mode,...cases]=process.argv.slice(2);
+if(!/^[a-z0-9-]+$/.test(name||'')||!cases.length||!['python','dom'].includes(mode))throw Error('Exact unique name/mode/cases required');
+if(mode==='dom'&&(cases.length!==1||cases[0]!=='tests/test_inline_series_frontend.js'))throw Error('Only audited pure DOM route allowed here');
+for(const leaf of ['temp','profile','fixtures'])fs.mkdirSync(root+'/'+leaf,{recursive:true});
+const env={SystemRoot:process.env.SystemRoot,WINDIR:process.env.WINDIR,PATH:main+'/build-cache/qa-runtime/ffmpeg;C:/Program Files/nodejs;C:/Windows/System32',TEMP:root+'/temp',TMP:root+'/temp',TMPDIR:root+'/temp',USERPROFILE:root+'/profile',APPDATA:root+'/profile',LOCALAPPDATA:root+'/profile',BOOKS_QA_RUN_ROOT:source,BOOKS_QA_FIXTURE_ROOT:root+'/fixtures',PYTHONHOME:'',PYTHONPATH:'',PYTHONIOENCODING:'utf-8',NODE_OPTIONS:'',NODE_PATH:''};
+const {runOwned}=await import(pathToFileURL('C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs').href);
+const result=await runOwned(mode==='python'?main+'/build-cache/qa-runtime/python/python.exe':'C:/Program Files/nodejs/node.exe',mode==='python'?['-I','-B',root+'/focused.py',...cases]:[source+'/'+cases[0]],{cwd:source,env,timeoutMs:600000,maxBytes:4194304,koffiRoot:main+'/build-cache/qa-ownership/node_modules/koffi'});
+fs.writeFileSync(root+'/'+name+'.json',JSON.stringify(result,null,2),{flag:'wx'});fs.writeFileSync(root+'/'+name+'.log',(result.out||'')+(result.err||''),{flag:'wx'});
+console.log(JSON.stringify({name,ok:result.ok,code:result.code,closed:result.closed,outputComplete:result.outputComplete,native:result.native,elapsedMs:result.elapsedMs}));console.log((result.out||'')+(result.err||''));process.exitCode=result.ok?0:1;

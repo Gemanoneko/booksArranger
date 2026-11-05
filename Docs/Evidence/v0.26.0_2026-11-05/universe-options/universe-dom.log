@@ -1,0 +1,2 @@
+TypeError: Cannot set properties of undefined (setting 'value')
+    at eval (eval at <anonymous> (C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\tests\test_inline_series_frontend.js:118:1), <anonymous>:99:25)

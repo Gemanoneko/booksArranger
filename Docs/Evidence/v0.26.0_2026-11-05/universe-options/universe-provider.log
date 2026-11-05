@@ -1,0 +1,6 @@
+test_universe_choices_always_include_requested_values_without_losing_learned_values (test_entered_names.StoreTests.test_universe_choices_always_include_requested_values_without_losing_learned_values) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.105s
+
+OK

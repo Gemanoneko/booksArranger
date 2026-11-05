@@ -1,0 +1,92 @@
+{
+  "baseline": "2fa8f21374e1f1c4858db013799bac4b1c020fd3",
+  "files": [
+    {
+      "path": "merge_service.py",
+      "bytes": 451991,
+      "sha256": "255477a3951136cf7ad5903d704cbdcd9c2bbf3cee5835ae2ce57c3f70c72190",
+      "lf_sha256": "1770c1601df7e7d588d7e3e75337eef912c886af46a513d4dc4c86ba7bffdd61",
+      "baseline_lf_sha256": "d59ab8892e8a5ea5ce35f39beee28e6f087f89b5951861566ec6c270983ec22f"
+    },
+    {
+      "path": "tests/test_entered_names.py",
+      "bytes": 44303,
+      "sha256": "603ae7a313ddac78c18677a18e74563e3d90dcb9a0172ff350e29265c15f727c",
+      "lf_sha256": "08a8cdbf1c9b8521c7750cacf35d835b55a7f75817eb9b82c9baa0086029bb86",
+      "baseline_lf_sha256": "512919ad187e303a9fcd46663e22e2a39f31cb92e6ec8637a6365b8e7df5c49b"
+    },
+    {
+      "path": "tests/test_inline_series_frontend.js",
+      "bytes": 18282,
+      "sha256": "7b4b49b10d198340040e64d3fd8ed1539e5d6c70d0ef102c3551e618f6c101fc",
+      "lf_sha256": "19a9b79360bcc276608c24dc0076568a516ce09ce734426f6b31f6e9aaead0d6",
+      "baseline_lf_sha256": "fac9258929e55aa2a4d7b5dfcbf10e74dae78e42f16bd1b969bd9076d1cca6c4"
+    }
+  ],
+  "patch_sha256": "2a0de520f0f19a7adc1b3c93dd820f1aa085996b4b2c54a575f219b58fae7040",
+  "behavior": "Existing editable Universe datalist always offers exact Warhammer40K spelling as requested: Warhammer 40K, SCP, Eve Online, World of Warcraft. Union occurs after existing2000 learned-value bound so no previously offered learned/custom value is displaced and all four stay available in large catalogs. No selected value, book assignment, source/output, job or name entry is changed by offering suggestions.",
+  "tests": "8/8 existing StoreTests PASS0.442s; one provider case covers2001 learned values plus saved custom and unchanged SQL rows. Existing complete inline-series DOM script PASS, proves four choices, existing learned value, free custom typing and choosing SCP. Initial DOM test looked for Universe in inline ask controls instead of full namesRows.inputs; test-only lookup corrected, raw failure preserved. All owned results normal closure/nativezero.",
+  "runtime_scope": "No frontend product change, new control, layout, liveAPI/DB/Z/focus, build/full/native/release execution. Three code/test paths frozen for Sully integration; version0.26.0 remains Sully-owned.",
+  "evidence": [
+    {
+      "path": "owned.mjs",
+      "bytes": 2091,
+      "sha256": "4fc505c791d0ed426c6c62a08fdcf73115da6a7cff082ec25c217028bee3c69a"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 794,
+      "sha256": "a0b02cdf06f23fcf5c3018cb7670f0aedfcce43c79bd9dac0711acb5d172ef2d"
+    },
+    {
+      "path": "freeze-universe.py",
+      "bytes": 3041,
+      "sha256": "1c3717076113c9471c6f0ac8f4f8102f39eee4ae61235074e599fb090f3d1acc"
+    },
+    {
+      "path": "source.patch",
+      "bytes": 6797,
+      "sha256": "2a0de520f0f19a7adc1b3c93dd820f1aa085996b4b2c54a575f219b58fae7040"
+    },
+    {
+      "path": "universe-provider.json",
+      "bytes": 1004,
+      "sha256": "9af4f5f1263e43b9a86ec4a2dfe5f8435f02be098b44f35315cec5b89b5c859c"
+    },
+    {
+      "path": "universe-provider.log",
+      "bytes": 310,
+      "sha256": "d8a3735f8ceede8ace785bc1aeb8fcc6a059aa38f0fcd1afbf9eba56d6b9b554"
+    },
+    {
+      "path": "universe-store-cohort.json",
+      "bytes": 2273,
+      "sha256": "67a34d59b912ed345979ca96814663d97f5bfd6620f3c014f30bbf1a7244f490"
+    },
+    {
+      "path": "universe-store-cohort.log",
+      "bytes": 1563,
+      "sha256": "632e67f77df6805120c70763f214773286520aa510ef43dd9def18cbfaf044ef"
+    },
+    {
+      "path": "universe-dom.json",
+      "bytes": 927,
+      "sha256": "2ddd42f66d8016045798961633967c8756d11753b5cdbfae706e93a6b9690ea2"
+    },
+    {
+      "path": "universe-dom.log",
+      "bytes": 236,
+      "sha256": "2485b912b5bad8030010798c609f02401bc111517103c82be1a1ef5b65c4bbc2"
+    },
+    {
+      "path": "universe-dom-corrected.json",
+      "bytes": 759,
+      "sha256": "31eeb642c9845fbf199c0b834e1e5827de86ee56efdddcc8fbee66d7924b2bf3"
+    },
+    {
+      "path": "universe-dom-corrected.log",
+      "bytes": 77,
+      "sha256": "8ef8d103b7dec515e4ce97af5ccb3f1b88c1ce4f8a8828f4accea8091a6bd9cd"
+    }
+  ]
+}

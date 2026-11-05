@@ -1,0 +1,77 @@
+diff --git a/merge_service.py b/merge_service.py
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -3228,8 +3228,7 @@
+         return {'state':state,'row':row}
+ 
+     def _names_lists(self):
+-        """The editor's pick-lists (Judy 3): the universes and series already in use, from the audiobooks queued or made
+-        and from Sergei's saved names."""
++        """The existing learned pick-lists plus Sergei's always-available Universe choices."""
+         import entered_names
+         from audio_jobs import CURRENT
+         universes,series=set(),set()
+@@ -3239,7 +3238,10 @@
+                 if isinstance(name,str) and name.strip():series.add(name.strip())
+         universes.update(entered_names.in_use(self.inventory.database,'universe'));series.update(entered_names.in_use(self.inventory.database,'series'))
+         order=lambda values:sorted(values,key=str.casefold)[:2000]
+-        return order(universes),order(series)
++        # Add these after the learned-list bound so none displaces an existing
++        # offered custom value, and all remain available on large catalogs.
++        offered=set(order(universes))|{'Warhammer 40K','SCP','Eve Online','World of Warcraft'}
++        return sorted(offered,key=str.casefold),order(series)
+ 
+     def _names_others(self,row,entries,research):
+         """[(row, read, scope)] of the other current books a press's fixes may reach: those whose folder, file names or tags
+diff --git a/tests/test_entered_names.py b/tests/test_entered_names.py
+--- a/tests/test_entered_names.py
++++ b/tests/test_entered_names.py
+@@ -28,6 +28,26 @@
+         self.other=book('Z:\\Иван Петров\\Пртоколы SCP. Сейф №1.m4b',clue='Пртоколы SCP. Сейф №1')
+         self.scope=entered_names.scope_of(self.safe[0],'Разные авторы',collection=True)
+     def read(self,n):return {'title':'Пртоколы SCP. Сейф №%d'%n,'author':'Разные авторы','series':'','number':'','universe':'','collection':True}
++
++    def test_universe_choices_always_include_requested_values_without_losing_learned_values(self):
++        from types import SimpleNamespace
++        from audio_jobs import AudioJobs
++        from merge_service import MergeService
++        queue=AudioJobs(self.db,None,lambda value:True,lambda value:True);self.addCleanup(queue.close)
++        learned=['A custom universe %04d'%index for index in range(2001)]
++        with queue._db() as db:
++            for index,value in enumerate(learned):
++                manifest=json.dumps({'metadata':{'universe':value,'series':'Kept series'}})
++                db.execute('INSERT INTO audio_jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)',(str(uuid.uuid4()),manifest,'hash','pending','queued',None,'{}',None,'','now','now'))
++        row=book('private-source.m4b');entered_names.save(self.db,row,[('book','universe','0 Saved custom universe','','','')])
++        service=MergeService.__new__(MergeService);service.inventory=SimpleNamespace(database=self.db);service.jobs=queue
++        before=queue._rows();names_before=entered_names._rows(self.db)
++        universes,series=service._names_lists()
++        expected={'Warhammer 40K','SCP','Eve Online','World of Warcraft'}
++        self.assertTrue(expected<=set(universes));self.assertEqual(len(universes),2004)
++        self.assertIn('0 Saved custom universe',universes)
++        self.assertEqual(set(universes)-expected,set(sorted(learned+['0 Saved custom universe'],key=str.casefold)[:2000]))
++        self.assertEqual(series,['Kept series']);self.assertEqual(queue._rows(),before);self.assertEqual(entered_names._rows(self.db),names_before)
+ 
+     def test_a_one_word_respelling_reaches_the_folders_books_and_never_another_author(self):
+         entries=entered_names.plan(self.safe[0],{'title':'Протоколы SCP. Сейф №1'},self.read(1),self.scope)
+diff --git a/tests/test_inline_series_frontend.js b/tests/test_inline_series_frontend.js
+--- a/tests/test_inline_series_frontend.js
++++ b/tests/test_inline_series_frontend.js
+@@ -43,8 +43,17 @@
+  type('series','Оттенки магии');type('number','1');input('number').handlers.blur();await tick();
+  assert.equal(Object.hasOwn(call('/api/candidate/approve-preview'),'title'),false,'pair-only Title-row edit preserves R49 untouched title authority');
+  assert.equal(Object.hasOwn(call('/api/candidate/approve-preview'),'author'),false,'pair-only never reanswers English author');
+- answers['/api/candidate/names']=()=>ok({editor:{fields:{title:{proposal:'Темный оттенок магии'},author:{proposal:'Schwab Victoria'},series:{proposal:''},number:{proposal:''},universe:{proposal:''},collection:{proposal:false}},universes:[],series:[],remembered:[],entered:[],job:'none'}});
++ answers['/api/candidate/names']=()=>ok({editor:{fields:{title:{proposal:'Темный оттенок магии'},author:{proposal:'Schwab Victoria'},series:{proposal:''},number:{proposal:''},universe:{proposal:''},collection:{proposal:false}},universes:['Warhammer 40K','SCP','Eve Online','World of Warcraft','Learned custom universe'],series:[],remembered:[],entered:[],job:'none'}});
+  await run('namesToggle("cand-inline")');for(const name of ['title','author','series','number'])assert.equal(controls().filter(e=>e.dataset.name===name).length,1,'full editor retains one '+name);assert.equal(input('series').value,'Оттенки магии');run('namesClose("cand-inline",true)');assert.equal(input('number').value,'1');assert.equal(controls().filter(e=>e.dataset.name==='author').length,0,'collapse restores title-only inline author plan');
++ await run('namesToggle("cand-inline")');
++ const universeList=run('namesRows.get("cand-inline").box').children.find(element=>element.id==='names-universes-cand-inline');
++ assert.deepEqual(universeList.children.map(option=>option.value),['Warhammer 40K','SCP','Eve Online','World of Warcraft','Learned custom universe']);
++ const universeInput=run('namesRows.get("cand-inline").inputs.universe');
++ universeInput.value='My new custom universe';universeInput.handlers.input();
++ assert.equal(run('namesValues(rows[0]).universe'),'My new custom universe','suggestions remain an editable field');
++ universeInput.value='SCP';universeInput.handlers.input();assert.equal(run('namesValues(rows[0]).universe'),'SCP');
++ universeInput.value='';universeInput.handlers.input();
++ run('namesClose("cand-inline",true)');
+  const receipt='Answer saved. This book still needs its series confirmed. Enter Series and Number, then press Approve. This book has not been queued or filed.';
+  answers['/api/candidate/approve']=()=>ok({saved:true,code:'series_needed',message:receipt});
+  const focus=input('number');context.document.activeElement=focus;await run('askPress(askRows.get("cand-inline"),"approve")');paint();

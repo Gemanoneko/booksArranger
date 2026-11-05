@@ -29,6 +29,26 @@ class StoreTests(unittest.TestCase):
         self.scope=entered_names.scope_of(self.safe[0],'Разные авторы',collection=True)
     def read(self,n):return {'title':'Пртоколы SCP. Сейф №%d'%n,'author':'Разные авторы','series':'','number':'','universe':'','collection':True}
 
+    def test_universe_choices_always_include_requested_values_without_losing_learned_values(self):
+        from types import SimpleNamespace
+        from audio_jobs import AudioJobs
+        from merge_service import MergeService
+        queue=AudioJobs(self.db,None,lambda value:True,lambda value:True);self.addCleanup(queue.close)
+        learned=['A custom universe %04d'%index for index in range(2001)]
+        with queue._db() as db:
+            for index,value in enumerate(learned):
+                manifest=json.dumps({'metadata':{'universe':value,'series':'Kept series'}})
+                db.execute('INSERT INTO audio_jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)',(str(uuid.uuid4()),manifest,'hash','pending','queued',None,'{}',None,'','now','now'))
+        row=book('private-source.m4b');entered_names.save(self.db,row,[('book','universe','0 Saved custom universe','','','')])
+        service=MergeService.__new__(MergeService);service.inventory=SimpleNamespace(database=self.db);service.jobs=queue
+        before=queue._rows();names_before=entered_names._rows(self.db)
+        universes,series=service._names_lists()
+        expected={'Warhammer 40K','SCP','Eve Online','World of Warcraft'}
+        self.assertTrue(expected<=set(universes));self.assertEqual(len(universes),2004)
+        self.assertIn('0 Saved custom universe',universes)
+        self.assertEqual(set(universes)-expected,set(sorted(learned+['0 Saved custom universe'],key=str.casefold)[:2000]))
+        self.assertEqual(series,['Kept series']);self.assertEqual(queue._rows(),before);self.assertEqual(entered_names._rows(self.db),names_before)
+
     def test_a_one_word_respelling_reaches_the_folders_books_and_never_another_author(self):
         entries=entered_names.plan(self.safe[0],{'title':'Протоколы SCP. Сейф №1'},self.read(1),self.scope)
         self.assertIn(('fix','title','Протоколы','Пртоколы',self.scope,''),entries,'remembered as the word')
