@@ -170,20 +170,29 @@ class CandidateReviewService:
             saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(row['id'],)).fetchone()
         return json.loads(saved['data']) if saved and saved['revision']==row['revision'] else {}
 
-    def _write(self,row,ctx,bump=True,manual_source=None,decision_record=None):
+    def _write_in_transaction(self,db,row,ctx,bump=True,manual_source=None,decision_record=None,effect=None):
+        import reacquire_sources
+        marker=reacquire_sources.marker(db,row['id'])
+        if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
+        current=db.execute('SELECT revision FROM book_groups WHERE id=?',(row['id'],)).fetchone()
+        if not current or current['revision']!=row['revision']:raise ValueError('Candidate changed; reload evidence before reviewing')
+        revision=row['revision']+int(bump)
+        if bump:db.execute('UPDATE book_groups SET revision=?,approved=0 WHERE id=?',(revision,row['id']))
+        db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(row['id'],revision,json.dumps(ctx,ensure_ascii=False)))
+        manual_metadata.append(db,manual_source)
+        if decision_record is not None:
+            import metadata_choices
+            metadata_choices.append(db,decision_record,applied_revision=revision)
+        if effect is not None:effect.commit(db,row,revision,outcome='saved')
+
+    def _write(self,row,ctx,bump=True,manual_source=None,decision_record=None,effect=None,effect_values=None):
+        if effect is not None:
+            values=effect_values if effect_values is not None else {'context':{key:value for key,value in ctx.items() if key not in ('metadata_utc','track_utc')},'bump':bump}
+            effect.bind('context',values)
         with self.inventory.group_lock,connect(self.inventory.database) as db:
-            import reacquire_sources
-            marker=reacquire_sources.marker(db,row['id'])
-            if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
-            current=db.execute('SELECT revision FROM book_groups WHERE id=?',(row['id'],)).fetchone()
-            if not current or current['revision']!=row['revision']:raise ValueError('Candidate changed; reload evidence before reviewing')
-            revision=row['revision']+int(bump)
-            if bump:db.execute('UPDATE book_groups SET revision=?,approved=0 WHERE id=?',(revision,row['id']))
-            db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(row['id'],revision,json.dumps(ctx,ensure_ascii=False)))
-            manual_metadata.append(db,manual_source)
-            if decision_record is not None:
-                import metadata_choices
-                metadata_choices.append(db,decision_record,applied_revision=revision)
+            if effect is not None:db.execute('BEGIN IMMEDIATE')
+            prior=effect.before(db,row) if effect is not None else None
+            if prior is None:self._write_in_transaction(db,row,ctx,bump,manual_source,decision_record,effect)
         return self.enrich(self._row('Audiobooks',row['id']))
 
     def _source_root(self,row,library='Audiobooks'):
@@ -326,17 +335,18 @@ class CandidateReviewService:
             entered=manual_metadata.records(db,row)
             return metadata_choices.present(db,row,matching.get('proposals') or [],entered,conflicts)
 
-    def choose_metadata(self,library,id,revision,signature,choices,manual_note=''):
+    def choose_metadata(self,library,id,revision,signature,choices,manual_note='',effect=None):
         """Save an explicit evidence-scoped draft choice; never approve or queue."""
         import metadata_choices
         with self.lock:
             try:row=self._row(library,id,revision)
             except ValueError:raise metadata_choices.ChoiceChanged() from None
+            if effect is not None and effect.replay(row,'metadata_choices',{'signature':signature,'choices':choices,'manual_note':manual_note}) is not None:return {'row':self.enrich(row)}
             ctx=self._context(row);snapshot=self.metadata_questions(row,ctx)
             prepared=metadata_choices.prepare(row,snapshot,signature,choices,actor='user',note=manual_note)
             if prepared['record']['choices'] and all(choice['mode']=='unresolved' for choice in prepared['record']['choices']):
                 held=copy.deepcopy(ctx);held['metadata_approved']=False
-                saved=self._write(row,held,decision_record=prepared['record'])
+                saved=self._write(row,held,decision_record=prepared['record'],effect=effect)
                 questions=saved.get('metadata_questions') or self.metadata_questions(saved,self._context(saved))
                 return {'row':saved,'unresolved_count':questions['unresolved_count'],'decision':prepared['record']}
             review=copy.deepcopy(row.get('review') or {})
@@ -347,7 +357,7 @@ class CandidateReviewService:
             review.update(patch)
             saved=self.save(library,id,revision,review,approve=False,manual_note=manual_note or ctx.get('manual_note',''),
                 proposal_id=ctx.get('proposal_id') or None,cover_id=ctx.get('cover_id') or None,actor='user',
-                capture_manual=bool(prepared['corrected_values']),manual_source_values=prepared['corrected_values'],decision_record=prepared['record'])
+                capture_manual=bool(prepared['corrected_values']),manual_source_values=prepared['corrected_values'],decision_record=prepared['record'],effect=effect)
             questions=saved.get('metadata_questions') or self.metadata_questions(saved,self._context(saved))
             return {'row':saved,'unresolved_count':questions['unresolved_count'],'decision':prepared['record']}
 
@@ -587,13 +597,15 @@ class CandidateReviewService:
             draft['organization_policy']='books-hierarchy-v2'
             return propose(row['members'][0]['path'],self._output_root(row,draft,library),'audiobook',row['metadata'],draft,automatic_facts=facts if isinstance(names,dict) else self._context(row).get('metadata_facts'))
 
-    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None,user_approval=False,names_row_only=False):
+    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None,user_approval=False,names_row_only=False,effect=None):
         """user_approval: Sergei's Approve through the private admission (MergeService.approve_book, ruling 6b): the
         user actor may carry the admission checkpoint and standing facts, and open metadata questions do not refuse.
         names_row_only (ruling 40; Senua's 0.22.3 review, M3): a book's names are edited on its row only, so the six name
         fields keep the saved draft's values and are no part of the "Entered by you" source this Save records."""
         with self.lock:
             row=self._row(library,id,revision); ctx=self._context(row); self._actor(actor,manual_note)
+            if effect is not None and effect.replay(row,'review',{'review':review,'approve':approve,'manual_note':manual_note,'proposal_id':proposal_id,'cover_id':cover_id,'names_row_only':names_row_only,
+                    '_actor':actor,'_evidence':evidence,'_automatic_facts':automatic_facts,'_automatic_pending':automatic_pending,'_user_approval':user_approval,'_capture_manual':capture_manual,'_manual_source_values':manual_source_values}) is not None:return self.enrich(row)
             if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid canonical metadata')
             review=copy.deepcopy(review)
             if names_row_only:
@@ -657,15 +669,28 @@ class CandidateReviewService:
             if approve and not preview['path']:raise ValueError(preview['reason'])
             if proposal_id is not None and not any(p['id']==proposal_id for p in self.matching.get(id,ctx.get('matching',{})).get('proposals',[])):raise ValueError('Unknown metadata proposal')
             changed=review!=row.get('review') or manual_note!=ctx.get('manual_note') or trial['cover_id']!=ctx.get('cover_id') or records!=ctx.get('metadata_evidence',[])
+            def prepared(fresh):
+                if automatic_facts is not None:ctx['metadata_facts']=copy.deepcopy(automatic_facts)
+                else:ctx.pop('metadata_facts',None);ctx.pop('duplicate_review',None)
+                ctx.update(manual_note=manual_note,proposal_id=proposal_id,cover_id=trial['cover_id'],metadata_actor=actor,metadata_utc=utc(),metadata_evidence=records,metadata_approved=bool(approve and automatic_pending is None))
+                ctx.pop('manual_metadata_acceptance',None)
+                if actor=='user' and approve:ctx['manual_metadata_acceptance']=manual_metadata.acceptance(fresh,review)
+                if user_approval:ctx.pop('names_approval_pending',None)
+                if changed:ctx.update(source_coverage_confirmed=False,order_confirmed=False,source_hashes={})
+                return manual_metadata.capture(fresh,manual_source_values if manual_source_values is not None else review,manual_note) if actor=='user' and capture_manual else None
+            if effect is not None:
+                # The group review, its context/evidence, and the application
+                # receipt must not become separately committed crash states.
+                import groups
+                with self.inventory.group_lock,connect(self.inventory.database) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    if effect.before(db,row) is None:
+                        fresh=groups.save(db,self._source_root(row,library),id,revision,review,False)
+                        source=prepared(fresh)
+                        self._write_in_transaction(db,fresh,ctx,manual_source=source,decision_record=decision_record,effect=effect)
+                return self.enrich(self._row(library,id))
             fresh=self.inventory.save_candidate(library,id,revision,review,False)
-            if automatic_facts is not None:ctx['metadata_facts']=copy.deepcopy(automatic_facts)
-            else:ctx.pop('metadata_facts',None);ctx.pop('duplicate_review',None)
-            ctx.update(manual_note=manual_note,proposal_id=proposal_id,cover_id=trial['cover_id'],metadata_actor=actor,metadata_utc=utc(),metadata_evidence=records,metadata_approved=bool(approve and automatic_pending is None))
-            ctx.pop('manual_metadata_acceptance',None)
-            if actor=='user' and approve:ctx['manual_metadata_acceptance']=manual_metadata.acceptance(fresh,review)
-            if user_approval:ctx.pop('names_approval_pending',None)
-            if changed:ctx.update(source_coverage_confirmed=False,order_confirmed=False,source_hashes={})
-            return self._write(fresh,ctx,manual_source=manual_metadata.capture(fresh,manual_source_values if manual_source_values is not None else review,manual_note) if actor=='user' and capture_manual else None,decision_record=decision_record)
+            return self._write(fresh,ctx,manual_source=prepared(fresh),decision_record=decision_record)
 
     def match(self,library,id,revision):
         with self.lock:
@@ -691,11 +716,12 @@ class CandidateReviewService:
             worker=threading.Thread(target=lookup,daemon=True);self.workers[id]=worker;worker.start()
             return copy.deepcopy(self.matching[id])
 
-    def covers(self,library,id,revision,all_embedded=False,stop=None):
+    def covers(self,library,id,revision,all_embedded=False,stop=None,effect=None):
         with self.lock:
             stop=stop or threading.Event()
             if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
             row=self._row(library,id,revision);ctx=self._context(row);choices=[]
+            if effect is not None and effect.replay(row,'covers',{'all_embedded':all_embedded}) is not None:return self.enrich(row)
             def add(data,label):
                 if len(data)>MAX_COVER:raise ValueError('Cover exceeds8 MB')
                 kind=image_kind(data);hash=hashlib.sha256(data).hexdigest();cover_id=str(uuid.uuid5(uuid.NAMESPACE_URL,id+hash))
@@ -744,7 +770,7 @@ class CandidateReviewService:
             changed=choices!=ctx.get('cover_choices',[])
             if changed:ctx['cover_choices']=choices
             if ctx.get('cover_id') and not any(c['id']==ctx['cover_id'] for c in choices):ctx.update(metadata_approved=False,source_hashes={})
-            return self._write(row,ctx,bump=bool(changed and ctx.get('cover_id')))
+            return self._write(row,ctx,bump=bool(changed and ctx.get('cover_id')),effect=effect)
 
     def cover_file(self,id):
         try:
@@ -824,10 +850,11 @@ class CandidateReviewService:
                 if digest(cached)!=hash:raise ValueError('Cached source cover bytes changed')
         return {'id':id,'thumbnail_url':'/api/cover?id='+id,'label':'Embedded/source cover — edition unverified','status':'Source cover','sha256':hash}
 
-    def tracks(self,library,id,revision,order,included,source_coverage_confirmed,order_confirmed,chapters,actor='user',evidence_note='',stop=None,keep_pending=False):
+    def tracks(self,library,id,revision,order,included,source_coverage_confirmed,order_confirmed,chapters,actor='user',evidence_note='',stop=None,keep_pending=False,effect=None):
         """keep_pending: Sergei's Approve (MergeService.approve_book) keeps its pending admission through this step."""
         with self.lock:
             row=self._row(library,id,revision);ctx=self._context(row);keys=self._keys(row);self._actor(actor,evidence_note)
+            if effect is not None and effect.replay(row,'tracks',{'order':order,'included':included,'source_coverage_confirmed':source_coverage_confirmed,'order_confirmed':order_confirmed,'chapters':chapters,'evidence_note':evidence_note}) is not None:return self.enrich(row)
             if actor=='user' and not keep_pending:ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
             if not isinstance(order,list) or len(order)!=len(keys) or set(order)!=set(keys) or not isinstance(included,list) or len(set(included))!=len(included) or not set(included)<=set(keys):raise ValueError('Review the exact known member list and order')
             if any(type(v)is not bool for v in (source_coverage_confirmed,order_confirmed,chapters)):raise ValueError('Track confirmations must be explicit booleans')
@@ -847,7 +874,7 @@ class CandidateReviewService:
                     if identity(before)!=identity(after):raise ValueError('Source changed — review required')
                     hashes[key]={'sha256':hash,'size':before.st_size,'modified':str(before.st_mtime_ns),'dev':before.st_dev,'ino':before.st_ino}
             ctx.update(track_order=order,included=included,source_coverage_confirmed=source_coverage_confirmed,order_confirmed=order_confirmed,chapters=chapters,track_actor=actor,track_utc=utc(),track_evidence=evidence_note,source_hashes=hashes)
-            return self._write(row,ctx)
+            return self._write(row,ctx,effect=effect)
 
     def source_chapter_plan(self,row,member,source,stop,*,joined):
         from audio_pipeline import source_chapters,verified_source_chapters,ChapterValidationError

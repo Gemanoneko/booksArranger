@@ -658,8 +658,11 @@ class AudioJobs:
             except Exception:
                 continue  # resume() repeats this exact check before any new work
 
-    def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None,retry_context=None):
+    def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None,retry_context=None,decision=None,decision_rules=None):
         """Freeze JSON-safe authoritative server manifest. Never HTTP path input."""
+        if decision is not None and (approval_context is None or any(value is not None for value in (replacement_context,repair_context,retry_context))):
+            raise ValueError('Saved approval requires its private approval checkpoint')
+        if decision_rules is not None and decision is None:raise ValueError('Saved approval rules require their decision boundary')
         frozen = json.loads(json.dumps(manifest, ensure_ascii=False, allow_nan=False))
         if not isinstance(frozen, dict):
             raise ValueError("Manifest must be an object")
@@ -713,6 +716,23 @@ class AudioJobs:
             with self._db() as db:
                 if not db.in_transaction:db.execute('BEGIN IMMEDIATE')
                 reacquire_sources.require_admission(db,frozen['candidate_id'])
+                if decision is not None:
+                    group=db.execute('SELECT id,revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(frozen['candidate_id'],)).fetchone()
+                    saved,_=decision.check_current(db,dict(group)) if group else decision.check(db)
+                    if saved['action']!='approve' or saved['book_id']!=frozen['candidate_id'] or not group or saved['source_fingerprint']!=group['fingerprint']:
+                        raise ValueError('Saved approval does not bind this exact current book/source generation')
+                    if decision_rules is not None:
+                        import author_rules,local_identity
+                        payload=json.loads(saved['payload'])
+                        typed=payload.get('author')
+                        if not isinstance(decision_rules,list) or len(decision_rules)>1 or decision_rules and (not isinstance(typed,str) or local_identity.script(typed)!='latin'):
+                            raise ValueError('Saved author rule requires its explicit English-name decision')
+                        for rule in decision_rules:
+                            if not isinstance(rule,dict) or set(rule)!={'kind','credit','target','title'} or rule['kind'] not in ('same_as','keep'):
+                                raise ValueError('Invalid saved author-rule plan')
+                            if any(not isinstance(rule[field],str) or len(rule[field])>2000 for field in ('credit','title')):raise ValueError('Invalid saved author-rule text')
+                            if rule['kind']=='same_as' and rule['target']!=local_identity.surname_first(typed)[0] or rule['kind']=='keep' and (rule['target'] is not None or author_rules.key(rule['credit'])!=author_rules.key(typed)):
+                                raise ValueError('Saved author rule differs from the accepted name')
                 if retry_context is not None:
                     parent,group,context=retry_context[:3]
                     expected_destination=retry_context[3] if len(retry_context)>3 else None
@@ -764,6 +784,15 @@ class AudioJobs:
                 import publication_reuse
                 if publication_reuse.task(frozen):publication_reuse.admit(db,frozen)
                 db.execute("INSERT INTO audio_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (frozen["job_id"], encoded, digest, "pending", "queued", None, "{}", None, "", timestamp, timestamp))
+                if decision is not None:
+                    rules=[]
+                    if decision_rules:
+                        author_rules.setup(db)
+                        for rule in decision_rules:
+                            rules.append(author_rules.append(db,rule['kind'],rule['credit'],target=rule['target'] or '',actor='user',source='Sergei (English spelling, ruling 39)',question=rule['title']))
+                    decision.commit_step(db,'enqueue',{'candidate_id':frozen['candidate_id'],'manifest_sha256':digest},
+                                         {'outcome':'queued','candidate_id':frozen['candidate_id'],'job_id':frozen['job_id'],'author_rule_ids':rules},
+                                         final=True,applied_revision=frozen['candidate_revision'])
             return frozen["job_id"]
 
     def _step_started(self, job_id, attempt, phase):

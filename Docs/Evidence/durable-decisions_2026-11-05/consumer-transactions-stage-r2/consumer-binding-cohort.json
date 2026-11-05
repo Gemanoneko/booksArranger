@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_acceptance_does_not_wait_for_actual_merge_review_group_or_queue_locks (test_action_queue.DurableDecisionLedgerTests.test_acceptance_does_not_wait_for_actual_merge_review_group_or_queue_locks) ... ok\r\ntest_acceptance_is_independent_of_worker_locks_and_survives_reopen (test_action_queue.DurableDecisionLedgerTests.test_acceptance_is_independent_of_worker_locks_and_survives_reopen) ... ok\r\ntest_applied_payload_is_purged_but_request_reconciliation_and_conflict_guard_survive (test_action_queue.DurableDecisionLedgerTests.test_applied_payload_is_purged_but_request_reconciliation_and_conflict_guard_survive) ... ok\r\ntest_approval_enqueue_and_applied_receipt_share_one_commit (test_action_queue.DurableDecisionLedgerTests.test_approval_enqueue_and_applied_receipt_share_one_commit) ... ok\r\ntest_approve_overlapping_names_does_not_depend_on_its_superseded_owner (test_action_queue.DurableDecisionLedgerTests.test_approve_overlapping_names_does_not_depend_on_its_superseded_owner) ... ok\r\ntest_approve_still_waits_for_disjoint_predecessor_names (test_action_queue.DurableDecisionLedgerTests.test_approve_still_waits_for_disjoint_predecessor_names) ... ok\r\ntest_disjoint_names_and_tracks_are_both_preserved_under_new_head_fence (test_action_queue.DurableDecisionLedgerTests.test_disjoint_names_and_tracks_are_both_preserved_under_new_head_fence) ... ok\r\ntest_incompatible_late_request_is_saved_without_moving_valid_head (test_action_queue.DurableDecisionLedgerTests.test_incompatible_late_request_is_saved_without_moving_valid_head) ... ok\r\ntest_replaced_payload_is_retained_until_explicit_successor_applies (test_action_queue.DurableDecisionLedgerTests.test_replaced_payload_is_retained_until_explicit_successor_applies) ... ok\r\ntest_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work (test_action_queue.DurableDecisionLedgerTests.test_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work) ... ok\r\ntest_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries (test_action_queue.DurableDecisionLedgerTests.test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries) ... ok\r\ntest_save_then_approve_waits_for_its_captured_names_receipt (test_action_queue.DurableDecisionLedgerTests.test_save_then_approve_waits_for_its_captured_names_receipt) ... ok\r\ntest_sqlite_writer_contention_is_bounded_and_same_request_reconciles_once (test_action_queue.DurableDecisionLedgerTests.test_sqlite_writer_contention_is_bounded_and_same_request_reconciles_once) ... ok\r\ntest_transaction_rollback_has_no_effect_or_step_receipt_then_recovery_applies_once (test_action_queue.DurableDecisionLedgerTests.test_transaction_rollback_has_no_effect_or_step_receipt_then_recovery_applies_once) ... ok\r\ntest_assistant_requires_per_field_evidence_and_actor_is_honest (test_review_backend.ReviewTests.test_assistant_requires_per_field_evidence_and_actor_is_honest) ... ok\r\ntest_async_proposal_cannot_overwrite_draft (test_review_backend.ReviewTests.test_async_proposal_cannot_overwrite_draft) ... ok\r\ntest_completion_flag_uses_exact_single_authority_snapshot (test_review_backend.ReviewTests.test_completion_flag_uses_exact_single_authority_snapshot) ... ok\r\ntest_cover_serving_cannot_escape_cache_and_missing_cover_blocks (test_review_backend.ReviewTests.test_cover_serving_cannot_escape_cache_and_missing_cover_blocks) ... ok\r\ntest_durable_effect_rejects_different_values_and_unrelated_revision (test_review_backend.ReviewTests.test_durable_effect_rejects_different_values_and_unrelated_revision) ... ok\r\ntest_durable_partial_review_reopens_without_repeating_its_committed_mutations (test_review_backend.ReviewTests.test_durable_partial_review_reopens_without_repeating_its_committed_mutations) ... ok\r\ntest_durable_review_receipt_failure_rolls_back_group_context_and_manual_evidence (test_review_backend.ReviewTests.test_durable_review_receipt_failure_rolls_back_group_context_and_manual_evidence) ... ok\r\ntest_durable_track_receipt_failure_rolls_back_hashes_and_confirmations (test_review_backend.ReviewTests.test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations) ... ok\r\ntest_equal_fingerprint_changed_bytes_fail_hash_check (test_review_backend.ReviewTests.test_equal_fingerprint_changed_bytes_fail_hash_check) ... ok\r\ntest_filter_is_applied_before_page_and_chapter_names_are_explicit (test_review_backend.ReviewTests.test_filter_is_applied_before_page_and_chapter_names_are_explicit) ... ok\r\ntest_list_rows_carry_the_decided_author_not_the_tag (test_review_backend.ReviewTests.test_list_rows_carry_the_decided_author_not_the_tag) ... ok\r\ntest_loose_sources_block_even_after_explicit_confirmation (test_review_backend.ReviewTests.test_loose_sources_block_even_after_explicit_confirmation) ... ok\r\ntest_m3_a_books_names_are_never_saved_from_the_panel (test_review_backend.ReviewTests.test_m3_a_books_names_are_never_saved_from_the_panel) ... ok\r\ntest_order_inclusion_requires_exact_keys (test_review_backend.ReviewTests.test_order_inclusion_requires_exact_keys) ... ok\r\ntest_ready_manifest_keeps_unknown_external_completeness (test_review_backend.ReviewTests.test_ready_manifest_keeps_unknown_external_completeness) ... ok\r\ntest_review_context_survives_restart_and_edits_invalidate_tracks (test_review_backend.ReviewTests.test_review_context_survives_restart_and_edits_invalidate_tracks) ... ok\r\ntest_shifted_file_ids_with_identical_content_are_not_a_change (test_review_backend.ReviewTests.test_shifted_file_ids_with_identical_content_are_not_a_change) ... ok\r\ntest_single_existing_m4b_never_ready_for_concatenation (test_review_backend.ReviewTests.test_single_existing_m4b_never_ready_for_concatenation) ... ok\r\ntest_source_change_invalidates_exact_revision (test_review_backend.ReviewTests.test_source_change_invalidates_exact_revision) ... ok\r\ntest_durable_return_king_actual_approve_has_atomic_job_receipt (test_shared_routing.CuratedApprovalTests.test_durable_return_king_actual_approve_has_atomic_job_receipt) ... ok\r\ntest_durable_two_towers_actual_approve_has_atomic_job_receipt (test_shared_routing.CuratedApprovalTests.test_durable_two_towers_actual_approve_has_atomic_job_receipt) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 35 tests in 19.420s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 40664,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 48,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 1280,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 20102.618100000003,
+  "outputBytes": 6257
+}

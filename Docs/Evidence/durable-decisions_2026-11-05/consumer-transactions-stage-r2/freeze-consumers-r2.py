@@ -1,0 +1,6 @@
+from pathlib import Path
+text=Path(__file__).with_name('freeze-consumers.py').read_text(encoding='utf-8')
+text=text.replace('consumer-transactions-stage','consumer-transactions-stage-r2').replace("'freeze-consumers.py'","'freeze-consumers-r2.py'")
+text=text.replace("'approve-review-consumers'):","'approve-review-consumers','effect-binding-first','durable-approve-first','durable-approve-green','consumer-binding-cohort','consumer-binding-final'):")
+text=text.replace('32 affected ledger/enqueue/review tests pass with owned native zero.', 'C1 correction: exact normalized semantic inputs are included in each step input hash, explicit user review/track/choice fields must equal the immutable accepted payload, and current revision must be exactly explained by the compatible head/predecessor receipts. Changed canonical values/replay and unrelated same-fingerprint revisions refuse without discarding intent. 35-case affected cohort passed19.420s/nativezero, then final21-case binding/rollback/ledger/actualApprove cohort passed9.949s/nativezero after exact receipt DTO and disjoint older-Approve names projection additions. Ancillary actual Approve proof uses separately WIP Merge propagation, outside this six-file freeze; no final whole-feature claim.')
+exec(compile(text,str(__file__),'exec'))

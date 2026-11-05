@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_acceptance_does_not_wait_for_actual_merge_review_group_or_queue_locks (test_action_queue.DurableDecisionLedgerTests.test_acceptance_does_not_wait_for_actual_merge_review_group_or_queue_locks) ... ok\r\ntest_acceptance_is_independent_of_worker_locks_and_survives_reopen (test_action_queue.DurableDecisionLedgerTests.test_acceptance_is_independent_of_worker_locks_and_survives_reopen) ... ok\r\ntest_applied_payload_is_purged_but_request_reconciliation_and_conflict_guard_survive (test_action_queue.DurableDecisionLedgerTests.test_applied_payload_is_purged_but_request_reconciliation_and_conflict_guard_survive) ... ok\r\ntest_approval_enqueue_and_applied_receipt_share_one_commit (test_action_queue.DurableDecisionLedgerTests.test_approval_enqueue_and_applied_receipt_share_one_commit) ... ok\r\ntest_approve_overlapping_names_does_not_depend_on_its_superseded_owner (test_action_queue.DurableDecisionLedgerTests.test_approve_overlapping_names_does_not_depend_on_its_superseded_owner) ... ok\r\ntest_approve_still_waits_for_disjoint_predecessor_names (test_action_queue.DurableDecisionLedgerTests.test_approve_still_waits_for_disjoint_predecessor_names) ... ok\r\ntest_disjoint_names_and_tracks_are_both_preserved_under_new_head_fence (test_action_queue.DurableDecisionLedgerTests.test_disjoint_names_and_tracks_are_both_preserved_under_new_head_fence) ... ok\r\ntest_incompatible_late_request_is_saved_without_moving_valid_head (test_action_queue.DurableDecisionLedgerTests.test_incompatible_late_request_is_saved_without_moving_valid_head) ... ok\r\ntest_replaced_payload_is_retained_until_explicit_successor_applies (test_action_queue.DurableDecisionLedgerTests.test_replaced_payload_is_retained_until_explicit_successor_applies) ... ok\r\ntest_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work (test_action_queue.DurableDecisionLedgerTests.test_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work) ... ok\r\ntest_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries (test_action_queue.DurableDecisionLedgerTests.test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries) ... ok\r\ntest_save_then_approve_waits_for_its_captured_names_receipt (test_action_queue.DurableDecisionLedgerTests.test_save_then_approve_waits_for_its_captured_names_receipt) ... ok\r\ntest_sqlite_writer_contention_is_bounded_and_same_request_reconciles_once (test_action_queue.DurableDecisionLedgerTests.test_sqlite_writer_contention_is_bounded_and_same_request_reconciles_once) ... ok\r\ntest_transaction_rollback_has_no_effect_or_step_receipt_then_recovery_applies_once (test_action_queue.DurableDecisionLedgerTests.test_transaction_rollback_has_no_effect_or_step_receipt_then_recovery_applies_once) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 14 tests in 4.362s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 93708,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 8,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 309,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 4838.8219,
+  "outputBytes": 2840
+}

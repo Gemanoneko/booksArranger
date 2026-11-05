@@ -1,0 +1,8 @@
+test_durable_effect_rejects_different_values_and_unrelated_revision (test_review_backend.ReviewTests.test_durable_effect_rejects_different_values_and_unrelated_revision) ... ok
+test_durable_partial_review_reopens_without_repeating_its_committed_mutations (test_review_backend.ReviewTests.test_durable_partial_review_reopens_without_repeating_its_committed_mutations) ... ok
+test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations (test_review_backend.ReviewTests.test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.940s
+
+OK

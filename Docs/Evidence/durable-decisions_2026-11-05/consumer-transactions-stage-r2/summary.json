@@ -1,0 +1,174 @@
+{
+  "baseline": "9bcc58b5876e0ad2e6de8e4de39597f2bb9b7ac5",
+  "files": [
+    {
+      "path": "durable_decisions.py",
+      "bytes": 18780,
+      "sha256": "c35b00d2feae3b99ab0a4ad6fd887d02b3ba9059683ceebd13b8704dfce9dcd9",
+      "lf_sha256": "c35b00d2feae3b99ab0a4ad6fd887d02b3ba9059683ceebd13b8704dfce9dcd9",
+      "baseline_lf_sha256": "75ee349be3bf54df24be7233d89d272fd3cf59d810ec5bd43fe895c7c0e5ee13"
+    },
+    {
+      "path": "audio_jobs.py",
+      "bytes": 105593,
+      "sha256": "59cb5e91e3c2cc49172715fe4c0e982873ea73a2c8be09a7fc26f3f373a60324",
+      "lf_sha256": "700aad7f1d6a6737c2db6ac922200fcb41e1330b5a373358ec544d5ba3d06f06",
+      "baseline_lf_sha256": "a806d1a0c0c41709ca073e7ce4cfbf84d2f87b48c3d23a967cdb9a17c2ce49ce"
+    },
+    {
+      "path": "decision_effects.py",
+      "bytes": 3628,
+      "sha256": "a6992066e747edf603f9f5cbe42e57468918aa4bd7db60dbb7bcb7b79b1b4b06",
+      "lf_sha256": "a6992066e747edf603f9f5cbe42e57468918aa4bd7db60dbb7bcb7b79b1b4b06",
+      "baseline_lf_sha256": null
+    },
+    {
+      "path": "review_backend.py",
+      "bytes": 82785,
+      "sha256": "41e2a20d6a8d579055e84d1a676a67bdb386c4fd42607208346e1bdd30dc5c4a",
+      "lf_sha256": "b3e70b0941508a4c771a7a5200fea80687891394e9526d73e5637232b627ae44",
+      "baseline_lf_sha256": "83cfa6c5091340221a49fe1d481cd708f376b78bc0a65aff1851c5f386552a0c"
+    },
+    {
+      "path": "tests/test_action_queue.py",
+      "bytes": 33770,
+      "sha256": "34c5d658eab544464d8b3ba016fb2ba6739c3734221a614690e2f3b38d69c917",
+      "lf_sha256": "7e2dd42a90de4b5f3da2e9b59f9d663a0b737d9d456c07913ba7719579473c35",
+      "baseline_lf_sha256": "5d98eaf712162d7c6c10e350376386c9cbb66c1bd6e25684e70ae2ff5b3f2f76"
+    },
+    {
+      "path": "tests/test_review_backend.py",
+      "bytes": 21132,
+      "sha256": "3a798a479824cb1e6b4caf86d0fda45450d89ab51c9b7c8cf7898ff2ee42e79e",
+      "lf_sha256": "1fafd1870a455bb1298583e8e26e29c9d23d6cfab6af0c83b1372fff2cc14112",
+      "baseline_lf_sha256": "19e1a60debd32db08546963a5522d7c1b111588b0ff309b7018b9ea156faf6cd"
+    }
+  ],
+  "patch_sha256": "9d75121115bc167fca2f290908fad3f29eee34c59371fb970d892642a9895ffa",
+  "stage": "Unexposed transaction consumers only; Approve/review/choices/tracks durable HTTP still refused. Merge propagation and frontend are not included.",
+  "atomicity": "Canonical group review + context/manual/choice evidence + request step now commit together; track hashes/confirmations + step commit together. Reopening a partial review skips its committed mutation without a new revision. Private AudioJobs enqueue binds request/current book/source/head and commits final context + pending job + optional explicit English-name rule + final decision receipt in one transaction. Injected receipt failure rolls back all effects. Disjoint approval dependencies remain; fully overlapping superseded owners no longer strand approval.",
+  "results": "C1 correction: exact normalized semantic inputs are included in each step input hash, explicit user review/track/choice fields must equal the immutable accepted payload, and current revision must be exactly explained by the compatible head/predecessor receipts. Changed canonical values/replay and unrelated same-fingerprint revisions refuse without discarding intent. 35-case affected cohort passed19.420s/nativezero, then final21-case binding/rollback/ledger/actualApprove cohort passed9.949s/nativezero after exact receipt DTO and disjoint older-Approve names projection additions. Ancillary actual Approve proof uses separately WIP Merge propagation, outside this six-file freeze; no final whole-feature claim. Faults exercise review/context rollback, track/hash rollback, queued job/approval/rule rollback and restart partial-review replay. Existing public evidence actor/HTTPS/time validators unchanged; curated Tolkien dispatch preserved.",
+  "scope": "Private fixtures only, no live/source Z/API/focus, no full/build/release. Six paths frozen for bounded review while Merge propagation continues in separate files.",
+  "evidence": [
+    {
+      "path": "owned.mjs",
+      "bytes": 1985,
+      "sha256": "328e8f89372c9c511b54d14dc87ff7f7e36aea9c083f64a7558f460afef30c28"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 961,
+      "sha256": "be2e7c35c7e2dabe21ad28bfd99106f4fdab76d29916cccbcaa69db821b551ca"
+    },
+    {
+      "path": "freeze-consumers-r2.py",
+      "bytes": 1300,
+      "sha256": "8b1858f831799fffd04da59b9120bc49cf366fc576a10befda7aa6964323df73"
+    },
+    {
+      "path": "consumer-transactions.patch",
+      "bytes": 52882,
+      "sha256": "9d75121115bc167fca2f290908fad3f29eee34c59371fb970d892642a9895ffa"
+    },
+    {
+      "path": "approve-boundary-red.json",
+      "bytes": 2951,
+      "sha256": "45c6cf4042d4b8c5b00c64715a44d44028b542558d4991ba69a19baf07191886"
+    },
+    {
+      "path": "approve-boundary-red.log",
+      "bytes": 2201,
+      "sha256": "6fb2d20d96de3e032b98699cf7a548eb3332cfa65e994008d162a8071b5d4d3b"
+    },
+    {
+      "path": "approve-boundary-green.json",
+      "bytes": 3563,
+      "sha256": "946338952bd43e9fc9738902c2f467ddd562a4687c095278cf08fb69231ffecd"
+    },
+    {
+      "path": "approve-boundary-green.log",
+      "bytes": 2840,
+      "sha256": "982725c5caad0b00bb193f63c9ae2327ab4bff12c20e25ce017e60751b54fd96"
+    },
+    {
+      "path": "review-atomic-first.json",
+      "bytes": 2167,
+      "sha256": "46e0e33eda3cb244602f67e0377873429065950baed286ead41c9fe5e3e671fb"
+    },
+    {
+      "path": "review-atomic-first.log",
+      "bytes": 1440,
+      "sha256": "b52a7e9f828d845ac331845f50be818f8066c44eb04397568c8a97885ea309d5"
+    },
+    {
+      "path": "review-atomic-corrected.json",
+      "bytes": 6488,
+      "sha256": "c6faef97ce0afe7f87510ec11a7605a86389eab0444d4340d3c4d05b33468a4c"
+    },
+    {
+      "path": "review-atomic-corrected.log",
+      "bytes": 5727,
+      "sha256": "f9783e006386ffcf111d192c3c94cce5bb6b9b7ba1d857908b34c53a1a2f5f01"
+    },
+    {
+      "path": "approve-review-consumers.json",
+      "bytes": 6488,
+      "sha256": "41ed470f7ba1c26e073164f22a1035a17e3e3f293a9c15015ddce7e177c8b8cb"
+    },
+    {
+      "path": "approve-review-consumers.log",
+      "bytes": 5727,
+      "sha256": "7e7186e7db1adf55d7c5cdd0ec084b8cabb6c8e9c7d41f9abea26f9c61ad105f"
+    },
+    {
+      "path": "effect-binding-first.json",
+      "bytes": 1362,
+      "sha256": "c378ba6ed34468f47e89a101ced48855d41d0af57cf11dd9851332b7069cccd7"
+    },
+    {
+      "path": "effect-binding-first.log",
+      "bytes": 663,
+      "sha256": "2903f92cfa9e6edad212be3b024dbf2932c7aa1519c4e7e92d9eb97bc9b534dd"
+    },
+    {
+      "path": "durable-approve-first.json",
+      "bytes": 7878,
+      "sha256": "cab9c3c7107910396110cf2c9370289073d30c4d673f8898fe8b157826ea8c99"
+    },
+    {
+      "path": "durable-approve-first.log",
+      "bytes": 6927,
+      "sha256": "5fbdbcfde22514f5471b11e73042724d9231b29353417a66514100759dc5f050"
+    },
+    {
+      "path": "durable-approve-green.json",
+      "bytes": 1154,
+      "sha256": "3296d55b33cb4d5213d81d2fd93d1673d4584665ccb87df01e60fe23e24b857c"
+    },
+    {
+      "path": "durable-approve-green.log",
+      "bytes": 455,
+      "sha256": "87201d1feda67e638ae8140718afc5691c69c5cba0e106907486f72b9ed332d1"
+    },
+    {
+      "path": "consumer-binding-cohort.json",
+      "bytes": 7033,
+      "sha256": "511d0a3afcd857a41be5f8eaa2557765148e26390452490407c061698fd1764a"
+    },
+    {
+      "path": "consumer-binding-cohort.log",
+      "bytes": 6257,
+      "sha256": "d58284b2a63fe7099eb17edcd8c00bc941d5bb7af0d6036074aaa9519f930c46"
+    },
+    {
+      "path": "consumer-binding-final.json",
+      "bytes": 4942,
+      "sha256": "d9a99ddd527734e97af10d1611f3cb08fa499d638f88f3c617b23327048d8bd9"
+    },
+    {
+      "path": "consumer-binding-final.log",
+      "bytes": 4195,
+      "sha256": "6a9b379a452716d94f3d483f9526c4d6cb74d997c90bbe5cf944389230e1dafa"
+    }
+  ]
+}

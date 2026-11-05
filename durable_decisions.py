@@ -71,6 +71,8 @@ def receipt(row):
     return {'schema':SCHEMA,'request_id':row['request_id'],'book_id':row['book_id'],
             'action':row['action'],'sequence':row['seq'],'accepted_utc':row['accepted_utc'],
             'state':row['state'],'reason':row['reason'],'payload_sha256':row['payload_hash'],
+            'observed_revision':row['observed_revision'],'source_fingerprint':row['source_fingerprint'],
+            'predecessor':row['predecessor'],'effects':json.loads(row['effects']),
             'result':json.loads(row['result']) if row['result'] else None,
             'applied_revision':row['applied_revision']}
 
@@ -114,7 +116,10 @@ class Decisions:
             elif predecessor!=(head['request_id'] if head else None):reason='A newer decision was accepted first; review these saved choices before applying them'
             compatible=not reason
             inherited=json.loads(head['effects']) if head else {}
-            dependencies={key:owner for key,owner in inherited.items() if key!='approval'} if action=='approve' else {}
+            # An explicit overlapping value is fulfilled by this approval's own
+            # snapshot. Only unresolved disjoint effects require their original
+            # owner; a fully superseded owner can never become applied.
+            dependencies={key:owner for key,owner in inherited.items() if key!='approval' and key not in effect_keys} if action=='approve' else {}
             db.execute('INSERT INTO book_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                        (request_id,book_id,action,seq,predecessor,revision,fingerprint,encoded,payload_hash,
                         packed(effect_keys),packed(dependencies),utc(),'accepted' if compatible else 'needs_review',reason,None,None,None))
@@ -148,6 +153,18 @@ class Decisions:
             result=dict(row);result['effects']=json.loads(result['effects'])
             return result
 
+    def book(self,book_id):
+        """Only effective unresolved choices overlay a reopened book editor."""
+        with connect(self.database) as db:
+            saved=db.execute('SELECT * FROM book_decision_heads WHERE book_id=?',(book_id,)).fetchone()
+            if saved is None:return {'head':None,'decisions':[]}
+            head=dict(saved);head['effects']=json.loads(head['effects']);owners=set(head['effects'].values());items=[]
+            for row in db.execute("SELECT * FROM book_decisions WHERE book_id=? AND state IN ('accepted','applying','needs_review') ORDER BY seq",(book_id,)):
+                if row['request_id'] not in owners:continue
+                item=receipt(row);item['payload']=json.loads(row['payload']) if row['payload'] else None
+                item['active_effects']=sorted(key for key,owner in head['effects'].items() if owner==row['request_id']);items.append(item)
+            return {'head':head,'decisions':items}
+
     def pending(self):
         """Current compatible cumulative effects, in original acceptance order."""
         with connect(self.database) as db:
@@ -158,7 +175,7 @@ class Decisions:
                 for row in db.execute("SELECT * FROM book_decisions WHERE book_id=? AND state IN ('accepted','applying') ORDER BY seq",(head['book_id'],)):
                     if row['request_id'] not in owners:continue
                     dependencies=json.loads(row['dependencies'])
-                    if row['action']=='approve':
+                    if row['action']=='approve' and json.loads(head['effects']).get('approval')==row['request_id']:
                         dependency_ids=set(dependencies.values())-{row['request_id']}
                         if any((db.execute('SELECT state FROM book_decisions WHERE request_id=?',(key,)).fetchone() or ['missing'])[0]!='applied' for key in dependency_ids):continue
                     item=dict(row);item['payload']=json.loads(item['payload']);item['generation']=head['generation']
@@ -208,6 +225,23 @@ class Application:
             raise DecisionChanged('A newer saved decision changed this application generation')
         return row,head
 
+    def check_current(self,db,current):
+        row,head=self.check(db)
+        if row['book_id']!=current['id'] or row['source_fingerprint']!=current['fingerprint']:
+            raise DecisionChanged('Saved decision does not bind this current book/source generation')
+        # Only this compatible head's predecessor chain can explain revision
+        # advancement. An unrelated same-source legacy edit is not a rebase.
+        revisions=db.execute('''WITH RECURSIVE chain(request_id,predecessor,observed_revision,applied_revision) AS (
+          SELECT request_id,predecessor,observed_revision,applied_revision FROM book_decisions WHERE request_id=?
+          UNION SELECT d.request_id,d.predecessor,d.observed_revision,d.applied_revision FROM book_decisions d
+            JOIN chain c ON d.request_id=c.predecessor WHERE d.book_id=? AND d.source_fingerprint=?
+        ) SELECT MAX(revision) FROM (
+          SELECT observed_revision AS revision FROM chain UNION ALL SELECT applied_revision FROM chain
+          UNION ALL SELECT json_extract(s.result,'$.candidate_revision') FROM book_decision_steps s JOIN chain c ON s.request_id=c.request_id
+        )''',(head['request_id'],row['book_id'],row['source_fingerprint'])).fetchone()[0]
+        if current['revision']!=revisions:raise DecisionChanged('Book revision changed outside this saved decision’s committed steps')
+        return row,head
+
     def prior_step(self,db,name,inputs):
         self.check(db)
         if not isinstance(name,str) or not name or len(name)>128:raise ValueError('Invalid decision step')
@@ -218,10 +252,14 @@ class Application:
 
     def bind_names(self,db,book_id,fingerprint,values):
         row,head=self.check(db)
-        if row['book_id']!=book_id or row['action']!='names' or row['source_fingerprint']!=fingerprint:
+        projection=row['action']=='approve' and json.loads(head['effects']).get('approval')!=self.request_id
+        if row['book_id']!=book_id or row['action']!='names' and not projection or row['source_fingerprint']!=fingerprint:
             raise DecisionChanged('Saved names do not bind this exact book/source generation')
         payload=json.loads(row['payload']) if row['payload'] else {}
-        original=payload.get('names')
+        original=dict(payload.get('names') or {})
+        if projection:
+            for field in ('title','author'):
+                if payload.get(field) is not None and str(payload[field]).strip():original[field]=payload[field]
         if not isinstance(original,dict):raise DecisionChanged('Saved names payload is unavailable')
         owned={key.split('.',1)[1] for key,owner in json.loads(head['effects']).items() if owner==self.request_id and key.startswith('names.')}
         if values!={key:value for key,value in original.items() if key in owned}:

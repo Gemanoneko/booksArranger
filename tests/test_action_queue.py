@@ -127,6 +127,68 @@ class DurableDecisionLedgerTests(unittest.TestCase):
         newer=self.accept('tracks',['tracks'],approval['request_id'])
         self.assertEqual(newer['state'],'accepted');self.assertEqual(self.store.get(approval['request_id'])['state'],'needs_review')
 
+    def test_approve_overlapping_names_does_not_depend_on_its_superseded_owner(self):
+        names=self.accept(effects=['names.title','names.series'])
+        approval=self.accept('approve',['approval','names.title','names.series'],names['request_id'])
+        self.assertEqual(self.store.get(names['request_id'])['state'],'superseded')
+        self.assertIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
+
+    def test_approve_still_waits_for_disjoint_predecessor_names(self):
+        names=self.accept(effects=['names.title','names.series'])
+        approval=self.accept('approve',['approval','names.title'],names['request_id'])
+        self.assertEqual(self.store.get(names['request_id'])['state'],'accepted')
+        self.assertNotIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
+        self.finish(names['request_id'],self.store.head(self.book)['generation'])
+        self.assertIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
+
+    def test_new_approval_keeps_disjoint_names_from_an_older_approval_without_replaying_its_approve(self):
+        from scanner import connect
+        first=self.accept('approve',['approval','names.series'],payload={'names':{'series':'Accepted earlier series'}})
+        second=self.accept('approve',['approval','names.title'],first['request_id'],payload={'title':'Accepted later title'})
+        pending=self.store.pending();self.assertEqual([item['request_id'] for item in pending],[first['request_id']])
+        self.assertEqual(pending[0]['active_effects'],['names.series'])
+        scope=self.store.application(first['request_id'],self.store.head(self.book)['generation'])
+        with connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE');scope.bind_names(db,self.book,self.fp,{'series':'Accepted earlier series'})
+            scope.commit_step(db,'names',{}, {'outcome':'names_saved_approval_superseded'},final=True,applied_revision=1)
+        self.assertEqual([item['request_id'] for item in self.store.pending()],[second['request_id']])
+
+    def test_approval_enqueue_and_applied_receipt_share_one_commit(self):
+        import json
+        import groups
+        from durable_decisions import Application
+        from scanner import connect
+        queue=audio_jobs.AudioJobs(self.database,None,lambda value:True,lambda value:True);self.addCleanup(queue.close)
+        accepted=self.accept('approve',['approval'],payload={'author':'William Gibson'});scope=self.store.application(accepted['request_id'],self.store.head(self.book)['generation'])
+        checkpoint={'automatic_pending':{'matcher_version':'private','work_id':'private'},'metadata_approved':True}
+        approved={'metadata_approved':True,'automatic_approval':{'matcher_version':'private','work_id':'private'}}
+        with connect(self.database) as db:
+            groups.setup(db)
+            db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence,review) VALUES(?,?,?,?,?,?,?)',(self.book,str(self.database.parent),self.book,1,self.fp,'{}','{}'))
+            db.execute('CREATE TABLE candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
+            db.execute('INSERT INTO candidate_context VALUES(?,?,?)',(self.book,1,json.dumps(checkpoint)))
+        manifest={'job_id':str(uuid.uuid4()),'candidate_id':self.book,'candidate_revision':1,
+                  'sources':[{'path':str(self.database.parent/'private.mp3'),'sha256':'b'*64,'fingerprint':{'size':1,'modified':'1'}}],
+                  'metadata':{'title':'Private book'},'destination':str(self.database.parent/'private.m4b'),'profile':'private','evidence':{},'cover':{}}
+        import local_identity
+        args={'approval_context':(self.book,1,checkpoint,approved),'decision':scope,
+              'decision_rules':[{'kind':'same_as','credit':'Уильям Гибсон','target':local_identity.surname_first('William Gibson')[0],'title':'Private book'}]}
+        with mock.patch.object(Application,'commit_step',side_effect=RuntimeError('private enqueue commit interruption')):
+            with self.assertRaisesRegex(RuntimeError,'private enqueue commit interruption'):queue.enqueue(manifest,**args)
+        with connect(self.database) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM audio_jobs').fetchone()[0],0)
+            self.assertEqual(json.loads(db.execute('SELECT data FROM candidate_context').fetchone()[0]),checkpoint)
+            self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='author_rules'").fetchone(),'Rule schema/write must roll back with the failed receipt')
+        self.assertEqual(self.store.get(accepted['request_id'])['state'],'accepted')
+        self.assertEqual(queue.enqueue(manifest,**args),manifest['job_id'])
+        receipt=self.store.get(accepted['request_id']);self.assertEqual(receipt['state'],'applied');self.assertEqual(receipt['result']['job_id'],manifest['job_id'])
+        with connect(self.database) as db:
+            self.assertEqual(db.execute('SELECT state FROM audio_jobs').fetchone()[0],'pending')
+            self.assertEqual(json.loads(db.execute('SELECT data FROM candidate_context').fetchone()[0]),approved)
+            self.assertEqual(db.execute('SELECT count(*) FROM author_rules').fetchone()[0],1)
+        self.assertEqual(self.store.purge_fulfilled(),1)
+        self.assertEqual(self.store.get(accepted['request_id'])['result']['job_id'],manifest['job_id'])
+
     def test_replaced_payload_is_retained_until_explicit_successor_applies(self):
         old=self.accept();new=self.accept(predecessor=old['request_id'],payload={'value':'new explicit choice'})
         self.assertEqual(self.store.get(old['request_id'])['state'],'superseded')

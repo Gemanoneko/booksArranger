@@ -52,6 +52,71 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(manifest['chapters'],[])
         self.assertEqual(self.service.page(limit=1,status='ready')['total'],1)
 
+    def durable_effect(self,action,step,*,final=False,payload=None):
+        import uuid
+        from decision_effects import Effect
+        from durable_decisions import Decisions
+        store=Decisions(self.inventory.database)
+        saved=store.accept(request_id=str(uuid.uuid4()),book_id=self.row['id'],action=action,revision=self.row['revision'],fingerprint=self.row['fingerprint'],
+                           payload=payload if payload is not None else {'review':self.review},effects=[action],current_revision=self.row['revision'],current_fingerprint=self.row['fingerprint'])
+        scope=store.application(saved['request_id'],store.head(self.row['id'])['generation'])
+        return store,saved,Effect(scope,step,actions=(action,),final=final)
+
+    def test_durable_review_receipt_failure_rolls_back_group_context_and_manual_evidence(self):
+        from durable_decisions import Application
+        from unittest.mock import patch
+        store,saved,effect=self.durable_effect('review','review',final=True)
+        before=self.service._row('Audiobooks',self.row['id'])
+        with patch.object(Application,'commit_step',side_effect=RuntimeError('Private receipt interruption')):
+            with self.assertRaisesRegex(RuntimeError,'Private receipt interruption'):
+                self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,effect=effect)
+        after=self.service._row('Audiobooks',self.row['id'])
+        self.assertEqual((after['revision'],after.get('review')),(before['revision'],before.get('review')))
+        self.assertEqual(self.service._context(after),{});self.assertEqual(store.get(saved['request_id'])['state'],'accepted')
+        fresh=self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,effect=effect)
+        receipt=store.get(saved['request_id']);self.assertEqual(receipt['state'],'applied')
+        self.assertEqual(receipt['result']['candidate_revision'],fresh['revision']);self.assertEqual(fresh['review']['title'],'Book')
+
+    def test_durable_partial_review_reopens_without_repeating_its_committed_mutations(self):
+        from durable_decisions import Decisions
+        from decision_effects import Effect
+        store,saved,effect=self.durable_effect('review','review')
+        first=self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,effect=effect)
+        self.assertEqual(store.get(saved['request_id'])['state'],'applying')
+        restarted=Decisions(self.inventory.database)
+        scope=restarted.application(saved['request_id'],restarted.head(self.row['id'])['generation'])
+        replay=Effect(scope,'review',actions=('review',))
+        second=self.service.save('Audiobooks',first['id'],first['revision'],self.review,effect=replay)
+        self.assertEqual(second['revision'],first['revision']);self.assertEqual(second['review_context'],first['review_context'])
+        with connect(self.inventory.database) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM book_decision_steps WHERE request_id=?',(saved['request_id'],)).fetchone()[0],1)
+
+    def test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations(self):
+        from durable_decisions import Application
+        from unittest.mock import patch
+        store,saved,effect=self.durable_effect('tracks','tracks',final=True,payload={'order':self.row['track_order'],'included':self.row['included'],'source_coverage_confirmed':True,'order_confirmed':True,'chapters':False})
+        def save():return self.service.tracks('Audiobooks',self.row['id'],self.row['revision'],self.row['track_order'],self.row['included'],True,True,False,effect=effect)
+        with patch.object(Application,'commit_step',side_effect=RuntimeError('Private track receipt interruption')):
+            with self.assertRaisesRegex(RuntimeError,'Private track receipt interruption'):save()
+        self.assertEqual(self.service._context(self.row),{});self.assertEqual(store.get(saved['request_id'])['state'],'accepted')
+        result=save();self.assertTrue(result['review_context']['source_coverage_confirmed'])
+        self.assertEqual(len(self.service._context(result)['source_hashes']),2)
+        self.assertEqual(store.get(saved['request_id'])['state'],'applied')
+
+    def test_durable_effect_rejects_different_values_and_unrelated_revision(self):
+        from durable_decisions import DecisionChanged
+        from decision_effects import Effect
+        store,saved,effect=self.durable_effect('review','review')
+        changed=dict(self.review,title='A different unaccepted title')
+        with self.assertRaises(DecisionChanged):self.service.save('Audiobooks',self.row['id'],self.row['revision'],changed,effect=effect)
+        self.assertEqual(store.get(saved['request_id'])['state'],'accepted')
+        scope=effect.application
+        fresh=self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,effect=Effect(scope,'review',actions=('review',)))
+        with self.assertRaises(DecisionChanged):self.service.save('Audiobooks',fresh['id'],fresh['revision'],changed,effect=Effect(scope,'review',actions=('review',)))
+        legacy=self.service.save('Audiobooks',fresh['id'],fresh['revision'],dict(self.review,genre='Fantasy'))
+        with self.assertRaises(DecisionChanged):self.service.save('Audiobooks',legacy['id'],legacy['revision'],self.review,effect=Effect(scope,'review',actions=('review',)))
+        self.assertEqual(store.get(saved['request_id'])['state'],'applying')
+
     def test_source_change_invalidates_exact_revision(self):
         row=self.ready();self.sources[0].write_bytes(b'changed private fixture content')
         with self.assertRaisesRegex(ValueError,'Source changed'):
