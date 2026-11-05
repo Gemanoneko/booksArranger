@@ -1,0 +1,304 @@
+{
+  "tool": "books-arranger",
+  "version": "0.26.0",
+  "verdict": "NO-GO",
+  "source_commit": "a7e20113fabcb5c7a4c7896e8b64304aa918eafc",
+  "build_id": "696fda91-c49f-4294-8cea-054f9ee4c912",
+  "artifact_manifest_sha256": "9f538ebe75163c31ead29d5794b277cf026443ab0192d970f91efdb14bea61ef",
+  "runtime_pointer_sha256": "7abf4088f166b8f09d56bf5c39fb1ba93f04316d4628025d3d16d8eae32672ee",
+  "context_sha256": "77154febfda44ea5d6efd397e9a0eedbaf7c40b4cbe3f4fcebaa2145f06371d0",
+  "source_dirty": "N",
+  "run_root": "C:/Antigravity Projects/q27",
+  "run_child": "C:/Antigravity Projects/q27/entry-run-2VLeQx",
+  "invocations_on_build": 1,
+  "work_deadline_ms": 900000,
+  "transport_timeout_ms": 930000,
+  "outer": {
+    "started_at": "2026-11-05T12:00:02.386Z",
+    "finished_at": "2026-11-05T12:09:34.861Z",
+    "exit_code": 1,
+    "killed": false
+  },
+  "owned_check": {
+    "code": 1,
+    "elapsed_ms": 534648.5895,
+    "closed": true,
+    "output_complete": true,
+    "forced": false,
+    "timed_out": false,
+    "overflow": false,
+    "truncated": false,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 11213,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 21769,
+        "incompleteQueries": 494,
+        "firstIncomplete": {
+          "assigned": 41,
+          "listed": 40,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 9,
+          "listed": 8,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    }
+  },
+  "python": {
+    "batches": 13,
+    "discovered": 2447.0,
+    "completed": 2447.0,
+    "skipped": 0.0,
+    "failures": 0.0,
+    "errors": 0.0,
+    "rows": [
+      {
+        "batch": 0,
+        "discovered": 384,
+        "completed": 384,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 1,
+        "discovered": 46,
+        "completed": 46,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 2,
+        "discovered": 122,
+        "completed": 122,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 3,
+        "discovered": 145,
+        "completed": 145,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 4,
+        "discovered": 160,
+        "completed": 160,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 5,
+        "discovered": 221,
+        "completed": 221,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 6,
+        "discovered": 108,
+        "completed": 108,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 7,
+        "discovered": 225,
+        "completed": 225,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 8,
+        "discovered": 196,
+        "completed": 196,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 9,
+        "discovered": 144,
+        "completed": 144,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 10,
+        "discovered": 283,
+        "completed": 283,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 11,
+        "discovered": 134,
+        "completed": 134,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      },
+      {
+        "batch": 12,
+        "discovered": 279,
+        "completed": 279,
+        "skipped": 0,
+        "failures": 0,
+        "errors": 0,
+        "success": true
+      }
+    ]
+  },
+  "frontend_failure": {
+    "script": "tests/test_browser.js",
+    "script_line": 31,
+    "error": "TypeError: approval.removeAttribute is not a function",
+    "product_frame": "controls (evalmachine.<anonymous>:602:76)",
+    "detail": " and focused poll preservation\nevalmachine.<anonymous>:602\r\n  if(approving)approval.setAttribute('aria-disabled','true');else approval.removeAttribute('aria-disabled');\r\n                                                                           ^\r\n\r\nTypeError: approval.removeAttribute is not a function\r\n    at controls (evalmachine.<anonymous>:602:76)\r\n    at evalmachine.<anonymous>:5088:1\r\n    at Script.runInContext (node:vm:150:12)\r\n    at Object.runInContext (node:vm:302:6)\r\n    at Object.<anonymous> (C:\\Antigravity Projects\\q27\\entry-run-2VLeQx\\tests\\test_browser.js:31:4)\r\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\r\n    at Object..js (node:internal/modules/cjs/loader:2108:10)\r\n    at Module.load (node:internal/modules/cjs/loader:1690:32)\r\n    at Module._load (node:internal/modules/cjs/loader:1480:12)\r\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\r\n\r\nNode.js v26.13.0\r\nPython worker 0: 416.2 s real, 217 s projected, 660 s deadline (63 %)\nPython worker 1: 396.2 s real, 285 s projected, 660 s deadline (60 %)\nPython worker 2: 406.3 s real, 238 s projected, 660 s deadline (62 %)\nPython worker 3: 313.6 s real, 238 s projected, 660 s deadline (48 %)\nPython worker 4: 338.2 s real, 237 s projected, 660 s deadline (51 %)\nPython worker 5: 457.8 s real, 179 s projected, 660 s deadline (69 %)\nPytho",
+    "wrapper": "Focused desktop check failed: exit 1: tests\\\\test_browser.js",
+    "node_test_runner_pass": 242,
+    "node_test_runner_fail": 0
+  },
+  "receipt_sha256": "1eb3fd4c061eb780a9a7e5684d66c8b793ecf87df9809c151b46ecb7722808c2",
+  "receipt": "Entry-check receipt v2: books-arranger v0.26.0 @ a7e20113fabcb5c7a4c7896e8b64304aa918eafc (dirty: N) [source:efbf0b752a8784512c9a4683bf7a1af92eeedbee5701dcf93275191cc87e7532; harness:b3cb287fc0ecb6485289bc10deed63509a129191d7d6e2989ba21914ced808fe; runtime:7156e0d940c5e5df988b2406f509620647af07b755a405bc4d73508a5f2d4eca; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean",
+  "native_hidden_check": "NOT RUN; full entry failed",
+  "raw_file_index": [
+    {
+      "path": "batch-summary.json",
+      "bytes": 2370,
+      "sha256": "f79a0661f4f473383c39606a2d0a058c5a1af2c40287eab75824e90334e0f89e"
+    },
+    {
+      "path": "context/source-manifest.json",
+      "bytes": 402283,
+      "sha256": "82286f622e1149f88ba16723283240e8ec9b2ded594a91be692acab96f9e1fa4"
+    },
+    {
+      "path": "context/runtime-powershell.json",
+      "bytes": 146442,
+      "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3"
+    },
+    {
+      "path": "context/runtime-ownership.json",
+      "bytes": 13523,
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+    },
+    {
+      "path": "context/runtime-node-installation.json",
+      "bytes": 311392,
+      "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca"
+    },
+    {
+      "path": "context/runtime-mp3-fixture.json",
+      "bytes": 133,
+      "sha256": "7ce16c974ba7947022126eb991b24c7d1f45071bbd6082222772b0b8317ce143"
+    },
+    {
+      "path": "context/runtime-git.json",
+      "bytes": 1381113,
+      "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606"
+    },
+    {
+      "path": "context/runtime-dependencies.json",
+      "bytes": 1052511,
+      "sha256": "7e209c84b87c6c758afa6d4ad24bf42eb0b72f4a80377fd9818a1433f08feaf6"
+    },
+    {
+      "path": "context/runtime-bundled-media.json",
+      "bytes": 5823,
+      "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31"
+    },
+    {
+      "path": "context/harness/graph.json",
+      "bytes": 2961,
+      "sha256": "895e8c7250cef7341df91ec83732b1f0ef88fc1727cee8c413dc8353a4279445"
+    },
+    {
+      "path": "context/harness-manifest.json",
+      "bytes": 248,
+      "sha256": "8fd846e9e53e3fb3735dc8e152eea16e8a14d040d3db98671e8aa9bb7c0ecaf1"
+    },
+    {
+      "path": "context/context.json",
+      "bytes": 4750,
+      "sha256": "77154febfda44ea5d6efd397e9a0eedbaf7c40b4cbe3f4fcebaa2145f06371d0"
+    },
+    {
+      "path": "receipt.txt",
+      "bytes": 514,
+      "sha256": "1eb3fd4c061eb780a9a7e5684d66c8b793ecf87df9809c151b46ecb7722808c2"
+    },
+    {
+      "path": "outer-stdout.log",
+      "bytes": 756939,
+      "sha256": "be1386037b69c911e521849fe18261726e0b08a0cbd9f8939b4bc912aab761c7"
+    },
+    {
+      "path": "outer-stderr.log",
+      "bytes": 40,
+      "sha256": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57"
+    },
+    {
+      "path": "outer-result.json",
+      "bytes": 583,
+      "sha256": "c6c177705c9777775797ea3eb15e037c9e8a7efc55183787766a74b3c63ef9d7"
+    },
+    {
+      "path": "operator.mjs",
+      "bytes": 2593,
+      "sha256": "12b44b01e9cebc537d1134a101d9040e42fdf22bfcb34801986f1962d4e2dcd7"
+    },
+    {
+      "path": "invocation.json",
+      "bytes": 1826,
+      "sha256": "62033130bf71711f01f852e73e60eae7488b094a69b47d5615aabf28c9096cb3"
+    },
+    {
+      "path": "failure-index.json",
+      "bytes": 1755,
+      "sha256": "f00615507871dfff73a2ccb09f6e3716f9c70a7631855859aa7adb27f8184116"
+    },
+    {
+      "path": "context/context.json.sha256",
+      "bytes": 65,
+      "sha256": "4db368d9c290d3bacc7bb370dbcfb907ee0d54ab26266e40d2491366cc973230"
+    },
+    {
+      "path": "context/harness/run-entry.sh",
+      "bytes": 809,
+      "sha256": "c4c829407c0df79a8c5bf4f69b5aa4b0bb9ce150d3b9a4e5127b11a3b8fe911e"
+    }
+  ]
+}

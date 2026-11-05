@@ -1,0 +1,20 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+const {manifestOf}=await import(pathToFileURL('C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r2/scripts/qa-entry-context.mjs').href);
+const q='C:/Antigravity Projects/q27',main='C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger';
+if(await fs.lstat(q).catch(()=>null))throw Error('Fresh QA arena already exists; do not adopt it');
+const source=main+'/build-cache/qa-ownership',before=await manifestOf(source);
+await fs.mkdir(q);await fs.mkdir(q+'/ownership');
+for(const item of before.files){const target=q+'/ownership/'+item.path;await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(source+'/'+item.path,target,1);}
+if(JSON.stringify(before)!==JSON.stringify(await manifestOf(source))||JSON.stringify(before)!==JSON.stringify(await manifestOf(q+'/ownership')))throw Error('Ownership bytes changed during exact copy');
+await fs.mkdir(q+'/media');
+const codec=main+'/build-cache/qa-runtime/ffmpeg/ffmpeg.exe',pins=JSON.parse(await fs.readFile(main+'/scripts/qa-runtime.json','utf8'));
+const sha=b=>createHash('sha256').update(b).digest('hex');if(sha(await fs.readFile(codec))!==pins.ffmpeg.files['ffmpeg.exe'].sha256)throw Error('Private fixture codec changed');
+const r=spawnSync(codec,['-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=0.8','-c:a','libmp3lame','-ar','44100','-ac','1','-b:a','128k','-metadata','title=Private QA recording','-metadata','artist=Private QA Author','-id3v2_version','3',q+'/media/private.mp3'],{windowsHide:true,encoding:'utf8',timeout:30000});
+if(r.error||r.status!==0)throw Error(r.error?.message||r.stderr||'Private fixture generation failed');
+const s=await fs.lstat(q,{bigint:true}),fixture=await fs.readFile(q+'/media/private.mp3');
+const receipt={arena:q,identity:{dev:String(s.dev),ino:String(s.ino)},ownership_manifest:before,fixture:{path:q+'/media/private.mp3',bytes:fixture.length,sha256:sha(fixture)},codec_sha256:pins.ffmpeg.files['ffmpeg.exe'].sha256};
+await fs.writeFile(q+'/preparation.json',JSON.stringify(receipt,null,2),{flag:'wx'});console.log(JSON.stringify(receipt));

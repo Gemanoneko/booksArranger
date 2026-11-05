@@ -1,0 +1,10 @@
+{
+  "script": "tests/test_browser.js",
+  "script_line": 31,
+  "error": "TypeError: approval.removeAttribute is not a function",
+  "product_frame": "controls (evalmachine.<anonymous>:602:76)",
+  "detail": " and focused poll preservation\nevalmachine.<anonymous>:602\r\n  if(approving)approval.setAttribute('aria-disabled','true');else approval.removeAttribute('aria-disabled');\r\n                                                                           ^\r\n\r\nTypeError: approval.removeAttribute is not a function\r\n    at controls (evalmachine.<anonymous>:602:76)\r\n    at evalmachine.<anonymous>:5088:1\r\n    at Script.runInContext (node:vm:150:12)\r\n    at Object.runInContext (node:vm:302:6)\r\n    at Object.<anonymous> (C:\\Antigravity Projects\\q27\\entry-run-2VLeQx\\tests\\test_browser.js:31:4)\r\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\r\n    at Object..js (node:internal/modules/cjs/loader:2108:10)\r\n    at Module.load (node:internal/modules/cjs/loader:1690:32)\r\n    at Module._load (node:internal/modules/cjs/loader:1480:12)\r\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\r\n\r\nNode.js v26.13.0\r\nPython worker 0: 416.2 s real, 217 s projected, 660 s deadline (63 %)\nPython worker 1: 396.2 s real, 285 s projected, 660 s deadline (60 %)\nPython worker 2: 406.3 s real, 238 s projected, 660 s deadline (62 %)\nPython worker 3: 313.6 s real, 238 s projected, 660 s deadline (48 %)\nPython worker 4: 338.2 s real, 237 s projected, 660 s deadline (51 %)\nPython worker 5: 457.8 s real, 179 s projected, 660 s deadline (69 %)\nPytho",
+  "wrapper": "Focused desktop check failed: exit 1: tests\\\\test_browser.js",
+  "node_test_runner_pass": 242,
+  "node_test_runner_fail": 0
+}

@@ -1,0 +1,127 @@
+{
+  "batches": 13,
+  "discovered": 2447.0,
+  "completed": 2447.0,
+  "skipped": 0.0,
+  "failures": 0.0,
+  "errors": 0.0,
+  "rows": [
+    {
+      "batch": 0,
+      "discovered": 384,
+      "completed": 384,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 1,
+      "discovered": 46,
+      "completed": 46,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 2,
+      "discovered": 122,
+      "completed": 122,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 3,
+      "discovered": 145,
+      "completed": 145,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 4,
+      "discovered": 160,
+      "completed": 160,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 5,
+      "discovered": 221,
+      "completed": 221,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 6,
+      "discovered": 108,
+      "completed": 108,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 7,
+      "discovered": 225,
+      "completed": 225,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 8,
+      "discovered": 196,
+      "completed": 196,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 9,
+      "discovered": 144,
+      "completed": 144,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 10,
+      "discovered": 283,
+      "completed": 283,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 11,
+      "discovered": 134,
+      "completed": 134,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    {
+      "batch": 12,
+      "discovered": 279,
+      "completed": 279,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    }
+  ]
+}

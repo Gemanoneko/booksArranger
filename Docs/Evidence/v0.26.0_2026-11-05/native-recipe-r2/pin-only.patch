@@ -1,0 +1,80 @@
+--- canonical-0.25-native-once.mjs
++++ fresh-0.26-native-once.mjs
+@@ -1,5 +1,5 @@
+ // Reviewed operator only. No app/native adapter is constructed by prepare/accept.
+-// One fresh 0.25.0 PA-1 launch, after the exact full PASS; never automatic retry.
++// One fresh 0.26.0 PA-1 launch, after the exact full PASS; never automatic retry.
+ import fs from 'node:fs/promises';
+ import path from 'node:path';
+ import {fileURLToPath,pathToFileURL} from 'node:url';
+@@ -7,21 +7,21 @@
+ import {execFile} from 'node:child_process';
+ const hash=b=>createHash('sha256').update(b).digest('hex');
+ const need=(ok,why)=>{if(!ok)throw Error(why);};
+-const BASE='C:/Antigravity Projects/n25';
+-const SOURCE='C:/Antigravity Projects/q4/context/source',CONTEXT='C:/Antigravity Projects/q4/context';
+-const RELEASE='C:/Antigravity Projects/Worktrees/Books Arranger/0250-release-20261105-r3';
++const BASE='C:/Antigravity Projects/n26';
++const SOURCE='C:/Antigravity Projects/q27/context/source',CONTEXT='C:/Antigravity Projects/q27/context';
++const RELEASE='C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r2';
+ const STUDIO='C:/Antigravity Projects/Studio Illuminati';
+ const HELPER=STUDIO+'/.claude/skills/qa-handoff/scripts/bounded-check.mjs';
+-const NODE='C:/Program Files/nodejs/node.exe',OWNERSHIP='C:/Antigravity Projects/q4/ownership';
+-const BINDING={version:'0.25.0',source_head:'90f0368ba7631659a3caafc2fa6125e9075ccf2a',product_digest:'21a42959c039c1e80075a5be71e7a86b0b17b09301ff00481857f12047febb16',build_id:'9b63e746-2a00-4cd8-a0ba-5b45e6405fc2',artifact_manifest_sha256:'2f58427054176b23f0110dda1a3b51920e8628ecbf571062942a951c292a41a4',runtime_manifest_sha256:'f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e',phase_contract_sha256:'63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f'};
++const NODE='C:/Program Files/nodejs/node.exe',OWNERSHIP='C:/Antigravity Projects/q27/ownership';
++const BINDING={"version":"0.26.0","source_head":"a7e20113fabcb5c7a4c7896e8b64304aa918eafc","product_digest":"1caa8b99b1f333f46bde7b97c5fc465f24f3386c530c65c90d4bdfc46873864c","build_id":"696fda91-c49f-4294-8cea-054f9ee4c912","artifact_manifest_sha256":"9f538ebe75163c31ead29d5794b277cf026443ab0192d970f91efdb14bea61ef","runtime_manifest_sha256":"f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e","phase_contract_sha256":"63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"};
+ const FIXTURE=BASE+'/pa1-'+BINDING.build_id,PLAN=BASE+'/plan.json';
+ const CODE={
+- 'scripts/qa-phase-contract.mjs':BINDING.phase_contract_sha256,
+- 'scripts/qa-real-shell-phase.mjs':'49a0a2fae1f29b0dd0631644be168fa321df4a4689a9cf59dbc076da5e6f32af',
+- 'tests/real-shell-update-support.mjs':'fd3f0c9c5d0af1bbf877b089781e718092b64c6488d483ba2c925c3326975c90',
+- 'tests/real-shell-update.test.mjs':'0a4a48db35c05214c1ac5e9cd9cb536fc73fd3989664685f0f376975e2ee4ee2'
++ "scripts/qa-phase-contract.mjs": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f",
++ "scripts/qa-real-shell-phase.mjs": "49a0a2fae1f29b0dd0631644be168fa321df4a4689a9cf59dbc076da5e6f32af",
++ "tests/real-shell-update-support.mjs": "fd3f0c9c5d0af1bbf877b089781e718092b64c6488d483ba2c925c3326975c90",
++ "tests/real-shell-update.test.mjs": "0a4a48db35c05214c1ac5e9cd9cb536fc73fd3989664685f0f376975e2ee4ee2"
+ };
+-const EXPECTED_CONTEXT='ef05253c057a0aff3a5ade8eb854f076725e4dd82ef512e641c407aa5cd9752c';
++const EXPECTED_CONTEXT='77154febfda44ea5d6efd397e9a0eedbaf7c40b4cbe3f4fcebaa2145f06371d0';
+ const encode=v=>Buffer.from(JSON.stringify(v));
+ async function write(file,bytes){await fs.writeFile(file,bytes,{flag:'wx'});return {path:file,sha256:hash(bytes),size:bytes.length};}
+ async function pin(file,systemDll=false){const bytes=await fs.readFile(file),s=await fs.lstat(file,{bigint:true});need(s.isFile()&&!s.isSymbolicLink()&&(s.nlink===1n||(systemDll&&s.nlink>1n)),'Nonordinary/hardlinked pin: '+file);return {path:file.replaceAll('\\','/'),sha256:hash(bytes),size:bytes.length,identity:{dev:String(s.dev),ino:String(s.ino),nlink:Number(s.nlink)}};}
+@@ -42,7 +42,7 @@
+ function fullPass(text){
+  const receipts=text.split(/\r?\n/).filter(line=>line.startsWith('Entry-check receipt v2:'));
+  need(receipts.length===1,'One exact original full receipt required');const line=receipts[0];
+- need(line.startsWith('Entry-check receipt v2: books-arranger v0.25.0 @ '+BINDING.source_head+' (dirty: N) ')&&/ — .*\bcheck pass,/.test(line)&&line.endsWith('; personal-folders clean'),'Exact clean full PASS required');
++ need(line.startsWith('Entry-check receipt v2: books-arranger v0.26.0 @ '+BINDING.source_head+' (dirty: N) ')&&/ — .*\bcheck pass,/.test(line)&&line.endsWith('; personal-folders clean'),'Exact clean full PASS required');
+ }
+ const selfHash=async()=>hash(await fs.readFile(fileURLToPath(import.meta.url)));
+ async function prepare(receiptPath,receiptSha){
+@@ -52,7 +52,7 @@
+  const manifest=await pin(RELEASE+'/dist/release-artifacts.json');need(manifest.sha256===BINDING.artifact_manifest_sha256,'Built artifact changed');const m=JSON.parse(await fs.readFile(manifest.path));
+  need(m.build_id===BINDING.build_id&&m.product_digest===BINDING.product_digest&&m.source_head===BINDING.source_head&&hash(JSON.stringify(m.runtime))===BINDING.runtime_manifest_sha256&&m.payload?.verified===true&&m.payload.installer_equivalent===true,'Built candidate identity differs');
+  const inputs=[manifest,await pin(RELEASE+'/build-cache/runtime-pointer.json'),await pin(HELPER),await pin(path.dirname(HELPER)+'/bounded-child.mjs'),await pin(NODE),await pin(fileURLToPath(import.meta.url)),receipt];
+- need(inputs[1].sha256==='da4cfa5c4684ed71706c48536962ba3419c07fac3b8c4281831d59fd4e2fab10','Runtime pointer changed');
++ need(inputs[1].sha256==='7abf4088f166b8f09d56bf5c39fb1ba93f04316d4628025d3d16d8eae32672ee','Runtime pointer changed');
+  need(inputs[2].sha256==='89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc'&&inputs[3].sha256==='240a6a96a32f08989439387d5d6ab75d17e1bcf243863d31d2ff7287f68d1e42'&&inputs[4].sha256==='14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5','Reviewed owner/Node changed');
+  for(const name of ['kernel32.dll','advapi32.dll','ntdll.dll','user32.dll','iphlpapi.dll'])inputs.push(await pin('C:/Windows/System32/'+name,true));
+  for(const name of Object.keys(CODE))inputs.push(await pin(SOURCE+'/'+name));
+@@ -66,7 +66,7 @@
+  const koffi={};for(const [name,ref]of Object.entries(trees[2].files))if(name.startsWith('node_modules/koffi/'))koffi[name.slice('node_modules/koffi/'.length)]=ref;
+  need(Object.keys(koffi).length>0,'Koffi inventory absent');trees.push({root:OWNERSHIP+'/node_modules/koffi',files:koffi});
+  await support.ordinary(path.dirname(BASE));await fs.mkdir(BASE); // Must be fresh; never adopt/remove existing output.
+- const authority={schema:'books-native-qa-authority-v1',binding:BINDING,approved_by:'Sergei',decision_ref:'Current 0.25.0 user instructions in this release chat; BooksArranger_DuplicateAndTolkien_Decisions_2026-11-04.md',decision_text:'User: "Fix the issues for 0.25.0". User: "I\'m going to sleep. Please create and implement everything I requested. Try to finish everything till the morning, unless there is a stopper that can\'t be solved without me." This new 0.25.0 authority records the current authorized completion work and the previously approved canonical private PA-1 effects: hidden private copied app; invalid fake installer refusal; exact newly created own HKCU tray leaf deletion; leave ONE added 8-byte numeric ID history reference while preserving preexisting UIOrderList bytes. No focus, installed app state, live library or Z: access. This is a new 0.25.0 authority; no old approval artifact or timestamp is copied. approved_at records actual preparation time.',approved_at:new Date().toISOString(),effects:{hidden_private_app:true,invalid_installer_attempt:true,own_new_leaf_delete:true,leave_numeric_history_reference:true,ui_order_list_write:false}};
++ const authority={"schema":"books-native-qa-authority-v1","binding":BINDING,"approved_by":"Sergei","decision_ref":"Current user message in this release chat, client date 2026-11-05; exact message sent time unavailable","decision_text":"Current user message, quoted verbatim: \"Add the four Universe options too, then have Sully release the next version with all these fixes. Don't stop until it's released unless there's a serious stopper.\" Jane and Senua interpret the existing canonical private PA-1 as necessary release workflow within that request: one hidden private copied app, invalid fake installer refusal, deletion of the exact newly created own HKCU tray numeric leaf, and ONE added 8-byte numeric history reference while preserving every preexisting UIOrderList byte. These enumerated registry effects are producer/reviewer scope interpretation, not words attributed to Sergei. No focus, installed app changes, live library or Z: access. No old 0.25 authority or proof is reused. approved_at records actual new preparation UTC, not the unavailable user-message sent time.","approved_at":new Date().toISOString(),"effects":{"hidden_private_app":true,"invalid_installer_attempt":true,"own_new_leaf_delete":true,"leave_numeric_history_reference":true,"ui_order_list_write":false}};
+  const authorityRef=await write(BASE+'/authority.json',encode(authority));
+  const p={schema:'books-real-shell-plan-v1',binding:BINDING,case:contract.NATIVE_CASE,deadlineMs:600000,phase_contract_sha256:BINDING.phase_contract_sha256,fixture_root:FIXTURE,evidence_root:BASE,source_root:SOURCE,koffi_root:OWNERSHIP+'/node_modules/koffi',authority:authorityRef,node:inputs[4],helper:inputs[2],inputs,trees,payload:{root:RELEASE+'/dist/'+m.unpacked,manifest},environment:{SystemRoot:'C:/Windows',WINDIR:'C:/Windows',PATH:'C:/Program Files/nodejs;C:/Windows/System32',TEMP:FIXTURE+'/temp',TMP:FIXTURE+'/temp',USERPROFILE:FIXTURE+'/home',APPDATA:FIXTURE+'/home/Roaming',LOCALAPPDATA:FIXTURE+'/home/Local'},expected_tray_types:{ExecutablePath:1,IconSnapshot:3,InitialTooltip:1,UID:4},operator:inputs[5],release_full_receipt:receipt};
+  support.validatePlan(p,authority);const ref=await write(PLAN,encode(p));console.log(JSON.stringify({prepared:true,plan:ref,self_sha256:await selfHash(),binding:BINDING}));
+@@ -85,9 +85,9 @@
+  for(const role of contract.NATIVE_ROLES)raw[role]=await fs.readFile(BASE+'/'+role.replaceAll('_','-')+(['stdout','stderr','controller_stdout','controller_stderr'].includes(role)?'.log':'.json'));
+  const callback=JSON.parse(raw.callback);need((await fs.readFile(BASE+'/outer-stdout.log')).equals(raw.controller_stdout)&&(await fs.readFile(BASE+'/outer-stderr.log')).equals(raw.controller_stderr),'Actual callback streams differ from original controller');
+  need(callback.plan_sha256===sha,'Actual callback plan differs');const summary=phase.evidenceSummary(BINDING,raw);contract.validateNativeEvidence(summary,raw,BINDING);
+- await fs.mkdir(BASE+'/accepted');await fs.mkdir(BASE+'/accepted/BooksArranger_NativeQA_v0.25.0_Evidence');
++ await fs.mkdir(BASE+'/accepted');await fs.mkdir(BASE+'/accepted/BooksArranger_NativeQA_v0.26.0_Evidence');
+  for(const role of contract.NATIVE_ROLES)await write(BASE+'/accepted/'+summary.records[role].path.replace(/^Docs\//,''),raw[role]);
+- const ref=await write(BASE+'/accepted/BooksArranger_NativeQA_v0.25.0.json',Buffer.from(JSON.stringify(summary,null,2)+'\n'));
++ const ref=await write(BASE+'/accepted/BooksArranger_NativeQA_v0.26.0.json',Buffer.from(JSON.stringify(summary,null,2)+'\n'));
+  console.log(JSON.stringify({accepted:true,summary:ref,binding:p.binding}));
+ }
+ const [mode,expectedSelf,...args]=process.argv.slice(2);

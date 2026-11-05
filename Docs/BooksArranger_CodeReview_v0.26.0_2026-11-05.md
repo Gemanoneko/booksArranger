@@ -7,20 +7,20 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-11-05
 Tool: Books Arranger (Electron desktop with Python backend)
 Release: v0.26.0
-Commit range: 90f0368ba7631659a3caafc2fa6125e9075ccf2a..d6753c69ae01468693d8c77964893b1e259c9190
-Files changed: 563 files, +253282 / -332 lines, including retained documentation/evidence
-Product/test/release scope: 44 files, +2350 / -312 lines
+Commit range: 90f0368ba7631659a3caafc2fa6125e9075ccf2a..a7e20113fabcb5c7a4c7896e8b64304aa918eafc
+Files changed: 647 files, +468941 / -370 lines, including retained documentation/evidence
+Product/test/release scope: 46 files, +2409 / -350 lines
 Stand-down dimensions: none
 Status: source and guarded build bound; independent full/native QA pending
 ```
 
-Release source commit: d6753c69ae01468693d8c77964893b1e259c9190
+Release source commit: a7e20113fabcb5c7a4c7896e8b64304aa918eafc
 
 ## Summary
 
 This accumulated review starts at the exact source certified by the [0.25.0 review](BooksArranger_CodeReview_v0.25.0_2026-11-05.md). It covers book-local durable Save/Approve decisions, their transaction consumers and renderer reconciliation, typed curated Tolkien evidence, per-book restaging holds, truthful processing status, four editable Universe suggestions, version/build-input preparation, and the final server-startup ownership correction. The earlier bounded reviews were reconciled to the pushed source; they are evidence for this accumulated review, not separate release verdicts.
 
-The source and exact guarded package review below are complete. The fresh canonical full-entry context and one-use outer operator were reviewed before execution. Independent full/native QA and a fresh actual native plan remain pending; a full-check execution clearance is not a test result or packaged/native acceptance. Previous 0.25.0 artifact, full-check and native approval identities are not inherited.
+The source and exact candidate-2 guarded package review below are complete. The fresh q27 canonical full-entry context and one-use outer operator were reviewed before execution. Independent full/native QA and a fresh actual native plan remain pending; a full-check execution clearance is not a test result or packaged/native acceptance. Candidate 1 (build `7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9`, q26) failed its full check and is excluded. Previous 0.25.0 artifact, full-check and native approval identities are not inherited.
 
 ## Rubric
 
@@ -83,36 +83,39 @@ Read-only source, evidence and hash inspection was performed; Senua ran no tests
 | Final renderer | `durable-decisions-ui_2026-11-05/restoration-final` summary `72cbd13ef5579773b297faf33ee7fd36c6a7ef603200fef73dc1a1202110bcf5` | All 18 source/test pins match. Final app SHA256 `f2f2c279a91de04d40c78fc01e5172559aa389e92faaa01804808168cbf7b8eb`; index `ac82a8174b36e85c213de4b8eb81f44f6c32711ad34042feb248dee0f1b3ddb3`. Exact failing predecessor and final 32-script complete/native-zero proof were inspected. The earlier `f81a3171…` real Handler bridge is historical and does not certify final semantic guards. |
 | Universe/version/build pin | `v0.26.0_2026-11-05/universe-options` summary `bc4e5a2bf10a240ba712ab30b21713028da35496badec2d2a9ee1e78ce7cf26e`; build-pin summary `c5287fc08698ed152bd264d3e31708d37771bfa7e17122e6e01104beafcd77e7` | Three source LF/12 evidence hashes match. Eight Store cases and inline DOM pass; 2,001 learned values plus a saved custom value prove the four exact options do not displace previously offered learned values or mutate rows. Lock SHA256 `4793ceb09472d3381afc1acec949e4f9506cb31b311cbab4babdcceabafadd18` matches the build pin; parsed graph differs only in two root versions. |
 | Final startup owner | `v0.26.0_2026-11-05/startup-owner` summary `eb3c9a5dcffbd8e964ec9f62a3ce48436af8ca28b8fd7bca2ddee3297dad52f9`; patch `81515b0a9df5ca8537b4a1cf9058cabf42016a21fbab79cf6bbea07a15a0c89a` | Two source hashes/all nine listed proof hashes match; real orphan-owner RED becomes 3/3 construction GREEN and 17/17 startup/writer-contention PASS/native-zero. Inventory `07fc0537251ba9eb4ada4fea6c2ac77bcf457282a5357103290f9917d5f5476e` records 30 constructors in 18 test files and production factory/abort/quit/unload closure dispositions. |
+| Candidate-2 fixture correction | `v0.26.0_2026-11-05/full-fixture-correction` summary `1ec64eceaf4375517c9b5194f8173361300aeae1a2e6e6c988251a007de8f0ec`; patch `531e68897ca1ca49f25202f00ea419e2bf20dca2b3be30a21c5cd50a1c2d9a8e`; freeze `01c2ad0f874fbffb13f85e59a832943fa1ccbb8247e2e446681b6ae23a342331` | Exact two test hashes and all 17 retained evidence leaves match. Both old failures reproduce; both corrected targets and 41/41 affected-module methods pass (1.708 seconds; owned closure 2.148 seconds/native-zero). Runtime product code and guards are unchanged. Earlier refused fixture attempts remain preserved. |
+
+Candidate 1's 2,447-method full run had two failed fixture contracts, zero errors/skips and normal native-zero closure; its NO-GO remains historical evidence. The MP3 fixture correction replaces an obsolete long-file duration/sample assumption with a privately owned short MP3 whose false TAG-contained MPEG frame makes strict original decode fail. The unchanged repair path must prove the exact original-minus-128-byte prefix, decoded PCM/frame/source binding and provenance; changed-derived and ordinary-TAG-without-proof cases still refuse. The DOM fixture now supplies the actual attribute-removal, durable metadata-choice and row-identity boundaries while retaining pending ARIA, caret, stale text, dirty-field and no-approval assertions. These are test-contract corrections, with no new unsupported-format exception or codec integrity relaxation.
 
 The patch-only erratum SHA256 `cfd111d0bba21443556236697ec7dfa31d0de479b3255035ee43d79bec0d0533` explains the stale implementation index that exported deletion hunks for existing untracked modules. Thirteen prior integrated stage blobs were independently compared with their original frozen LF manifests; all match. Corrected Names patch `cb6be8b504d28169d806115cdc98121814c049e48616552629b30a684f548371` and consumer patch `eb6174395fc8884b41f3ab850b66fc4abe8a674792cfe0bbc462e64c52d59ec6` preserve the reviewed source rather than silently rewriting evidence. Final main source was additionally reconciled to the latest applicable consumer/Universe/startup/renderer manifests; no drift was found.
 
 ## Artifact and execution binding
 
 ```text
-Release worktree: C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r1
-Build ID: 7e1ce2b4-e87b-43c5-b2c1-cc5cd798c1e9
-Product digest: 6ea741997a1f08b8e96696dfb5066fc2bcc15bb01902ff6ed92e8063780882e0
-Release artifact manifest SHA256: 137258122f81fe9c365bbc11a7d5265c9b22354d46d6f0034b12a6baf84e125b
-Runtime pointer SHA256: 04bcb999b14343f36f9e8932cb6b0d32253feb7270c4de7d15cc5019a32d28d0
-Payload manifest SHA256: 32987ab61c466eae0eab7e010bfa98c5969602dce6c9c60ea66bd04748d97043
+Release worktree: C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r2
+Build ID: 696fda91-c49f-4294-8cea-054f9ee4c912
+Product digest: 1caa8b99b1f333f46bde7b97c5fc465f24f3386c530c65c90d4bdfc46873864c
+Release artifact manifest SHA256: 9f538ebe75163c31ead29d5794b277cf026443ab0192d970f91efdb14bea61ef
+Runtime pointer SHA256: 7abf4088f166b8f09d56bf5c39fb1ba93f04316d4628025d3d16d8eae32672ee
+Payload manifest SHA256: bd2b91028cad49cd523c5151e17c7b78ebc55d8b3f78b390a27207274b4a3820
 Installer: Books-Arranger-Setup-0.26.0.exe
-Installer size: 174793043 bytes
-Installer SHA256: d93c7dcb0b450879e6912155acc2d89892b88f1ef340c80ad989aabebdedfb22
-Blockmap size: 182221 bytes
-Blockmap SHA256: ee3db98bbe9b8a90e5f9d748b2a0a2f1e5d837c1fb7156ef70d2cc5706163971
+Installer size: 174792889 bytes
+Installer SHA256: fa922cc83730084597896bc5f93c1d0e81c9cf5b14c0168759691a392637a18e
+Blockmap size: 182265 bytes
+Blockmap SHA256: 8aa66707495b8ce3a712f0e308e0ec29e21b570095b0d2a43012dd2014bbe9b4
 latest.yml size: 360 bytes
-latest.yml SHA256: eb720f8ed0968379e51a5ad591a2ea9245206515b9de01f5dd7df9fe7d5ba08b
+latest.yml SHA256: 13d94d93eabdeb3e4ba064b9ea50dc5d39b016a55640b3722045afe1c717509e
 ```
 
-The guarded build completed once in 75.007 seconds with exit 0, complete output, normal closure, native membership complete/zero, no force and no timeout. Actual pack-owned receipt SHA256 is `d16a9ab52bcb212437cb21e30c30ae1b44dd4185d7749faf980ee741cf770b1d`. The guarded installer-equivalent extraction verification passed; no installed or visible app execution is inferred. Independent read-only verification reproduced the canonical Git product digest, hashed all 332 payload files and all three release assets, and compared 105 intended backend/frontend source files plus the shell entry/preload/icon and package version. All five new root modules are packaged. The only root Python omissions are the existing explicit build exclusions `app.py` and `install_app_entries.py`. Backend/shell versions are both 0.26.0; no unexplained payload/source mismatch was found.
+The candidate-2 guarded build completed once in 79.950 seconds with exit 0, complete output, normal closure, native membership complete/zero, no force and no timeout. Actual pack-owned receipt SHA256 is `b8bdef8df82b43cacbf5c03ecafb6fe867a34b7bd30ea782eaf6e6a9253094c1`. The guarded installer-equivalent extraction verification passed; no installed or visible app execution is inferred. Independent read-only verification reproduced the canonical Git product digest, hashed all 332 payload files and all three release assets, and compared 105 intended backend/frontend source files plus the shell entry/preload/icon and package version. All five new root modules are packaged. The only root Python omissions are the existing explicit build exclusions `app.py` and `install_app_entries.py`. Backend/shell versions are both 0.26.0; no unexplained payload/source mismatch was found. The product digest differs from candidate 1 because the canonical preimage deliberately includes test files: its only changed non-prose Git records are `tests/test_metadata_choices.py` and `tests/test_mp3_tag_repair.py`.
 
-One guarded build execution was cleared for build plan SHA256 `b26653fb19aad4854c6722c05e94e33227967a9cc122f6d74ad2336dbae8cf08` and operator SHA256 `4463ee1b6a21d7bddcab52ae956b305ca982ced85e4dded982068c6e9de7885e` under main `scratch/0260-release-20261105`. All 2,325 tracked-source and 2,033 actual tool/config/input hashes were independently checked, including exact 87-file ownership-module and 1,927-file npm tree memberships and both empty owned npm configs. The revised operator verifies those inputs before importing the owned helper and after closure. The exact route remains installed Node/npm `run pack`, the committed native build guard and canonical outer `runOwned`, each with its existing 600000 ms bound. This is execution-plan clearance only; a result, duplicate retry, full QA, packaged/native app check or publication is not inferred from it.
+One guarded candidate-2 build execution was cleared for build plan SHA256 `a36c5dc32f91ffa04a5801345fd99b71074add46596ff01e7c48e25f69b99a7d` and operator SHA256 `2777eb1e45427dd322cacd54182b50318e1486b197ee78877fa230c3f1e93b7a` under main `scratch/0260-release-20261105/r2`. All 2,407 tracked-source and 2,033 actual tool/config/input hashes were independently checked, including exact 87-file ownership-module and 1,927-file npm tree memberships and both empty owned npm configs. The operator body matches the previously cleared version after only candidate/root literal substitutions and verifies inputs before importing the owned helper and after closure. The exact route remains installed Node/npm `run pack`, the committed native build guard and canonical outer `runOwned`, each with its existing 600000 ms bound. A duplicate retry, full QA, packaged/native app check or publication is not inferred from build clearance.
 
 ### Full-check execution contract
 
-One canonical non-app full invocation was cleared for `C:/Antigravity Projects/q26/context/context.json`, SHA256 `c9a979022a33967c5e29535c3b242f0df5af7a72bd249277bb07f6e769853365`, and one-use `q26/operator.mjs`, SHA256 `cd9384d713b1bf8adee3408079082838bf35510d1bd8cb2968e9faf68fd49716`. The context is the exact reviewed schema 3 / 900000 ms profile. The outer 930000 ms is exit/EOF collection only, with exclusive invocation creation before launch; it does not extend work. The previously proposed operator's old fixture literal was corrected before execution; reversing that sole substitution reproduces its prior hash exactly.
+One candidate-2 canonical non-app full invocation was cleared for `C:/Antigravity Projects/q27/context/context.json`, SHA256 `77154febfda44ea5d6efd397e9a0eedbaf7c40b4cbe3f4fcebaa2145f06371d0`, and one-use `q27/operator.mjs`, SHA256 `12b44b01e9cebc537d1134a101d9040e42fdf22bfcb34801986f1962d4e2dcd7`. The context is the exact reviewed schema 3 / 900000 ms profile. The outer 930000 ms is exit/EOF collection only, with exclusive invocation creation before launch; it does not extend work. Replacing the six candidate/root pin pairs in the reviewed q26 operator reproduces these exact operator bytes; no execution or collection body change is present.
 
-Independent checks matched complete manifests and membership for 2,325 source files, two harness files, 7,589 dependencies, 92 ownership files, 47 bundled-media files, one private MP3 fixture, 1,936 Node-installation files, 9,625 Git files and 898 PowerShell files, as well as all five checker/helper hashes. The source snapshot equals the clean prepared checkout and tracked membership. The single declared check is the byte-audited `node scripts/check-desktop.mjs`; its complete canonical graph keeps the 18 declared Node entries and sorted DOM/Python work, while PA-1 remains a separate mandatory native phase. No unsupported declaration is treated as n/a. The private fixture SHA256 is `3fd8b5de3da373c69eff6a0eafe42ea313c15b04952523c3c3b2515505958288`, and its actual operator path agrees with the pinned graph. The 34-file preparation freeze SHA256 `d91b6e38f88b4ab811969456b5cb79486ae342b356615a07b94b7ba7921b538c` also matches.
+Independent checks matched complete manifests and membership for 2,407 source files, two harness files, 7,589 dependencies, 92 ownership files, 47 bundled-media files, one private MP3 fixture, 1,936 Node-installation files, 9,625 Git files and 898 PowerShell files, as well as all five checker/helper and actual executable hashes. The source snapshot equals the clean prepared checkout and tracked membership. Graph SHA256 `895e8c7250cef7341df91ec83732b1f0ef88fc1727cee8c413dc8353a4279445` retains the single byte-audited `node scripts/check-desktop.mjs`, 18 declared Node entries and sorted DOM/Python work, while PA-1 remains a separate mandatory native phase. No unsupported declaration is treated as n/a. The private fixture SHA256 is `3fd8b5de3da373c69eff6a0eafe42ea313c15b04952523c3c3b2515505958288`, and its actual operator path agrees with the pinned graph. The preparation freeze SHA256 `d494727abbf7840b4a1437c0c99995b4f7292c7f5531bce72b7b8049b74dd643` and all 33 listed members also match (34 files including the freeze).
 
 The [QA plan](BooksArranger_QAPlan_v0.26.0_2026-11-05.md) explicitly records the authorized one-full-invocation exception: Ender's handoff is focused readiness, not an invented sender full receipt; Futaba owns the actual full invocation/result. No repeat on this candidate is implied. A full result and a fresh actual native operator/authority/plan acceptance remain pending and cannot be inferred from these input checks.
 

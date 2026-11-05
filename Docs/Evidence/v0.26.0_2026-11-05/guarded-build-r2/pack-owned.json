@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "\n> books-arranger@0.26.0 pack\n> node scripts/build-step.mjs pack\n\n{\"verified\": true, \"output\": \"C:\\\\Antigravity Projects\\\\Worktrees\\\\Books Arranger\\\\0260-release-20261105-r2\\\\dist\\\\builds\\\\696fda91-c49f-4294-8cea-054f9ee4c912\", \"build_id\": \"696fda91-c49f-4294-8cea-054f9ee4c912\", \"manifest\": \"C:\\\\Antigravity Projects\\\\Worktrees\\\\Books Arranger\\\\0260-release-20261105-r2\\\\dist\\\\release-artifacts.json\", \"manifest_sha256\": \"9f538ebe75163c31ead29d5794b277cf026443ab0192d970f91efdb14bea61ef\", \"prior_archived\": {}, \"staging_cleanup_removed\": 801, \"cleanup_warning\": null}\r\n",
+  "err": "",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 108860,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 62,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 5071,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 79949.7184,
+  "outputBytes": 570
+}

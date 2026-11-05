@@ -1,0 +1,80 @@
+{
+  "schema": "books-0260-publisher-readiness-v1",
+  "status": "PENDING actual full PASS, native accepted proof, formal QA GO and code review CLEAR; no publisher launch",
+  "binding": {
+    "version": "0.26.0",
+    "source_head": "a7e20113fabcb5c7a4c7896e8b64304aa918eafc",
+    "product_digest": "1caa8b99b1f333f46bde7b97c5fc465f24f3386c530c65c90d4bdfc46873864c",
+    "build_id": "696fda91-c49f-4294-8cea-054f9ee4c912",
+    "artifact_manifest_sha256": "9f538ebe75163c31ead29d5794b277cf026443ab0192d970f91efdb14bea61ef",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "source_root": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r2",
+  "runtime_pointer_sha256": "7abf4088f166b8f09d56bf5c39fb1ba93f04316d4628025d3d16d8eae32672ee",
+  "canonical_command": {
+    "executable": "C:/Program Files/nodejs/node.exe",
+    "args": [
+      "C:/Program Files/nodejs/node_modules/npm/bin/npm-cli.js",
+      "run",
+      "release"
+    ],
+    "cwd": "C:/Antigravity Projects/Worktrees/Books Arranger/0260-release-20261105-r2",
+    "owner": "Sully",
+    "deadline_ms": 600000,
+    "route": "Existing npm release -> native release lease -> exact accepted installer publisher; no rebuild-after-QA or upload fallback"
+  },
+  "source_pins": [
+    {
+      "path": "scripts/release.mjs",
+      "sha256": "37554b99f0f490a21c208b2731e959fa0be5c3cf184cd108f86ef10b7ff48f39"
+    },
+    {
+      "path": "scripts/release-flow.mjs",
+      "sha256": "9259d16132a22970683e218d5d0df18da88d7cb6e65839e076bb636beb23659f"
+    },
+    {
+      "path": "scripts/release-contract.mjs",
+      "sha256": "c2cf63586a0d2d6a8bb75fb7b76e1d358a6fcbe13047153b6acbaad2ddbcf741"
+    },
+    {
+      "path": "scripts/guarded-io.mjs",
+      "sha256": "602b7188fcf14a395086493b12b2293643c30dab8fbb22536ae3eec21db1f2f5"
+    },
+    {
+      "path": "scripts/cleanup-releases.js",
+      "sha256": "d8e71d991cbd35cc6d3f2a687e9fa71a2ba0fffbe07d59214a9c1a1de596b6f3"
+    }
+  ],
+  "required_records": [
+    "Docs/BooksArranger_QA_v0.26.0_2026-11-05.md naming exact source and manifest with GO plus exact native summary hash",
+    "Docs/BooksArranger_CodeReview_v0.26.0_2026-11-05.md naming same product/source and manifest with RELEASE CLEAR",
+    "Docs/BooksArranger_NativeQA_v0.26.0.json plus all12 original accepted raw roles",
+    "Docs/BooksArranger_ReleaseAcceptance_v0.26.0.json pointing to those exact committed reports"
+  ],
+  "preconditions": [
+    "Sully commits only final reviewed Docs/acceptance and fast-forwards release checkout to a clean descendant of a7e20113fabcb5c7a4c7896e8b64304aa918eafc with identical productTree 1caa8b99b1f333f46bde7b97c5fc465f24f3386c530c65c90d4bdfc46873864c",
+    "Sully creates/pushes only v0.26.0 naming exact final clean release HEAD; publisher verifies local/remote tag and ancestor/product identity",
+    "Guarded release re-verifies complete unpacked payload and all3 previously accepted artifacts without a new pack",
+    "Fresh publisher outer-input/runtime/ownership plan is pinned/reviewed at final release HEAD if a separate outer operator is used; this metadata is not an execution clearance",
+    "GitHub CLI credentials acquired only by existing native-held publisher; no credential payload stored in this plan",
+    "Existing keep-last4 cleanup runs only after remote assets/tag/digests verify; report any scoped cleanup refusal without bypass"
+  ],
+  "retained_artifacts": [
+    {
+      "path": "builds/696fda91-c49f-4294-8cea-054f9ee4c912/Books-Arranger-Setup-0.26.0.exe",
+      "sha256": "fa922cc83730084597896bc5f93c1d0e81c9cf5b14c0168759691a392637a18e",
+      "size": 174792889
+    },
+    {
+      "path": "builds/696fda91-c49f-4294-8cea-054f9ee4c912/Books-Arranger-Setup-0.26.0.exe.blockmap",
+      "sha256": "8aa66707495b8ce3a712f0e308e0ec29e21b570095b0d2a43012dd2014bbe9b4",
+      "size": 182265
+    },
+    {
+      "path": "builds/696fda91-c49f-4294-8cea-054f9ee4c912/latest.yml",
+      "sha256": "13d94d93eabdeb3e4ba064b9ea50dc5d39b016a55640b3722045afe1c717509e",
+      "size": 360
+    }
+  ]
+}
