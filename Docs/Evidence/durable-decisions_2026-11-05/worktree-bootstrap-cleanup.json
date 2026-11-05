@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-20261105\\scratch",
+   "reason": "Ender-owned empty test import bootstrap directories in the isolated implementation checkout; backend committed03fe85f, all private fixtures/checks closed native zero. Exact dry-run0files0bytes0protected0links0worktrees. Product checkout and Git metadata stay outside this ignored scratch leaf.",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-20261105\\scratch",
+   "isDir": true,
+   "before": {
+    "files": 0,
+    "bytes": 0
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 0,
+    "bytes": 0
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 0,
+    "bytes": 0
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 99244105728,
+   "after": 99244113920
+  }
+ ],
+ "removedFiles": 0,
+ "removedBytes": 0,
+ "keptCount": 0
+}

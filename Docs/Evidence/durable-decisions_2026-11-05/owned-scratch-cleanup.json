@@ -1,0 +1,52 @@
+{
+ "mode": "approved",
+ "apply": true,
+ "items": [
+  {
+   "kind": "approved",
+   "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\durable-decisions-20261105",
+   "reason": "Ender-owned durable decision private runners, fixture caches and temporary outputs. Original and final bridges plus all focused checks closed with native complete zero. Unique source and failed/passing receipts are preserved in Docs/Evidence. Exact dry-run admitted98files530037bytes with0protected0links0worktrees.",
+   "olderThan": null,
+   "cutoff": null,
+   "notes": [],
+   "real": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\durable-decisions-20261105",
+   "isDir": true,
+   "before": {
+    "files": 98,
+    "bytes": 530037
+   },
+   "kept": [],
+   "worktrees": [],
+   "plan": {
+    "files": 98,
+    "bytes": 530037
+   },
+   "protectedFiles": 0,
+   "newerFiles": 0,
+   "links": 0,
+   "after": {
+    "files": 0,
+    "bytes": 0
+   },
+   "removed": {
+    "files": 98,
+    "bytes": 530037
+   },
+   "needsAdmin": 0,
+   "needsAdminSample": [],
+   "skipped": 0,
+   "skippedSample": [],
+   "action": "removed"
+  }
+ ],
+ "free": [
+  {
+   "drive": "C:\\",
+   "before": 99289100288,
+   "after": 99289862144
+  }
+ ],
+ "removedFiles": 98,
+ "removedBytes": 530037,
+ "keptCount": 0
+}

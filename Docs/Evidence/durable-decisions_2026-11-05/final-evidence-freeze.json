@@ -1,0 +1,87 @@
+{
+  "files": [
+    {
+      "sha256": "0cfa2e01b62e604e1c01aa32309f6f770911799a401aaf8954272597b468ec9b",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-r1/actual-frontend-handler-bridge.json",
+      "bytes": 15306
+    },
+    {
+      "sha256": "42d73d7b8ceb286a29defc2a5fc054b538f175634cac0e45cc1ca7a149c03009",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-r1/actual-frontend-handler-bridge.log",
+      "bytes": 12607
+    },
+    {
+      "sha256": "4721d9abf2c22a59bbb44b21d32429e85f534631ee5323f7ea79d1e8849c5550",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-r1/durable_frontend_http_bridge.js",
+      "bytes": 3723
+    },
+    {
+      "sha256": "01358bb740ac4e5adb0838397437c79d9e1fc93dea6f155975efa3e5848dec9b",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-r1/freeze-bridge.py",
+      "bytes": 2847
+    },
+    {
+      "sha256": "1a90f9a352e850ef854e1f9343e9da695e51edaac41d9a3c8a7d4ad6476aedd0",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-r1/frontend-backend-bridge.py",
+      "bytes": 5269
+    },
+    {
+      "sha256": "5c26528a7ae94e50b776414d73424c0bca91c1122b611b889b4ef0216f7f436b",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-r1/owned-bridge.mjs",
+      "bytes": 1738
+    },
+    {
+      "sha256": "6056fdd450a14c87600d4f49b0d18347e60256c03c9345b923fb668674af347b",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-r1/summary.json",
+      "bytes": 4139
+    },
+    {
+      "sha256": "15d12ff4b48405f4ceb4c57e73574c701d83f62797112bdcd75cfb6e7374754c",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-final/actual-frontend-handler-final.json",
+      "bytes": 15612
+    },
+    {
+      "sha256": "8a00dfb01e5ae36334f50c9de90b0ab6ec3e8c1a7bbebb99ca4daf8c030d6f95",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-final/actual-frontend-handler-final.log",
+      "bytes": 12878
+    },
+    {
+      "sha256": "4721d9abf2c22a59bbb44b21d32429e85f534631ee5323f7ea79d1e8849c5550",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-final/durable_frontend_http_bridge.js",
+      "bytes": 3723
+    },
+    {
+      "sha256": "01358bb740ac4e5adb0838397437c79d9e1fc93dea6f155975efa3e5848dec9b",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-final/freeze-bridge.py",
+      "bytes": 2847
+    },
+    {
+      "sha256": "4a12aed4bacef345bfddb2babd595df85466252229ccdc3ba95afcee9284a3eb",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-final/frontend-backend-bridge.py",
+      "bytes": 5642
+    },
+    {
+      "sha256": "5c26528a7ae94e50b776414d73424c0bca91c1122b611b889b4ef0216f7f436b",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-final/owned-bridge.mjs",
+      "bytes": 1738
+    },
+    {
+      "sha256": "1120a32c79984301dcf36adcb37797fcbf4abb5b4d9879510a31228973c0dc97",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-final/summary.json",
+      "bytes": 4312
+    },
+    {
+      "sha256": "3a441ca1795aa940c7ed1004450a14a863ad885f3729cbb8832c8fa437557373",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/owned-scratch-cleanup.json",
+      "bytes": 1311
+    },
+    {
+      "sha256": "08abf0ae2a60d44d089b10cb5d57f04c452a72d1e1fa2592526931c722a99f56",
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/worktree-bootstrap-cleanup.json",
+      "bytes": 1239
+    }
+  ],
+  "cleanup": "Both exact owned scratch roots removed through admitted studio-sweep; zero active native owners. Product worktrees left intact.",
+  "backend_commit": "03fe85f11bde97c784a68f931e88be7680552557",
+  "bridge_qualification": "The final actual bridge binds app f81a3171 and index ac82a817 exactly. A later three-branch feedback-only delta produces app 9ccb675d; UI agent/Judy/Senua own the exact diff and unchanged transport-function audit. No false whole-file rebind claim and no third bridge."
+}
