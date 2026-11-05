@@ -29,18 +29,20 @@ get('automatic-result').append(get('automatic-result-status'),get('automatic-rea
 const document={activeElement:null,getElementById:get,querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:tag=>new Element(tag)};
 const calls=[];let backend={version:'fixture',root:'fixture-root',genres:[],status:{state:'idle',count:0,checked:0,reused:0,pending:0,errors:0},active_library:null,automatic_processing:{state:'Idle',phase:'discovery',can_start:true,can_stop:false,research:{researching:0,waiting:0,held:0},current:null,reason:'',run_id:null},audiobook_jobs:{state:'Needs attention',queued:0,failed:1,approved_total:0,converted_total:0}};
 let inventoryRows=[],retryOverride=null,inventoryOverride=null;
+const durableFixture=require('./durable_frontend_fixture.js')(),durableMemory=new Map();
 async function fixtureFetch(route,options){calls.push({route,options});const data=options.body?JSON.parse(options.body):undefined;
+  if(route.startsWith('/api/book-decisions'))return durableFixture(route,options,context.fetch);
   if(route==='/api/audiobook/retry'){if(retryOverride)return retryOverride(data);return {ok:true,status:202,json:async()=>({job_id:data.job_id,requeued:true})};}
   if(route.startsWith('/api/inventory') && inventoryOverride)return inventoryOverride();let result={};if(route.startsWith('/api/state'))result=backend;else if(route.startsWith('/api/inventory'))result={rows:inventoryRows,total:inventoryRows.length};else if(route==='/api/inspect')result={inspector:{sections:[],source_directories:[]}};
   return {ok:true,json:async()=>result};}
-const context=vm.createContext({document,console,URL,Intl,Date,JSON,location:{origin:'http://127.0.0.1:5210'},setTimeout:()=>0,clearTimeout(){},fetch:fixtureFetch});
+const context=vm.createContext({document,console,URL,Intl,Date,JSON,TextEncoder,crypto:{randomUUID:require('node:crypto').randomUUID,subtle:{digest:async(_algorithm,data)=>Uint8Array.from(require('node:crypto').createHash('sha256').update(data).digest()).buffer}},localStorage:{getItem:k=>durableMemory.get(k)||null,setItem:(k,v)=>durableMemory.set(k,v)},location:{origin:'http://127.0.0.1:5210'},setTimeout:()=>0,clearTimeout(){},fetch:fixtureFetch});
 const app=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8').replace(/controls\(\);\s*viewControls\(\);poll\(\);\s*$/,'');vm.runInContext(app,context);
 function run(code){return vm.runInContext(code,context);}
 const JOB_REASON='Working cleanup requires attention: Legacy attempt still contains working inputs';
 const NOT_YET='Working files from an earlier attempt are still present. Retry after they are cleared.';
 const READY='Check this book again and queue its audiobook job.';
 function blocked(overrides={},job={}){
-  const row={id:'cand-a',path:'cand-a',kind:'candidate',library:'Audiobooks',revision:4,scope:'fixture scope',preview:{reason:'fixture',path:''},metadata:{tags:{},notes:[]},grouping:'Source clues',title_evidence:[],title_clue:'Название книги',conflicts:[],coverage:'',companions:[],artists:[],members:[],track_order:[],included:[],
+  const row={id:'cand-a',path:'cand-a',kind:'candidate',library:'Audiobooks',revision:4,fingerprint:'a'.repeat(64),scope:'fixture scope',preview:{reason:'fixture',path:''},metadata:{tags:{},notes:[]},grouping:'Source clues',title_evidence:[],title_clue:'Название книги',conflicts:[],coverage:'',companions:[],artists:[],members:[],track_order:[],included:[],
     review:{title:'Вечный зов'},review_context:{},status:'Output needs attention',automatic:null,
     creation:{status:'Output needs attention',can_create:false,chapters_available:false,reasons:['Audiobook job already exists; inspect its current status'],job:{job_id:'job-a',state:'Output needs attention',stage:'queued',reason:JOB_REASON,retry:{allowed:true,reason:''},...job}},...overrides};
   return row;

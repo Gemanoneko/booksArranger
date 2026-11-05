@@ -1,0 +1,1 @@
+The current frozen handoff is [restoration-final/README.md](restoration-final/README.md), app f2f2c279 / index ac82a817. Earlier parent9ccb and source-guards-final a6aa proofs are historical and superseded for integration. Final committed-source Handler QA remains Futaba-owned/pending.

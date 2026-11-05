@@ -6,7 +6,7 @@ harness+=String.raw`
 const posts=[],answers={};const baseFetch=context.fetch;
 context.fetch=async(route,options)=>{const data=options?.body?JSON.parse(options.body):undefined;if(answers[route]){posts.push({route,data});return answers[route](data);}return baseFetch(route,options);};
 const ok=value=>({ok:true,status:200,json:async()=>value});const tick=()=>new Promise(r=>setImmediate(r));
-const row={id:'cand-inline',path:'cand-inline',kind:'candidate',library:'Audiobooks',revision:1,scope:'private fixture',preview:{path:''},metadata:{tags:{}},title_clue:'Мистер Вечный Канун. Уэлихолн',artists:[],members:[{path:'X:\\private\\story.mp3'}],review:{},review_context:{},status:'Held',creation:{status:'Held',can_create:false,reasons:[]},automatic:{state:'Held'},source_directory_count:1,
+const row={id:'cand-inline',path:'cand-inline',kind:'candidate',library:'Audiobooks',revision:1,fingerprint:'a'.repeat(64),scope:'private fixture',preview:{path:''},metadata:{tags:{}},title_clue:'Мистер Вечный Канун. Уэлихолн',artists:[],members:[{path:'X:\\private\\story.mp3'}],review:{},review_context:{},status:'Held',creation:{status:'Held',can_create:false,reasons:[]},automatic:{state:'Held'},source_directory_count:1,
  place:{series:'',number:'',universe:'',collection:false},ask:{kind:'author_unclear',why:'two_people',fields:{title:{proposal:'Мистер Вечный Канун. Уэлихолн',basis:'tag'},author:{proposal:'Олег Яковлев',basis:'tag'}},candidates:[{name:'Олег Яковлев'},{name:'Владимир Торин'}],destination:{path:'old.m4b'}}};
 function paint(){context.fixture=row;run('rows=[fixture];view="candidates";filters.candidates="output_attention";renderRows(true);controls()');}
 function controls(){return run('askRows.get("cand-inline").controls');}function input(name){return controls().find(x=>x.dataset.name===name);}function type(name,value){const e=input(name);e.value=value;e.handlers.input();}
@@ -48,7 +48,7 @@ const call=route=>posts.filter(p=>p.route===route).at(-1)?.data;
  const receipt='Answer saved. This book still needs its series confirmed. Enter Series and Number, then press Approve. This book has not been queued or filed.';
  answers['/api/candidate/approve']=()=>ok({saved:true,code:'series_needed',message:receipt});
  const focus=input('number');context.document.activeElement=focus;await run('askPress(askRows.get("cand-inline"),"approve")');paint();
- assert.equal(run('askResults.get("cand-inline").text'),receipt);assert.equal(run('askResults.get("cand-inline").warn'),false);assert.equal(run('askDone.has("cand-inline")'),false);
+ assert.equal(run('askResults.get("cand-inline").text'),'Approval saved for Оттенки магии01. Темный оттенок магии. '+receipt);assert.equal(run('askResults.get("cand-inline").warn'),false);assert.equal(run('askDone.has("cand-inline")'),false);
  assert.equal(input('series').value,'Оттенки магии');assert.equal(input('number').value,'1');assert.equal(context.document.activeElement,focus,'saved receipt never moves focus');
  run('applyQueueOutcome({id:"saved-q",action:"approve",book_id:"cand-inline",result:"saved",code:"series_needed",answer:{saved:true,code:"series_needed",message:'+JSON.stringify(receipt)+'}})');
  assert.equal(run('askResults.get("cand-inline").text'),receipt);assert.equal(run('askResults.get("cand-inline").warn'),false);assert.equal(run('askDone.has("cand-inline")'),false);

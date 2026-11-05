@@ -1,0 +1,111 @@
+{
+  "status": "FINAL_FROZEN_FOR_SENUA_JUDY_SULLY; Futaba committed-source real Handler QA pending",
+  "base": "9bcc58b5876e0ad2e6de8e4de39597f2bb9b7ac5",
+  "files": {
+    "tests/durable_frontend_fixture.js": {
+      "sha256": "3e24a4f3484a5f994bde52011f855960a83cd4c7e4ce48cb831712ee772db74d",
+      "bytes": 3572
+    },
+    "tests/durable_frontend_http_bridge.js": {
+      "sha256": "4721d9abf2c22a59bbb44b21d32429e85f534631ee5323f7ea79d1e8849c5550",
+      "bytes": 3723
+    },
+    "tests/test_0223_ui_frontend.js": {
+      "sha256": "4c7f0f81be901d6873e826785cc32b169bfcf04f2b58f4e889df6f6af5c59e8e",
+      "bytes": 13133
+    },
+    "tests/test_0242_frontend.js": {
+      "sha256": "73386878b55318a26d9765d91310b0b53ee1c7fac8b284e9c1dbf177777a5de0",
+      "bytes": 15265
+    },
+    "tests/test_automatic_frontend.js": {
+      "sha256": "c75aef87e25e165fb2186eb36d0ada1926028d7415e75ecb9c1a548e3eddaea4",
+      "bytes": 45078
+    },
+    "tests/test_durable_decisions_frontend.js": {
+      "sha256": "62d6a7e8c39af18367734ee91a9d025033be39e105c9ba4e55467c118073e44a",
+      "bytes": 19714
+    },
+    "tests/test_durable_drafts_frontend.js": {
+      "sha256": "bcf5504e438d95393c41ab3151b649c14971a9ce817ceeeb39333bf22d656e9b",
+      "bytes": 11074
+    },
+    "tests/test_inline_series_frontend.js": {
+      "sha256": "fac9258929e55aa2a4d7b5dfcbf10e74dae78e42f16bd1b969bd9076d1cca6c4",
+      "bytes": 17281
+    },
+    "tests/test_kept_frontend.js": {
+      "sha256": "ed3fe65029638d91986a8985f449507bf401a3e45e47d33e83414bf0c5aa2171",
+      "bytes": 13284
+    },
+    "tests/test_odd_names_frontend.js": {
+      "sha256": "750e899a72103a880fa326afc8d75d503bf7fc76d2708ae6c6c7980554674cc4",
+      "bytes": 12031
+    },
+    "tests/test_retry_frontend.js": {
+      "sha256": "af1b597a0a1648b14474805ee406374c9f27b0f87443364bf223bbca95643cd3",
+      "bytes": 24582
+    },
+    "tests/test_ruling35_frontend.js": {
+      "sha256": "0cef839bde03c64fe68f916fa35c4828e664efcbbc9768c575a2183834e8e2ef",
+      "bytes": 13468
+    },
+    "tests/test_save_metadata_frontend.js": {
+      "sha256": "febce9026668c28a928d433eb52196edc5015a5f82e9431d0f40569174b27b08",
+      "bytes": 10419
+    },
+    "tests/test_stale_list_frontend.js": {
+      "sha256": "c0c1ee0124790959658aedd36f21cb6c72a1191edd252ee0f0782b7053c2001e",
+      "bytes": 11561
+    },
+    "tests/test_todo_frontend.js": {
+      "sha256": "ee450c32df221a98d1cd56018ea24758d4fd7ec49e2e6ba76bbe4db8720cea04",
+      "bytes": 34130
+    },
+    "tests/test_todo_holds_frontend.js": {
+      "sha256": "68e6ecdca61f553be2a4413f46ad36ed8516e47426c5640abca7bf69a3272c6c",
+      "bytes": 28937
+    },
+    "web/app.js": {
+      "sha256": "f2f2c279a91de04d40c78fc01e5172559aa389e92faaa01804808168cbf7b8eb",
+      "bytes": 546739
+    },
+    "web/index.html": {
+      "sha256": "ac82a8174b36e85c213de4b8eb81f44f6c32711ad34042feb248dee0f1b3ddb3",
+      "bytes": 36017
+    }
+  },
+  "implementation_patch_sha256": "780134a24566412bf700a7f93be210254ac90d5aef2f541f554eb319f9ecd442",
+  "last_residual_delta_sha256": "660068ede691dbf823747c8c5b9a35bf15a5a2f64e9461fbe7eea8a7ee3692b7",
+  "all_review_corrections_sha256": "d2305adc7386db5466d3cd8fe03bf31c2ac18936b1e8258499aa4a34a51627dd",
+  "final_app_sha256": "f2f2c279a91de04d40c78fc01e5172559aa389e92faaa01804808168cbf7b8eb",
+  "final_index_sha256": "ac82a8174b36e85c213de4b8eb81f44f6c32711ad34042feb248dee0f1b3ddb3",
+  "affected_scripts": 32,
+  "owned_result": {
+    "ok": true,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "elapsedMs": 5869.205,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 68,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 381,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    }
+  },
+  "supersedes": [
+    "parent 9ccb handoff",
+    "source-guards-final a6aa handoff"
+  ],
+  "scope": "Full row identity guards across acknowledgments and panel restoration, source generation invalidation, terminal hold retry. Prior ever-uncertain retention and pending intent idempotency remain. Historical f81 Handler proof does not bind final semantic changes."
+}

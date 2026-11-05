@@ -1,0 +1,4 @@
+studio-sweep approved targets (apply): removed 0 file(s), 0 B; refused or kept 0 target(s).
+  REMOVED      C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-ui-20261105\scratch  [Verified empty task-created scratch parent after completed durable-ui arena cleanup; no other entries or active work.]
+               before 0 files, 0 B; removed 0 files, 0 B; after 0 files, 0 B
+  free space on C:\: 86.02 GB -> 86.02 GB (+24.00 KB, statfs)

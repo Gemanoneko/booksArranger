@@ -108,8 +108,8 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
 
   // Jobs panel (section 10, O2): the same total as All when the server sends the counts; the old count otherwise.
   run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Needs attention',queued:0,failed:1,attention_counts:{retry:2,repair:1,changed:1,audiobook:1,other:0,unsupported:1}}})+';renderJobs()');
-  assert.match(get('jobs-status').textContent,/ · 6 need attention$/);
-  run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Needs attention',queued:0,failed:4}})+';renderJobs()');assert.match(get('jobs-status').textContent,/ · 4 need attention$/);
+  assert.equal(get('jobs-status').textContent,'Needs attention · 0 queued · 6 need attention · Approved book progress unavailable');
+  run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Needs attention',queued:0,failed:4}})+';renderJobs()');assert.equal(get('jobs-status').textContent,'Needs attention · 0 queued · 4 need attention · Approved book progress unavailable');
   // Source folders hold nothing: the server sends no folder note, so the panel shows none.
   run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Completed',queued:0,failed:0,folder_cleanup_notes:[]}})+';renderJobs()');
   assert.doesNotMatch(get('jobs-help').textContent,/source folders/i);

@@ -1,0 +1,5 @@
+PASS tests/test_durable_drafts_frontend.js
+PASS tests/test_durable_decisions_frontend.js
+PASS durable frontend: all six actions/exact wire and hash, prompt names acceptance, duplicate press, newer draft, discard/reopen, lost reply before/after acceptance, mismatched receipt, restart reconciliation, refusal, all panel overlays/poll persistence/newer draft guards,403 and404→422 recovery, pending-intent dedup, paused Resume
+
+PASS tests/test_save_metadata_frontend.js

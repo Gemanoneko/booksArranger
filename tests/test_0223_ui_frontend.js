@@ -11,7 +11,7 @@ harness=harness.slice(0,harness.indexOf('(async()=>{'));
 harness+=String.raw`
 const ROOT='Z:\\Audiobooks Sorted';
 function askRow(name,ask,extra={}){
-  return {id:'cand-'+name,path:'cand-'+name,kind:'candidate',library:'Audiobooks',revision:2,scope:'fixture scope',preview:{reason:'fixture',path:''},metadata:{tags:{}},grouping:'Source clues',title_evidence:[],
+  return {id:'cand-'+name,path:'cand-'+name,kind:'candidate',library:'Audiobooks',revision:2,fingerprint:'a'.repeat(64),scope:'fixture scope',preview:{reason:'fixture',path:''},metadata:{tags:{}},grouping:'Source clues',title_evidence:[],
     title_clue:'Title '+name,conflicts:[],coverage:'',companions:[],artists:[],members:[{path:'Z:\\Audiobooks\\'+name+'\\01.m4b'}],track_order:[],included:[],review:{},review_context:{},status:'Held',
     automatic:{state:'Held',reasons:['Title or author missing']},creation:{status:'Held',can_create:false,reasons:[]},source_directory_count:1,ask,...extra};
 }
@@ -74,24 +74,17 @@ const cls=(tr,name)=>walk(statusCell(tr)).find(e=>String(e.className || '').spli
   assert.equal(run('namesValues(rows.find(row=>row.id==="cand-rats")).series'),'','one click clears it');
   assert.equal(save().getAttribute('aria-disabled'),null,'the blocked Save works at once');
 
-  // 2. Saving: "Saving these names…", then the clock and the ladder; the result names where the book goes.
+  // Durable acceptance has a finite request bound; it never claims to wait for background media work.
   let release;answers['/api/candidate/names-save']=()=>new Promise(resolve=>{release=resolve;});
-  const pressed=Date.now();await save().handlers.click({stopPropagation(){}});await tick();
+  const pressed=Date.now(),saving=run('namesSave("cand-rats")');await tick();
   const status=()=>cls(trOf('cand-rats'),'names-status');
-  assert.equal(save().textContent,'Saving…');assert.equal(status().textContent,'Saving these names…');
-  run('pressTick('+(pressed+7400)+')');
-  assert.match(status().textContent,/^Saving these names… 0:0[78] The app is busy with background work, so this takes longer\.$/,status().textContent);
-  run('pressTick('+(pressed+61000)+')');
-  assert.match(status().textContent,/^Saving these names… 1:0[01] Still waiting \(1 min\)\. The app is busy with background work\. It may still go through\. Don't press Save again\.$/);
-  inventoryRows=[other];  // the reload no longer lists it: it left this chip
-  release(ok({outcome:'saved',applies:1,job:'none',entered:['series'],destination:{path:'Герберт Джеймс\\Крысы - Герберт Джеймс.m4b',absolute:''},
-    list_row:{...rats,ask:undefined,automatic:{state:'Queued',reasons:[]},status:'Queued'}}));
-  await tick();await tick();await tick();await tick();
-  assert.equal(get('retry-all-status').textContent,'Saved names for Title rats. Goes to Audiobooks Sorted\\Герберт Джеймс\\Крысы - Герберт Джеймс.m4b. It left this list: '+run('candidateStatus({...fixture[0],ask:undefined,automatic:{state:"Queued",reasons:[]},status:"Queued"})')+'.');
-  assert.equal(get('strip-show').hidden,false,'Show it after the sentence');
-  assert.equal(get('strip-show').title,'List this book: sets Status to All and searches for its title.');
-  inventoryRows=[rats,other];await get('strip-show').handlers.click();await tick();await tick();
-  assert.equal(run('filters.candidates'),'all');assert.equal(get('search').value,'Title rats');assert.equal(run('selectedPath'),'cand-rats','the book is listed and selected');
+  assert.equal(save().textContent,'Saving…');assert.equal(status().textContent,'Saving…');
+  assert.equal(save().title,"Recording this book's decision…");
+  run('pressTick('+(pressed+7400)+')');assert.equal(status().textContent,'Saving…');
+  run('pressTick('+(pressed+61000)+')');assert.equal(status().textContent,'Saving…','timer cannot invent a background-work blocker');
+  release(ok({outcome:'saved',applies:1,job:'none',entered:['series']}));await saving;
+  assert.equal(run('namesNotes.get("cand-rats").text'),'Saved names for Title rats.');
+  assert.equal(run('namesOpen("cand-rats")'),true);assert.equal(get('strip-show').hidden,true,'acknowledgment does not invent a move or hide the row');
 
   // 4. Author rules learned online.
   const rules=[{rule_id:'r2',kind:'same_as',credit:'Страуд Джонатан',target:'Stroud Jonathan',source:'https://fantlab.ru/work1',saved_utc:'2026-10-27T10:00:00+00:00',question:'Лестница'},

@@ -10,7 +10,7 @@ harness=harness.slice(0,harness.indexOf('(async()=>{'));
 harness+=String.raw`
 const ROOT='Z:\\Audiobooks Sorted';
 function askRow(name,ask,extra={}){
-  return {id:'cand-'+name,path:'cand-'+name,kind:'candidate',library:'Audiobooks',revision:2,scope:'fixture scope',preview:{reason:'fixture',path:''},metadata:{tags:{},notes:[]},grouping:'Source clues',title_evidence:[],
+  return {id:'cand-'+name,path:'cand-'+name,kind:'candidate',library:'Audiobooks',revision:2,fingerprint:'a'.repeat(64),scope:'fixture scope',preview:{reason:'fixture',path:''},metadata:{tags:{},notes:[]},grouping:'Source clues',title_evidence:[],
     title_clue:'Title '+name,conflicts:[],coverage:'',companions:[],artists:[],members:[{path:'Z:\\Audiobooks\\'+name+'\\01.mp3'}],track_order:[],included:[],review:{},review_context:{},status:'Held',
     automatic:{state:'Held',reasons:['Playback order uncertain']},creation:{status:'Held',can_create:false,reasons:[]},source_directory_count:1,ask,...extra};
 }
@@ -46,7 +46,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
   for(const [key,tip] of [['part_of_book','Show books that may be parts of a bigger book.'],['files_unclear',"Show books where the app isn't sure which files belong."],['order_unclear',"Show books where the app isn't sure of the playback order."]])
     assert.ok(html.includes('id="group-'+key+'" type="button" class="quiet attention-group" aria-pressed="false" title="'+tip+'" hidden>'),key);
-  assert.equal(get('group-all').textContent,'All · 23');assert.equal(get('attention-shortcut').textContent,'Needs attention · 23');assert.match(get('jobs-status').textContent,/ · 23 need attention$/);
+  assert.equal(get('group-all').textContent,'All · 23');assert.equal(get('attention-shortcut').textContent,'Needs attention · 23');assert.equal(get('jobs-status').textContent,'Needs attention · 0 queued · 23 need attention · 0 converted out of 0 approved books');
 
   // Order unclear: one sentence per cause, the "Playback order" list of 5, then "+ n more".
   const order=[hold('o1','order_unclear','no_tracks',{missing:12,total:12}),hold('o2','order_unclear','some_missing',{missing:3,total:12}),hold('o3','order_unclear','some_missing',{missing:1,total:12}),
@@ -87,7 +87,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   }
   // Approve this order sends the row as shown.
   await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.deepEqual(JSON.parse(calls.filter(c=>c.route==='/api/candidate/approve').at(-1).options.body),{library:'Audiobooks',id:'cand-o1',revision:2,path:'Джордан Роберт\\Колесо Времени - Джордан Роберт.m4b',queue:true,label:'Title o1'},'with the Goes to line shown (m1)');
+  assert.deepEqual(JSON.parse(calls.filter(c=>c.route==='/api/candidate/approve').at(-1).options.body),{library:'Audiobooks',id:'cand-o1',revision:2,path:'Джордан Роберт\\Колесо Времени - Джордан Роберт.m4b'},'with the Goes to line shown (m1)');
   // Scan again on a hold row: unchanged -> "Checked hh:mm. No change."; changed -> the book leaves and is checked again.
   tr=trOf('cand-o2');await buttonsOf(tr)[2].handlers.click({stopPropagation(){}});await tick();
   assert.match(hint(tr),/^3 of 12 files have no track number\. Checked \d\d:\d\d\. No change\.$/);
@@ -100,11 +100,11 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // The audio-format gate is named in the refusal line (B5.4).
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Audio format needs an encoding decision',code:'format',row:null})});
   tr=trOf('cand-o4');await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(tr).children[0].textContent,"Approval not queued: The audio format needs a decision the app can't make yet. Select the row to read why.");
+  assert.equal(statusCell(tr).children[0].textContent,"Approval not saved: The audio format needs a decision the app can't make yet. Select the row to read why.");
   // N7: the destination moved since the row showed it (Senua m1): its own line, not "This book changed".
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Destination changed since it was shown: it is now X. Nothing was changed.',code:'moved',row:null})});
   tr=trOf('cand-o4');await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(tr).children[0].textContent,'Approval not queued: The destination changed. Check the Goes to line and try again.');approveAnswer=null;
+  assert.equal(statusCell(tr).children[0].textContent,'Approval not saved: The destination changed. Check the Goes to line and try again.');approveAnswer=null;
 
   // Files unclear: every cause, the "In" folder line and 3 names (files without the title first), mixed albums.
   const flagged=[{name:'Реклама.mp3',folder:'Z:\\Audiobooks\\Дюна',path:'x',flag:true}];

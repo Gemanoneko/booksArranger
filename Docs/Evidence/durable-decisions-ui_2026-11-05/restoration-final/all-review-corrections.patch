@@ -1,0 +1,134 @@
+--- a/web/app.js
++++ b/web/app.js
+@@ -224,6 +224,7 @@
+ }
+ try{for(const kept of JSON.parse(globalThis.localStorage?.getItem(DECISION_STORAGE)||'[]'))if(kept?.body?.request_id&&kept.hash)decisionFlights.set(kept.body.request_id,{...kept,uncertain:true});}catch{}
+ function decisionKey(library,id){return library+'\n'+id;}
++function sameDecisionRow(current,original){return !!current && current.id===original.id && current.path===original.path && current.revision===original.revision && current.fingerprint===original.fingerprint && current.size===original.size && current.modified===original.modified;}
+ function decisionName(row){return row.review?.title || row.title_clue || row.path || 'this book';}
+ function decisionAction(action){return {names:'Names',approve:'Approval',review:'Metadata',tracks:'Track review',metadata_choices:'Choices',file_review:'Metadata'}[action] || 'Changes';}
+ function decisionLine(flight,receipt){const name=flight.title,verb=(flight.body.action==='approve' || flight.body.action==='review'&&flight.body.payload?.approve===true)?'Approval saved for ':flight.body.action==='names'?'Saved names for ':'Saved '+decisionAction(flight.body.action).toLowerCase()+' for ';return verb+name+'.'+(receipt.state==='needs_review'&&receipt.reason?' Audiobook work is on hold: '+receipt.reason:'');}
+@@ -268,7 +269,7 @@
+   // Read the authoritative predecessor before allocating the new exact request.
+   const current=await request('/api/book-decisions/book',{library,id:row.id},5000);
+   const wanted=decisionEffects(action,payload);
+-  const existing=(current.decisions || []).find(d=>['accepted','applying','needs_review'].includes(d.state) && d.action===action && d.source_fingerprint===row.fingerprint && d.payload && decisionPacked(d.payload)===decisionPacked(payload) && current.head?.source_fingerprint===row.fingerprint && wanted.every(effect=>d.active_effects?.includes(effect)&&current.head.effects?.[effect]===d.request_id));
++  const existing=(current.decisions || []).find(d=>['accepted','applying'].includes(d.state) && d.action===action && d.source_fingerprint===row.fingerprint && d.payload && decisionPacked(d.payload)===decisionPacked(payload) && current.head?.source_fingerprint===row.fingerprint && wanted.every(effect=>d.active_effects?.includes(effect)&&current.head.effects?.[effect]===d.request_id));
+   if(existing){
+     const body={library,id:row.id,revision:existing.observed_revision,fingerprint:row.fingerprint,request_id:existing.request_id,predecessor:existing.predecessor,action,payload:existing.payload};
+     const hash=await decisionHash({book_id:body.id,action,revision:body.revision,fingerprint:body.fingerprint,payload:body.payload,effects:wanted,predecessor:body.predecessor});
+@@ -347,7 +348,7 @@
+     }
+     if(!/^[0-9a-f]{64}$/.test(identity.fingerprint || ''))return;
+     const owners=await readDecisionOwners(identity,library);
+-    if(ticket!==decisionPanelSequence || selectedLibrary!==library || selectedRow?.path!==row.path || selectedRow.revision!==row.revision || selectedRow.fingerprint!==row.fingerprint)return;
++    if(ticket!==decisionPanelSequence || selectedLibrary!==library || !sameDecisionRow(selectedRow,row))return;
+     decisionDisplays.set(decisionDisplayKey(row,library),{revision:row.revision,fingerprint:row.fingerprint,size:row.size,modified:row.modified,owners});
+     const shown=decisionDisplayRow(row,library);
+     if(metaSaveResult?.retained?.path===row.path)delete metaSaveResult.retained;
+@@ -377,7 +378,7 @@
+       }
+       if(has('approval')){askResults.set(row.id,{text:decisionLine({body:{action:'approve'},title:decisionName(row)},d),warn:d.state==='needs_review'});updateAskRows();}
+     }
+-  }catch{if(ticket===decisionPanelSequence && selectedRow?.path===row.path && editSeq===seq)setText('review-note',(metaSaveResult?.retained?metaSaveResult.text+' ':'')+'Saved decision status unavailable. Your local draft is kept.');}
++  }catch{if(ticket===decisionPanelSequence && sameDecisionRow(selectedRow,row) && editSeq===seq)setText('review-note',(metaSaveResult?.retained?metaSaveResult.text+' ':'')+'Saved decision status unavailable. Your local draft is kept.');}
+ }
+ function message(value='') { $('message').textContent=value; }
+ // The only writer of #version: the engine's own version, as reported by its state. Hidden while loading (Judy 3.5).
+@@ -767,7 +768,7 @@
+   if(candidate)ensureCandidateInspector(row);
+   controls();
+   const displayed=decisionDisplays.get(decisionDisplayKey(row,selectedLibrary));
+-  if(changing || reset || displayed?.revision!==row.revision || displayed?.fingerprint!==row.fingerprint || metaSaveResult?.retained || trackDraft?.retainedDecision)restoreDecisionPanel(row,selectedLibrary);
++  if(changing || reset || displayed?.revision!==row.revision || displayed?.fingerprint!==row.fingerprint || displayed?.size!==row.size || displayed?.modified!==row.modified || metaSaveResult?.retained || trackDraft?.retainedDecision)restoreDecisionPanel(row,selectedLibrary);
+   for (const element of $('inventory').children) element.setAttribute('aria-selected',String(element.dataset.path===row.path));
+ }
+ function renderRows(force=false) {
+@@ -1142,8 +1143,8 @@
+   finally{if(metaSave===flight)metaSave=null;}
+   if(selectedLibrary!==library || selectedRow?.path!==row.path){controls();return;}
+   if(saved){
+-    const current=editSeq===seq && decisionPacked(metadataReview())===decisionPacked(review) && proposalId===flight.proposal && coverId===flight.cover;
+-    if(saved.row && selectedRow?.id===row.id){
++    const current=sameDecisionRow(selectedRow,row) && editSeq===seq && decisionPacked(metadataReview())===decisionPacked(review) && proposalId===flight.proposal && coverId===flight.cover;
++    if(saved.row?.id===row.id && sameDecisionRow(selectedRow,row)){
+       const fresh={...saved.row,path:saved.row.id,kind:'candidate',library:selectedLibrary};
+       if(trackDraft?.id===fresh.id && trackDraft.revision===saved.sent.revision)trackDraft.revision=fresh.revision;
+       reviewRow=fresh;  // a later save goes to the book's new revision
+@@ -1152,7 +1153,7 @@
+     if(current){dirty=false;manualMetadataTouched=false;syncManualDraft();const values={...review};if(row.kind==='candidate')for(const field of NAME_INPUTS)delete values[field];metaSaveResult={text:savedFieldsLine(before,review)+(saved.decision?.state==='needs_review'&&saved.decision.reason?' Audiobook work is on hold: '+saved.decision.reason:''),retained:{path:row.path,revision:selectedRow.revision,fingerprint:row.fingerprint,size:row.size,modified:row.modified,seq,values}};setText('review-note',metaSaveResult.text);}
+     else setText('review-note',decisionLine({body:{action:row.kind==='candidate'?'review':'file_review'},title:decisionName(row)},saved.decision)+' Your newer edits are not saved yet.');
+   }else{
+-    if(selectedRow?.id===row.id && failure?.body?.code==='changed' && failure.body.row){reviewRow={...failure.body.row,path:row.id,kind:'candidate',library:selectedLibrary};select(reviewRow,false);}
++    if(sameDecisionRow(selectedRow,row) && failure?.body?.code==='changed' && failure.body.row){reviewRow={...failure.body.row,path:row.id,kind:'candidate',library:selectedLibrary};select(reviewRow,false);}
+     metaSaveResult={text:failure?.decisionUnknown?failure.message:'Metadata not saved: '+(failure?.message || 'Check these values and try again.'),warn:true};setText('review-note',metaSaveResult.text);
+   }
+   renderMetaSave();controls();
+@@ -1160,7 +1161,7 @@
+   if(saved){restoreDecisionPanel(selectedRow,selectedLibrary);refresh(true).catch(()=>{});}  // the list follows; its failure is not the save's
+ }
+ form.addEventListener('submit',event=>{event.preventDefault();return saveMetadata();});
+-$('approve-candidate').addEventListener('click',async()=>{const row=reviewRow || selectedRow;if(!row || row.kind!=='candidate' || dirty || ended || metadataApprovals.has(row.id))return;const context=reviewContext(),before=decisionPacked(metadataChoiceValues()),seq=editSeq,proposal=proposalId,cover=coverId;metadataApprovals.add(row.id);controls();setText('review-note','Saving decision…');try{const answer=await bookDecision(row,'review',{review:row.review,approve:true,manual_note:context.manual_note,proposal_id:context.proposal_id || null,cover_id:context.cover_id || null,names_row_only:false});decisionFeedback(row,'review',decisionLine({body:{action:'review',payload:{approve:true}},title:decisionName(row)},answer.decision)+(editSeq!==seq || before!==decisionPacked(metadataChoiceValues()) || proposal!==proposalId || cover!==coverId?' Your newer edits are not saved yet.':''));}catch(error){decisionFeedback(row,'review',error.decisionUnknown?error.message:'Metadata not saved: '+error.message,true);}finally{metadataApprovals.delete(row.id);controls();}});
++$('approve-candidate').addEventListener('click',async()=>{const row=reviewRow || selectedRow;if(!row || row.kind!=='candidate' || dirty || ended || metadataApprovals.has(row.id))return;const context=reviewContext(),before=decisionPacked(metadataChoiceValues()),seq=editSeq,proposal=proposalId,cover=coverId;metadataApprovals.add(row.id);controls();setText('review-note','Saving decision…');try{const answer=await bookDecision(row,'review',{review:row.review,approve:true,manual_note:context.manual_note,proposal_id:context.proposal_id || null,cover_id:context.cover_id || null,names_row_only:false});decisionFeedback(row,'review',decisionLine({body:{action:'review',payload:{approve:true}},title:decisionName(row)},answer.decision)+(!sameDecisionRow(selectedRow,row) || editSeq!==seq || before!==decisionPacked(metadataChoiceValues()) || proposal!==proposalId || cover!==coverId?' Your newer edits are not saved yet.':''));}catch(error){decisionFeedback(row,'review',error.decisionUnknown?error.message:'Metadata not saved: '+error.message,true);}finally{metadataApprovals.delete(row.id);controls();}});
+ $('shutdown').addEventListener('click',later('toolbar:shutdown','shutdown',async()=>{
+   if(busy || ended)return;busy=true;controls();message();
+   try{await request('/api/shutdown',{});ended=true;clearConnectionNotice();clearTimeout(timer);$('status').textContent='Server stopping. Saved catalog and pending scans remain available on the next launch.';message('You can close this browser tab.');}
+@@ -1371,7 +1372,7 @@
+   const section=$('metadata-questions'),snapshot=row.metadata_questions;
+   if(row.kind!=='candidate' || !snapshot?.questions?.length){section.hidden=true;metadataChoiceState=null;return;}
+   section.hidden=false;$('resolve-metadata-question').setAttribute('aria-label','Resolve metadata: '+(row.title_clue || row.id));
+-  const key=JSON.stringify([row.id,snapshot.signature,snapshot.questions.map(question=>[question.id,question.decision,question.renewed])]);
++  const key=JSON.stringify([row.id,row.fingerprint,snapshot.signature,snapshot.questions.map(question=>[question.id,question.decision,question.renewed])]);
+   if(!reset && metadataChoiceState?.id===row.id && metadataChoiceState.fingerprint===row.fingerprint && metadataChoiceState.edited){metadataChoiceState.revision=row.revision;updateMetadataChoiceControls();return;}
+   if(metadataChoiceState?.key===key){metadataChoiceState.revision=row.revision;updateMetadataChoiceControls();return;}
+   metadataChoiceState={id:row.id,revision:row.revision,fingerprint:row.fingerprint,key,snapshot,answers:{},baseline:metadataChoiceValues(),cover:row.review_context?.cover_id || row.selected_cover?.id || null,blockedDirty:dirty,
+@@ -1413,10 +1414,10 @@
+ $('save-metadata-choices').addEventListener('click',async()=>{
+   const saved=metadataChoiceState;if(!saved || saved.pending || ended || metadataChoiceDirtyReason())return;
+   const choices=saved.snapshot.questions.map(question=>{const answer=saved.answers[question.id] || {mode:'unresolved'},choice={question_id:question.id,...answer};if(answer.mode==='corrected'){choice.values={};for(const field of question.type==='work_profile'?(question.profile_fields || ['title','canonical_author','original_language','series','number','universe']):[question.field])choice.values[field]=form.elements.namedItem(field)?.value.trim() || '';}return choice;});
+-  const seq=editSeq,answers=decisionPacked(saved.answers),values=decisionPacked(metadataChoiceValues()),flight={at:Date.now()};saved.pending=true;saved.error='';saved.status='';choiceSave=flight;controls();updateMetadataChoiceControls();
++  const original=selectedRow,seq=editSeq,answers=decisionPacked(saved.answers),values=decisionPacked(metadataChoiceValues()),flight={at:Date.now()};saved.pending=true;saved.error='';saved.status='';choiceSave=flight;controls();updateMetadataChoiceControls();
+   try{
+-    const original=selectedRow,result=await bookDecision({...original,id:saved.id,revision:saved.revision},'metadata_choices',{signature:saved.snapshot.signature,choices,manual_note:keptNote(original)});
+-    const current=metadataChoiceState===saved && editSeq===seq && decisionPacked(saved.answers)===answers && decisionPacked(metadataChoiceValues())===values;
++    const result=await bookDecision({...original,id:saved.id,revision:saved.revision},'metadata_choices',{signature:saved.snapshot.signature,choices,manual_note:keptNote(original)});
++    const current=sameDecisionRow(selectedRow,original) && metadataChoiceState===saved && editSeq===seq && decisionPacked(saved.answers)===answers && decisionPacked(metadataChoiceValues())===values;
+     if(metadataChoiceState===saved){saved.edited=!current;saved.status='Choices saved.'+(current?'':' Your newer choices are not saved yet.')+(result.decision.state==='needs_review' && result.decision.reason?' '+result.decision.reason:'');if(!result.row)decisionFeedback(original,'metadata_choices',saved.status);if(current)restoreDecisionPanel(selectedRow,selectedLibrary);}
+     if(selectedRow?.id===saved.id && result.row && current){
+       if(trackDraft?.id===saved.id && trackDraft.revision===saved.revision)trackDraft.revision=result.row.revision;
+@@ -1426,7 +1427,7 @@
+       if(metadataChoiceState?.id===saved.id)metadataChoiceState.status=choices.every(choice=>choice.mode==='unresolved')?'Left unresolved. This book stays held.':result.unresolved_count?`Choices saved. ${result.unresolved_count} conflicts remain.`:'Choices saved. Review the metadata to continue.';
+     }
+   }catch(error){
+-    if(selectedRow?.id===saved.id && error.httpStatus===409 && error.body?.row)renderMetadataQuestions({...error.body.row,kind:'candidate'},false);
++    if(sameDecisionRow(selectedRow,original) && error.httpStatus===409 && error.body?.row)renderMetadataQuestions({...error.body.row,kind:'candidate'},false);
+     if(metadataChoiceState===saved)metadataChoiceState.error=error.decisionUnknown?error.message:'Choices not saved: '+error.message;
+   }finally{saved.pending=false;if(choiceSave===flight)choiceSave=null;controls();updateMetadataChoiceControls();}
+ });
+@@ -1477,7 +1478,7 @@
+ $('edit-held-metadata').addEventListener('click',()=>{if(!selectedRow || ended)return;if(!selectedRow.metadata_questions?.unresolved_count && namesHold(selectedRow))return panelEditNames();if(selectedRow.metadata_questions?.unresolved_count){$('manual-review').open=true;const heading=$('metadata-questions-heading');heading.scrollIntoView?.({block:'center',behavior:'auto'});heading.focus?.({preventScroll:true});return;}$('manual-review').open=true;const field=(selectedRow.metadata_holds || []).flatMap(item=>item.fields || [])[0] || 'title';const control=form.elements.namedItem(field) || form.elements.namedItem('title');control?.scrollIntoView?.({block:'center',behavior:'auto'});control?.focus?.({preventScroll:true});});
+ $('check-metadata').addEventListener('click',later('toolbar:check-metadata','check_metadata',()=>{if(dirty || busy || ended)return;$('matching-status').textContent='Checking metadata…';return candidateRequest('/api/candidate/match');}));
+ $('find-covers').addEventListener('click',later('toolbar:find-covers','find_covers',()=>candidateRequest('/api/candidate/covers')));
+-$('save-tracks').addEventListener('click',async()=>{if(!trackDraft || trackSave || !selectedRow)return;const row=selectedRow,draft=JSON.parse(JSON.stringify(trackDraft)),flight={at:Date.now()},flags={source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked};trackSave=flight;trackSaveLine();let text='';try{const answer=await bookDecision({...row,revision:draft.revision},'tracks',{order:draft.order,included:draft.included,...flags,evidence_note:''});if(selectedRow?.id===draft.id && decisionPacked(trackDraft)===decisionPacked(draft) && flags.source_coverage_confirmed===$('source-coverage').checked && flags.order_confirmed===$('playback-order').checked && flags.chapters===$('add-chapters').checked){if(answer.row){trackDraft.revision=answer.row.revision;select({...answer.row,path:answer.row.id,kind:'candidate',library:selectedLibrary},false);}trackDirty=false;manualTrackTouched=false;trackDraft.retainedDecision={fingerprint:row.fingerprint,revision:row.revision};syncManualDraft();}if(selectedRow?.id===row.id)restoreDecisionPanel(selectedRow,selectedLibrary);text='Track review saved.'+(trackDirty?' Your newer edits are not saved yet.':'')+(answer.decision.state==='needs_review'&&answer.decision.reason?' '+answer.decision.reason:'');}catch(error){text=error.decisionUnknown?error.message:'Track review not saved: '+error.message;}finally{if(trackSave===flight)trackSave=null;if(selectedRow?.id===row.id)trackSaveLine(text);controls();}});
++$('save-tracks').addEventListener('click',async()=>{if(!trackDraft || trackSave || !selectedRow)return;const row=selectedRow,draft=JSON.parse(JSON.stringify(trackDraft)),flight={at:Date.now()},flags={source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked};trackSave=flight;trackSaveLine();let text='';try{const answer=await bookDecision({...row,revision:draft.revision},'tracks',{order:draft.order,included:draft.included,...flags,evidence_note:''});if(sameDecisionRow(selectedRow,row) && decisionPacked(trackDraft)===decisionPacked(draft) && flags.source_coverage_confirmed===$('source-coverage').checked && flags.order_confirmed===$('playback-order').checked && flags.chapters===$('add-chapters').checked){if(answer.row?.id===row.id){trackDraft.revision=answer.row.revision;select({...answer.row,path:answer.row.id,kind:'candidate',library:selectedLibrary},false);}trackDirty=false;manualTrackTouched=false;trackDraft.retainedDecision={fingerprint:row.fingerprint,revision:row.revision};syncManualDraft();}if(selectedRow?.id===row.id)restoreDecisionPanel(selectedRow,selectedLibrary);text='Track review saved.'+(trackDirty?' Your newer edits are not saved yet.':'')+(answer.decision.state==='needs_review'&&answer.decision.reason?' '+answer.decision.reason:'');}catch(error){text=error.decisionUnknown?error.message:'Track review not saved: '+error.message;}finally{if(trackSave===flight)trackSave=null;if(selectedRow?.id===row.id)trackSaveLine(text);controls();}});
+ function trackSaveLine(text){const line=$('track-save-status'),button=$('save-tracks');if(!line)return;const value=trackSave?trackSave.text || 'Saving…':text ?? line.textContent;if(line.textContent!==value)line.textContent=value;if(button && trackSave){button.textContent='Saving…';button.title='Recording this book\'s decision…';button.setAttribute('aria-disabled','true');}else if(button){button.textContent='Save track review';button.removeAttribute('aria-disabled');}}
+ for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
+ $('create-audiobook').addEventListener('click',later('toolbar:create-audiobook','create',()=>{if(!dirty && !trackDirty && selectedRow?.creation?.can_create)candidateRequest('/api/audiobook/create');}));
+@@ -4994,7 +4995,7 @@
+       result=await request(route,{library:'Audiobooks',id,revision:row.revision,queue:true,title:askName(row)},kind==='scan'?120000:PRESS_TIMEOUT);
+     }
+     if(result?.queued===true)queueAccepted(row,ASK_QUEUE[kind],result);
+-    else askSettled(entry,kind,result,values,approval && (press.snapshot!==decisionPacked({values:askValues(row),names:namesFor(row)}) || rows.find(item=>item.id===id)?.fingerprint!==row.fingerprint));
++    else askSettled(entry,kind,result,values,approval && (press.snapshot!==decisionPacked({values:askValues(row),names:namesFor(row)}) || !sameDecisionRow(rows.find(item=>item.id===id),row)));
+   }catch(error){
+     if(approval)askResults.set(id,{text:error.decisionUnknown?error.message:'Approval not saved: '+(error.httpStatus?askErrorText(error,kind,row):error.message),code:error.body?.code || '',warn:true});
+     else askResults.set(id,{text:askErrorText(error,kind,row),code:error.body?.code || ''});
+@@ -5055,7 +5056,7 @@
+     const shown=confirm.paths?.get(row.id);  // the path the dialog listed (m1)
+     // Each book gets its own durable receipt before later work admission.
+     try{const answer=await bookDecision(row,'approve',{title:null,author:null,names:null,without_missing:false,choice:null,path:shown || null});
+-      askSettled(askRows.get(row.id) || {row},'approve',answer,{},draft!==decisionPacked({ask:askDrafts.get(row.id) || {},names:namesState.get(row.id)?.draft || {}}));selectedBooks.delete(row.id);approved++;}
++      askSettled(askRows.get(row.id) || {row},'approve',answer,{},draft!==decisionPacked({ask:askDrafts.get(row.id) || {},names:namesState.get(row.id)?.draft || {}}) || !sameDecisionRow(rows.find(item=>item.id===row.id),row));selectedBooks.delete(row.id);approved++;}
+     catch(error){askResults.set(row.id,{text:error.decisionUnknown?error.message:'Approval not saved: '+(error.httpStatus?askErrorText(error,'approve',row):error.message),warn:true});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}}
+     finally{askPendings.delete(row.id);}
+   }

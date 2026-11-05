@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "FAIL tests/test_todo_frontend.js\nAssertionError [ERR_ASSERTION]: The input did not match the regular expression / · 9 need attention$/. Input:\n\n'Needs attention · 0 queued · 9 need attention · 0 converted out of 0 approved books'\n\n    at C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-ui-20261105\\tests\\test_todo_frontend.js:103:10\n    at Object.<anonymous> (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-ui-20261105\\tests\\test_todo_frontend.js:326:3)\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\n    at Object.<anonymous> (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-ui-20261105\\tests\\test_todo_frontend.js:286:188)\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\n    at Object..js (node:internal/modules/cjs/loader:2108:10)\n    at Module.load (node:internal/modules/cjs/loader:1690:32)\n    at Module._load (node:internal/modules/cjs/loader:1480:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 'Needs attention · 0 queued · 9 need attention · 0 converted out of 0 approved books',\n  expected: / · 9 need attention$/,\n  operator: 'match',\n  diff: 'simple'\n}\n\nFAIL tests/test_todo_holds_frontend.js\nAssertionError [ERR_ASSERTION]: The input did not match the regular expression / · 23 need attention$/. Input:\n\n'Needs attention · 0 queued · 23 need attention · 0 converted out of 0 approved books'\n\n    at C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-ui-20261105\\tests\\test_todo_holds_frontend.js:90:139\n    at Object.<anonymous> (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-ui-20261105\\tests\\test_todo_holds_frontend.js:276:3)\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\n    at Object.<anonymous> (C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-ui-20261105\\tests\\test_todo_holds_frontend.js:237:200)\n    at Module._compile (node:internal/modules/cjs/loader:1968:14)\n    at Object..js (node:internal/modules/cjs/loader:2108:10)\n    at Module.load (node:internal/modules/cjs/loader:1690:32)\n    at Module._load (node:internal/modules/cjs/loader:1480:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 'Needs attention · 0 queued · 23 need attention · 0 converted out of 0 approved books',\n  expected: / · 23 need attention$/,\n  operator: 'match',\n  diff: 'simple'\n}\n\n",
+  "err": "",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 77964,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 14,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 35,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 555.2044,
+  "outputBytes": 2710
+}

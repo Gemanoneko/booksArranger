@@ -1,0 +1,16 @@
+FAIL tests/test_durable_drafts_frontend.js
+AssertionError [ERR_ASSERTION]: late file owner lookup cannot overlay a different size/mtime generation
++ actual - expected
+
++ 'Accepted old-file Reader'
+- 'Current-file Reader'
+
+    at eval (eval at <anonymous> (C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-ui-20261105\tests\test_durable_drafts_frontend.js:85:1), <anonymous>:113:10) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'Accepted old-file Reader',
+  expected: 'Current-file Reader',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+

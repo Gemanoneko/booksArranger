@@ -1,0 +1,14 @@
+FAIL tests/test_kept_frontend.js
+AssertionError [ERR_ASSERTION]: The input did not match the regular expression / · 6 need attention$/. Input:
+
+'Needs attention · 0 queued · 6 need attention · Approved book progress unavailable'
+
+    at C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-ui-20261105\tests\test_kept_frontend.js:154:10 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'Needs attention · 0 queued · 6 need attention · Approved book progress unavailable',
+  expected: / · 6 need attention$/,
+  operator: 'match',
+  diff: 'simple'
+}
+

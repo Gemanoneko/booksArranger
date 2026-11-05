@@ -1,0 +1,81 @@
+{
+  "bridged_app_sha256": "f81a3171dbfe36e312bf76821aa72df557f3880de6288f2578d751cf7d1fd4c8",
+  "final_app_sha256": "9ccb675d9ab177e20408d24e4ed1e07b9ca2fec87ce404e10bd976a64d635b36",
+  "index_sha256": "ac82a8174b36e85c213de4b8eb81f44f6c32711ad34042feb248dee0f1b3ddb3",
+  "feedback_patch_sha256": "bd062646205fbf274eccd0d30c8549c24ce35c9cecfad8284487880fe97d3a79",
+  "bridge_summary": "Docs/Evidence/durable-decisions_2026-11-05/actual-frontend-handler-final/summary.json",
+  "bridge_summary_sha256": "1120a32c79984301dcf36adcb37797fcbf4abb5b4d9879510a31228973c0dc97",
+  "equal_regions": [
+    {
+      "region": "request_headers_and_bounded_transport",
+      "sha256_before": "56beb483a402a96b2c2cb8a456d416a3987d4880464247cd5e23185ab8ff2d6a",
+      "sha256_after": "56beb483a402a96b2c2cb8a456d416a3987d4880464247cd5e23185ab8ff2d6a",
+      "bytes": 1836,
+      "equal": true
+    },
+    {
+      "region": "storage_identity_canonical_hash_and_effects",
+      "sha256_before": "18523459d98f5ce16db9281afff3c87b4776102d541e6900d014b9955a21f830",
+      "sha256_after": "18523459d98f5ce16db9281afff3c87b4776102d541e6900d014b9955a21f830",
+      "bytes": 2327,
+      "equal": true
+    },
+    {
+      "region": "receipt_validation_uncertainty_dedup_body_and_head_ownership",
+      "sha256_before": "35ed069f3e4dd6c0a3742e7aa3ba05520ffb95befd893b31656c7808050a1ad9",
+      "sha256_after": "35ed069f3e4dd6c0a3742e7aa3ba05520ffb95befd893b31656c7808050a1ad9",
+      "bytes": 8185,
+      "equal": true
+    },
+    {
+      "region": "read_only_names_panel_overlay_and_source_revision_draft_guards",
+      "sha256_before": "5b10f662e2f8a3dfd9152788d17108804da23779e0ed9203bad7381ab4f0e504",
+      "sha256_after": "5b10f662e2f8a3dfd9152788d17108804da23779e0ed9203bad7381ab4f0e504",
+      "bytes": 7403,
+      "equal": true
+    },
+    {
+      "region": "review_and_file_review_dto",
+      "sha256_before": "cfcea6a906a78cef8cb8b958775424eeed1413c719b9f4e37b464e91fada4b68",
+      "sha256_after": "cfcea6a906a78cef8cb8b958775424eeed1413c719b9f4e37b464e91fada4b68",
+      "bytes": 720,
+      "equal": true
+    },
+    {
+      "region": "metadata_choices_dto_and_newer_answer_guards",
+      "sha256_before": "420248980a1f9451b62efda2e62f0889e02c90d45488b98f0e2876cceee6841d",
+      "sha256_after": "420248980a1f9451b62efda2e62f0889e02c90d45488b98f0e2876cceee6841d",
+      "bytes": 11123,
+      "equal": true
+    },
+    {
+      "region": "row_approval_dto_and_newer_draft_guard",
+      "sha256_before": "21660a247cf4b893bcc9a08c9ab1bae70b84a44602109f99abdde4e9778da952",
+      "sha256_after": "21660a247cf4b893bcc9a08c9ab1bae70b84a44602109f99abdde4e9778da952",
+      "bytes": 3476,
+      "equal": true
+    },
+    {
+      "region": "bulk_approval_dto_and_newer_draft_guard",
+      "sha256_before": "69d249dbf490f953611db03d0c95e2730e39ab8b77f980d836dc7bd55ed24b0f",
+      "sha256_after": "69d249dbf490f953611db03d0c95e2730e39ab8b77f980d836dc7bd55ed24b0f",
+      "bytes": 1905,
+      "equal": true
+    },
+    {
+      "region": "track_dto_and_checkbox_newer_draft_guard",
+      "sha256_before": "546b4237fb2816c17ca3fa81ce2d7fcfcbdff4785b52e8c055f269f7c3610ea1",
+      "sha256_after": "546b4237fb2816c17ca3fa81ce2d7fcfcbdff4785b52e8c055f269f7c3610ea1",
+      "bytes": 1146,
+      "equal": true
+    },
+    {
+      "region": "candidate_approval_dto",
+      "sha256_before": "ad7be14a889a6bf01890aabe1dde7818876144d8de9db6cd0bbd3fdcac7e181e",
+      "sha256_after": "ad7be14a889a6bf01890aabe1dde7818876144d8de9db6cd0bbd3fdcac7e181e",
+      "bytes": 205,
+      "equal": true
+    }
+  ],
+  "difference": "Three feedback changes only: append newer-draft status after track acknowledgement; acknowledge saved metadata snapshot plus newer draft; add read-only current-value predicate solely to candidate-approval feedback. No payload, transport, persistence, receipt, ownership, overlay, admission or application branch changed."
+}

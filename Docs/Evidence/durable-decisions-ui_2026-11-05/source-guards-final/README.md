@@ -1,0 +1,13 @@
+# Final frontend source guards and terminal retry
+
+This leaf supersedes the earlier 9ccb frozen source and feedback-equivalence handoff in the parent evidence directory. `summary.json` names all 18 owned paths and exact raw source/test hashes. Product: app a6aa6ecb / index ac82a817. Do not use the historical c55 patch or 3359 summary for integration.
+
+Senua UI-M1: same ID/path does not establish the same source/revision. Metadata and file-metadata Save, tracks, metadata choices and affected approval feedback/draft-clearing branches now compare ID, path, revision, fingerprint, size and modified token. A prior receipt cannot clear the current draft or roll the current row back after a source change. Metadata-choice state also binds its source fingerprint and captures the immutable original row before awaiting acknowledgment. Names retains its existing fingerprint guard; read-only effective saved names remain visible across a disjoint same-source revision advance.
+
+Senua UI-M2: unchanged unresolved accepted/applying intent remains idempotent on re-click. `needs_review` is terminal and permits an explicit fresh current-revision retry, even when values remain identical. Unknown/restored requests continue to reconcile their exact original request ID/body/hash before any new intent; authentication/unavailability and 404 followed by 422 never erase an uncertain request.
+
+The exact prior 9ccb bytes reproduce both findings (`source-guards-9ccb-red`): a late metadata row rolls the source fingerprint back, and a terminal held intent prevents a fresh request. Corrected private fixtures cover candidate metadata, file generations, track source changes, metadata-choice source changes, held retry and accepted-pending dedup. `source-guards-final-affected` is 32 affected/shared-harness scripts PASS, code0, closed/outputComplete, native complete/zero, with no timeout or force. Syntax passed.
+
+`source-guard-and-terminal-retry.patch` is the exact semantic delta from 9ccb; `implementation.patch` is the complete 18-file delta from 9bcc. These changes are semantic and are not represented as feedback-only equivalence to the earlier f81 HTTP bridge. Futaba's final real Handler check on the committed combined source is still required and belongs to the parent handoff. No build, full entry, installed app, browser, focus or live-library action occurred in this lane.
+
+The parent evidence preserves earlier feedback-only and initial attention-count baseline proofs. `runner/` contains snapshots of the exact owned runner and prior-hash baseline loader used here; original task scratch is removed after preservation.

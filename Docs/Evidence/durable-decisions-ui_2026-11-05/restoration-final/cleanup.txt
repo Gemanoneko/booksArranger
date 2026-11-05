@@ -1,0 +1,4 @@
+studio-sweep approved targets (apply): removed 66 file(s), 1.66 MB; refused or kept 0 target(s).
+  REMOVED      C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-ui-20261105\scratch\durable-ui  [Completed task-owned durable frontend fixture arena; all exact source patches, baseline failures and final PASS receipts preserved under Books Arranger Docs/Evidence/durable-decisions-ui_2026-11-05; parent explicitly authorized cleanup of this exact lane scratch.]
+               before 66 files, 1.66 MB; removed 66 files, 1.66 MB; after 0 files, 0 B
+  free space on C:\: 85.45 GB -> 85.45 GB (+1.79 MB, statfs)

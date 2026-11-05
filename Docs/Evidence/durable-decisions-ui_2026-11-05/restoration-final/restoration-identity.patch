@@ -1,0 +1,29 @@
+--- a/web/app.js
++++ b/web/app.js
+@@ -348,7 +348,7 @@
+     }
+     if(!/^[0-9a-f]{64}$/.test(identity.fingerprint || ''))return;
+     const owners=await readDecisionOwners(identity,library);
+-    if(ticket!==decisionPanelSequence || selectedLibrary!==library || selectedRow?.path!==row.path || selectedRow.revision!==row.revision || selectedRow.fingerprint!==row.fingerprint)return;
++    if(ticket!==decisionPanelSequence || selectedLibrary!==library || !sameDecisionRow(selectedRow,row))return;
+     decisionDisplays.set(decisionDisplayKey(row,library),{revision:row.revision,fingerprint:row.fingerprint,size:row.size,modified:row.modified,owners});
+     const shown=decisionDisplayRow(row,library);
+     if(metaSaveResult?.retained?.path===row.path)delete metaSaveResult.retained;
+@@ -378,7 +378,7 @@
+       }
+       if(has('approval')){askResults.set(row.id,{text:decisionLine({body:{action:'approve'},title:decisionName(row)},d),warn:d.state==='needs_review'});updateAskRows();}
+     }
+-  }catch{if(ticket===decisionPanelSequence && selectedRow?.path===row.path && editSeq===seq)setText('review-note',(metaSaveResult?.retained?metaSaveResult.text+' ':'')+'Saved decision status unavailable. Your local draft is kept.');}
++  }catch{if(ticket===decisionPanelSequence && sameDecisionRow(selectedRow,row) && editSeq===seq)setText('review-note',(metaSaveResult?.retained?metaSaveResult.text+' ':'')+'Saved decision status unavailable. Your local draft is kept.');}
+ }
+ function message(value='') { $('message').textContent=value; }
+ // The only writer of #version: the engine's own version, as reported by its state. Hidden while loading (Judy 3.5).
+@@ -768,7 +768,7 @@
+   if(candidate)ensureCandidateInspector(row);
+   controls();
+   const displayed=decisionDisplays.get(decisionDisplayKey(row,selectedLibrary));
+-  if(changing || reset || displayed?.revision!==row.revision || displayed?.fingerprint!==row.fingerprint || metaSaveResult?.retained || trackDraft?.retainedDecision)restoreDecisionPanel(row,selectedLibrary);
++  if(changing || reset || displayed?.revision!==row.revision || displayed?.fingerprint!==row.fingerprint || displayed?.size!==row.size || displayed?.modified!==row.modified || metaSaveResult?.retained || trackDraft?.retainedDecision)restoreDecisionPanel(row,selectedLibrary);
+   for (const element of $('inventory').children) element.setAttribute('aria-selected',String(element.dataset.path===row.path));
+ }
+ function renderRows(force=false) {

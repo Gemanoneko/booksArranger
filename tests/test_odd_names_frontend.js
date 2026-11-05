@@ -10,7 +10,7 @@ harness=harness.slice(0,harness.indexOf('(async()=>{'));
 harness+=String.raw`
 const ROOT='Z:\\Audiobooks Sorted';
 function askRow(name,ask){
-  return {id:'cand-'+name,path:'cand-'+name,kind:'candidate',library:'Audiobooks',revision:2,scope:'fixture scope',preview:{reason:'fixture',path:''},metadata:{tags:{},notes:[]},grouping:'Source clues',title_evidence:[],
+  return {id:'cand-'+name,path:'cand-'+name,kind:'candidate',library:'Audiobooks',revision:2,fingerprint:'a'.repeat(64),scope:'fixture scope',preview:{reason:'fixture',path:''},metadata:{tags:{},notes:[]},grouping:'Source clues',title_evidence:[],
     title_clue:'Title '+name,conflicts:[],coverage:'',companions:[],artists:[],members:[{path:'Z:\\Audiobooks\\Unsorted\\'+name+'\\01.mp3'}],track_order:[],included:[],review:{},review_context:{},status:'Held',
     automatic:{state:'Held',reasons:[ask.reasons[0]]},creation:{status:'Held',can_create:false,reasons:[]},source_directory_count:1,ask};
 }

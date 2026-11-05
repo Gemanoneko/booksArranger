@@ -1,0 +1,34 @@
+PASS tests/test_retry_frontend.js
+PASS tests/test_0242_frontend.js
+PASS tests/test_0231_rows_frontend.js
+PASS tests/test_0231_destination_frontend.js
+PASS tests/test_0223_ui_frontend.js
+PASS tests/test_attention_frontend.js
+PASS tests/test_bulk_retry_receipts_frontend.js
+PASS tests/test_busy_frontend.js
+PASS tests/test_delete_frontend.js
+PASS tests/test_delete_leaves_frontend.js
+PASS tests/test_durable_decisions_frontend.js
+PASS durable frontend: all six actions/exact wire and hash, prompt names acceptance, duplicate press, newer draft, discard/reopen, lost reply before/after acceptance, mismatched receipt, restart reconciliation, refusal, all panel overlays/poll persistence/newer draft guards,403 and404→422 recovery, pending-intent dedup, paused Resume
+
+PASS tests/test_durable_drafts_frontend.js
+PASS tests/test_inline_series_frontend.js
+PASS tests/test_iron_skazka_frontend.js
+PASS tests/test_kept_frontend.js
+PASS tests/test_missing_files_frontend.js
+PASS tests/test_odd_names_frontend.js
+PASS tests/test_original_title_frontend.js
+PASS tests/test_panel_lock_frontend.js
+PASS tests/test_precheck_frontend.js
+PASS tests/test_producer_recovery_frontend.js
+PASS tests/test_queue_frontend.js
+PASS tests/test_refused_retry_frontend.js
+PASS tests/test_retry_selected_frontend.js
+PASS tests/test_ruling35_frontend.js
+PASS tests/test_ruling37_frontend.js
+PASS tests/test_stale_list_frontend.js
+PASS tests/test_startover_frontend.js
+PASS tests/test_todo_frontend.js
+PASS tests/test_todo_holds_frontend.js
+PASS tests/test_automatic_frontend.js
+PASS tests/test_save_metadata_frontend.js

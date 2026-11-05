@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "PASS tests/test_retry_frontend.js\nPASS tests/test_0242_frontend.js\nPASS tests/test_0231_rows_frontend.js\nPASS tests/test_0231_destination_frontend.js\nPASS tests/test_0223_ui_frontend.js\nPASS tests/test_attention_frontend.js\nPASS tests/test_bulk_retry_receipts_frontend.js\nPASS tests/test_busy_frontend.js\nPASS tests/test_delete_frontend.js\nPASS tests/test_delete_leaves_frontend.js\nPASS tests/test_durable_decisions_frontend.js\nPASS durable frontend: all six actions/exact wire and hash, prompt names acceptance, duplicate press, newer draft, discard/reopen, lost reply before/after acceptance, mismatched receipt, restart reconciliation, refusal, all panel overlays/poll persistence/newer draft guards,403 and404→422 recovery, pending-intent dedup, paused Resume\n\nPASS tests/test_durable_drafts_frontend.js\nPASS tests/test_inline_series_frontend.js\nPASS tests/test_iron_skazka_frontend.js\nPASS tests/test_kept_frontend.js\nPASS tests/test_missing_files_frontend.js\nPASS tests/test_odd_names_frontend.js\nPASS tests/test_original_title_frontend.js\nPASS tests/test_panel_lock_frontend.js\nPASS tests/test_precheck_frontend.js\nPASS tests/test_producer_recovery_frontend.js\nPASS tests/test_queue_frontend.js\nPASS tests/test_refused_retry_frontend.js\nPASS tests/test_retry_selected_frontend.js\nPASS tests/test_ruling35_frontend.js\nPASS tests/test_ruling37_frontend.js\nPASS tests/test_stale_list_frontend.js\nPASS tests/test_startover_frontend.js\nPASS tests/test_todo_frontend.js\nPASS tests/test_todo_holds_frontend.js\nPASS tests/test_automatic_frontend.js\nPASS tests/test_save_metadata_frontend.js\n",
+  "err": "",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 51980,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 68,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 381,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 5869.205,
+  "outputBytes": 1592
+}

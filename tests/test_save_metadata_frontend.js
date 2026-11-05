@@ -17,15 +17,15 @@ const nodes=new Map(),get=id=>{if(!nodes.has(id))nodes.set(id,new Element(id));r
 const fields=new Map();for(const key of ['original_language','title','author','canonical_author','narrator','universe','series','number','genre','topic','multi_author','anthology'])fields.set(key,new Element());
 const form=get('review-form');form.elements={namedItem:key=>fields.get(key)};for(const field of fields.values())form.append(field);get('candidate-members').parentElement=new Element();
 const document={getElementById:get,querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:tag=>new Element(tag),activeElement:null};
-const answers=[];let requests=[],refreshes=0;
-const context=vm.createContext({document,console,URL,location:{origin:'http://127.0.0.1:5211'},setTimeout:()=>0,clearTimeout(){},
-  fetch:(route,options)=>{const body=options?.body?JSON.parse(options.body):null;requests.push({route,body});
+const answers=[];let requests=[],refreshes=0,bookUnavailable=false;const durableFixture=require('./durable_frontend_fixture.js')(),durableMemory=new Map();
+const context=vm.createContext({document,console,URL,TextEncoder,crypto:{randomUUID:require('node:crypto').randomUUID,subtle:{digest:async(_algorithm,data)=>Uint8Array.from(require('node:crypto').createHash('sha256').update(data).digest()).buffer}},localStorage:{getItem:k=>durableMemory.get(k)||null,setItem:(k,v)=>durableMemory.set(k,v)},location:{origin:'http://127.0.0.1:5211'},setTimeout:()=>0,clearTimeout(){},
+  fetch:(route,options)=>{if(route==='/api/book-decisions/book'&&bookUnavailable)throw Error('Private head read unavailable');if(route.startsWith('/api/book-decisions'))return durableFixture(route,options,context.fetch);const body=options?.body?JSON.parse(options.body):null;requests.push({route,body});
     if(route==='/api/candidate/review'){return new Promise(resolve=>answers.push({body,resolve}));}
     return Promise.resolve({ok:true,json:async()=>({})});}});
 let source=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');source=source.replace(/viewControls\(\);poll\(\);\s*$/,'');vm.runInContext(source,context);
 vm.runInContext('refresh=async()=>{refreshCount++;throw Error("list read failed")};var refreshCount=0',context);
 const run=js=>vm.runInContext(js,context),tick=()=>new Promise(resolve=>setImmediate(resolve));
-const row={id:'book1',revision:4,path:'book1',kind:'candidate',library:'Audiobooks',scope:'fixture',grouping:'Leaf folder',coverage:'',title_evidence:[],conflicts:[],metadata:{tags:{}},preview:{reason:'',path:''},
+const row={id:'book1',revision:4,fingerprint:'a'.repeat(64),path:'book1',kind:'candidate',library:'Audiobooks',scope:'fixture',grouping:'Leaf folder',coverage:'',title_evidence:[],conflicts:[],metadata:{tags:{}},preview:{reason:'',path:''},
   review:{title:'Saved',canonical_author:'Author',author:'Author Folder',original_language:'Other'},title_clue:'Book One',artists:[],companions:[],members:[],included:[],track_order:[],matching:{state:'idle',proposals:[]},
   review_context:{metadata_actor:'assistant',manual_note:'Old note'},cover_choices:[],creation:{status:'Ready to create',can_create:false,destination:'',duration_seconds:1,reasons:[]}};
 const answered=(revision,narrator)=>({ok:true,status:200,json:async()=>({saved:true,row:{...row,revision,review:{...row.review,narrator}}})});
@@ -51,24 +51,25 @@ function press(){return form.handlers.submit({preventDefault(){}});}
   // 3. Typed while it saved, with no second press: those edits stay unsaved.
   type('narrator','Сейф №3');const third=press();await tick();type('narrator','Сейф №4');
   answers[2].resolve(answered(7,'Сейф №3'));await third;await tick();
-  assert.equal(note(),'Unsaved local review.');assert.equal(run('dirty'),true);
+  assert.equal(note(),'Saved metadata for Saved. Your newer edits are not saved yet.');assert.equal(run('dirty'),true);
   // 4. Candidate changed: his values are kept and saved again on the new revision, once.
   const fourth=press();await tick();assert.equal(answers[3].body.review.narrator,'Сейф №4');
   answers[3].resolve({ok:false,status:409,json:async()=>({error:'Candidate changed; reload evidence before reviewing',code:'changed',row:{...row,revision:9,review:{...row.review,narrator:'Researched'}}})});
-  await tick();await tick();assert.equal(answers.length,5,'saved again');assert.equal(answers[4].body.revision,9);assert.equal(answers[4].body.review.narrator,'Сейф №4','his value, not the research\'s');
-  answers[4].resolve(answered(10,'Сейф №4'));await fourth;await tick();assert.equal(note(),'Saved: Reader / narrator.');
+  await fourth;await tick();assert.equal(answers.length,4,'refusal is not acceptance or an automatic rewrite');assert.equal(run('dirty'),true);assert.match(note(),/^Metadata not saved: Candidate changed/);const corrected=press();await tick();assert.equal(answers.length,5,'explicit retry preserves the draft on current revision');assert.equal(answers[4].body.revision,9);assert.equal(answers[4].body.review.narrator,'Сейф №4','his value, not the research\'s');
+  answers[4].resolve(answered(10,'Сейф №4'));await corrected;await tick();assert.equal(note(),'Saved: Reader / narrator.');
   // 5. During another press of this page the save waits for it, then runs (ruling 35).
   type('narrator','Сейф №5');run('busy=true');press();await tick();
-  assert.equal(answers.length,5,'waits');assert.equal(button.textContent,'Saving…');assert.equal(note(),'Saving after the current operation finishes…');
-  run('busy=false;controls()');await tick();assert.equal(answers.length,6,'runs once the other press ends');assert.equal(answers[5].body.review.narrator,'Сейф №5');
+  assert.equal(answers.length,6,'durable decision sends while unrelated work is busy');assert.equal(button.textContent,'Saving…');assert.equal(note(),'Saving…');
+  run('busy=false;controls()');await tick();assert.equal(answers.length,6,'ending unrelated work cannot duplicate the decision');assert.equal(answers[5].body.review.narrator,'Сейф №5');
   answers[5].resolve(answered(11,'Сейф №5'));await tick();await tick();assert.equal(note(),'Saved: Reader / narrator.');
   // 6. A refusal says so; nothing is silent.
   type('narrator','Сейф №6');const sixth=press();await tick();answers[6].resolve({ok:false,status:400,json:async()=>({error:'Invalid canonical metadata'})});await sixth;await tick();
-  assert.equal(note(),'Not saved. Invalid canonical metadata. Nothing was changed.','0.22.3 (Judy 2.5): the reason beside the button, not at the page top');assert.equal(run('dirty'),true,'his values stay');
+  assert.equal(note(),'Metadata not saved: Invalid canonical metadata','0.22.3 (Judy 2.5): the reason beside the button, not at the page top');assert.equal(run('dirty'),true,'his values stay');
   // 7. Ruling 40 (Senua's 0.22.3 review, M3): a book's hidden name inputs are never what a Save sends. The request says the
   // names are the row's, and carries the saved draft's names, whatever stale text the hidden inputs hold.
   fields.get('title').value='Stale hidden title';fields.get('series').value='Old series';type('narrator','Сейф №7');const seventh=press();await tick();
   assert.equal(answers[7].body.names_row_only,true);assert.equal(answers[7].body.review.title,'Saved');assert.equal(answers[7].body.review.series,'');
   assert.equal(answers[7].body.review.narrator,'Сейф №7');answers[7].resolve(answered(12,'Сейф №7'));await seventh;await tick();
-  console.log('PASS Save preview metadata: Saving… at the press, Saved. with the answer, no press dropped, typed edits kept unsaved, rebased on Candidate changed, waits for another press');
+  document.activeElement=null;type('narrator','Accepted pending reader');const pending=press();await tick();bookUnavailable=true;answers[8].resolve({ok:true,status:202,json:async()=>({queued:true})});await pending;await tick();run('select(selectedRow,false)');assert.equal(fields.get('narrator').value,'Accepted pending reader','an unavailable head read cannot erase just-acknowledged form values on a poll');assert.match(note(),/^Saved: Reader \/ narrator\./);bookUnavailable=false;await run('restoreDecisionPanel(selectedRow,selectedLibrary)');assert.equal(fields.get('narrator').value,'Accepted pending reader');
+  console.log('PASS Save preview metadata: Saving… at the press, Saved. with the answer, no press dropped, typed edits kept unsaved, explicit retry after Candidate changed, immediate durable acceptance during another press');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -1,0 +1,30 @@
+FAIL tests/test_durable_decisions_frontend.js
+AssertionError [ERR_ASSERTION]: an explicit retry after terminal needs_review accepts a fresh current-revision decision
+
+21 !== 22
+
+    at eval (eval at <anonymous> (C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-ui-20261105\tests\test_durable_decisions_frontend.js:82:1), <anonymous>:125:298) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 21,
+  expected: 22,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+FAIL tests/test_durable_drafts_frontend.js
+AssertionError [ERR_ASSERTION]: old metadata response cannot roll back current source identity
++ actual - expected
+
++ 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+- 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
+    at eval (eval at <anonymous> (C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-ui-20261105\tests\test_durable_drafts_frontend.js:80:1), <anonymous>:105:10) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  expected: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+

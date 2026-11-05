@@ -37,7 +37,8 @@ let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=n
 // chip changes and are dropped on Approve; done/results/checked are the per-row outcomes shown until the row leaves.
 let askBulk=false,approveConfirm=null;
 const askPendings=new Map();  // book id -> {id, kind, at}: a row's press on its way (one per row; rows never hold each other)
-let editSeq=0,metaSave=null,metaAgain=false,metaQueued=false;  // Save preview metadata (2026-10-26)
+const metadataApprovals=new Set();
+let editSeq=0,metaSave=null,metaAgain=false;  // Save preview metadata (2026-10-26)
 const askRows=new Map(),askDrafts=new Map(),askDone=new Map(),askResults=new Map(),askChecked=new Map();
 // Delete book (ruling 23): its row buttons, its row hints, the press reading the list, and the open dialog.
 const deleteButtons=new Map(),deleteNotes=new Map();let deletePending=null,deleteDialog=null,focusPlan=null,deleteNext=null;
@@ -204,6 +205,180 @@ async function request(route, data, timeoutMs=0, signal=null) {
   finally{if(timer)clearTimeout(timer);if(ticket!==null)inflight.delete(ticket);if(busyShown)renderBusy();}
   if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;error.automaticProcessing=result.automatic_processing;error.body=result;throw error;}
   return result;
+}
+// Durable book decisions have their own prompt acceptance path. They never enter
+// the cancellable in-page operation queue and a transport failure is not a refusal.
+const decisionFlights=new Map(),decisionBooks=new Map(),decisionSubmissions=new Map(),decisionDisplays=new Map(),decisionClosed=new Set();
+const DECISION_STORAGE='books-decisions-v1',DECISION_STATES=new Set(['accepted','applying','applied','needs_review','superseded']);
+function decisionPacked(value){if(value===null || typeof value!=='object')return JSON.stringify(value);if(Array.isArray(value))return '['+value.map(decisionPacked).join(',')+']';return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+decisionPacked(value[key])).join(',')+'}';}
+async function decisionHash(value){const bytes=new TextEncoder().encode(decisionPacked(value));return [...new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256',bytes))].map(n=>n.toString(16).padStart(2,'0')).join('');}
+function decisionEffects(action,payload){const keys=action==='names'?Object.keys(payload.names).map(k=>'names.'+k):action==='approve'?['approval',...Object.keys(payload.names || {}).map(k=>'names.'+k),...['title','author'].filter(k=>typeof payload[k]==='string'&&payload[k].trim()).map(k=>'names.'+k)]:[action];return [...new Set(keys)].sort();}
+function rememberDecisions(required=false){
+  try{
+    if(!globalThis.localStorage)throw Error('Storage unavailable');
+    const kept=new Map(JSON.parse(globalThis.localStorage.getItem(DECISION_STORAGE)||'[]').filter(f=>f?.body?.request_id&&f.hash).map(f=>[f.body.request_id,f]));
+    for(const id of decisionClosed)kept.delete(id);
+    for(const f of decisionFlights.values())kept.set(f.body.request_id,{body:f.body,hash:f.hash,title:f.title});
+    globalThis.localStorage.setItem(DECISION_STORAGE,JSON.stringify([...kept.values()]));
+  }catch{if(required)throw Error('This decision could not be kept for recovery. Your draft is kept.');}
+}
+try{for(const kept of JSON.parse(globalThis.localStorage?.getItem(DECISION_STORAGE)||'[]'))if(kept?.body?.request_id&&kept.hash)decisionFlights.set(kept.body.request_id,{...kept,uncertain:true});}catch{}
+function decisionKey(library,id){return library+'\n'+id;}
+function sameDecisionRow(current,original){return !!current && current.id===original.id && current.path===original.path && current.revision===original.revision && current.fingerprint===original.fingerprint && current.size===original.size && current.modified===original.modified;}
+function decisionName(row){return row.review?.title || row.title_clue || row.path || 'this book';}
+function decisionAction(action){return {names:'Names',approve:'Approval',review:'Metadata',tracks:'Track review',metadata_choices:'Choices',file_review:'Metadata'}[action] || 'Changes';}
+function decisionLine(flight,receipt){const name=flight.title,verb=(flight.body.action==='approve' || flight.body.action==='review'&&flight.body.payload?.approve===true)?'Approval saved for ':flight.body.action==='names'?'Saved names for ':'Saved '+decisionAction(flight.body.action).toLowerCase()+' for ';return verb+name+'.'+(receipt.state==='needs_review'&&receipt.reason?' Audiobook work is on hold: '+receipt.reason:'');}
+function decisionFeedback(row,action,text,warn=false){
+  if(action==='names'){const pending=namesState.get(row.id)?.pending;if(pending)pending.text=text;namesNotes.set(row.id,{text,warn});updateNamesRows();}
+  else if(action==='approve'){const pending=askPendings.get(row.id);if(pending)pending.text=text;askResults.set(row.id,{text,warn});updateAskRows();}
+  else if(selectedRow?.id===row.id || selectedRow?.path===row.path){if(action==='tracks' && trackSave)trackSave.text=text;else if(action==='metadata_choices' && choiceSave)choiceSave.text=text;else if(metaSave)metaSave.text=text;setText(action==='tracks'?'track-save-status':action==='metadata_choices'?'metadata-question-status':'review-note',text);}
+}
+function checkDecisionReceipt(flight,answer){
+  const d=answer?.decision,b=flight.body;
+  if(!d || d.schema!=='books-durable-decision-v1' || d.request_id!==b.request_id || d.book_id!==b.id || d.action!==b.action || d.payload_sha256!==flight.hash || d.observed_revision!==b.revision || d.source_fingerprint!==b.fingerprint || d.predecessor!==b.predecessor || !Number.isSafeInteger(d.sequence) || d.sequence<1 || !DECISION_STATES.has(d.state))throw Error('Saved decision response does not match this book and these exact choices.');
+  decisionClosed.add(b.request_id);decisionFlights.delete(b.request_id);rememberDecisions();return {durable:true,decision:d,application:answer.application,...(d.state==='applied'&&d.result&&typeof d.result==='object'?d.result:{})};
+}
+async function deliverDecision(flight,row){
+  const verb=flight.body.action==='review'&&flight.body.payload?.approve===true?'Approval':decisionAction(flight.body.action);
+  const b=flight.body;
+  if(flight.hash!==await decisionHash({book_id:b.id,action:b.action,revision:b.revision,fingerprint:b.fingerprint,payload:b.payload,effects:decisionEffects(b.action,b.payload),predecessor:b.predecessor}))throw Error('The retained decision does not match its exact choices. Your current draft is kept.');
+  for(let attempt=0;attempt<2;attempt++){
+    try{const answer=await request(attempt?'/api/book-decisions/status':'/api/book-decisions',attempt?{request_id:flight.body.request_id}:flight.body,5000);return checkDecisionReceipt(flight,answer);}
+    catch(error){
+      if(!attempt){const definite=[400,409,422].includes(error.httpStatus);if(!definite)flight.uncertain=true;flight.refusal=definite&&!flight.uncertain?error:null;}
+      decisionFeedback(row,flight.body.action,verb+' not confirmed. Checking this book\'s saved decision…');
+      if(attempt){
+        if(error.httpStatus===404&&error.body?.code==='decision_not_found'){
+          if(flight.refusal){decisionClosed.add(flight.body.request_id);decisionFlights.delete(flight.body.request_id);rememberDecisions();throw flight.refusal;}
+          try{return checkDecisionReceipt(flight,await request('/api/book-decisions',flight.body,5000));}catch{}  // A retry refusal cannot disprove an earlier unknown acceptance.
+        }
+        const unknown=new Error(verb+' status unavailable. Check this book before trying again.');unknown.decisionUnknown=true;throw unknown;
+      }
+    }
+  }
+}
+function bookDecision(row,action,payload,library='Audiobooks'){
+  row={...row,review:{...row.review}};payload=JSON.parse(JSON.stringify(payload));
+  const key=decisionKey(library,row.id),signature=decisionPacked({action,payload}),prior=decisionSubmissions.get(key);
+  if(prior?.signature===signature)return prior.promise;
+  const submission={signature};submission.promise=(prior?prior.promise.catch(()=>{}):Promise.resolve()).then(()=>sendBookDecision(row,action,payload,library)).finally(()=>{if(decisionSubmissions.get(key)===submission)decisionSubmissions.delete(key);});decisionSubmissions.set(key,submission);return submission.promise;
+}
+async function sendBookDecision(row,action,payload,library='Audiobooks'){
+  const key=decisionKey(library,row.id),pending=[...decisionFlights.values()].find(f=>decisionKey(f.body.library,f.body.id)===key);
+  if(pending){const same=pending.body.action===action&&decisionPacked(pending.body.payload)===decisionPacked(payload);pending.promise ||= deliverDecision(pending,row).finally(()=>{delete pending.promise;});const answer=await pending.promise;return same?answer:sendBookDecision(row,action,payload,library);}
+  // Read the authoritative predecessor before allocating the new exact request.
+  const current=await request('/api/book-decisions/book',{library,id:row.id},5000);
+  const wanted=decisionEffects(action,payload);
+  const existing=(current.decisions || []).find(d=>['accepted','applying'].includes(d.state) && d.action===action && d.source_fingerprint===row.fingerprint && d.payload && decisionPacked(d.payload)===decisionPacked(payload) && current.head?.source_fingerprint===row.fingerprint && wanted.every(effect=>d.active_effects?.includes(effect)&&current.head.effects?.[effect]===d.request_id));
+  if(existing){
+    const body={library,id:row.id,revision:existing.observed_revision,fingerprint:row.fingerprint,request_id:existing.request_id,predecessor:existing.predecessor,action,payload:existing.payload};
+    const hash=await decisionHash({book_id:body.id,action,revision:body.revision,fingerprint:body.fingerprint,payload:body.payload,effects:wanted,predecessor:body.predecessor});
+    return checkDecisionReceipt({body,hash,title:decisionName(row)},{decision:existing,application:current.application});
+  }
+  const predecessor=current.head?.request_id || null;
+  if(predecessor && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(predecessor))throw Error('This book\'s saved decision could not be read. Your draft is kept.');
+  if(!Number.isSafeInteger(row.revision) || row.revision<0 || !/^[0-9a-f]{64}$/.test(row.fingerprint || ''))throw Error('This book\'s source identity is unavailable. Reload this book before saving. Your draft is kept.');
+  if(!globalThis.crypto?.randomUUID || !globalThis.crypto?.subtle)throw Error('Secure decision identity is unavailable. Your draft is kept.');
+  const body={library,id:row.id,revision:row.revision,fingerprint:row.fingerprint,request_id:globalThis.crypto.randomUUID(),predecessor,action,payload:JSON.parse(JSON.stringify(payload))};
+  const effects=decisionEffects(action,body.payload),hash=await decisionHash({book_id:body.id,action,revision:body.revision,fingerprint:body.fingerprint,payload:body.payload,effects,predecessor});
+  const flight={body,hash,title:decisionName(row)};decisionFlights.set(body.request_id,flight);try{rememberDecisions(true);}catch(error){decisionFlights.delete(body.request_id);throw error;}
+  flight.promise=deliverDecision(flight,row).finally(()=>{delete flight.promise;});return flight.promise;
+}
+function reconcileBookDecisions(){for(const flight of decisionFlights.values()){if(flight.promise || recoveryDisconnected || ended)continue;const row=rows.find(r=>r.id===flight.body.id) || {id:flight.body.id,title_clue:flight.title};flight.promise=deliverDecision(flight,row).then(answer=>decisionFeedback(row,flight.body.action,decisionLine(flight,answer.decision),answer.decision.state==='needs_review')).catch(()=>{}).finally(()=>{delete flight.promise;});}}
+async function readDecisionOwners(row,library='Audiobooks'){
+  const answer=await request('/api/book-decisions/book',{library,id:row.id},5000),head=answer.head;
+  if(!head || head.source_fingerprint!==row.fingerprint)return [];
+  const owners=[];
+  for(const d of answer.decisions || []){
+    if(d.source_fingerprint!==row.fingerprint || !d.payload || !Array.isArray(d.active_effects))continue;
+    if(d.schema!=='books-durable-decision-v1' || d.book_id!==row.id || !Number.isSafeInteger(d.observed_revision) || !DECISION_STATES.has(d.state) || d.payload_sha256!==await decisionHash({book_id:d.book_id,action:d.action,revision:d.observed_revision,fingerprint:d.source_fingerprint,payload:d.payload,effects:decisionEffects(d.action,d.payload),predecessor:d.predecessor}))throw Error('Saved choices do not match this book\'s decision.');
+    const active=d.active_effects.filter(effect=>head.effects?.[effect]===d.request_id);
+    if(active.length)owners.push({...d,active_effects:active});
+  }
+  return owners;
+}
+function decisionOwnerNames(owners,row){
+  const names={};
+  for(const d of owners){
+    for(const effect of d.active_effects){if(!effect.startsWith('names.'))continue;const field=effect.slice(6),p=d.payload;
+      const value=d.action==='names'?p.names?.[field]:d.action==='approve'?(Object.hasOwn(p.names || {},field)?p.names[field]:p[field]):undefined;
+      if(value!==undefined && NAMES_FIELDS.includes(field))names[field]=value;
+    }
+  }
+  return names;
+}
+async function durableNamesOverlay(row){return decisionOwnerNames(await readDecisionOwners(row),row);}
+function decisionDisplayKey(row,library){return decisionKey(library,row.path);}
+function decisionDisplayRow(row,library){
+  const kept=decisionDisplays.get(decisionDisplayKey(row,library));
+  if(!kept || kept.revision!==row.revision || kept.fingerprint!==row.fingerprint || kept.size!==row.size || kept.modified!==row.modified)return row;
+  let shown={...row,review:{...row.review},review_context:{...row.review_context}};
+  for(const d of kept.owners){
+    const p=d.payload,has=domain=>d.active_effects.includes(domain);
+    if(has('review') || has('file_review')){
+      const values={...p.review};if(p.names_row_only)for(const key of NAME_INPUTS)delete values[key];
+      Object.assign(shown.review,values);
+    }
+    if(has('tracks')){
+      const known=new Set((row.members || []).map(member=>member.member_key || member.path));
+      if(Array.isArray(p.order)&&Array.isArray(p.included)&&[...p.order,...p.included].every(key=>known.has(key))){shown.track_order=p.order;shown.included=p.included;Object.assign(shown.review_context,{source_coverage_confirmed:p.source_coverage_confirmed,order_confirmed:p.order_confirmed,chapters:p.chapters,chapters_choice_saved:true});}
+    }
+    if(has('metadata_choices') && p.signature===row.metadata_questions?.signature){
+      shown.metadata_questions={...row.metadata_questions,questions:row.metadata_questions.questions.map(q=>({...q,decision:p.choices.find(choice=>choice.question_id===q.id) || q.decision}))};
+      for(const q of shown.metadata_questions.questions){const choice=q.decision,values=choice?.mode==='corrected'?choice.values:choice?.mode==='provider'?q.options?.find(option=>option.id===choice.option_id)?.values:null;
+        for(const key of q.type==='work_profile'?(q.profile_fields || ['title','canonical_author','original_language','series','number','universe']):[q.field])if(values && Object.hasOwn(values,key))shown.review[key]=values[key];}
+    }
+  }
+  return shown;
+}
+let decisionPanelSequence=0,decisionPanelRequest=null;
+async function restoreDecisionPanel(row,library){
+  const requestKey=decisionPacked([library,row.path,row.revision,row.fingerprint,row.size,row.modified]);
+  if(decisionPanelRequest?.key===requestKey)return decisionPanelRequest.promise;
+  const flight={key:requestKey};decisionPanelRequest=flight;
+  flight.promise=loadDecisionPanel(row,library).finally(()=>{if(decisionPanelRequest===flight)decisionPanelRequest=null;});return flight.promise;
+}
+async function loadDecisionPanel(row,library){
+  const ticket=++decisionPanelSequence,seq=editSeq,tracks=decisionPacked(trackDraft),choices=decisionPacked(metadataChoiceState?.answers || {});
+  try{
+    let identity=row;
+    if(row.kind!=='candidate'){
+      if(!['audiobook','ebook'].includes(row.kind) || row.size===undefined || row.modified===undefined)return;
+      identity={...row,id:'file:'+await decisionHash({library,path:row.path}),revision:0,fingerprint:await decisionHash({library,path:row.path,size:row.size,modified:row.modified})};
+    }
+    if(!/^[0-9a-f]{64}$/.test(identity.fingerprint || ''))return;
+    const owners=await readDecisionOwners(identity,library);
+    if(ticket!==decisionPanelSequence || selectedLibrary!==library || !sameDecisionRow(selectedRow,row))return;
+    decisionDisplays.set(decisionDisplayKey(row,library),{revision:row.revision,fingerprint:row.fingerprint,size:row.size,modified:row.modified,owners});
+    const shown=decisionDisplayRow(row,library);
+    if(metaSaveResult?.retained?.path===row.path)delete metaSaveResult.retained;
+    if(trackDraft?.id===row.id)delete trackDraft.retainedDecision;
+    const names=decisionOwnerNames(owners,identity);
+    decisionBooks.set(row.id,{fingerprint:row.fingerprint,names});
+    for(const d of owners){
+      const p=d.payload,has=domain=>d.active_effects.includes(domain);
+      if((has('review') || has('file_review')) && !dirty && editSeq===seq && !form.contains?.(document.activeElement)){
+        const values={...p.review};if(p.names_row_only)for(const key of NAME_INPUTS)delete values[key];
+        for(const key of [...fields,'multi_author','anthology'])if(Object.hasOwn(values,key)){const input=form.elements.namedItem(key);if(['multi_author','anthology'].includes(key))input.checked=!!values[key];else input.value=values[key] ?? '';}
+        reviewRow={...selectedRow,review:{...selectedRow.review,...values}};
+        setText('review-note',decisionLine({body:{action:d.action,payload:d.payload},title:decisionName(row)},d));
+      }
+      if(has('tracks') && !trackDirty && decisionPacked(trackDraft)===tracks && !$('track-review').contains?.(document.activeElement)){
+        const known=new Set((row.members || []).map(member=>member.member_key || member.path));
+        if(!Array.isArray(p.order) || !Array.isArray(p.included) || [...p.order,...p.included].some(key=>!known.has(key))){setText('track-save-status','Track review saved. The saved file selection needs review against the current source files.');continue;}
+        trackDraft={id:row.id,revision:row.revision,order:[...p.order],included:[...p.included]};
+        $('source-coverage').checked=p.source_coverage_confirmed;$('playback-order').checked=p.order_confirmed;$('add-chapters').checked=p.chapters;
+        renderMembers(row,true);setText('track-save-status','Track review saved.'+(d.state==='needs_review'&&d.reason?' '+d.reason:''));
+      }
+      if(has('metadata_choices') && metadataChoiceState?.id===row.id && decisionPacked(metadataChoiceState.answers)===choices && !$('metadata-questions').contains?.(document.activeElement)){
+        if(p.signature!==row.metadata_questions?.signature){metadataChoiceState.status='Choices saved. The evidence changed; review the current choices.';updateMetadataChoiceControls();continue;}
+        const snapshot={...row.metadata_questions,questions:row.metadata_questions.questions.map(q=>({...q,decision:p.choices.find(choice=>choice.question_id===q.id) || q.decision}))};
+        if(!dirty && editSeq===seq && !form.contains?.(document.activeElement))for(const field of fields)if(Object.hasOwn(shown.review,field))form.elements.namedItem(field).value=shown.review[field] ?? '';
+        renderMetadataQuestions({...row,metadata_questions:snapshot},false);metadataChoiceState.status='Choices saved.'+(d.state==='needs_review'&&d.reason?' '+d.reason:'');updateMetadataChoiceControls();
+      }
+      if(has('approval')){askResults.set(row.id,{text:decisionLine({body:{action:'approve'},title:decisionName(row)},d),warn:d.state==='needs_review'});updateAskRows();}
+    }
+  }catch{if(ticket===decisionPanelSequence && sameDecisionRow(selectedRow,row) && editSeq===seq)setText('review-note',(metaSaveResult?.retained?metaSaveResult.text+' ':'')+'Saved decision status unavailable. Your local draft is kept.');}
 }
 function message(value='') { $('message').textContent=value; }
 // The only writer of #version: the engine's own version, as reported by its state. Hidden while loading (Judy 3.5).
@@ -421,7 +596,10 @@ function controls() {
   $('resume').disabled = ended || recoveryDisconnected || !!active || !stopped;
   $('stop').disabled = ended || recoveryDisconnected || !active || state?.stopping || automaticOwnsScanner;
   $('shutdown').disabled = ended || recoveryDisconnected;
-  $('approve-candidate').disabled=ended || recoveryDisconnected || dirty || selectedRow?.kind!=='candidate' || !selectedRow?.can_approve;
+  const approving=metadataApprovals.has(selectedRow?.id),approval=$('approve-candidate');
+  approval.disabled=ended || recoveryDisconnected || (!approving && (dirty || selectedRow?.kind!=='candidate' || !selectedRow?.can_approve));
+  approval.textContent=approving?'Saving decision…':'Approve candidate metadata';approval.title=approving?"Recording this book's decision…":"Confirm this candidate's reviewed title, author, language, series and selected cover. Source files stay unchanged.";
+  if(approving)approval.setAttribute('aria-disabled','true');else approval.removeAttribute('aria-disabled');
   if(selectedRow?.kind==='candidate')$('approval-reason').textContent=dirty ? 'Save the draft metadata before approving it.' : selectedRow.approval_reason || '';
   $('approval-reason').hidden=!$('approval-reason').textContent;
   if($('create-audiobook'))$('create-audiobook').disabled=ended || recoveryDisconnected || dirty || trackDirty || !selectedRow?.creation?.can_create || selectedRow?.creation?.status==='Single audiobook file';
@@ -445,7 +623,6 @@ function controls() {
   renderMetaSave();updateNamesRows();updateFolderRows();updateDestinations();renderLaterButtons();if(choiceSave)updateMetadataChoiceControls();if(trackSave)trackSaveLine();renderNamesFacts();
   gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
   drainLater();
-  if(metaQueued && !busy && !metaSave)saveMetadata();  // a Save pressed during another press runs now (ruling 35)
 }
 async function action(route, data) {
   if (ended) return;
@@ -471,9 +648,10 @@ async function action(route, data) {
 // Provisional copy (ruling 35's rest, sent to Judy): what a kept Resume waits for.
 const START_WAITS={pause:'the pause',start:'the earlier start'};
 function startWaitLine(reason){return `Resume queued. It starts when ${START_WAITS[reason] || 'the current start check'} finishes. Press Resume again to cancel.`;}
+function automaticStartWord(){return state?.automatic_processing?.state==='Paused'?'Resume':'Start';}
 function pauseLine(pause,automatic=false){
   const origin={user:'Paused by you.',update:'Paused for an update.',closing:'Paused when Books Arranger closed.',interrupted:'Paused after an interruption.'}[pause?.origin] || 'Paused.';
-  return origin+' '+(automatic?'Start automatic processing to continue.':'Resume continues pending work.');
+  return origin+' '+(automatic?'Resume automatic processing to continue.':'Resume continues pending work.');
 }
 function admissionLine(jobs){
   const admission=jobs?.start_admission;
@@ -525,12 +703,13 @@ function startWaitTip(button,waiting){
 // stays in the catalog, never on screen; the server's counts and filters use the same predicate.
 function readError(row){return row.error && !row.missing ? row.error : '';}
 function select(row, reset) {
+  row=decisionDisplayRow(row,row.library || $('library').value);
   $('manual-review').hidden=false;
   const changing=selectedPath!==row.path;
   if(reset && (changing || dirty || trackDirty)){discardManualDraft();if(changing)$('manual-review').open=row.kind!=='candidate';}
   // Technical details: closed again on every selection; "Copied." stays until the selection changes (Judy, section 4.6).
   if(changing && $('technical-details')){$('technical-details').open=false;setText('copy-technical-status','');}
-  if(changing){metaSaveResult=null;panelDiscarded=null;trackSave=null;choiceSave=null;if($('track-save-status'))$('track-save-status').textContent='';automaticResultKey=null;automaticInspectorKey=null;closeRecoveryDialog(false);recoveryPanel=null;inspectorIdentity=null;++inspectSequence;$('metadata-inspector').hidden=true;for(const url of inspectorObjects)URL.revokeObjectURL(url);inspectorObjects.length=0;}
+  if(changing){metaSave=null;metaAgain=false;metaSaveResult=null;panelDiscarded=null;trackSave=null;choiceSave=null;if($('track-save-status'))$('track-save-status').textContent='';automaticResultKey=null;automaticInspectorKey=null;closeRecoveryDialog(false);recoveryPanel=null;inspectorIdentity=null;++inspectSequence;$('metadata-inspector').hidden=true;for(const url of inspectorObjects)URL.revokeObjectURL(url);inspectorObjects.length=0;}
   selectedPath=row.path; selectedRow=row;
   updateRecovery();
   selectedLibrary=row.library || $('library').value;
@@ -575,18 +754,21 @@ function select(row, reset) {
   form.hidden=!['audiobook','ebook','candidate'].includes(row.kind) || !!row.error || !!row.missing;
   renderNamesInputs();if(candidate)loadNamesFacts(row);  // 0.22.3 (ruling 40): a book's names are facts here, edited on its row
   if (reset || (!dirty && !form.contains?.(document.activeElement))) {
-    for (const field of fields) form.elements.namedItem(field).value=row.review?.[field] || (field==='original_language' ? 'Unknown' : '');
-    form.elements.namedItem('multi_author').checked=!!row.review?.multi_author;
-    form.elements.namedItem('anthology').checked=!!row.review?.anthology;
+    const kept=metaSaveResult?.retained,values=kept && kept.path===row.path && kept.revision===row.revision && kept.fingerprint===row.fingerprint && kept.size===row.size && kept.modified===row.modified && kept.seq===editSeq?{...row.review,...kept.values}:row.review;
+    for (const field of fields) form.elements.namedItem(field).value=values?.[field] || (field==='original_language' ? 'Unknown' : '');
+    form.elements.namedItem('multi_author').checked=!!values?.multi_author;
+    form.elements.namedItem('anthology').checked=!!values?.anthology;
     dirty=false;
-    reviewRow=row;
-    $('review-note').textContent='Saved only in the local catalog.';
+    reviewRow={...row,review:values};
+    $('review-note').textContent=kept?metaSaveResult.text:'Saved only in the local catalog.';
   }
   routingControls();
   renderMergeCandidate(row,reset);
   renderAutomaticResult(row);
   if(candidate)ensureCandidateInspector(row);
   controls();
+  const displayed=decisionDisplays.get(decisionDisplayKey(row,selectedLibrary));
+  if(changing || reset || displayed?.revision!==row.revision || displayed?.fingerprint!==row.fingerprint || displayed?.size!==row.size || displayed?.modified!==row.modified || metaSaveResult?.retained || trackDraft?.retainedDecision)restoreDecisionPanel(row,selectedLibrary);
   for (const element of $('inventory').children) element.setAttribute('aria-selected',String(element.dataset.path===row.path));
 }
 function renderRows(force=false) {
@@ -871,7 +1053,7 @@ async function poll() {
   if (!polling) {
     polling=true;
     const library=$('library').value,sequence=refreshSequence+1;
-    try { if(await refresh())clearConnectionNotice(); }
+    try { if(await refresh()){clearConnectionNotice();reconcileBookDecisions();} }
     catch(error) {
       if(sequence===refreshSequence && library===$('library').value){
         // v0.16.8: a busy engine answered 503 "still updating" under load and the page declared the server
@@ -932,57 +1114,54 @@ function metadataReview(){
   return review;
 }
 function renderMetaSave(){
-  const button=$('save-metadata');if(!button)return;const pending=!!metaSave || metaQueued;
-  const face=pending?'Saving…':SAVE_METADATA_FACE,tip=pending?ladderNote('Saving these values…',metaSave?.at):saveMetadataTip();
+  const button=$('save-metadata');if(!button)return;const pending=!!metaSave;
+  const face=pending?'Saving…':SAVE_METADATA_FACE,tip=pending?'Recording this book\'s decision…':saveMetadataTip();
   // 2.5: the line beside the button counts while it saves, then names what was saved, or why not.
-  const note=metaSave?clockNote('Saving…',metaSave.at):metaQueued?'Saving after the current operation finishes…':metaSaveResult?.text;
+  const note=metaSave?metaSave.text || 'Saving…':metaSaveResult?.text;
   if(note && $('review-note') && $('review-note').textContent!==note)$('review-note').textContent=note;
   if(button.textContent!==face)button.textContent=face;if(button.title!==tip)button.title=tip;
   if(pending)button.setAttribute?.('aria-disabled','true');else button.removeAttribute?.('aria-disabled');
 }
 async function sendMetadata(row,review){
-  if(row.kind!=='candidate'){await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});return {row:null};}
-  for(let attempt=0;;attempt++){
-    try{return {...await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext(row),...(namesLocked()?{names_row_only:true}:{})}),sent:row};}
-    catch(error){
-      const fresh=error.body?.row;
-      if(attempt===0 && error.body?.code==='changed' && fresh && fresh.id===row.id){row={...fresh,path:fresh.id,kind:'candidate',library:selectedLibrary};reviewRow=row;continue;}
-      throw error;
-    }
+  if(row.kind!=='candidate'){
+    const library=selectedLibrary || $('library').value,identity={library,path:row.path},facts={...identity,size:row.size,modified:row.modified};
+    const file={...row,id:'file:'+await decisionHash(identity),revision:0,fingerprint:await decisionHash(facts)};
+    return {...await bookDecision(file,'file_review',{path:row.path,size:row.size,modified:row.modified,review},library),sent:row};
   }
+  const context=reviewContext(row);
+  return {...await bookDecision(row,'review',{review,approve:false,manual_note:context.manual_note,proposal_id:context.proposal_id || null,cover_id:context.cover_id || null,names_row_only:namesLocked()}),sent:row};
 }
 async function saveMetadata(){
   if(!selectedRow)return;
   if(ended || recoveryDisconnected){message('Local server unavailable. Nothing was saved.');return;}
   if(metaSave){metaAgain=true;return;}  // never dropped: the newest values are saved when this save lands
-  if(busy){metaQueued=true;renderMetaSave();setText('review-note','Saving after the current operation finishes…');return;}
-  metaQueued=false;
-  const row=reviewRow || selectedRow,review=metadataReview(),seq=editSeq,before=row.review || {};
-  metaSaveResult=null;metaSave={at:Date.now(),seq,id:row.id};busy=true;renderMetaSave();controls();message();setText('review-note','Saving…');
+  const row=reviewRow || selectedRow,library=selectedLibrary,review=metadataReview(),seq=editSeq,before=row.review || {},flight={at:Date.now(),seq,id:row.id,proposal:proposalId,cover:coverId};
+  metaSaveResult=null;metaSave=flight;renderMetaSave();controls();message();setText('review-note','Saving…');
   let saved=null,failure=null;
   try{saved=await sendMetadata(row,review);}
   catch(error){failure=error;}
-  finally{metaSave=null;busy=false;}
+  finally{if(metaSave===flight)metaSave=null;}
+  if(selectedLibrary!==library || selectedRow?.path!==row.path){controls();return;}
   if(saved){
-    const current=editSeq===seq;
-    if(saved.row){
+    const current=sameDecisionRow(selectedRow,row) && editSeq===seq && decisionPacked(metadataReview())===decisionPacked(review) && proposalId===flight.proposal && coverId===flight.cover;
+    if(saved.row?.id===row.id && sameDecisionRow(selectedRow,row)){
       const fresh={...saved.row,path:saved.row.id,kind:'candidate',library:selectedLibrary};
       if(trackDraft?.id===fresh.id && trackDraft.revision===saved.sent.revision)trackDraft.revision=fresh.revision;
       reviewRow=fresh;  // a later save goes to the book's new revision
       if(selectedRow?.id===fresh.id)select(fresh,false);
     }
-    if(current){dirty=false;manualMetadataTouched=false;syncManualDraft();metaSaveResult={text:savedFieldsLine(before,review)};setText('review-note',metaSaveResult.text);}
-    else setText('review-note','Unsaved local review.');  // typed while it saved: those edits are not saved yet
+    if(current){dirty=false;manualMetadataTouched=false;syncManualDraft();const values={...review};if(row.kind==='candidate')for(const field of NAME_INPUTS)delete values[field];metaSaveResult={text:savedFieldsLine(before,review)+(saved.decision?.state==='needs_review'&&saved.decision.reason?' Audiobook work is on hold: '+saved.decision.reason:''),retained:{path:row.path,revision:selectedRow.revision,fingerprint:row.fingerprint,size:row.size,modified:row.modified,seq,values}};setText('review-note',metaSaveResult.text);}
+    else setText('review-note',decisionLine({body:{action:row.kind==='candidate'?'review':'file_review'},title:decisionName(row)},saved.decision)+' Your newer edits are not saved yet.');
   }else{
-    metaSaveResult={text:failure?.httpStatus?'Not saved. '+serverSentence(failure,'Nothing was changed.'):'Not saved. '+lostLine(),warn:true};setText('review-note',metaSaveResult.text);
-    if(!failure?.httpStatus)refreshFailed(failure);
+    if(sameDecisionRow(selectedRow,row) && failure?.body?.code==='changed' && failure.body.row){reviewRow={...failure.body.row,path:row.id,kind:'candidate',library:selectedLibrary};select(reviewRow,false);}
+    metaSaveResult={text:failure?.decisionUnknown?failure.message:'Metadata not saved: '+(failure?.message || 'Check these values and try again.'),warn:true};setText('review-note',metaSaveResult.text);
   }
   renderMetaSave();controls();
   if(metaAgain){metaAgain=false;if(dirty)return saveMetadata();}
-  if(saved)refresh(true).catch(()=>{});  // the list follows; its failure is not the save's
+  if(saved){restoreDecisionPanel(selectedRow,selectedLibrary);refresh(true).catch(()=>{});}  // the list follows; its failure is not the save's
 }
 form.addEventListener('submit',event=>{event.preventDefault();return saveMetadata();});
-$('approve-candidate').addEventListener('click',later('toolbar:approve-candidate','approve_candidate',async()=>{const row=reviewRow || selectedRow;if(!row || row.kind!=='candidate' || dirty || busy || ended)return;busy=true;controls();try{const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review:row.review,approve:true,...reviewContext()});select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},true);await refresh(true);message('Candidate metadata approved. Tracks still require review; source files unchanged.');}catch(error){message(error.message);}finally{busy=false;controls();}}));
+$('approve-candidate').addEventListener('click',async()=>{const row=reviewRow || selectedRow;if(!row || row.kind!=='candidate' || dirty || ended || metadataApprovals.has(row.id))return;const context=reviewContext(),before=decisionPacked(metadataChoiceValues()),seq=editSeq,proposal=proposalId,cover=coverId;metadataApprovals.add(row.id);controls();setText('review-note','Saving decision…');try{const answer=await bookDecision(row,'review',{review:row.review,approve:true,manual_note:context.manual_note,proposal_id:context.proposal_id || null,cover_id:context.cover_id || null,names_row_only:false});decisionFeedback(row,'review',decisionLine({body:{action:'review',payload:{approve:true}},title:decisionName(row)},answer.decision)+(!sameDecisionRow(selectedRow,row) || editSeq!==seq || before!==decisionPacked(metadataChoiceValues()) || proposal!==proposalId || cover!==coverId?' Your newer edits are not saved yet.':''));}catch(error){decisionFeedback(row,'review',error.decisionUnknown?error.message:'Metadata not saved: '+error.message,true);}finally{metadataApprovals.delete(row.id);controls();}});
 $('shutdown').addEventListener('click',later('toolbar:shutdown','shutdown',async()=>{
   if(busy || ended)return;busy=true;controls();message();
   try{await request('/api/shutdown',{});ended=true;clearConnectionNotice();clearTimeout(timer);$('status').textContent='Server stopping. Saved catalog and pending scans remain available on the next launch.';message('You can close this browser tab.');}
@@ -1174,6 +1353,7 @@ function metadataChoiceValues(){const values={};for(const name of fields)values[
 function metadataChoiceFieldLabel(field){return ({title:'Title',canonical_author:'Author',original_language:'Original language',series:'Cycle',number:'Number in cycle',universe:'Universe',genre:'Genre',topic:'Topic',narrator:'Reader / narrator'})[field] || field.replaceAll('_',' ');}
 function metadataChoiceDirtyReason(){
   const saved=metadataChoiceState;if(!saved)return '';
+  if(saved.snapshot.signature!==selectedRow?.metadata_questions?.signature)return 'The evidence changed. Your unsaved choices are kept. Review this book again before saving.';
   if(!dirty)return '';
   if(saved.blockedDirty)return 'Save your edits before choosing a result.';
   const allowed=new Set();for(const question of saved.snapshot.questions || [])if(saved.answers[question.id]?.mode==='corrected')for(const field of question.type==='work_profile'?(question.profile_fields || ['title','canonical_author','original_language','series','number','universe']):[question.field])allowed.add(field);
@@ -1182,18 +1362,20 @@ function metadataChoiceDirtyReason(){
 }
 function updateMetadataChoiceControls(){
   const saved=metadataChoiceState;if(!saved || $('metadata-questions').hidden)return;
-  const reason=metadataChoiceDirtyReason();$('save-metadata-choices').disabled=!!(reason || saved.pending || ended || recoveryDisconnected);  // ruling 35: busy holds the press (later()), never disables it
-  $('save-metadata-choices').textContent=saved.pending?'Saving choices…':'Save choices';
-  const line=saved.pending && choiceSave?clockNote('Saving choices…',choiceSave.at):[saved.error,reason || saved.status || ''].filter(Boolean).join(' ');
+  const reason=metadataChoiceDirtyReason(),button=$('save-metadata-choices');button.disabled=!!(reason || ended || recoveryDisconnected);
+  button.textContent=saved.pending?'Saving…':'Save choices';button.title=saved.pending?'Recording this book\'s decision…':reason || 'Save these metadata choices for this book.';
+  if(saved.pending)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+  const line=saved.pending && choiceSave?choiceSave.text || 'Saving…':[saved.error,reason || saved.status || ''].filter(Boolean).join(' ');
   if($('metadata-question-status').textContent!==line)$('metadata-question-status').textContent=line;
 }
 function renderMetadataQuestions(row,reset=false){
   const section=$('metadata-questions'),snapshot=row.metadata_questions;
   if(row.kind!=='candidate' || !snapshot?.questions?.length){section.hidden=true;metadataChoiceState=null;return;}
   section.hidden=false;$('resolve-metadata-question').setAttribute('aria-label','Resolve metadata: '+(row.title_clue || row.id));
-  const key=JSON.stringify([row.id,snapshot.signature,snapshot.questions.map(question=>[question.id,question.decision,question.renewed])]);
+  const key=JSON.stringify([row.id,row.fingerprint,snapshot.signature,snapshot.questions.map(question=>[question.id,question.decision,question.renewed])]);
+  if(!reset && metadataChoiceState?.id===row.id && metadataChoiceState.fingerprint===row.fingerprint && metadataChoiceState.edited){metadataChoiceState.revision=row.revision;updateMetadataChoiceControls();return;}
   if(metadataChoiceState?.key===key){metadataChoiceState.revision=row.revision;updateMetadataChoiceControls();return;}
-  metadataChoiceState={id:row.id,revision:row.revision,key,snapshot,answers:{},baseline:metadataChoiceValues(),cover:row.review_context?.cover_id || row.selected_cover?.id || null,blockedDirty:dirty,
+  metadataChoiceState={id:row.id,revision:row.revision,fingerprint:row.fingerprint,key,snapshot,answers:{},baseline:metadataChoiceValues(),cover:row.review_context?.cover_id || row.selected_cover?.id || null,blockedDirty:dirty,
     pending:false,status:snapshot.questions.some(question=>question.renewed)?'Sources disagree — choose again.':snapshot.unresolved_count?`Metadata choice needed for ${row.title_clue || 'this book'}.`:'Chosen by you. Review the metadata to continue.'};
   const saved=metadataChoiceState,container=$('metadata-question-fields');container.replaceChildren();
   for(const question of snapshot.questions){
@@ -1207,7 +1389,7 @@ function renderMetadataQuestions(row,reset=false){
     for(const option of question.options || []){
       const values=Object.entries(option.values || {}).map(([field,value])=>`${metadataChoiceFieldLabel(field)}: ${value || 'Not supplied'}`).join(' · '),names=(option.sources || []).map(source=>source.provider).join(', ');
       const item=radio(option.id,values+' — '+names,'Use this result for this conflict after saving your choices.');item.input.checked=prior?.mode==='provider' && prior.option_id===option.id;
-      item.input.addEventListener('change',()=>{if(!item.input.checked)return;saved.answers[question.id]={mode:'provider',option_id:option.id};updateMetadataChoiceControls();});
+      item.input.addEventListener('change',()=>{if(!item.input.checked)return;saved.edited=true;saved.answers[question.id]={mode:'provider',option_id:option.id};updateMetadataChoiceControls();});
       const card=node('section'),details=node('details'),summary=node('summary','View source evidence');card.append(item.label);details.append(summary);
       for(const source of option.sources || []){
         details.append(node('p',`${source.provider} · Record ${source.id || 'not supplied'} · Retrieved ${source.retrieved_utc || 'time not supplied'}`));
@@ -1219,9 +1401,9 @@ function renderMetadataQuestions(row,reset=false){
     }
     for(const source of question.not_supplied || [])fieldset.append(node('p',`Not supplied — ${source.provider} · ${source.id || 'Record ID not supplied'}`));
     const corrected=radio('corrected','Enter a corrected value','Enter your own value and save it with this conflict decision.');corrected.input.checked=prior?.mode==='corrected';
-    corrected.input.addEventListener('change',()=>{if(!corrected.input.checked)return;saved.answers[question.id]={mode:'corrected'};$('manual-review').open=true;const control=form.elements.namedItem(question.type==='work_profile'?'title':question.field);if(control){control.title='Enter the value you want this book to use.';control.scrollIntoView?.({block:'center',behavior:'auto'});control.focus?.({preventScroll:true});}updateMetadataChoiceControls();});
+    corrected.input.addEventListener('change',()=>{if(!corrected.input.checked)return;saved.edited=true;saved.answers[question.id]={mode:'corrected'};$('manual-review').open=true;const control=form.elements.namedItem(question.type==='work_profile'?'title':question.field);if(control){control.title='Enter the value you want this book to use.';control.scrollIntoView?.({block:'center',behavior:'auto'});control.focus?.({preventScroll:true});}updateMetadataChoiceControls();});
     const unresolved=radio('unresolved','Keep unresolved','Leave this conflict open and keep this book out of automatic conversion.');unresolved.input.checked=!prior || prior.mode==='unresolved';
-    unresolved.input.addEventListener('change',()=>{if(unresolved.input.checked){saved.answers[question.id]={mode:'unresolved'};updateMetadataChoiceControls();}});
+    unresolved.input.addEventListener('change',()=>{if(unresolved.input.checked){saved.edited=true;saved.answers[question.id]={mode:'unresolved'};updateMetadataChoiceControls();}});
     if(question.previous_decision){const decision=node('details'),summary=node('summary','View decision');summary.title='Show the sources compared and your saved choice.';decision.append(summary,node('p',question.resolved?'Chosen by you':'Earlier choice; current evidence needs review'),node('pre',JSON.stringify(question.previous_decision,null,2)));fieldset.append(decision);}
     container.append(fieldset);
   }
@@ -1229,13 +1411,15 @@ function renderMetadataQuestions(row,reset=false){
   updateMetadataChoiceControls();
 }
 $('resolve-metadata-question').addEventListener('click',()=>{$('manual-review').open=true;$('metadata-questions-heading').scrollIntoView?.({block:'center',behavior:'auto'});$('metadata-questions-heading').focus?.({preventScroll:true});});
-$('save-metadata-choices').addEventListener('click',later('toolbar:save-metadata-choices','save_choices',async()=>{
-  const saved=metadataChoiceState;if(!saved || busy || ended || recoveryDisconnected || metadataChoiceDirtyReason())return;
+$('save-metadata-choices').addEventListener('click',async()=>{
+  const saved=metadataChoiceState;if(!saved || saved.pending || ended || metadataChoiceDirtyReason())return;
   const choices=saved.snapshot.questions.map(question=>{const answer=saved.answers[question.id] || {mode:'unresolved'},choice={question_id:question.id,...answer};if(answer.mode==='corrected'){choice.values={};for(const field of question.type==='work_profile'?(question.profile_fields || ['title','canonical_author','original_language','series','number','universe']):[question.field])choice.values[field]=form.elements.namedItem(field)?.value.trim() || '';}return choice;});
-  saved.pending=true;saved.error='';saved.status='';choiceSave={at:Date.now()};busy=true;controls();updateMetadataChoiceControls();
+  const original=selectedRow,seq=editSeq,answers=decisionPacked(saved.answers),values=decisionPacked(metadataChoiceValues()),flight={at:Date.now()};saved.pending=true;saved.error='';saved.status='';choiceSave=flight;controls();updateMetadataChoiceControls();
   try{
-    const result=await request('/api/candidate/metadata-choice',{library:selectedLibrary,id:saved.id,revision:saved.revision,signature:saved.snapshot.signature,choices,manual_note:keptNote(selectedRow)});
-    if(selectedRow?.id===saved.id && result.row){
+    const result=await bookDecision({...original,id:saved.id,revision:saved.revision},'metadata_choices',{signature:saved.snapshot.signature,choices,manual_note:keptNote(original)});
+    const current=sameDecisionRow(selectedRow,original) && metadataChoiceState===saved && editSeq===seq && decisionPacked(saved.answers)===answers && decisionPacked(metadataChoiceValues())===values;
+    if(metadataChoiceState===saved){saved.edited=!current;saved.status='Choices saved.'+(current?'':' Your newer choices are not saved yet.')+(result.decision.state==='needs_review' && result.decision.reason?' '+result.decision.reason:'');if(!result.row)decisionFeedback(original,'metadata_choices',saved.status);if(current)restoreDecisionPanel(selectedRow,selectedLibrary);}
+    if(selectedRow?.id===saved.id && result.row && current){
       if(trackDraft?.id===saved.id && trackDraft.revision===saved.revision)trackDraft.revision=result.row.revision;
       dirty=false;manualMetadataTouched=false;syncManualDraft();
       for(const field of fields)if(form.elements.namedItem(field)!==document.activeElement)form.elements.namedItem(field).value=result.row.review?.[field] || (field==='original_language'?'Unknown':'');
@@ -1243,10 +1427,10 @@ $('save-metadata-choices').addEventListener('click',later('toolbar:save-metadata
       if(metadataChoiceState?.id===saved.id)metadataChoiceState.status=choices.every(choice=>choice.mode==='unresolved')?'Left unresolved. This book stays held.':result.unresolved_count?`Choices saved. ${result.unresolved_count} conflicts remain.`:'Choices saved. Review the metadata to continue.';
     }
   }catch(error){
-    if(selectedRow?.id===saved.id && error.httpStatus===409 && error.body?.row)renderMetadataQuestions({...error.body.row,kind:'candidate'},false);
-    if(metadataChoiceState?.id===saved.id)metadataChoiceState.error='Choices not saved. '+(error.httpStatus?(error.message || 'Nothing was changed.'):lostLine());
-  }finally{saved.pending=false;choiceSave=null;busy=false;controls();updateMetadataChoiceControls();}
-}));
+    if(sameDecisionRow(selectedRow,original) && error.httpStatus===409 && error.body?.row)renderMetadataQuestions({...error.body.row,kind:'candidate'},false);
+    if(metadataChoiceState===saved)metadataChoiceState.error=error.decisionUnknown?error.message:'Choices not saved: '+error.message;
+  }finally{saved.pending=false;if(choiceSave===flight)choiceSave=null;controls();updateMetadataChoiceControls();}
+});
 function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';renderMetadataQuestions(row,reset);for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output','create-audiobook'])$(id).hidden=!candidate;if(!candidate)return;
   const renderKey=JSON.stringify([row.id,row.revision,row.review_context,row.matching,row.cover_choices,row.creation,row.cleanup,row.audiobook_ready,row.metadata_facts,row.duplicate_review,row.manual_metadata_sources,row.metadata_holds,dirty,trackDirty,coverId]);
   if(!reset && renderKey===mergeRenderKey)return;mergeRenderKey=$('manual-review').contains?.(document.activeElement)?null:renderKey;
@@ -1256,7 +1440,7 @@ function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';
   if(!dirty){++routingPreviewSequence;$('routing-preview-label').textContent='Output folder';$('routing-preview-path').textContent=creation.destination || row.preview?.reason || '';}
   const metadataHolds=row.metadata_holds || [],questionsPending=(row.metadata_questions?.unresolved_count || 0)>0;const metadataRemedy=questionsPending?'Resolve metadata question':namesHold(row)?'Edit names':'Edit metadata';$('edit-held-metadata').hidden=!metadataHolds.length && !questionsPending;$('edit-held-metadata').textContent=metadataRemedy;$('edit-held-metadata').setAttribute('aria-label',metadataRemedy+': '+(row.title_clue || row.id));$('metadata-hold-fields').hidden=!metadataHolds.length && !questionsPending;$('metadata-hold-fields').textContent=questionsPending?'Choose which recorded values this book should use. Your answer saves a draft for review.':metadataHolds.map(item=>item.reason).join(' · ');
   if(reset || (!dirty && !$('manual-review').contains?.(document.activeElement))){proposalId=context.proposal_id || null;coverId=context.cover_id || row.selected_cover?.id || null;}
-  if(reset || (!trackDirty && !$('track-review').contains?.(document.activeElement) && !$('candidate-details').contains?.(document.activeElement))){trackDraft={id:row.id,revision:row.revision,order:row.track_order || row.members.map(member=>member.member_key || member.path),included:row.included || row.members.map(member=>member.member_key || member.path)};trackDirty=false;$('source-coverage').checked=!!context.source_coverage_confirmed;$('playback-order').checked=!!context.order_confirmed;const chapterDefault=context.chapters_choice_saved===false && creation.chapters_default===true && creation.chapters_available===true && !creation.job && !/queued|creating|checking|created|completed/i.test(creation.status || '');$('add-chapters').checked=chapterDefault || !!context.chapters;if(chapterDefault)trackDirty=true;}
+  if(reset || (!trackDirty && !(trackDraft?.retainedDecision?.fingerprint===row.fingerprint && trackDraft.retainedDecision.revision===row.revision) && !$('track-review').contains?.(document.activeElement) && !$('candidate-details').contains?.(document.activeElement))){trackDraft={id:row.id,revision:row.revision,order:row.track_order || row.members.map(member=>member.member_key || member.path),included:row.included || row.members.map(member=>member.member_key || member.path)};trackDirty=false;$('source-coverage').checked=!!context.source_coverage_confirmed;$('playback-order').checked=!!context.order_confirmed;const chapterDefault=context.chapters_choice_saved===false && creation.chapters_default===true && creation.chapters_available===true && !creation.job && !/queued|creating|checking|created|completed/i.test(creation.status || '');$('add-chapters').checked=chapterDefault || !!context.chapters;if(chapterDefault)trackDirty=true;}
   const actor=actorValue=>actorValue==='assistant'?'Assistant review':actorValue==='user'?'User review':'Needs review';
   $('candidate-facts').textContent=`Metadata: ${actor(context.metadata_actor)} · ${context.source_coverage_confirmed?'Source files reviewed: '+actor(context.track_actor):'Source files need review'} · Playback order: ${context.order_confirmed?actor(context.track_actor):'Needs review'} · Recording completeness unknown`;
   $('matching-status').textContent=matching.error || (matching.conflicts?.length?`${matching.conflicts.length} metadata disagreements need review.`:null) || (matching.state==='finding' || matching.state==='pending'?'Finding metadata…':matching.proposals?.length?'Original work matches; recording unverified':matching.state==='completed'?'No reliable match found. Review the title and author, then try again.':'Find possible identities or enter verified metadata manually.');
@@ -1294,11 +1478,8 @@ $('find-metadata').addEventListener('click',later('toolbar:find-metadata','find_
 $('edit-held-metadata').addEventListener('click',()=>{if(!selectedRow || ended)return;if(!selectedRow.metadata_questions?.unresolved_count && namesHold(selectedRow))return panelEditNames();if(selectedRow.metadata_questions?.unresolved_count){$('manual-review').open=true;const heading=$('metadata-questions-heading');heading.scrollIntoView?.({block:'center',behavior:'auto'});heading.focus?.({preventScroll:true});return;}$('manual-review').open=true;const field=(selectedRow.metadata_holds || []).flatMap(item=>item.fields || [])[0] || 'title';const control=form.elements.namedItem(field) || form.elements.namedItem('title');control?.scrollIntoView?.({block:'center',behavior:'auto'});control?.focus?.({preventScroll:true});});
 $('check-metadata').addEventListener('click',later('toolbar:check-metadata','check_metadata',()=>{if(dirty || busy || ended)return;$('matching-status').textContent='Checking metadata…';return candidateRequest('/api/candidate/match');}));
 $('find-covers').addEventListener('click',later('toolbar:find-covers','find_covers',()=>candidateRequest('/api/candidate/covers')));
-$('save-tracks').addEventListener('click',later('toolbar:save-tracks','save_tracks',async()=>{if(!trackDraft || trackSave)return;const draft=trackDraft;trackSave={at:Date.now()};trackSaveLine();const result=await candidateRequest('/api/candidate/tracks',{revision:draft.revision,order:draft.order,included:draft.included,source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked,actor:'user',evidence_note:''},{quiet:true});if(result?.row && selectedRow?.id===draft.id){trackDirty=false;manualTrackTouched=false;
-  // The rows update now, not at the next poll, so Approve this order works as soon as the save lands (Futaba 0.22.0 M-3).
-  syncManualDraft();renderMergeCandidate(selectedRow,false);controls();}
-  trackSave=null;trackSaveLine(result?.row?'Track review saved.':'Track review not saved. '+(candidateFailure?serverSentence(candidateFailure,'Nothing was changed.'):'Nothing was changed.'));}));
-function trackSaveLine(text){const line=$('track-save-status');if(!line)return;const value=trackSave?clockNote('Saving track review…',trackSave.at):text ?? line.textContent;if(line.textContent!==value)line.textContent=value;}
+$('save-tracks').addEventListener('click',async()=>{if(!trackDraft || trackSave || !selectedRow)return;const row=selectedRow,draft=JSON.parse(JSON.stringify(trackDraft)),flight={at:Date.now()},flags={source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked};trackSave=flight;trackSaveLine();let text='';try{const answer=await bookDecision({...row,revision:draft.revision},'tracks',{order:draft.order,included:draft.included,...flags,evidence_note:''});if(sameDecisionRow(selectedRow,row) && decisionPacked(trackDraft)===decisionPacked(draft) && flags.source_coverage_confirmed===$('source-coverage').checked && flags.order_confirmed===$('playback-order').checked && flags.chapters===$('add-chapters').checked){if(answer.row?.id===row.id){trackDraft.revision=answer.row.revision;select({...answer.row,path:answer.row.id,kind:'candidate',library:selectedLibrary},false);}trackDirty=false;manualTrackTouched=false;trackDraft.retainedDecision={fingerprint:row.fingerprint,revision:row.revision};syncManualDraft();}if(selectedRow?.id===row.id)restoreDecisionPanel(selectedRow,selectedLibrary);text='Track review saved.'+(trackDirty?' Your newer edits are not saved yet.':'')+(answer.decision.state==='needs_review'&&answer.decision.reason?' '+answer.decision.reason:'');}catch(error){text=error.decisionUnknown?error.message:'Track review not saved: '+error.message;}finally{if(trackSave===flight)trackSave=null;if(selectedRow?.id===row.id)trackSaveLine(text);controls();}});
+function trackSaveLine(text){const line=$('track-save-status'),button=$('save-tracks');if(!line)return;const value=trackSave?trackSave.text || 'Saving…':text ?? line.textContent;if(line.textContent!==value)line.textContent=value;if(button && trackSave){button.textContent='Saving…';button.title='Recording this book\'s decision…';button.setAttribute('aria-disabled','true');}else if(button){button.textContent='Save track review';button.removeAttribute('aria-disabled');}}
 for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
 $('create-audiobook').addEventListener('click',later('toolbar:create-audiobook','create',()=>{if(!dirty && !trackDirty && selectedRow?.creation?.can_create)candidateRequest('/api/audiobook/create');}));
 $('queue-books').addEventListener('click',later('toolbar:queue-books','queue_books',async()=>{const chosen=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id));const ready=chosen.filter(row=>readyForQueue(row));const blocked=chosen.filter(row=>!ready.includes(row));if(!ready.length)return;if(busy || ended)return;busy=true;controls();try{const result=await request('/api/audiobook/queue',{library:'Audiobooks',candidates:ready.map(row=>({id:row.id,revision:row.revision}))});await refresh(true);message([`${ready.length} reviewed candidate(s) requested for queue.`,...blocked.map(row=>`${row.title_clue}: ${(row.creation?.reasons || ['Needs review or candidate changed']).join('; ')}`)].join('\n'));if(result.excluded?.length)message($('message').textContent+'\n'+result.excluded.map(item=>item.reason || 'Candidate needs review').join('\n'));}catch(error){message(error.message);}finally{busy=false;controls();}}));
@@ -2148,7 +2329,7 @@ function renderAttentionGroups(){
   // Books automatic processing has not settled yet are counted, never silently missing (0.22.0 review B5.2).
   const sweep=$('attention-sweep');
   if(sweep){const n=stillChecking(),running=researchChecking();
-    const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked.`+(state?.automatic_processing?.can_start===true?` Start automatic processing to check ${n===1?'it':'them'}.`:'');
+    const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked.`+(state?.automatic_processing?.can_start===true?` ${automaticStartWord()} automatic processing to check ${n===1?'it':'them'}.`:'');
     if(sweep.textContent!==text)sweep.textContent=text;sweep.hidden=!text;}
   const queueLine=$('queue-line');
   if(queueLine){const n=queueState.queued.length,p=n?queueP(queueBlocker(queueState.queued[0])):'';
@@ -2259,17 +2440,20 @@ function startPending(automatic){const kind=automatic?.start_pending?.kind;retur
 function researchChecking(){return !ended && !recoveryDisconnected && state?.automatic_processing?.state==='Running' && Number.isInteger(state?.automatic_processing?.research?.researching) && state.automatic_processing.research.researching>0;}
 function renderAutomaticEligibility(){
   const automatic=state?.automatic_processing;
+  const resume=automatic?.state==='Paused',verb=resume?'Resume':'Start';
+  setText('start-automatic',verb+' automatic processing');
+  $('start-automatic').setAttribute('aria-label',verb+' automatic processing');
   let reason='';
-  if(ended)reason='The local server is stopping or stopped. Start is unavailable.';
-  else if(recoveryDisconnected || typeof automatic?.can_start!=='boolean')reason='Start availability is unknown. Waiting for the local server.';
-  else if(automaticRequest==='start')reason='Start requested. Waiting for the app to respond.';
+  if(ended)reason=verb+' is unavailable: the local server is stopping or stopped.';
+  else if(recoveryDisconnected || typeof automatic?.can_start!=='boolean')reason=verb+' availability is unknown. Waiting for the local server.';
+  else if(automaticRequest==='start')reason=verb+' requested. Waiting for the app to respond.';
   else if(draftLeaseFailure || (manualDraftLease?.active && !manualDraftLease.confirmed))reason='';
   // A pending start (O12): the notice says what it waits for, in place of the block reason; Start stays disabled.
   else if(startPending(automatic))reason=PENDING_NOTICE[startPending(automatic)];
-  else if(automatic.can_start!==true)reason=automatic.start_block_reason || 'Start availability is unknown. Waiting for the local server.';
+  else if(automatic.can_start!==true)reason=automatic.start_block_reason || verb+' availability is unknown. Waiting for the local server.';
   setText('automatic-start-reason',reason);
   $('automatic-start-reason').hidden=$('library').value!=='Audiobooks' || !reason;
-  $('start-automatic').title=reason || (automatic?.state==='Paused'?'Continue the saved discovery, metadata research and queued audiobook jobs.':'Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held.');
+  $('start-automatic').title=reason || (resume?'Continue saved discovery, metadata research and pending audiobook jobs.':'Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held.');
   $('start-automatic').setAttribute('aria-describedby','automatic-start-reason automatic-status automatic-request');
 }
 function renderAutomatic(){
@@ -2280,11 +2464,11 @@ function renderAutomatic(){
   reconcileAutomaticRequest(automatic);
   const shown=automatic?.state==='Needs attention'?'Stopped — needs attention':automatic?.state;
   setText('automatic-status',(!known || stale?'Current processing status unavailable. ':'')+stale+'Automatic processing: '+(known?(stale?automatic.state:shown):'status unavailable'));
-  setText('automatic-request',automaticRequest==='start'?'Start requested. Waiting for the app to respond.':automaticRequest==='stop'?'Requesting automatic stop…':automaticRequest==='cancel-start'?'Cancelling the queued start…':'');
+  setText('automatic-request',automaticRequest==='start'?(automaticFlight?.state==='Paused'?'Resume':'Start')+' requested. Waiting for the app to respond.':automaticRequest==='stop'?'Requesting automatic stop…':automaticRequest==='cancel-start'?'Cancelling the queued start…':'');
   renderAutomaticEligibility();
   let detail='';
   if(automatic?.state==='Stopping')detail='Stopping automatic processing — '+(automatic.reason || automaticPhase(automatic.phase));
-  else if(automatic?.state==='Paused')detail=automatic.pause?.origin || !automatic.reason || automatic.reason==='Paused — pending work saved'?pauseLine(automatic.pause,true):automatic.reason.replace(/\.?$/,'.')+' Start automatic processing to continue.';
+  else if(automatic?.state==='Paused')detail='Automatic processing is paused. Resume automatic processing to continue.'+(automatic.can_start!==true && automatic.start_block_reason?' '+automatic.start_block_reason:'');
   else if(automatic?.state==='Completed'){
     const converted=verifiedCount(state?.audiobook_jobs?.converted_total),approved=verifiedCount(state?.audiobook_jobs?.approved_total),held=verifiedCount(automatic.research?.held);
     detail=converted!==null && approved!==null && approved>=converted && held!==null?'Automatic pass complete — '+converted+' converted · '+held+' held':'Automatic pass complete — result counts unavailable';
@@ -2466,7 +2650,7 @@ function restartText(row){
   if(r.state==='held')return heldText(row,r);
   if(r.state==='failed'){
     if(known && !running && auto.can_start!==true && !startPending(auto))return {status:null,hint:`Automatic processing hit an error on this book. It can't start again yet. ${auto.start_block_reason || ''}`.trim(),warn:true};
-    return {status:null,hint:'Automatic processing hit an error on this book. Press Start automatic processing above to try again.',warn:true};
+    return {status:null,hint:`Automatic processing hit an error on this book. Press ${automaticStartWord()} automatic processing above to try again.`,warn:true};
   }
   if(!known)return {status:'Started over — waiting',hint:'Reconnecting to the app. This row updates when it is back.'};
   if(running && r.state==='working')return r.source_wait===true?{status:'Started over — waiting for a source',hint:'Nothing to do. A metadata source is busy. Automatic processing tries again by itself.'}:
@@ -2478,7 +2662,7 @@ function restartText(row){
     const when={conversion:'Automatic processing starts by itself when audiobook conversion finishes or is paused, then',scan:'Automatic processing starts by itself when the library scan ends or is stopped, then',stopping:'Automatic processing starts again by itself once it has stopped, then'}[pending];
     return {status:'Started over — waiting to start',hint:`Nothing to do. ${when} ${held?'holds this book because it has a saved review.'+(release?' Then Let the app handle it appears here.':''):'takes this book.'}`};
   }
-  if(auto.can_start===true)return {status:'Started over — waiting for you',hint:held?'Press Start automatic processing above. It will then hold this book because it has a saved review'+(release?', and Let the app handle it appears here.':'.'):'Press Start automatic processing above. It will then research this book and queue it if the match is safe.',warn:true};
+  if(auto.can_start===true)return {status:'Started over — waiting for you',hint:held?`Press ${automaticStartWord()} automatic processing above. It will then hold this book because it has a saved review`+(release?', and Let the app handle it appears here.':'.'):`Press ${automaticStartWord()} automatic processing above. It will then research this book and queue it if the match is safe.`,warn:true};
   return {status:'Started over — waiting for you',hint:`Automatic processing can't start yet. ${auto.start_block_reason || ''}`.trim(),warn:true};
 }
 // Held for a saved review (follow-up 3, sections 2.2 and 4): "saved review kept" when the button can release it.
@@ -2535,7 +2719,7 @@ function renderRestartSummary(){
   const auto=state?.automatic_processing,running=auto?.state==='Running',pending=startPending(auto),tails=[];
   if(!running && (n('waiting') || n('working') || n('failed'))){
     if(pending)tails.push('Nothing for you to do. Automatic processing starts by itself when '+{conversion:'audiobook conversion finishes or is paused.',scan:'the library scan ends or is stopped.',stopping:'it has stopped.'}[pending]);
-    else if(auto?.can_start===true)tails.push('Press Start automatic processing above.');
+    else if(auto?.can_start===true)tails.push(`Press ${automaticStartWord()} automatic processing above.`);
     else if(auto && typeof auto.can_start==='boolean')tails.push(`Automatic processing can't start yet. ${auto.start_block_reason || ''}`.trim());
   }
   if(running && n('next_run'))tails.push('Press Start automatic processing above after this run finishes.');
@@ -2789,7 +2973,7 @@ const SET_APPROVE_TIP='Join the files shown, in this order, into one book: re-en
 function setCause(ask){return holdKind(ask)==='part_of_book' && String(ask?.cause || '').startsWith('set_');}
 function askTip(entry,kind){return chosenCopy(entry.row,askTipOf(entry,kind));}
 function askTipOf(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;if(kind==='approve' && ask?.membership==='checking')return CHECKING_TIP;if(folderQuestion(ask) && (kind==='approve' || kind==='separate'))return kind==='approve'?FOLDER_QUESTION.approve[1]:FOLDER_QUESTION.separate;if(kind==='approve' && gapRow(ask))return GAP_APPROVE[1];return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:kind==='approve' && inlineNames(entry.row)?'Approve this book with the author, title, series and number shown. Queued work waits for Start. Ctrl+Enter in a field does the same.':ASK_TIPS[kind];}
-const ASK_PENDING={delete:['Checking...',"Checking this book's files..."],copy:['Checking...','Checking the audiobook in {sorted}...'],approve:['Submitting approval…','Submitting approval…'],separate:['Keeping...','Keeping these files separate...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
+const ASK_PENDING={delete:['Checking...',"Checking this book's files..."],copy:['Checking...','Checking the audiobook in {sorted}...'],approve:['Saving decision…','Saving decision…'],separate:['Keeping...','Keeping these files separate...'],convert:['Saving decision…','Saving decision…'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
   found:[null,'Files found. The book is checked again.'],separate:[null,'Kept as separate books. Each is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
   changed:[null,'Changes found. The book is checked again.'],deleted:[null,'Deleted. The book is gone from the app.'],copy_removed:[null,'Removed. The copy is gone from the app.'],later:[null,'Changes found. The next library scan will pick them up.']};
@@ -3047,7 +3231,7 @@ function updateAskButton(entry,button,kind){
   if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(gone)return;
   const label=mode==='done' && queued?'Queued':mode==='waiting'?'Queued':mode==='pending'?(askPendings.get(row.id)?.checking?(askPendings.get(row.id).unconfirmed?'Approval unconfirmed':'Checking approval…'):queueRunning(row,ASK_QUEUE[kind])?'Checking book…':ASK_PENDING[kind][0]):askLabel(entry,kind);
   const sibling=queuedFor(row) || (queueState.running?.book_id===row.id?queueState.running:null),siblingTip=sibling?`${queueWord(sibling.action)} is queued for this book. Cancel it to use this.`:(ASK_PENDING[askPendings.get(row.id)?.kind]?.[1] || '');
-  const title={done:chosenCopy(row,ASK_DONE[done]?.[1] || ''),offline:'Local server unavailable.',sibling:siblingTip,queued:QUEUE_SIBLING,waiting:queueHint(row) || '',inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:askPendings.get(row.id)?.checking?(askPendings.get(row.id).unconfirmed?'Approval could not be confirmed. Check the book’s status after reconnecting.':'Checking whether the approval was queued…'):ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
+  const title={done:chosenCopy(row,ASK_DONE[done]?.[1] || ''),offline:'Local server unavailable.',sibling:siblingTip,queued:QUEUE_SIBLING,waiting:queueHint(row) || '',inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:['approve','convert'].includes(kind)?'Recording this book\'s decision…':ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',label.replace(/\.\.\.$/,'')+': '+askName(row));
   // Pending and a not-yet-possible Approve keep keyboard focus: aria-disabled, never the disabled attribute.
@@ -3063,7 +3247,7 @@ function updateAskRow(entry){
   const text=askText(row),done=askDone.get(row.id),result=askResults.get(row.id),pending=askPendings.get(row.id)?.kind || null;
   let status=text.status,hint=text.hint,clause='',warn=false,lines=null;
   if(done){status=ASK_DONE[done]?.[0] || status;hint=chosenCopy(row,ASK_DONE[done]?.[1] || hint);}
-  else if(pending)hint=askPendings.get(row.id)?.checking?(askPendings.get(row.id).unconfirmed?'Approval could not be confirmed. Check the book’s status after reconnecting.':'Checking whether the approval was queued…'):clockNote(ASK_PENDING[pending][1],askPendings.get(row.id)?.at);
+  else if(pending)hint=['approve','convert'].includes(pending)?askPendings.get(row.id)?.text || 'Saving decision…':clockNote(ASK_PENDING[pending][1],askPendings.get(row.id)?.at);
   else if(result){hint=result.text;warn=result.warn!==false;}
   else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+(holdKind(ask)?'. No change.':'. Not found.');
   else if(!pending){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued delete's outcome (1.6)
@@ -3588,7 +3772,7 @@ function namesProposal(id,field){const row=rows.find(row=>row.id===id),value=nam
 // The values shown: the draft over what the editor read; Title and Author of a question row are its ask draft (one draft).
 function namesValue(row,field){
   const state=namesState.get(row.id),draft=state?.draft || {};
-  if((field==='title' || field==='author') && askOf(row)){const d=askDrafts.get(row.id) || {};if(field==='author'){const chosen=askValues(row,true).author;if(typeof chosen==='string')return chosen;}if(typeof d[field]==='string')return d[field];const proposal=askProposal(askOf(row),field);return proposal || namesProposal(row.id,field);}
+  if((field==='title' || field==='author') && askOf(row)){const d=askDrafts.get(row.id) || {};if(field==='author'){const chosen=askValues(row,true).author;if(typeof chosen==='string')return chosen;}if(typeof d[field]==='string')return d[field];const saved=decisionBooks.get(row.id),proposal=(saved && saved.fingerprint===row.fingerprint?saved.names?.[field]:undefined) ?? askProposal(askOf(row),field);return proposal || namesProposal(row.id,field);}
   if(inlineNames(row) && ['series','number'].includes(field)){const value=askDrafts.get(row.id)?.[field];if(typeof value==='string')return value;}
   if(Object.hasOwn(draft,field))return draft[field];
   return namesProposal(row.id,field);
@@ -3644,7 +3828,7 @@ async function namesToggle(id){
   if(namesOpen(id)){namesRows.get(id)?.inputs?.title?.focus?.({preventScroll:true});return;}  // open: focus moves to Title (1.7)
   const state=namesState.get(id) || {draft:{},seq:0,previewKey:''};state.open=true;namesState.set(id,state);
   state.openDraft={names:{...state.draft},ask:askDrafts.has(id)?{...askDrafts.get(id)}:null};
-  if(state.data && (state.loadedRevision!==row.revision || state.loadedFingerprint!==row.fingerprint))state.data=null;
+  state.data=null;  // Reopening always reads the latest durable choices; the unsaved draft stays separate.
   renderRows(true);focusNames(id);
   if(!state.data){
     const ticket=(state.loadSeq || 0)+1;state.loadSeq=ticket;
@@ -3652,13 +3836,15 @@ async function namesToggle(id){
     const current=()=>namesState.get(id)===state && state.open && state.loadSeq===ticket;
     try{
       // This only loads editable names. Use the existing finite read bound, not the long destructive-press bound.
-      const answer=await request('/api/candidate/names',{library:'Audiobooks',id,revision},STATE_TIMEOUT);
+      const [answer,accepted]=await Promise.all([request('/api/candidate/names',{library:'Audiobooks',id,revision},STATE_TIMEOUT),durableNamesOverlay(row)]);
       if(!current())return;
       const fresh=rows.find(item=>item.id===id),editor=answer?.editor;
       const texts=['title','author','series','number','universe'];
       if(!fresh || fresh.revision!==revision || fresh.fingerprint!==fingerprint || !editor ||
           !texts.every(field=>typeof editor.fields?.[field]?.proposal==='string') || typeof editor.fields?.collection?.proposal!=='boolean')throw Error('Names response is stale or incomplete');
+      decisionBooks.set(id,{fingerprint,names:accepted});
       state.data={...editor,series:Array.isArray(editor.series)?editor.series:[],universes:Array.isArray(editor.universes)?editor.universes:[]};
+      for(const [field,value] of Object.entries(accepted))state.data.fields[field]={...state.data.fields[field],proposal:value};
       state.loadedRevision=revision;state.loadedFingerprint=fingerprint;
       namesNotes.delete(id);
     }catch(error){
@@ -3776,13 +3962,13 @@ function updateNamesRow(row){
   // The editor's Goes to is the row's destination block (Judy 0.23.1 checklist 18): it follows the draft's preview.
   if(!askOf(row)){const dest=destRows.get(row.id);if(dest){dest.row=row;updateDestination(dest);}}
   if(entry.save){
-    const pending=state?.pending,queued=queuedFor(row,'names') || queueRunning(row,'names'),inert=pending || queued?'':namesInert(row);
-    const face=pending || queued?'Saving…':'Save',tip=pending?'Saving these names…':queuedFor(row,'names')?'Names are queued in this session. They are not saved yet.':queued?'Saving these names…':inert || NAMES_SAVE_TIP;
+    const pending=state?.pending,queued=false,inert=pending?'':namesInert(row);
+    const face=pending?'Saving…':'Save',tip=pending?'Recording this book\'s decision…':inert || NAMES_SAVE_TIP;
     if(entry.save.textContent!==face)entry.save.textContent=face;if(entry.save.title!==tip)entry.save.title=tip;entry.save.setAttribute('aria-label',face.replace(/…$/,'')+': '+askName(row));
     if(pending || queued || inert)entry.save.setAttribute('aria-disabled','true');else entry.save.removeAttribute('aria-disabled');
     // 0.22.3: the clock while it waits, a failure in its place (the editor stays open, the typing is kept), else the cause.
     const note=namesNotes.get(row.id),forgetting=state?.forgetting;
-    const text=pending?clockNote('Saving these names…',pending.at,SAVE_TAIL):forgetting?clockNote('Taking this correction back…',forgetting.at,SAVE_TAIL):note?.warn && open?note.text:'';
+    const text=pending?pending.text || 'Saving…':forgetting?clockNote('Taking this correction back…',forgetting.at,SAVE_TAIL):open?note?.text || '':'';
     if(entry.status){if(entry.status.textContent!==text)entry.status.textContent=text;entry.status.hidden=!text;entry.status.classList?.toggle?.('warn',!pending && !forgetting && !!text);
       if(!pending && !forgetting && text)entry.status.setAttribute('role','alert');else entry.status.removeAttribute('role');}
     renderBlock(entry.why,pending || queued?{text:'',fix:null}:saveBlock(row),row,true,entry.save);
@@ -3824,13 +4010,19 @@ async function namesSave(id){
   if(entry?.save?.getAttribute('aria-disabled')==='true')return;
   const values=namesValues(row);state.pending={at:Date.now()};namesNotes.delete(id);updateNamesRows();
   let answer=null,failure=null;
-  try{answer=await request('/api/candidate/names-save',{library:'Audiobooks',id,revision:row.revision,...seen(row),names:values,queue:true,title:askName(row)},PRESS_TIMEOUT);}catch(error){failure=error;}
+  try{answer=await bookDecision(row,'names',{names:values});}catch(error){failure=error;}
   state.pending=null;
-  if(answer?.queued===true){queueAccepted(row,'names',answer);updateNamesRows();return;}
-  if(answer){namesDone(row,answer);return;}
+  if(answer?.durable){
+    if(namesState.get(id)!==state || rows.find(item=>item.id===id)?.fingerprint!==row.fingerprint){namesNotes.set(id,{text:decisionLine({body:{action:'names'},title:decisionName(row)},answer.decision)+' The source changed; review the current book before using these names.',warn:true});updateNamesRows();return;}
+    const unchanged=decisionPacked(namesValues(row))===decisionPacked(values);
+    for(const [field,value] of Object.entries(values))if(state.data?.fields?.[field])state.data.fields[field]={...state.data.fields[field],proposal:value};
+    decisionBooks.set(id,{fingerprint:row.fingerprint,names:{...(decisionBooks.get(id)?.names || {}),...values}});
+    state.openDraft={names:{},ask:null};
+    if(unchanged){state.draft={};askDrafts.delete(id);state.previewKey='';}
+    namesNotes.set(id,{text:decisionLine({body:{action:'names'},title:decisionName(row)},answer.decision)+(unchanged?'':' Your newer edits are not saved yet.'),warn:answer.decision.state==='needs_review'});updateNamesRows();return;
+  }
   const code=failure?.body?.code;
-  namesNotes.set(id,{text:!failure?.httpStatus?'Save not confirmed. Check this book before trying again.':code==='changed'?'This book changed. Review its details and try again.':serverSentence(failure,'Save was not accepted. Nothing was changed.'),warn:true});
-  if(!failure?.httpStatus)refreshFailed(failure);
+  namesNotes.set(id,{text:failure?.decisionUnknown?failure.message:'Names not saved: '+(failure?.message || 'Check this book and try again.'),warn:true});
   if(code==='changed'){lastKey=null;refresh(true).catch(()=>{});}  // the next press carries the new revision
   updateNamesRows();
 }
@@ -4752,9 +4944,10 @@ function openTrackReview(entry){
 const ASK_QUEUE={approve:'approve',convert:'convert',separate:'separate',scan:'scan_again',remove:'dismiss'};
 const ASK_QUEUE_ACTIONS=Object.values(ASK_QUEUE);
 // A press's outcome on its row, whether it ran in its own request or later from the queue (outcome.answer).
-function askSettled(entry,kind,result,values){
+function askSettled(entry,kind,result,values,preserveDraft=false){
   const row=entry?.row,id=row?.id ?? entry?.id,ask=row?askOf(row):null;
   if(kind==='approve' || kind==='convert'){
+    if(result?.durable){const text=decisionLine({body:{action:'approve'},title:decisionName(row || {title_clue:entry?.title})},result.decision)+(result.code==='series_needed'&&result.message?' '+result.message:'')+(preserveDraft?' Your newer edits are not saved yet.':'');askResults.set(id,{text,warn:result.decision.state==='needs_review'});askNote(text);if(!preserveDraft && result.decision.state==='applied' && (result.job_id || result.approved===true)){askDone.set(id,kind);askDrafts.delete(id);selectedBooks.delete(id);namesDropped(id);}return;}
     if(result?.saved===true && result?.code==='series_needed'){askResults.set(id,{text:result.message,warn:false,code:result.code});queueAnnounce(`${row?askName(row):entry?.title || 'Book'}: ${result.message}`);return;}
     askDone.set(id,kind);askDrafts.delete(id);selectedBooks.delete(id);namesDropped(id);
     const settled=Math.max(1,Number(ask?.same_author?.count) || 1);
@@ -4779,22 +4972,6 @@ function askSettled(entry,kind,result,values){
   if(kind==='scan' && result?.found!==true){askChecked.set(id,askClock(new Date()));return;}
   askDone.set(id,kind==='scan'?'found':'removed');askNote(kind==='scan'?'Files found. The book is checked again.':'Removed 1 book from the list. No files were touched.');
 }
-const APPROVAL_ACK_MS=5000;
-async function reconcileApproval(row, press){
-  const id=row.id,action=ASK_QUEUE[press.kind];
-  if(press.receipt){
-    for(let attempt=0;attempt<2;attempt++){
-      try{
-        const answer=await request('/api/queue/approval-reconcile',{id,action,...press.receipt},APPROVAL_ACK_MS);
-        if(answer?.queued===true){queueAccepted(row,action,answer);return;}
-        if(answer?.queued===false){askResults.set(id,{text:'Approval not queued. Your choices are still here. Try again.'});return;}
-        break;
-      }catch(error){if(error.httpStatus && error.httpStatus<500)break;}
-    }
-  }
-  // Neither a lost reply nor an unavailable server proves that the request did not run.
-  press.unconfirmed=true;
-}
 async function askPress(entry,kind){
   const row=entry.row,id=row.id,button=(entry.buttons || []).find(item=>item.kind===kind)?.button;
   if(!button || button.disabled || button.getAttribute?.('aria-disabled')==='true' || askDone.has(id))return;
@@ -4804,28 +4981,24 @@ async function askPress(entry,kind){
   // Futaba's 0.22.0 QA, m-11: a Delete book note (a partial delete) took the hint over, so a later Scan again showed no
   // result line. A new press on the row replaces it, as it does an earlier refusal.
   const approval=kind==='approve' || kind==='convert';
-  const requestId=approval?globalThis.crypto?.randomUUID?.():null;
-  const press={id,kind,at:Date.now(),receipt:requestId?{request_id:requestId,request_expires:Date.now()+45000}:null};
+  const press={id,kind,at:Date.now(),snapshot:approval?decisionPacked({values,names:namesFor(row)}):null};
   askPendings.set(id,press);askResults.delete(id);deleteNotes.delete(id);dropQueueNote(id);controls();
   try{
     let result;
     if(values){
       // The "Goes to" line shown travels with the press: a different destination now is refused (Senua's 0.22.0 review, m1).
-      // Ruling 35: always accepted and queued with his values; the row shows it running and its outcome.
+      // Acceptance records the exact current choices; later job admission remains separate.
       const shown=askDestination(row)?.path,names=namesFor(row);
-      result=await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...seen(row),...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{}),
-        ...(names?{names}:{}),...press.receipt,queue:true,label:askName(row)},APPROVAL_ACK_MS);
+      result=await bookDecision(row,'approve',{title:values.title ?? null,author:values.author ?? null,names:names || null,without_missing:kind==='convert',choice:values.choice || null,path:shown || null});
     }else{
       const route=kind==='separate'?'/api/candidate/keep-separate':kind==='scan'?'/api/candidate/scan-again':'/api/candidate/dismiss';
       result=await request(route,{library:'Audiobooks',id,revision:row.revision,queue:true,title:askName(row)},kind==='scan'?120000:PRESS_TIMEOUT);
     }
     if(result?.queued===true)queueAccepted(row,ASK_QUEUE[kind],result);
-    else askSettled(entry,kind,result,values);
+    else askSettled(entry,kind,result,values,approval && (press.snapshot!==decisionPacked({values:askValues(row),names:namesFor(row)}) || !sameDecisionRow(rows.find(item=>item.id===id),row)));
   }catch(error){
-    if(approval && (!error.httpStatus || error.httpStatus>=500)){
-      press.checking=true;controls();
-      await reconcileApproval(row,press);
-    }else askResults.set(id,{text:(approval?'Approval not queued: ':'')+askErrorText(error,kind,row),code:error.body?.code || ''});
+    if(approval)askResults.set(id,{text:error.decisionUnknown?error.message:'Approval not saved: '+(error.httpStatus?askErrorText(error,kind,row):error.message),code:error.body?.code || '',warn:true});
+    else askResults.set(id,{text:askErrorText(error,kind,row),code:error.body?.code || ''});
     // A gate refused it (for example Name taken, or the destination moved): the row shows the current Goes to line, with
     // his typed values kept.
     if(['name_taken','changed','moved'].includes(error.body?.code)){askDraft(id).previewKey=null;askPreview(entry,0);}
@@ -4875,21 +5048,21 @@ function closeApproveDialog(){if(!approveConfirm)return;approveConfirm=null;$('a
 async function runApproveSelected(){
   const confirm=approveConfirm,button=$('approve-confirm');if(!confirm || button.getAttribute?.('aria-disabled')==='true' || askBulk)return;
   button.setAttribute('aria-disabled','true');approveConfirm=null;$('approve-dialog').close?.();
-  const items=confirm.items,n=items.length;let approved=0,queued=0;askBulk=true;askNote(`Approving ${plural(n,'book','books')}.`);controls();
+  const items=confirm.items,n=items.length;let approved=0;askBulk=true;askNote(`Approving ${plural(n,'book','books')}.`);controls();
   for(const row of items){
     if(ended || recoveryDisconnected)break;
     askPendings.set(row.id,{id:row.id,kind:'approve',at:Date.now()});updateAskRows();
+    const draft=decisionPacked({ask:askDrafts.get(row.id) || {},names:namesState.get(row.id)?.draft || {}});
     const shown=confirm.paths?.get(row.id);  // the path the dialog listed (m1)
-    // Ruling 35: each Approve is accepted and queued at once; its checks run in the engine's queue, one book at a time.
-    try{const answer=await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...seen(row),...(shown?{path:shown}:{}),queue:true,label:askName(row)},APPROVE_TIMEOUT);
-      if(answer?.queued===true){queueAccepted(row,'approve',answer);selectedBooks.delete(row.id);queued++;}else{askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}}
-    catch(error){askResults.set(row.id,{text:askErrorText(error,'approve',row)});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
+    // Each book gets its own durable receipt before later work admission.
+    try{const answer=await bookDecision(row,'approve',{title:null,author:null,names:null,without_missing:false,choice:null,path:shown || null});
+      askSettled(askRows.get(row.id) || {row},'approve',answer,{},draft!==decisionPacked({ask:askDrafts.get(row.id) || {},names:namesState.get(row.id)?.draft || {}}) || !sameDecisionRow(rows.find(item=>item.id===row.id),row));selectedBooks.delete(row.id);approved++;}
+    catch(error){askResults.set(row.id,{text:error.decisionUnknown?error.message:'Approval not saved: '+(error.httpStatus?askErrorText(error,'approve',row):error.message),warn:true});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}}
     finally{askPendings.delete(row.id);}
   }
   askBulk=false;
-  // Provisional copy for the queued count (ruling 35, sent to Judy).
-  askNote(queued===n?`Queued ${plural(n,'book','books')} for approval. Each is checked, then converted. Each row shows its outcome.`:
-    approved+queued===n?`Approved ${plural(n,'book','books')}. Track ${n===1?'it':'them'} under Queued / creating.`:`Approved ${(approved+queued).toLocaleString()} of ${n.toLocaleString()}. ${(n-approved-queued).toLocaleString()} ${n-approved-queued===1?'stays listed with its reason':'stay listed with their reasons'}.`);
+  // Count only acknowledged durable decisions, independently of later jobs.
+  askNote(`Approval saved for ${approved.toLocaleString()} of ${n.toLocaleString()} books.`+(approved<n?' Other decisions remain listed with their reasons.':''));
   batchCounts();$('group-'+attentionGroup).focus?.({preventScroll:true});
 }
 $('approve-selected').addEventListener('click',()=>{if($('approve-selected').disabled)return;openApproveDialog();});

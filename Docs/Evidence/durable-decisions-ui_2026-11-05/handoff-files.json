@@ -1,0 +1,247 @@
+{
+  "frozen": true,
+  "owner": "/root/ender_m4b",
+  "files": [
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/counts-baseline.json",
+      "sha256": "8a06b2b0a3ba9bed072ad2b50a1404dac181b247deac974e7762749d44e1778d",
+      "bytes": 3477
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/counts-baseline.log",
+      "sha256": "e24c3baef657743b4c7c7e5d667e6c5325b4cdb87a5e7124bc30b76b6a079eb8",
+      "bytes": 2710
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/CURRENT.md",
+      "sha256": "09a1a746c098c16c5e09084f8349d6314ccd848c1a06c0cb8f63f9573e654703",
+      "bytes": 287
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/deferred-guards-baseline-red.json",
+      "sha256": "b039aadc43c7967e60872c16f486b841ae5e8b446f4d56cf321028346db9cf16",
+      "bytes": 1151
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/deferred-guards-baseline-red.log",
+      "sha256": "5be8c238bd7d0562e3ee2b8bb4a0ea01bb4fcad0d1bf9fbe7bf390f31bfd2f4f",
+      "bytes": 448
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/feedback-after-bridge.patch",
+      "sha256": "bd062646205fbf274eccd0d30c8549c24ce35c9cecfad8284487880fe97d3a79",
+      "bytes": 9018
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/feedback-equivalence.json",
+      "sha256": "01292ce6b6c447f8e2932c70f38fc226aa97fe0fb46935f13d35f74b5f9a19be",
+      "bytes": 3895
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/final-feedback-pass-v3.json",
+      "sha256": "0993fe745ece6a4c515d061806faeee5413311a109fd01a490867b6cf0feecaa",
+      "bytes": 1158
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/final-feedback-pass-v3.log",
+      "sha256": "4c493905ffe04e45ceacced3c292dc00679441f0491c053c2c99c7f76ecb7ba2",
+      "bytes": 470
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/grouped-final-sweep.json",
+      "sha256": "1144c329f694ba8b5bdaa8b74809cf0122997f16b738adeb853d9a24d6c21edb",
+      "bytes": 2320
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/grouped-final-sweep.log",
+      "sha256": "1e8c3a5579aceb2591e9c91522b37701463b787cf392996404eb74dba14d5e3f",
+      "bytes": 1592
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/implementation.patch",
+      "sha256": "c55dec23a67f747c58ebfa921d5a3ab4c6d86669774e98f1dcd988d4a5561ce7",
+      "bytes": 208075
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/kept-count-baseline.json",
+      "sha256": "86945ad065688cc95a19f0f63318b6eddab8884ef355eeccf2477dd3a2b88476",
+      "bytes": 1288
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/kept-count-baseline.log",
+      "sha256": "628e6cf0157fae72474e7716ce9eacdf7081973c3ac6bcdc06a0a4b60659b90f",
+      "bytes": 585
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/README.md",
+      "sha256": "d06d4bc3ccc2fdcea032bd24b84cb7ddf0bd0f294ed1feb0a7068be1c5919748",
+      "bytes": 3713
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/all-review-corrections.patch",
+      "sha256": "d2305adc7386db5466d3cd8fe03bf31c2ac18936b1e8258499aa4a34a51627dd",
+      "bytes": 22247
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/cleanup-empty-parent.txt",
+      "sha256": "11f32d5336f1708a075c75e5c5b5511bbae7dcb50d70300166be77c3a0e1ed73",
+      "bytes": 458
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/cleanup.txt",
+      "sha256": "b27a3a8bc49639de948ea8805d905ef52c014c77008b69bbfa2d91a01cd72500",
+      "bytes": 629
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/implementation.patch",
+      "sha256": "780134a24566412bf700a7f93be210254ac90d5aef2f541f554eb319f9ecd442",
+      "bytes": 213824
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/README.md",
+      "sha256": "d2aba8f330ab2eac33ffc5c91985f8f547ae405d52f0f10bc5d71fc9d7ce9514",
+      "bytes": 2324
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/restoration-a6aa-red.json",
+      "sha256": "e0601263a7591fc4307c9f44ed80be885cdf6faad62689422c605a424d2ee79e",
+      "bytes": 1289
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/restoration-a6aa-red.log",
+      "sha256": "c8219ccbf098169ff9b6c95fe84baaf62f2c72025d0558a4b0fefc5774ab9905",
+      "bytes": 574
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/restoration-final-affected.json",
+      "sha256": "ab2cf0be108d381b15c39a27793945f3f1b827b1a587b8b590ffe1e22f7ca121",
+      "bytes": 2311
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/restoration-final-affected.log",
+      "sha256": "1e8c3a5579aceb2591e9c91522b37701463b787cf392996404eb74dba14d5e3f",
+      "bytes": 1592
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/restoration-guard-green.json",
+      "sha256": "7c073a0ccf5ebe3f4e989611c392b0e4aa293e7de97136670391f483a8a1fdcf",
+      "bytes": 1159
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/restoration-guard-green.log",
+      "sha256": "a79feff307cab06f9da3460bdf78fea80248c3a3619954811cd179ad97209a02",
+      "bytes": 470
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/restoration-identity.patch",
+      "sha256": "660068ede691dbf823747c8c5b9a35bf15a5a2f64e9461fbe7eea8a7ee3692b7",
+      "bytes": 2466
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/runner/owned.mjs",
+      "sha256": "3f408a3d3459cfe779e972e304d9ab9b00812942e7779debf9c21d06fb9a9cef",
+      "bytes": 1146
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/runner/restoration-baseline.cjs",
+      "sha256": "cc41b949f05a0ff8dfdefc1939e78ae29cceb00b9eb3065d93122099fb311922",
+      "bytes": 546
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/runner/run.cjs",
+      "sha256": "101348a0b166b46d708991ce5edc4c9dc283f92855cff16e6e1cc061d15af604",
+      "bytes": 795
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/restoration-final/summary.json",
+      "sha256": "72cbd13ef5579773b297faf33ee7fd36c6a7ef603200fef73dc1a1202110bcf5",
+      "bytes": 4235
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/runner/baseline.cjs",
+      "sha256": "aaf00d88095e6f855315dcb104d7eaf095711379fcfd15a83b107d11b93cba56",
+      "bytes": 451
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/runner/owned.mjs",
+      "sha256": "3f408a3d3459cfe779e972e304d9ab9b00812942e7779debf9c21d06fb9a9cef",
+      "bytes": 1146
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/runner/run.cjs",
+      "sha256": "1cacf6a741119f2bf7f3bdcf788bd75633a87adef7307a6d9ca95a551d05a0b2",
+      "bytes": 588
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/implementation.patch",
+      "sha256": "962f0c330559afedb45bd46a19df624efff75b4670879eb35ff7e1f4c0db3eb6",
+      "bytes": 212704
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/README.md",
+      "sha256": "57bece306908929a8c5466974f25b9e9ab6f41d7838092915fe6defb60e6cc8d",
+      "bytes": 2627
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/runner/owned.mjs",
+      "sha256": "3f408a3d3459cfe779e972e304d9ab9b00812942e7779debf9c21d06fb9a9cef",
+      "bytes": 1146
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/runner/run.cjs",
+      "sha256": "86afed958cc38a60ac7d2f2a8a48ded36f3778d2fae34d48b469303119575625",
+      "bytes": 708
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/runner/source-guards-baseline.cjs",
+      "sha256": "a2755dd047bc943486be8bad963706447f1051862ee08dbbb8c8063bfb70f801",
+      "bytes": 542
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/source-guard-and-terminal-retry.patch",
+      "sha256": "89fa6725df8d41f87075553263163bf7a3a5f5c0e2fb0fe3b31e00468470593a",
+      "bytes": 19815
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/source-guards-9ccb-red.json",
+      "sha256": "331e062942c7683ecb6b365200ea365cca07c4f79cc0915e4a7f8a362fba8a84",
+      "bytes": 1952
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/source-guards-9ccb-red.log",
+      "sha256": "2b11af7377f02942b53bb3786b9e71c48c8499b5ff1530c8b13b03aa05155d1f",
+      "bytes": 1226
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/source-guards-final-affected.json",
+      "sha256": "45937a10432bc2da8d03b62d421c50c84613ecffb05714242bc228839889d974",
+      "bytes": 2312
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/source-guards-final-affected.log",
+      "sha256": "1e8c3a5579aceb2591e9c91522b37701463b787cf392996404eb74dba14d5e3f",
+      "bytes": 1592
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/source-guards-regressions.json",
+      "sha256": "fc1117ff5caf7b74ed4b5311ab93870227d7ffc9ebbe5ed9700aa13984ad934d",
+      "bytes": 1114
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/source-guards-regressions.log",
+      "sha256": "3f779d49f96556f32bb0a5b6c3727e2a4fe156a5309f9feb960cc8b9fbe6bf1d",
+      "bytes": 428
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/source-guards-final/summary.json",
+      "sha256": "ddb3fa56a899cfac411c61a0ec375dc1ffdd41eceb80b754170a8ae47dc4ab93",
+      "bytes": 4342
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions-ui_2026-11-05/summary.json",
+      "sha256": "3359e152d887a7f5b437e65d56153fd96a568ffa6bdd557ed0c1f9b1b2c45b0d",
+      "bytes": 4433
+    }
+  ],
+  "manifest_self_excluded": "Docs/Evidence/durable-decisions-ui_2026-11-05/handoff-files.json"
+}

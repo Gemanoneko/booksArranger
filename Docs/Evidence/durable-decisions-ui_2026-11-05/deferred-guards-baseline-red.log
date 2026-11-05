@@ -1,0 +1,14 @@
+FAIL tests/test_durable_drafts_frontend.js
+AssertionError [ERR_ASSERTION]: source-coverage: newer edit stays unsaved
+
+false !== true
+
+    at eval (eval at <anonymous> (C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-ui-20261105\tests\test_durable_drafts_frontend.js:66:1), <anonymous>:79:133) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+

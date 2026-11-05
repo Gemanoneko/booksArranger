@@ -16,10 +16,10 @@ const answer=body=>({ok:true,status:200,json:async()=>body});
   for(const [origin,copy] of [['user','Paused by you.'],['update','Paused for an update.'],['closing','Paused when Books Arranger closed.'],['interrupted','Paused after an interruption.'],['unknown','Paused.']]){
     stateWith({pause:{origin}},{pause:{origin},restart_paused:true});
     assert.ok(get('jobs-help').textContent.includes(['user','update','closing'].includes(origin)?copy+' Resume continues pending work.':'Audiobook jobs are paused. The app has not identified which book stopped them.'));
-    assert.equal(get('automatic-detail').textContent,copy+' Start automatic processing to continue.');
+    assert.equal(get('automatic-detail').textContent,'Automatic processing is paused. Resume automatic processing to continue.');
   }
-  stateWith({}, {restart_paused:true});assert.equal(get('automatic-detail').textContent,'Paused. Start automatic processing to continue.');
-  stateWith({}, {reason:'The saved drive cannot be reached.'});assert.equal(get('automatic-detail').textContent,'The saved drive cannot be reached. Start automatic processing to continue.');
+  stateWith({}, {restart_paused:true});assert.equal(get('automatic-detail').textContent,'Automatic processing is paused. Resume automatic processing to continue.');
+  stateWith({}, {reason:'The saved drive cannot be reached.'});assert.equal(get('automatic-detail').textContent,'Automatic processing is paused. Resume automatic processing to continue.');
 
   // A real start check takes priority over saved paused cleanup; no invented count/bar/clock.
   stateWith({start_admission:{state:'checking',generation:9},maintenance:{phase:'Checking the audiobook before source-folder cleanup',job_id:'old',title:'Earlier book',state:'checking',cancel_requested:false}});
@@ -66,7 +66,7 @@ const answer=body=>({ok:true,status:200,json:async()=>body});
 
   // Slow automatic Start remains one request with purpose and adjacent explanation.
   let startAnswer;context.fetch=async(route,options)=>route==='/api/automatic/start'?new Promise(resolve=>{sent.push(route);startAnswer=resolve;}):originalFetch(route,options);
-  stateWith();const starting=run("automaticAction('start')");assert.equal(get('automatic-request').textContent,'Start requested. Waiting for the app to respond.');assert.equal(get('start-automatic').disabled,true);
+  stateWith();const starting=run("automaticAction('start')");assert.equal(get('automatic-request').textContent,'Resume requested. Waiting for the app to respond.');assert.equal(get('start-automatic').disabled,true);
   await run("automaticAction('start')");assert.equal(sent.filter(x=>x==='/api/automatic/start').length,1);
   backend.automatic_processing={...backend.automatic_processing,state:'Running',can_start:false,can_stop:true};startAnswer(answer({automatic_processing:backend.automatic_processing}));await starting;
   for(const cancelled of [false,true]){
