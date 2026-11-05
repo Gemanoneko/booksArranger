@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_cancelled_merge_construction_never_starts_saved_decision_owner (test_lock_timing.SourceFolderDispatchTests.test_cancelled_merge_construction_never_starts_saved_decision_owner) ... FAIL\r\n\r\n======================================================================\r\nFAIL: test_cancelled_merge_construction_never_starts_saved_decision_owner (test_lock_timing.SourceFolderDispatchTests.test_cancelled_merge_construction_never_starts_saved_decision_owner)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-20261105\\tests\\test_lock_timing.py\", line 49, in test_cancelled_merge_construction_never_starts_saved_decision_owner\r\n    self.assertIsNone(created[0].thread,'No saved decision may start before aborting construction finishes')\r\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: <Thread(BooksArrangerSavedDecisions, started 49992)> is not None : No saved decision may start before aborting construction finishes\r\n\r\n----------------------------------------------------------------------\r\nRan 1 test in 0.687s\r\n\r\nFAILED (failures=1)\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 80784,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 8,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 86,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 1378.7175,
+  "outputBytes": 1243
+}

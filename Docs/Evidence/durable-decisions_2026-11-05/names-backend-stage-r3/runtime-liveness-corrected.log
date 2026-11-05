@@ -1,0 +1,8 @@
+test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries (test_action_queue.DurableDecisionLedgerTests.test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries) ... ok
+test_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work (test_action_queue.DurableDecisionLedgerTests.test_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work) ... ok
+test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart (test_lock_timing.SourceFolderDispatchTests.test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 3.451s
+
+OK

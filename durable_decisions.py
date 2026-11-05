@@ -216,6 +216,17 @@ class Application:
         if row['input_hash']!=digest(inputs):raise DecisionChanged('Saved decision step inputs changed')
         return json.loads(row['result'])
 
+    def bind_names(self,db,book_id,fingerprint,values):
+        row,head=self.check(db)
+        if row['book_id']!=book_id or row['action']!='names' or row['source_fingerprint']!=fingerprint:
+            raise DecisionChanged('Saved names do not bind this exact book/source generation')
+        payload=json.loads(row['payload']) if row['payload'] else {}
+        original=payload.get('names')
+        if not isinstance(original,dict):raise DecisionChanged('Saved names payload is unavailable')
+        owned={key.split('.',1)[1] for key,owner in json.loads(head['effects']).items() if owner==self.request_id and key.startswith('names.')}
+        if values!={key:value for key,value in original.items() if key in owned}:
+            raise DecisionChanged('Applied names differ from this accepted decision')
+
     def commit_step(self,db,name,inputs,result,*,final=False,applied_revision=None):
         row,head=self.check(db);encoded=_object(result,'Decision application receipt',16*1024)
         prior=self.prior_step(db,name,inputs)

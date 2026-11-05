@@ -317,12 +317,17 @@ class MergeService:
                     if identity:self._validated_outputs[job['job_id']]=tuple(identity)
                 except (ValueError,OSError,KeyError):pass  # Current-view reports the binding failure; catalog remains readable.
         self._lookups=looked
+        from decision_runtime import DecisionRuntime
+        self.decisions=DecisionRuntime(self)
         if progress is not None:progress(len(completed),len(completed))
         for job in completed_tasks:
             if job['manifest'].get('cleanup_policy',{}).get('enabled') and job['job_id'] not in enrolled:
                 # A crash after durable audio success but before enrollment does
                 # not turn its explicit frozen policy into a historical sweep.
                 self._enroll_completed_without_start(job)
+        # The loader cannot own/close this object until construction returns.
+        # Keep the non-daemon application owner inert through every abort point.
+        self.decisions.start()
 
     @operation
     def prepare_producer_recovery(self,job_id):
@@ -3312,7 +3317,7 @@ class MergeService:
         return {'fields':fields,'read':read,'remembered':entered_names.remembered(self.inventory.database,row,read,scope),'universes':universes,'series':names,
                 'job':job['state'],'place':place,'destination':destination,'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row)),'applies':1}
 
-    def names_save(self,id,revision,values,fingerprint=None):
+    def names_save(self,id,revision,values,fingerprint=None,*,decision=None):
         # Do not leave a Save request queued invisibly behind another book's
         # long source check. A later explicit retry keeps every fresh-row/CAS
         # guard below and the editor retains its draft after this known refusal.
@@ -3320,9 +3325,9 @@ class MergeService:
             for lock in (self.operation_lock,self.reviews.lock,self.inventory.group_lock):
                 if not lock.acquire(blocking=False):raise self.NamesRefused('busy','Another book is being checked. Try Save again shortly. Your entered names are kept.')
                 admission.callback(lock.release)
-            return self._names_save(id,revision,values,fingerprint)
+            return self._names_save(id,revision,values,fingerprint,decision=decision)
 
-    def _names_save(self,id,revision,values,fingerprint=None):
+    def _names_save(self,id,revision,values,fingerprint=None,*,decision=None):
         """Edit names, Save (Judy 1.3 to 1.5): records the values as Sergei's lasting names and touches no file. The book's
         job follows (1.4): a queued job that has not started is set aside and its book checked again with the new names
         ('replanned'); a Stopped one runs with them at its next attempt (the queue's claim check); a finished audiobook keeps
@@ -3340,25 +3345,43 @@ class MergeService:
         entries=entered_names.plan(row,values,read,scope,now)
         job=self._names_job(row['id'])
         if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
-        if not entries:return {'outcome':'unchanged','applies':1,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
+        if not entries:
+            answer={'outcome':'unchanged','applies':1,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
+            if decision is not None:
+                from sqlite_retry import transaction
+                def finish_unchanged(db):
+                    current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(id,)).fetchone()
+                    if not current or tuple(current)!=(row['revision'],row['fingerprint']):raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing')
+                    decision.bind_names(db,id,row['fingerprint'],values)
+                    return decision.commit_step(db,'names',{'request_id':decision.request_id},answer,final=True,applied_revision=row['revision'])
+                transaction(self.inventory.database,finish_unchanged)
+            return answer
         applies=1+len(entered_names.reach(entries,self._names_others(row,entries,research)))
         with self.jobs._lock:
             # Under the queue's lock: its claim either came first (refused here, nothing saved) or reads these names.
             job=self._names_job(row['id'])
             if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
+            outcome='replanned' if job['state'] in ('pending','retry_queued') else 'ready_only' if job['state']=='ready' else 'saved'
             from sqlite_retry import transaction
             def write(db):
+                if decision is not None:
+                    decision.bind_names(db,id,row['fingerprint'],values)
+                    previous=decision.prior_step(db,'names',{'request_id':decision.request_id})
+                    if previous is not None:return previous
                 current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(id,)).fetchone()
                 if not current or tuple(current)!=(row['revision'],row['fingerprint']):
                     raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing')
                 # A saved name press and its approval hold are one durable change.
                 # Retrying SQLITE_BUSY may repeat only these database writes.
-                entered_names.save_in_transaction(db,row,entries)
+                names_press=entered_names.save_in_transaction(db,row,entries)
                 if job['state']=='pending':
                     saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(id,)).fetchone()
                     context=json.loads(saved['data']) if saved and saved['revision']==row['revision'] else {}
                     context['names_approval_pending']={'revision':row['revision'],'fingerprint':row['fingerprint']}
                     db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(id,row['revision'],json.dumps(context,ensure_ascii=False)))
+                if decision is not None:
+                    answer={'outcome':outcome,'applies':applies,'job':job['state'],'names_press_id':names_press,'candidate_id':id}
+                    decision.commit_step(db,'names',{'request_id':decision.request_id},answer,final=True,applied_revision=row['revision'])
             try:transaction(self.inventory.database,write)
             except sqlite3.Error:raise self.NamesRefused('refused',self.NAMES_REFUSED) from None
         outcome='saved'
@@ -5186,6 +5209,8 @@ class MergeService:
             pending=self.__dict__.get('_retry_all_stop')
             if pending:pending.set()
             for press in list(self.__dict__.get('_approve_stops',())):press.set()
+        decisions=self.__dict__.get('decisions')
+        if decisions is not None:decisions.close()
         with _QUIET_LOCK:
             snapshots=[self.__dict__.get('_status_shared'),*self.__dict__.get('_page_shared',{}).values()]
         for snapshot in snapshots:

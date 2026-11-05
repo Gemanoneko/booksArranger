@@ -26,6 +26,71 @@ class SourceFolderDispatchTests(unittest.TestCase):
     def tearDown(self):
         from test_merge_service import MergeTests
         MergeTests.tearDown(self)
+    def test_cancelled_merge_construction_never_starts_saved_decision_owner(self):
+        import uuid
+        from decision_runtime import DecisionRuntime
+        from web_server import BrowserServer,LoadAborted
+        self.service.decisions.close()
+        row=self.inv.candidates('Audiobooks')['rows'][0];request_id=str(uuid.uuid4())
+        store=self.service.decisions.store
+        store.accept(request_id=request_id,book_id=row['id'],action='names',revision=row['revision'],fingerprint=row['fingerprint'],
+                     payload={'names':{'title':'Retained across cancelled startup'}},effects=['names.title'],
+                     current_revision=row['revision'],current_fingerprint=row['fingerprint'])
+        created=[]
+        def runtime(merge):
+            owner=DecisionRuntime(merge);created.append(owner);return owner
+        def abort(done,total):raise LoadAborted('Private startup cancellation')
+        server=object.__new__(BrowserServer);server.inventory=self.inv;server.merge_factory=MergeService;server.merge=None
+        try:
+            with patch('decision_runtime.DecisionRuntime',side_effect=runtime):
+                with self.assertRaises(LoadAborted):server._open_merge(progress=abort)
+            self.assertIsNone(server.merge,'The loader never acquired the cancelled service')
+            self.assertEqual(len(created),1)
+            self.assertIsNone(created[0].thread,'No saved decision may start before aborting construction finishes')
+            self.assertEqual(store.get(request_id)['state'],'accepted')
+        finally:
+            for owner in created:owner.close()
+        self.assertFalse(any(owner.thread and owner.thread.is_alive() for owner in created))
+    def test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart(self):
+        import uuid
+        import entered_names
+        from decision_runtime import DecisionRuntime
+        from test_merge_http import MergeHTTPTests
+        route=MergeHTTPTests();route.setUp();self.addCleanup(route.tearDown)
+        route.server.inventory=self.inv;route.server.merge=self.service
+        row=self.inv.candidates('Audiobooks')['rows'][0];request_id=str(uuid.uuid4())
+        body={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'fingerprint':row['fingerprint'],
+              'action':'names','payload':{'names':{'title':'A durably accepted private title'}},'request_id':request_id}
+        self.assertEqual(route.call('/api/book-decisions',body,token=False)[0],403)
+        unsupported=dict(body,request_id=str(uuid.uuid4()),action='approve')
+        self.assertEqual(route.call('/api/book-decisions',unsupported)[0],400)
+        self.assertIsNone(self.service.decisions.store.get(unsupported['request_id']),'Unwired actions cannot be accepted')
+        original={str(path):path.read_bytes() for path in self.sources}
+        entered=threading.Event();release=threading.Event()
+        def worker():
+            with self.service.operation_lock,self.service.reviews.lock,self.inv.group_lock,self.service.jobs._lock:
+                entered.set();release.wait(5)
+        holder=threading.Thread(target=worker);holder.start();self.assertTrue(entered.wait(2))
+        try:
+            started=time.monotonic();response=route.call('/api/book-decisions',body)
+            self.assertLess(time.monotonic()-started,1.0);self.assertTrue(holder.is_alive())
+            self.assertEqual(response[0],202,response);self.assertEqual(response[1]['decision']['state'],'accepted')
+            self.assertNotEqual(entered_names.book_values(self.inv.database,row).get('title'),'A durably accepted private title')
+            # A lost HTTP reply is reconciled from SQLite using the same ID.
+            read=route.call('/api/book-decisions/status',{'request_id':request_id})
+            self.assertEqual(read[1]['decision']['state'],'accepted')
+            self.service.decisions.close()
+        finally:release.set();holder.join(5)
+        self.assertFalse(holder.is_alive())
+        self.service.decisions=DecisionRuntime(self.service);self.service.decisions.start()
+        deadline=time.monotonic()+5
+        while self.service.decisions.store.get(request_id)['state']=='accepted' and time.monotonic()<deadline:time.sleep(.02)
+        saved=self.service.decisions.store.get(request_id)
+        self.assertEqual(saved['state'],'applied',saved)
+        self.assertEqual(entered_names.book_values(self.inv.database,row)['title'],'A durably accepted private title')
+        self.assertEqual(route.call('/api/book-decisions',body)[1]['decision']['state'],'applied')
+        self.assertEqual(self.service.jobs.status()['jobs'],[],'Saving a name never starts a producer')
+        self.assertEqual({str(path):path.read_bytes() for path in self.sources},original)
     def test_source_folder_dispatches_while_unrelated_worker_holds_group_lock(self):
         row=self.service.reviews._row('Audiobooks',self.inv.candidates('Audiobooks')['rows'][0]['id'])
         with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')

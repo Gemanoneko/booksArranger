@@ -134,6 +134,45 @@ class DurableDecisionLedgerTests(unittest.TestCase):
         self.finish(new['request_id'],self.store.head(self.book)['generation'])
         self.assertEqual(self.store.purge_fulfilled(),2)
 
+    def test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries(self):
+        import sqlite3
+        from decision_runtime import DecisionRuntime
+        owner=DecisionRuntime(SimpleNamespace(inventory=SimpleNamespace(database=self.database)))
+        busy=sqlite3.OperationalError('Private catalog writer contention');busy.sqlite_errorcode=sqlite3.SQLITE_BUSY
+        retried=threading.Event()
+        calls=[]
+        def scan():
+            calls.append(1)
+            if len(calls)==1:raise busy
+            retried.set();owner.stop.set();return []
+        with mock.patch.object(owner.store,'pending',side_effect=scan):
+            owner.start()
+            try:self.assertTrue(retried.wait(2))
+            finally:owner.close()
+        self.assertEqual(len(calls),2);self.assertIsNone(owner.status()['error'])
+
+    def test_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work(self):
+        from decision_runtime import DecisionRuntime
+        owner=DecisionRuntime(SimpleNamespace(inventory=SimpleNamespace(database=self.database)))
+        accepted=self.accept()
+        recovered=threading.Event();allow_recovery=threading.Event();scanned=threading.Event()
+        def scan():
+            scanned.set()
+            if not allow_recovery.is_set():raise sqlite3.DatabaseError('Private permanent failure')
+            recovered.set();owner.stop.set();return []
+        import sqlite3
+        with mock.patch.object(owner.store,'pending',side_effect=scan):
+            owner.start()
+            try:
+                self.assertTrue(scanned.wait(1));deadline=time.monotonic()+1
+                while owner.status()['error'] is None and time.monotonic()<deadline:time.sleep(.01)
+                self.assertEqual(owner.status()['state'],'needs_review');self.assertTrue(owner.thread.is_alive())
+                self.assertIn('Private permanent failure',owner.status()['error']['message'])
+                self.assertEqual(self.store.get(accepted['request_id'])['state'],'accepted')
+                allow_recovery.set();self.assertTrue(recovered.wait(3),'Recovery must not require another click')
+            finally:owner.close()
+        self.assertIsNone(owner.status()['error'])
+
 
 class Merge:
     """Records each call; answers what the test sets."""

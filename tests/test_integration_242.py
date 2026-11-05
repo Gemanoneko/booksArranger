@@ -198,6 +198,47 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(f.job_row(f.other),f.before_other)
         f.merge.automatic.requeue.assert_not_called();f.merge.automatic.request_start.assert_not_called()
 
+    def durable_names(self):
+        import uuid
+        from durable_decisions import Decisions
+        from scanner import connect
+        f=self.name_save_fixture();f.row['fingerprint']='a'*64
+        with connect(f.database) as db:db.execute('UPDATE book_groups SET fingerprint=? WHERE id=?',(f.row['fingerprint'],f.row['id']))
+        store=Decisions(f.database)
+        saved=store.accept(request_id=str(uuid.uuid4()),book_id=f.row['id'],action='names',revision=2,fingerprint=f.row['fingerprint'],
+                           payload={'names':{'title':'A durable title'}},effects=['names.title'],current_revision=2,current_fingerprint=f.row['fingerprint'])
+        return f,store,saved,store.application(saved['request_id'],store.head(f.row['id'])['generation'])
+
+    def test_durable_names_and_pending_hold_commit_with_the_applied_receipt(self):
+        from durable_decisions import Decisions
+        import entered_names
+        f,store,saved,scope=self.durable_names()
+        f.merge.names_save(f.row['id'],2,{'title':'A durable title'},fingerprint=f.row['fingerprint'],decision=scope)
+        result=Decisions(f.database).get(saved['request_id'])
+        self.assertEqual(result['state'],'applied');self.assertTrue(result['result']['names_press_id'])
+        self.assertEqual(entered_names.book_values(f.database,f.row)['title'],'A durable title')
+        self.assertIn('names_approval_pending',f.current_context(f.row));self.assertEqual(store.pending(),[])
+        count=len(f.names_rows());self.assertEqual(store.purge_fulfilled(),1)
+        self.assertEqual(len(f.names_rows()),count,'Payload pruning never removes accepted name evidence')
+
+    def test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold(self):
+        from unittest.mock import patch
+        f,store,saved,scope=self.durable_names();before=f.names_rows();context=f.current_context(f.row)
+        with patch.object(scope,'commit_step',side_effect=RuntimeError('Private crash before consumer commit')):
+            with self.assertRaisesRegex(RuntimeError,'Private crash'):
+                f.merge.names_save(f.row['id'],2,{'title':'A durable title'},fingerprint=f.row['fingerprint'],decision=scope)
+        self.assertEqual(f.names_rows(),before);self.assertEqual(f.current_context(f.row),context)
+        self.assertEqual(store.get(saved['request_id'])['state'],'accepted')
+        f.merge.names_save(f.row['id'],2,{'title':'A durable title'},fingerprint=f.row['fingerprint'],decision=scope)
+        self.assertEqual(store.get(saved['request_id'])['state'],'applied')
+
+    def test_durable_names_noop_also_has_an_atomic_terminal_receipt(self):
+        import entered_names
+        f,store,saved,scope=self.durable_names()
+        entered_names.save(f.database,f.row,[('book','title','A durable title','','','')])
+        answer=f.merge.names_save(f.row['id'],2,{'title':'A durable title'},fingerprint=f.row['fingerprint'],decision=scope)
+        self.assertEqual(answer['outcome'],'unchanged');self.assertEqual(store.get(saved['request_id'])['state'],'applied')
+
     def test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names(self):
         import entered_names
         from scanner import connect

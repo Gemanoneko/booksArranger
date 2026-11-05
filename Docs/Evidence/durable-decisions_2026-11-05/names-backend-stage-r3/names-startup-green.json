@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_cancelled_merge_construction_never_starts_saved_decision_owner (test_lock_timing.SourceFolderDispatchTests.test_cancelled_merge_construction_never_starts_saved_decision_owner) ... ok\r\ntest_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart (test_lock_timing.SourceFolderDispatchTests.test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 2 tests in 1.396s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 56708,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 12,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 133,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 2103.1820000000002,
+  "outputBytes": 511
+}

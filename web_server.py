@@ -1375,6 +1375,25 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
+            if path in ('/api/book-decisions','/api/book-decisions/status'):
+                self.status_control=False
+                merge=self.server.merge
+                if merge is None or self.server.closing:
+                    self.response(503,{'error':'The catalog is not available to record a decision yet','code':'decision_unavailable'});return
+                if path.endswith('/status'):
+                    self.shape(data,{'request_id'})
+                    answer=merge.decisions.store.get(self.uuid_value(data['request_id']),include_payload=True)
+                    self.response(200,{'decision':answer,'application':merge.decisions.status()});return
+                self.shape(data,{'library','id','revision','fingerprint','action','payload','request_id'},{'predecessor'})
+                library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+                if library!='Audiobooks':raise ValueError('Saved book decisions are for Audiobooks')
+                if data['action']!='names':raise ValueError('This saved-decision action is not available yet')
+                self.shape(data['payload'],{'names'})
+                names=self.names_value(data['payload']['names']);seen=self.fingerprint_value(data['fingerprint'])
+                if seen is None:raise ValueError('The shown source fingerprint is required')
+                predecessor=None if data.get('predecessor') is None else self.uuid_value(data['predecessor'])
+                answer=merge.decisions.accept_names(self.uuid_value(data['request_id']),id,revision,seen,names,predecessor)
+                self.response(202,{'decision':answer,'application':merge.decisions.status()});return
             if path=='/api/queue/approval-reconcile':
                 self.status_control=False
                 self.shape(data,{'id','action','request_id','request_expires'})

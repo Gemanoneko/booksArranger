@@ -1,0 +1,659 @@
+diff --git a/durable_decisions.py b/durable_decisions.py
+deleted file mode 100644
+index ee197ec..0000000
+--- a/durable_decisions.py
++++ /dev/null
+@@ -1,234 +0,0 @@
+-"""Durable book-local decisions, separate from conversion/disposal authority.
+-
+-Acceptance stores bounded immutable intent without taking worker locks. Application
+-uses the existing consumers and records each effect in that consumer's transaction.
+-No method in this module opens a source/output file or starts an audiobook worker.
+-"""
+-import copy
+-import datetime
+-import hashlib
+-import json
+-import uuid
+-
+-from scanner import connect
+-
+-SCHEMA='books-durable-decision-v1'
+-ACTIONS=frozenset(('names','approve','review','metadata_choices','tracks','file_review'))
+-MAX_PAYLOAD=64*1024
+-MAX_EFFECTS=128
+-MAX_PENDING=1000
+-
+-
+-class DecisionChanged(ValueError):
+-    code='decision_changed'
+-
+-
+-def packed(value):
+-    return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)
+-
+-
+-def digest(value):return hashlib.sha256(packed(value).encode('utf-8')).hexdigest()
+-
+-
+-def utc():return datetime.datetime.now(datetime.timezone.utc).isoformat()
+-
+-
+-def setup(db):
+-    db.execute('''CREATE TABLE IF NOT EXISTS book_decisions(
+-      request_id TEXT PRIMARY KEY,book_id TEXT NOT NULL,action TEXT NOT NULL,seq INTEGER NOT NULL,
+-      predecessor TEXT,observed_revision INTEGER NOT NULL,source_fingerprint TEXT NOT NULL,
+-      payload TEXT,payload_hash TEXT NOT NULL,effects TEXT NOT NULL,dependencies TEXT NOT NULL,
+-      accepted_utc TEXT NOT NULL,state TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',
+-      result TEXT,applied_revision INTEGER,superseded_by TEXT,UNIQUE(book_id,seq))''')
+-    db.execute('''CREATE TABLE IF NOT EXISTS book_decision_heads(
+-      book_id TEXT PRIMARY KEY,generation INTEGER NOT NULL,request_id TEXT NOT NULL,
+-      source_fingerprint TEXT NOT NULL,effects TEXT NOT NULL)''')
+-    db.execute('''CREATE TABLE IF NOT EXISTS book_decision_steps(
+-      request_id TEXT NOT NULL,step TEXT NOT NULL,input_hash TEXT NOT NULL,
+-      result TEXT NOT NULL,committed_utc TEXT NOT NULL,PRIMARY KEY(request_id,step))''')
+-    db.execute('CREATE INDEX IF NOT EXISTS book_decisions_current ON book_decisions(book_id,state,seq)')
+-
+-
+-def _identity(value):
+-    if not isinstance(value,str) or str(uuid.UUID(value))!=value:raise ValueError('A canonical decision request ID is required')
+-    return value
+-
+-
+-def _object(value,label,limit=MAX_PAYLOAD):
+-    if not isinstance(value,dict):raise ValueError(label+' must be an object')
+-    raw=packed(value)
+-    if len(raw.encode('utf-8'))>limit:raise ValueError(label+' exceeds its allowed bound')
+-    return raw
+-
+-
+-def _effects(value):
+-    if not isinstance(value,list) or not value or len(value)>MAX_EFFECTS or len(set(value))!=len(value):raise ValueError('Decision effects are missing or repeated')
+-    if any(not isinstance(key,str) or not key or len(key)>128 or any(ord(c)<33 for c in key) for key in value):raise ValueError('Invalid decision effect')
+-    return sorted(value)
+-
+-
+-def receipt(row):
+-    return {'schema':SCHEMA,'request_id':row['request_id'],'book_id':row['book_id'],
+-            'action':row['action'],'sequence':row['seq'],'accepted_utc':row['accepted_utc'],
+-            'state':row['state'],'reason':row['reason'],'payload_sha256':row['payload_hash'],
+-            'result':json.loads(row['result']) if row['result'] else None,
+-            'applied_revision':row['applied_revision']}
+-
+-
+-class Decisions:
+-    def __init__(self,database):
+-        self.database=database
+-        with connect(database) as db:setup(db)
+-
+-    def accept(self,*,request_id,book_id,action,revision,fingerprint,payload,effects,
+-               predecessor=None,current_revision=None,current_fingerprint=None):
+-        """Commit intent only. Caller supplies server-derived effects/current facts.
+-
+-        Shape/actor/source-scope checks belong to the existing route validator.
+-        Fresh media/review application remains separate and may retain a hold.
+-        """
+-        _identity(request_id)
+-        if action not in ACTIONS:raise ValueError('Unsupported durable decision action')
+-        if not isinstance(book_id,str) or not book_id or len(book_id)>200:raise ValueError('Decision book identity is invalid')
+-        if type(revision)is not int or revision<0:raise ValueError('Decision revision is invalid')
+-        if not isinstance(fingerprint,str) or len(fingerprint)!=64 or any(c not in '0123456789abcdef' for c in fingerprint):raise ValueError('Decision source fingerprint is invalid')
+-        if predecessor is not None:_identity(predecessor)
+-        encoded=_object(payload,'Decision payload');effect_keys=_effects(effects)
+-        immutable={'book_id':book_id,'action':action,'revision':revision,'fingerprint':fingerprint,
+-                   'payload':payload,'effects':effect_keys,'predecessor':predecessor}
+-        payload_hash=digest(immutable)
+-        # This is deliberately bounded acceptance, not the 30 s application retry.
+-        with connect(self.database,timeout=.25) as db:
+-            db.execute('PRAGMA synchronous=FULL');db.execute('BEGIN IMMEDIATE')
+-            old=db.execute('SELECT * FROM book_decisions WHERE request_id=?',(request_id,)).fetchone()
+-            if old:
+-                if old['payload_hash']!=payload_hash:raise DecisionChanged('This request ID already records different choices')
+-                return receipt(old)
+-            if db.execute("SELECT count(*) FROM book_decisions WHERE payload IS NOT NULL AND state NOT IN ('applied','superseded')").fetchone()[0]>=MAX_PENDING:
+-                raise ValueError('Too many unfinished saved decisions; resolve their reported holds first')
+-            head=db.execute('SELECT * FROM book_decision_heads WHERE book_id=?',(book_id,)).fetchone()
+-            seq=db.execute('SELECT COALESCE(MAX(seq),0)+1 FROM book_decisions WHERE book_id=?',(book_id,)).fetchone()[0]
+-            reason=''
+-            if current_fingerprint is not None and current_fingerprint!=fingerprint:reason='This book’s source list changed; review the saved decision against the current book'
+-            elif current_revision is not None and current_revision!=revision:reason='This book’s revision changed; review the saved decision against the current book'
+-            elif predecessor!=(head['request_id'] if head else None):reason='A newer decision was accepted first; review these saved choices before applying them'
+-            compatible=not reason
+-            inherited=json.loads(head['effects']) if head else {}
+-            dependencies={key:owner for key,owner in inherited.items() if key!='approval'} if action=='approve' else {}
+-            db.execute('INSERT INTO book_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+-                       (request_id,book_id,action,seq,predecessor,revision,fingerprint,encoded,payload_hash,
+-                        packed(effect_keys),packed(dependencies),utc(),'accepted' if compatible else 'needs_review',reason,None,None,None))
+-            if compatible:
+-                # Disjoint earlier effects remain in the cumulative head. Only
+-                # explicitly submitted overlapping keys acquire the new owner.
+-                merged=dict(inherited)
+-                for key in effect_keys:merged[key]=request_id
+-                db.execute('INSERT OR REPLACE INTO book_decision_heads VALUES(?,?,?,?,?)',
+-                           (book_id,(head['generation'] if head else 0)+1,request_id,fingerprint,packed(merged)))
+-                for prior in set(inherited.values())-set(merged.values()):
+-                    db.execute("UPDATE book_decisions SET state='superseded',superseded_by=? WHERE request_id=? AND state IN ('accepted','applying','needs_review')",(request_id,prior))
+-                prior_approval=inherited.get('approval')
+-                if action!='approve' and prior_approval and prior_approval in merged.values():
+-                    db.execute("UPDATE book_decisions SET state='needs_review',reason=? WHERE request_id=? AND state IN ('accepted','applying')",
+-                               ('New choices were saved after this approval; review the saved approval with those choices',prior_approval))
+-            return receipt(db.execute('SELECT * FROM book_decisions WHERE request_id=?',(request_id,)).fetchone())
+-
+-    def get(self,request_id,*,include_payload=False):
+-        _identity(request_id)
+-        with connect(self.database) as db:row=db.execute('SELECT * FROM book_decisions WHERE request_id=?',(request_id,)).fetchone()
+-        if row is None:return None
+-        value=receipt(row)
+-        if include_payload:value['payload']=json.loads(row['payload']) if row['payload'] else None
+-        return value
+-
+-    def head(self,book_id):
+-        with connect(self.database) as db:
+-            row=db.execute('SELECT * FROM book_decision_heads WHERE book_id=?',(book_id,)).fetchone()
+-            if not row:return None
+-            result=dict(row);result['effects']=json.loads(result['effects'])
+-            return result
+-
+-    def pending(self):
+-        """Current compatible cumulative effects, in original acceptance order."""
+-        with connect(self.database) as db:
+-            heads=[dict(row) for row in db.execute('SELECT * FROM book_decision_heads ORDER BY book_id')]
+-            result=[]
+-            for head in heads:
+-                owners=set(json.loads(head['effects']).values())
+-                for row in db.execute("SELECT * FROM book_decisions WHERE book_id=? AND state IN ('accepted','applying') ORDER BY seq",(head['book_id'],)):
+-                    if row['request_id'] not in owners:continue
+-                    dependencies=json.loads(row['dependencies'])
+-                    if row['action']=='approve':
+-                        dependency_ids=set(dependencies.values())-{row['request_id']}
+-                        if any((db.execute('SELECT state FROM book_decisions WHERE request_id=?',(key,)).fetchone() or ['missing'])[0]!='applied' for key in dependency_ids):continue
+-                    item=dict(row);item['payload']=json.loads(item['payload']);item['generation']=head['generation']
+-                    item['active_effects']=[key for key,owner in json.loads(head['effects']).items() if owner==row['request_id']]
+-                    result.append(item)
+-        return result
+-
+-    def application(self,request_id,generation):return Application(self,request_id,generation)
+-
+-    def hold(self,request_id,generation,reason):
+-        if not isinstance(reason,str) or not reason.strip():raise ValueError('A held decision needs its actual reason')
+-        with connect(self.database) as db:
+-            db.execute('BEGIN IMMEDIATE');scope=self.application(request_id,generation);scope.check(db)
+-            db.execute("UPDATE book_decisions SET state='needs_review',reason=? WHERE request_id=?",(reason[:2000],request_id))
+-
+-    def purge_fulfilled(self,limit=16):
+-        """Remove fulfilled payload only; request/hash/result tombstones remain."""
+-        if type(limit)is not int or not 1<=limit<=100:raise ValueError('Bounded decision cleanup is required')
+-        removed=0
+-        with connect(self.database) as db:
+-            db.execute('BEGIN IMMEDIATE')
+-            for row in db.execute("SELECT * FROM book_decisions WHERE payload IS NOT NULL AND state IN ('applied','superseded') ORDER BY accepted_utc LIMIT ?",(limit,)).fetchall():
+-                if row['state']=='superseded':
+-                    successor=db.execute('SELECT state FROM book_decisions WHERE request_id=?',(row['superseded_by'],)).fetchone()
+-                    if not successor or successor[0]!='applied':continue
+-                head=db.execute('SELECT effects FROM book_decision_heads WHERE book_id=?',(row['book_id'],)).fetchone()
+-                if head and row['request_id'] in json.loads(head[0]).values():continue
+-                if row['state']=='applied' and not row['result']:raise DecisionChanged('Applied decision has no durable result receipt')
+-                db.execute('UPDATE book_decisions SET payload=NULL,effects=? WHERE request_id=?',('[]',row['request_id']))
+-                db.execute('DELETE FROM book_decision_steps WHERE request_id=?',(row['request_id'],))
+-                removed+=1
+-        return removed
+-
+-
+-class Application:
+-    def __init__(self,store,request_id,generation):
+-        self.store=store;self.request_id=_identity(request_id)
+-        if type(generation)is not int or generation<1:raise ValueError('Invalid decision generation')
+-        self.generation=generation
+-
+-    def check(self,db):
+-        if not db.in_transaction:raise ValueError('Decision application requires the consumer transaction')
+-        row=db.execute('SELECT * FROM book_decisions WHERE request_id=?',(self.request_id,)).fetchone()
+-        if not row or row['state'] not in ('accepted','applying'):raise DecisionChanged('Saved decision is not currently applicable')
+-        head=db.execute('SELECT * FROM book_decision_heads WHERE book_id=?',(row['book_id'],)).fetchone()
+-        if not head or head['generation']!=self.generation or self.request_id not in json.loads(head['effects']).values():
+-            raise DecisionChanged('A newer saved decision changed this application generation')
+-        return row,head
+-
+-    def prior_step(self,db,name,inputs):
+-        self.check(db)
+-        if not isinstance(name,str) or not name or len(name)>128:raise ValueError('Invalid decision step')
+-        row=db.execute('SELECT * FROM book_decision_steps WHERE request_id=? AND step=?',(self.request_id,name)).fetchone()
+-        if not row:return None
+-        if row['input_hash']!=digest(inputs):raise DecisionChanged('Saved decision step inputs changed')
+-        return json.loads(row['result'])
+-
+-    def commit_step(self,db,name,inputs,result,*,final=False,applied_revision=None):
+-        row,head=self.check(db);encoded=_object(result,'Decision application receipt',16*1024)
+-        prior=self.prior_step(db,name,inputs)
+-        if prior is not None:
+-            if packed(prior)!=encoded:raise DecisionChanged('Saved decision step result changed')
+-            return prior
+-        db.execute('INSERT INTO book_decision_steps VALUES(?,?,?,?,?)',(self.request_id,name,digest(inputs),encoded,utc()))
+-        if final:
+-            # Consumer mutations and this receipt share one commit. Non-enqueue
+-            # Save/no-op/answer-only outcomes use exactly the same boundary.
+-            remaining={key:owner for key,owner in json.loads(head['effects']).items() if owner!=self.request_id}
+-            db.execute('UPDATE book_decision_heads SET effects=? WHERE book_id=? AND generation=?',
+-                       (packed(remaining),row['book_id'],self.generation))
+-            db.execute("UPDATE book_decisions SET state='applied',reason='',result=?,applied_revision=? WHERE request_id=?",(encoded,applied_revision,self.request_id))
+-        else:db.execute("UPDATE book_decisions SET state='applying' WHERE request_id=?",(self.request_id,))
+-        return copy.deepcopy(result)
+diff --git a/decision_runtime.py b/decision_runtime.py
+new file mode 100644
+--- /dev/null
++++ b/decision_runtime.py
+@@ -0,0 +1,108 @@
++"""Application owner for durable book decisions; acceptance never starts audio."""
++import json
++import sqlite3
++import threading
++
++from durable_decisions import Decisions,DecisionChanged
++from scanner import connect
++
++
++class DecisionRuntime:
++    def __init__(self,merge):
++        self.merge=merge;self.store=Decisions(merge.inventory.database)
++        self.stop=threading.Event();self.wake=threading.Event();self.thread=None
++        self.lock=threading.Lock();self.failure=None
++
++    def accept_names(self,request_id,book,revision,fingerprint,names,predecessor=None):
++        import entered_names
++        entered_names.check(names)
++        with connect(self.store.database) as db:
++            row=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(book,)).fetchone()
++        if row is None:raise ValueError('This book is no longer in the current catalog')
++        answer=self.store.accept(request_id=request_id,book_id=book,action='names',revision=revision,fingerprint=fingerprint,
++                                 payload={'names':names},effects=['names.'+field for field in names],predecessor=predecessor,
++                                 current_revision=row['revision'],current_fingerprint=row['fingerprint'])
++        self.wake.set()
++        if not self.stop.is_set():
++            try:self.start()
++            except Exception as error:
++                # Acceptance already committed: an application-owner failure
++                # cannot turn this durable receipt into a refused Save.
++                self.failure={'code':'decision_application_unavailable','message':'Saved decisions are retained; application could not start: '+(str(error) or type(error).__name__)[:1000],'transient':False}
++        return answer
++
++    def status(self):
++        return {'state':'needs_review' if self.failure and self.failure['transient'] is False else 'waiting' if self.failure else 'paused' if self.stop.is_set() else 'running' if self.thread and self.thread.is_alive() else 'idle',
++                'error':dict(self.failure) if self.failure else None}
++
++    def start(self):
++        with self.lock:
++            if self.stop.is_set():raise ValueError('Saved-decision application is closing')
++            if self.thread and self.thread.is_alive():return
++            self.thread=threading.Thread(target=self._work,name='BooksArrangerSavedDecisions',daemon=False)
++            self.thread.start()
++
++    def close(self):
++        self.stop.set();self.wake.set()
++        thread=self.thread
++        if thread and thread is not threading.current_thread():
++            thread.join(30)
++            if thread.is_alive():raise TimeoutError('Saved-decision application has not reached its catalog checkpoint')
++
++    def _work(self):
++        while not self.stop.is_set():
++            try:
++                requests=self.store.pending()
++                worked=self.run_once(requests)
++            except Exception as error:
++                transient=isinstance(error,sqlite3.OperationalError) and getattr(error,'sqlite_errorcode',0)&255==sqlite3.SQLITE_BUSY
++                self.failure={'code':'decision_catalog_busy' if transient else 'decision_application_unavailable',
++                              'message':('Saved decisions are retained while the catalog is busy' if transient else 'Saved decisions are retained; their application stopped: '+(str(error) or type(error).__name__)[:1000]),
++                              'transient':bool(transient)}
++                # Re-read durable pending state after a bounded wait. Completed
++                # consumer receipts are excluded, so recovery never blindly
++                # repeats the action that preceded a failed status/hold write.
++                self.wake.wait(.5 if transient else 2);self.wake.clear();continue
++            self.failure=None
++            if not worked:self.wake.wait(.5);self.wake.clear()
++
++    def run_once(self,requests=None):
++        """One pass over ready requests; busy books do not head-block other books."""
++        worked=False
++        for request in self.store.pending() if requests is None else requests:
++            if self.stop.is_set() or getattr(self.merge,'draining',False) or self.merge.__dict__.get('_closing'):break
++            if request['action']!='names':continue  # Other consumers are integrated separately.
++            scope=self.store.application(request['request_id'],request['generation'])
++            try:
++                with connect(self.store.database) as db:
++                    row=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(request['book_id'],)).fetchone()
++                if row is None or row['fingerprint']!=request['source_fingerprint']:
++                    self.store.hold(request['request_id'],request['generation'],'This book’s sources changed; review the saved names before applying them')
++                    worked=True;continue
++                if row['revision']!=request['observed_revision']:
++                    self.store.hold(request['request_id'],request['generation'],'This book’s revision changed; review the saved names before applying them')
++                    worked=True;continue
++                fields={key.split('.',1)[1] for key in request['active_effects'] if key.startswith('names.')}
++                names={key:value for key,value in request['payload']['names'].items() if key in fields}
++                if not names:raise ValueError('Saved names no longer own an applicable field')
++                self.merge.names_save(request['book_id'],row['revision'],names,fingerprint=request['source_fingerprint'],decision=scope)
++                # This only purges payload after the consumer's atomic receipt is
++                # already committed; receipt/tombstone reconciliation survives.
++                self.store.purge_fulfilled();worked=True
++            except DecisionChanged:
++                # A new head fenced the old in-flight read. Its retained cumulative
++                # effects will be read afresh, never marked failed or overwritten.
++                continue
++            except (ValueError,sqlite3.Error) as error:
++                if getattr(error,'code',None)=='busy' or isinstance(error,sqlite3.OperationalError) and getattr(error,'sqlite_errorcode',0)&255==sqlite3.SQLITE_BUSY:
++                    continue
++                try:self.store.hold(request['request_id'],request['generation'],str(error) or type(error).__name__)
++                except DecisionChanged:pass
++                worked=True
++            except Exception as error:
++                # An unknown consumer failure is held, not generically retried.
++                # If its final receipt committed, hold() refuses to undo it.
++                try:self.store.hold(request['request_id'],request['generation'],'Saved-decision application needs review: '+(str(error) or type(error).__name__))
++                except DecisionChanged:pass
++                worked=True
++        return worked
+diff --git a/merge_service.py b/merge_service.py
+index 9e906b8..ae815a5 100644
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -317,12 +317,17 @@ class MergeService:
+                     if identity:self._validated_outputs[job['job_id']]=tuple(identity)
+                 except (ValueError,OSError,KeyError):pass  # Current-view reports the binding failure; catalog remains readable.
+         self._lookups=looked
++        from decision_runtime import DecisionRuntime
++        self.decisions=DecisionRuntime(self)
+         if progress is not None:progress(len(completed),len(completed))
+         for job in completed_tasks:
+             if job['manifest'].get('cleanup_policy',{}).get('enabled') and job['job_id'] not in enrolled:
+                 # A crash after durable audio success but before enrollment does
+                 # not turn its explicit frozen policy into a historical sweep.
+                 self._enroll_completed_without_start(job)
++        # The loader cannot own/close this object until construction returns.
++        # Keep the non-daemon application owner inert through every abort point.
++        self.decisions.start()
+ 
+     @operation
+     def prepare_producer_recovery(self,job_id):
+@@ -3312,7 +3317,7 @@ class MergeService:
+         return {'fields':fields,'read':read,'remembered':entered_names.remembered(self.inventory.database,row,read,scope),'universes':universes,'series':names,
+                 'job':job['state'],'place':place,'destination':destination,'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row)),'applies':1}
+ 
+-    def names_save(self,id,revision,values,fingerprint=None):
++    def names_save(self,id,revision,values,fingerprint=None,*,decision=None):
+         # Do not leave a Save request queued invisibly behind another book's
+         # long source check. A later explicit retry keeps every fresh-row/CAS
+         # guard below and the editor retains its draft after this known refusal.
+@@ -3320,9 +3325,9 @@ class MergeService:
+             for lock in (self.operation_lock,self.reviews.lock,self.inventory.group_lock):
+                 if not lock.acquire(blocking=False):raise self.NamesRefused('busy','Another book is being checked. Try Save again shortly. Your entered names are kept.')
+                 admission.callback(lock.release)
+-            return self._names_save(id,revision,values,fingerprint)
++            return self._names_save(id,revision,values,fingerprint,decision=decision)
+ 
+-    def _names_save(self,id,revision,values,fingerprint=None):
++    def _names_save(self,id,revision,values,fingerprint=None,*,decision=None):
+         """Edit names, Save (Judy 1.3 to 1.5): records the values as Sergei's lasting names and touches no file. The book's
+         job follows (1.4): a queued job that has not started is set aside and its book checked again with the new names
+         ('replanned'); a Stopped one runs with them at its next attempt (the queue's claim check); a finished audiobook keeps
+@@ -3340,25 +3345,43 @@ class MergeService:
+         entries=entered_names.plan(row,values,read,scope,now)
+         job=self._names_job(row['id'])
+         if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
+-        if not entries:return {'outcome':'unchanged','applies':1,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
++        if not entries:
++            answer={'outcome':'unchanged','applies':1,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
++            if decision is not None:
++                from sqlite_retry import transaction
++                def finish_unchanged(db):
++                    current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(id,)).fetchone()
++                    if not current or tuple(current)!=(row['revision'],row['fingerprint']):raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing')
++                    decision.bind_names(db,id,row['fingerprint'],values)
++                    return decision.commit_step(db,'names',{'request_id':decision.request_id},answer,final=True,applied_revision=row['revision'])
++                transaction(self.inventory.database,finish_unchanged)
++            return answer
+         applies=1+len(entered_names.reach(entries,self._names_others(row,entries,research)))
+         with self.jobs._lock:
+             # Under the queue's lock: its claim either came first (refused here, nothing saved) or reads these names.
+             job=self._names_job(row['id'])
+             if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
++            outcome='replanned' if job['state'] in ('pending','retry_queued') else 'ready_only' if job['state']=='ready' else 'saved'
+             from sqlite_retry import transaction
+             def write(db):
++                if decision is not None:
++                    decision.bind_names(db,id,row['fingerprint'],values)
++                    previous=decision.prior_step(db,'names',{'request_id':decision.request_id})
++                    if previous is not None:return previous
+                 current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(id,)).fetchone()
+                 if not current or tuple(current)!=(row['revision'],row['fingerprint']):
+                     raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing')
+                 # A saved name press and its approval hold are one durable change.
+                 # Retrying SQLITE_BUSY may repeat only these database writes.
+-                entered_names.save_in_transaction(db,row,entries)
++                names_press=entered_names.save_in_transaction(db,row,entries)
+                 if job['state']=='pending':
+                     saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(id,)).fetchone()
+                     context=json.loads(saved['data']) if saved and saved['revision']==row['revision'] else {}
+                     context['names_approval_pending']={'revision':row['revision'],'fingerprint':row['fingerprint']}
+                     db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(id,row['revision'],json.dumps(context,ensure_ascii=False)))
++                if decision is not None:
++                    answer={'outcome':outcome,'applies':applies,'job':job['state'],'names_press_id':names_press,'candidate_id':id}
++                    decision.commit_step(db,'names',{'request_id':decision.request_id},answer,final=True,applied_revision=row['revision'])
+             try:transaction(self.inventory.database,write)
+             except sqlite3.Error:raise self.NamesRefused('refused',self.NAMES_REFUSED) from None
+         outcome='saved'
+@@ -5186,6 +5209,8 @@ class MergeService:
+             pending=self.__dict__.get('_retry_all_stop')
+             if pending:pending.set()
+             for press in list(self.__dict__.get('_approve_stops',())):press.set()
++        decisions=self.__dict__.get('decisions')
++        if decisions is not None:decisions.close()
+         with _QUIET_LOCK:
+             snapshots=[self.__dict__.get('_status_shared'),*self.__dict__.get('_page_shared',{}).values()]
+         for snapshot in snapshots:
+diff --git a/web_server.py b/web_server.py
+index c0f284e..b698915 100644
+--- a/web_server.py
++++ b/web_server.py
+@@ -1375,6 +1375,25 @@ class Handler(BaseHTTPRequestHandler):
+             path,query=self.query()
+             if query: raise ValueError('Control requests do not accept query parameters')
+             data=self.body()
++            if path in ('/api/book-decisions','/api/book-decisions/status'):
++                self.status_control=False
++                merge=self.server.merge
++                if merge is None or self.server.closing:
++                    self.response(503,{'error':'The catalog is not available to record a decision yet','code':'decision_unavailable'});return
++                if path.endswith('/status'):
++                    self.shape(data,{'request_id'})
++                    answer=merge.decisions.store.get(self.uuid_value(data['request_id']),include_payload=True)
++                    self.response(200,{'decision':answer,'application':merge.decisions.status()});return
++                self.shape(data,{'library','id','revision','fingerprint','action','payload','request_id'},{'predecessor'})
++                library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
++                if library!='Audiobooks':raise ValueError('Saved book decisions are for Audiobooks')
++                if data['action']!='names':raise ValueError('This saved-decision action is not available yet')
++                self.shape(data['payload'],{'names'})
++                names=self.names_value(data['payload']['names']);seen=self.fingerprint_value(data['fingerprint'])
++                if seen is None:raise ValueError('The shown source fingerprint is required')
++                predecessor=None if data.get('predecessor') is None else self.uuid_value(data['predecessor'])
++                answer=merge.decisions.accept_names(self.uuid_value(data['request_id']),id,revision,seen,names,predecessor)
++                self.response(202,{'decision':answer,'application':merge.decisions.status()});return
+             if path=='/api/queue/approval-reconcile':
+                 self.status_control=False
+                 self.shape(data,{'id','action','request_id','request_expires'})
+diff --git a/tests/test_integration_242.py b/tests/test_integration_242.py
+index 7f158ba..edaac72 100644
+--- a/tests/test_integration_242.py
++++ b/tests/test_integration_242.py
+@@ -198,6 +198,47 @@ class IntegrationTests(unittest.TestCase):
+         self.assertEqual(f.job_row(f.other),f.before_other)
+         f.merge.automatic.requeue.assert_not_called();f.merge.automatic.request_start.assert_not_called()
+ 
++    def durable_names(self):
++        import uuid
++        from durable_decisions import Decisions
++        from scanner import connect
++        f=self.name_save_fixture();f.row['fingerprint']='a'*64
++        with connect(f.database) as db:db.execute('UPDATE book_groups SET fingerprint=? WHERE id=?',(f.row['fingerprint'],f.row['id']))
++        store=Decisions(f.database)
++        saved=store.accept(request_id=str(uuid.uuid4()),book_id=f.row['id'],action='names',revision=2,fingerprint=f.row['fingerprint'],
++                           payload={'names':{'title':'A durable title'}},effects=['names.title'],current_revision=2,current_fingerprint=f.row['fingerprint'])
++        return f,store,saved,store.application(saved['request_id'],store.head(f.row['id'])['generation'])
++
++    def test_durable_names_and_pending_hold_commit_with_the_applied_receipt(self):
++        from durable_decisions import Decisions
++        import entered_names
++        f,store,saved,scope=self.durable_names()
++        f.merge.names_save(f.row['id'],2,{'title':'A durable title'},fingerprint=f.row['fingerprint'],decision=scope)
++        result=Decisions(f.database).get(saved['request_id'])
++        self.assertEqual(result['state'],'applied');self.assertTrue(result['result']['names_press_id'])
++        self.assertEqual(entered_names.book_values(f.database,f.row)['title'],'A durable title')
++        self.assertIn('names_approval_pending',f.current_context(f.row));self.assertEqual(store.pending(),[])
++        count=len(f.names_rows());self.assertEqual(store.purge_fulfilled(),1)
++        self.assertEqual(len(f.names_rows()),count,'Payload pruning never removes accepted name evidence')
++
++    def test_durable_names_crash_before_receipt_rolls_back_names_and_pending_hold(self):
++        from unittest.mock import patch
++        f,store,saved,scope=self.durable_names();before=f.names_rows();context=f.current_context(f.row)
++        with patch.object(scope,'commit_step',side_effect=RuntimeError('Private crash before consumer commit')):
++            with self.assertRaisesRegex(RuntimeError,'Private crash'):
++                f.merge.names_save(f.row['id'],2,{'title':'A durable title'},fingerprint=f.row['fingerprint'],decision=scope)
++        self.assertEqual(f.names_rows(),before);self.assertEqual(f.current_context(f.row),context)
++        self.assertEqual(store.get(saved['request_id'])['state'],'accepted')
++        f.merge.names_save(f.row['id'],2,{'title':'A durable title'},fingerprint=f.row['fingerprint'],decision=scope)
++        self.assertEqual(store.get(saved['request_id'])['state'],'applied')
++
++    def test_durable_names_noop_also_has_an_atomic_terminal_receipt(self):
++        import entered_names
++        f,store,saved,scope=self.durable_names()
++        entered_names.save(f.database,f.row,[('book','title','A durable title','','','')])
++        answer=f.merge.names_save(f.row['id'],2,{'title':'A durable title'},fingerprint=f.row['fingerprint'],decision=scope)
++        self.assertEqual(answer['outcome'],'unchanged');self.assertEqual(store.get(saved['request_id'])['state'],'applied')
++
+     def test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names(self):
+         import entered_names
+         from scanner import connect
+diff --git a/tests/test_lock_timing.py b/tests/test_lock_timing.py
+index c680ff8..782fd99 100644
+--- a/tests/test_lock_timing.py
++++ b/tests/test_lock_timing.py
+@@ -26,6 +26,71 @@ class SourceFolderDispatchTests(unittest.TestCase):
+     def tearDown(self):
+         from test_merge_service import MergeTests
+         MergeTests.tearDown(self)
++    def test_cancelled_merge_construction_never_starts_saved_decision_owner(self):
++        import uuid
++        from decision_runtime import DecisionRuntime
++        from web_server import BrowserServer,LoadAborted
++        self.service.decisions.close()
++        row=self.inv.candidates('Audiobooks')['rows'][0];request_id=str(uuid.uuid4())
++        store=self.service.decisions.store
++        store.accept(request_id=request_id,book_id=row['id'],action='names',revision=row['revision'],fingerprint=row['fingerprint'],
++                     payload={'names':{'title':'Retained across cancelled startup'}},effects=['names.title'],
++                     current_revision=row['revision'],current_fingerprint=row['fingerprint'])
++        created=[]
++        def runtime(merge):
++            owner=DecisionRuntime(merge);created.append(owner);return owner
++        def abort(done,total):raise LoadAborted('Private startup cancellation')
++        server=object.__new__(BrowserServer);server.inventory=self.inv;server.merge_factory=MergeService;server.merge=None
++        try:
++            with patch('decision_runtime.DecisionRuntime',side_effect=runtime):
++                with self.assertRaises(LoadAborted):server._open_merge(progress=abort)
++            self.assertIsNone(server.merge,'The loader never acquired the cancelled service')
++            self.assertEqual(len(created),1)
++            self.assertIsNone(created[0].thread,'No saved decision may start before aborting construction finishes')
++            self.assertEqual(store.get(request_id)['state'],'accepted')
++        finally:
++            for owner in created:owner.close()
++        self.assertFalse(any(owner.thread and owner.thread.is_alive() for owner in created))
++    def test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart(self):
++        import uuid
++        import entered_names
++        from decision_runtime import DecisionRuntime
++        from test_merge_http import MergeHTTPTests
++        route=MergeHTTPTests();route.setUp();self.addCleanup(route.tearDown)
++        route.server.inventory=self.inv;route.server.merge=self.service
++        row=self.inv.candidates('Audiobooks')['rows'][0];request_id=str(uuid.uuid4())
++        body={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'fingerprint':row['fingerprint'],
++              'action':'names','payload':{'names':{'title':'A durably accepted private title'}},'request_id':request_id}
++        self.assertEqual(route.call('/api/book-decisions',body,token=False)[0],403)
++        unsupported=dict(body,request_id=str(uuid.uuid4()),action='approve')
++        self.assertEqual(route.call('/api/book-decisions',unsupported)[0],400)
++        self.assertIsNone(self.service.decisions.store.get(unsupported['request_id']),'Unwired actions cannot be accepted')
++        original={str(path):path.read_bytes() for path in self.sources}
++        entered=threading.Event();release=threading.Event()
++        def worker():
++            with self.service.operation_lock,self.service.reviews.lock,self.inv.group_lock,self.service.jobs._lock:
++                entered.set();release.wait(5)
++        holder=threading.Thread(target=worker);holder.start();self.assertTrue(entered.wait(2))
++        try:
++            started=time.monotonic();response=route.call('/api/book-decisions',body)
++            self.assertLess(time.monotonic()-started,1.0);self.assertTrue(holder.is_alive())
++            self.assertEqual(response[0],202,response);self.assertEqual(response[1]['decision']['state'],'accepted')
++            self.assertNotEqual(entered_names.book_values(self.inv.database,row).get('title'),'A durably accepted private title')
++            # A lost HTTP reply is reconciled from SQLite using the same ID.
++            read=route.call('/api/book-decisions/status',{'request_id':request_id})
++            self.assertEqual(read[1]['decision']['state'],'accepted')
++            self.service.decisions.close()
++        finally:release.set();holder.join(5)
++        self.assertFalse(holder.is_alive())
++        self.service.decisions=DecisionRuntime(self.service);self.service.decisions.start()
++        deadline=time.monotonic()+5
++        while self.service.decisions.store.get(request_id)['state']=='accepted' and time.monotonic()<deadline:time.sleep(.02)
++        saved=self.service.decisions.store.get(request_id)
++        self.assertEqual(saved['state'],'applied',saved)
++        self.assertEqual(entered_names.book_values(self.inv.database,row)['title'],'A durably accepted private title')
++        self.assertEqual(route.call('/api/book-decisions',body)[1]['decision']['state'],'applied')
++        self.assertEqual(self.service.jobs.status()['jobs'],[],'Saving a name never starts a producer')
++        self.assertEqual({str(path):path.read_bytes() for path in self.sources},original)
+     def test_source_folder_dispatches_while_unrelated_worker_holds_group_lock(self):
+         row=self.service.reviews._row('Audiobooks',self.inv.candidates('Audiobooks')['rows'][0]['id'])
+         with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
+diff --git a/tests/test_action_queue.py b/tests/test_action_queue.py
+index b9fc2c1..41677b4 100644
+--- a/tests/test_action_queue.py
++++ b/tests/test_action_queue.py
+@@ -134,6 +134,45 @@ class DurableDecisionLedgerTests(unittest.TestCase):
+         self.finish(new['request_id'],self.store.head(self.book)['generation'])
+         self.assertEqual(self.store.purge_fulfilled(),2)
+ 
++    def test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries(self):
++        import sqlite3
++        from decision_runtime import DecisionRuntime
++        owner=DecisionRuntime(SimpleNamespace(inventory=SimpleNamespace(database=self.database)))
++        busy=sqlite3.OperationalError('Private catalog writer contention');busy.sqlite_errorcode=sqlite3.SQLITE_BUSY
++        retried=threading.Event()
++        calls=[]
++        def scan():
++            calls.append(1)
++            if len(calls)==1:raise busy
++            retried.set();owner.stop.set();return []
++        with mock.patch.object(owner.store,'pending',side_effect=scan):
++            owner.start()
++            try:self.assertTrue(retried.wait(2))
++            finally:owner.close()
++        self.assertEqual(len(calls),2);self.assertIsNone(owner.status()['error'])
++
++    def test_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work(self):
++        from decision_runtime import DecisionRuntime
++        owner=DecisionRuntime(SimpleNamespace(inventory=SimpleNamespace(database=self.database)))
++        accepted=self.accept()
++        recovered=threading.Event();allow_recovery=threading.Event();scanned=threading.Event()
++        def scan():
++            scanned.set()
++            if not allow_recovery.is_set():raise sqlite3.DatabaseError('Private permanent failure')
++            recovered.set();owner.stop.set();return []
++        import sqlite3
++        with mock.patch.object(owner.store,'pending',side_effect=scan):
++            owner.start()
++            try:
++                self.assertTrue(scanned.wait(1));deadline=time.monotonic()+1
++                while owner.status()['error'] is None and time.monotonic()<deadline:time.sleep(.01)
++                self.assertEqual(owner.status()['state'],'needs_review');self.assertTrue(owner.thread.is_alive())
++                self.assertIn('Private permanent failure',owner.status()['error']['message'])
++                self.assertEqual(self.store.get(accepted['request_id'])['state'],'accepted')
++                allow_recovery.set();self.assertTrue(recovered.wait(3),'Recovery must not require another click')
++            finally:owner.close()
++        self.assertIsNone(owner.status()['error'])
++
+ 
+ class Merge:
+     """Records each call; answers what the test sets."""

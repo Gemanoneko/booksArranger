@@ -1,0 +1,17 @@
+test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries (test_action_queue.DurableDecisionLedgerTests.test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries) ... FAIL
+test_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work (test_action_queue.DurableDecisionLedgerTests.test_runtime_permanent_failure_is_visible_and_does_not_replay_unknown_work) ... ok
+test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart (test_lock_timing.SourceFolderDispatchTests.test_durable_names_http_accepts_under_real_worker_locks_and_recovers_after_restart) ... ok
+
+======================================================================
+FAIL: test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries (test_action_queue.DurableDecisionLedgerTests.test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_action_queue.py", line 146, in test_runtime_transient_catalog_scan_failure_keeps_owner_alive_and_retries
+    try:self.assertTrue(retried.wait(2))
+        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 3 tests in 3.048s
+
+FAILED (failures=1)

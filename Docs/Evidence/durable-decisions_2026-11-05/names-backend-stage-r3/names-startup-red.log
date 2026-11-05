@@ -1,0 +1,15 @@
+test_cancelled_merge_construction_never_starts_saved_decision_owner (test_lock_timing.SourceFolderDispatchTests.test_cancelled_merge_construction_never_starts_saved_decision_owner) ... FAIL
+
+======================================================================
+FAIL: test_cancelled_merge_construction_never_starts_saved_decision_owner (test_lock_timing.SourceFolderDispatchTests.test_cancelled_merge_construction_never_starts_saved_decision_owner)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_lock_timing.py", line 49, in test_cancelled_merge_construction_never_starts_saved_decision_owner
+    self.assertIsNone(created[0].thread,'No saved decision may start before aborting construction finishes')
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: <Thread(BooksArrangerSavedDecisions, started 49992)> is not None : No saved decision may start before aborting construction finishes
+
+----------------------------------------------------------------------
+Ran 1 test in 0.687s
+
+FAILED (failures=1)
