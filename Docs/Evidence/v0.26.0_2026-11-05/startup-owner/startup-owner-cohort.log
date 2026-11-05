@@ -1,0 +1,27 @@
+Books Arranger 0.25.0 — http://127.0.0.1:0/ — PID 96140
+Books Arranger 0.25.0 — http://127.0.0.1:0/ — PID 96140
+Books Arranger 0.25.0 — http://127.0.0.1:0/ — PID 96140
+test_cold_669_row_startup_keeps_one_pending_page_worker_and_publishes_ready_only_after_completion (test_startup_loading.ColdServePendingPageTests.test_cold_669_row_startup_keeps_one_pending_page_worker_and_publishes_ready_only_after_completion) ... ok
+test_quit_during_pending_initial_page_interrupts_the_loader_without_starting_another_read (test_startup_loading.ColdServePendingPageTests.test_quit_during_pending_initial_page_interrupts_the_loader_without_starting_another_read) ... ok
+test_real_page_failure_remains_fatal_and_does_not_publish_ready (test_startup_loading.ColdServePendingPageTests.test_real_page_failure_remains_fatal_and_does_not_publish_ready) ... Books Arranger could not load the catalog: fixture real page read failed
+ok
+test_each_finished_book_is_looked_up_once_and_seeds_the_status_cache (test_startup_loading.ConstructionTests.test_each_finished_book_is_looked_up_once_and_seeds_the_status_cache) ... ok
+test_server_background_failure_closes_constructed_merge_owner (test_startup_loading.ConstructionTests.test_server_background_failure_closes_constructed_merge_owner) ... ok
+test_the_first_status_reads_each_enrolled_book_once_with_a_counter (test_startup_loading.ConstructionTests.test_the_first_status_reads_each_enrolled_book_once_with_a_counter) ... ok
+test_a_failed_load_ends_the_engine_with_its_message (test_startup_loading.LoadingServerTests.test_a_failed_load_ends_the_engine_with_its_message) ... Books Arranger could not load the catalog: Pending output moves need recovery first
+ok
+test_an_update_while_loading_ends_the_engine_at_once (test_startup_loading.LoadingServerTests.test_an_update_while_loading_ends_the_engine_at_once) ... ok
+test_changing_controls_are_refused_while_loading_with_the_pages_sentence (test_startup_loading.LoadingServerTests.test_changing_controls_are_refused_while_loading_with_the_pages_sentence) ... ok
+test_health_and_a_loading_state_answer_at_once_while_the_catalog_loads (test_startup_loading.LoadingServerTests.test_health_and_a_loading_state_answer_at_once_while_the_catalog_loads) ... ok
+test_quit_while_loading_stops_the_loader_and_closes_without_a_catalog_service (test_startup_loading.LoadingServerTests.test_quit_while_loading_stops_the_loader_and_closes_without_a_catalog_service) ... ok
+test_rebuilding_stale_groups_is_the_catalog_step_and_offers_no_restart (test_startup_loading.LoadingServerTests.test_rebuilding_stale_groups_is_the_catalog_step_and_offers_no_restart) ... ok
+test_the_session_step_counts_each_finished_book_then_parts_arrive_and_loading_ends (test_startup_loading.LoadingServerTests.test_the_session_step_counts_each_finished_book_then_parts_arrive_and_loading_ends) ... ok
+test_initialized_group_sync_succeeds_query_only (test_status_read_contention.StatusReadContentionTests.test_initialized_group_sync_succeeds_query_only) ... ok
+test_initialized_setup_does_not_request_writer_reservation (test_status_read_contention.StatusReadContentionTests.test_initialized_setup_does_not_request_writer_reservation) ... ok
+test_missing_singleton_is_still_initialized_without_resetting_existing (test_status_read_contention.StatusReadContentionTests.test_missing_singleton_is_still_initialized_without_resetting_existing) ... ok
+test_real_server_state_succeeds_while_private_writer_remains_held (test_status_read_contention.StatusReadContentionTests.test_real_server_state_succeeds_while_private_writer_remains_held) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 23.154s
+
+OK

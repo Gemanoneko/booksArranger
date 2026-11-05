@@ -1,0 +1,189 @@
+{
+  "method": "Python AST Call nodes named MergeService across every top-level production Python and tests/*.py; rg of MergeService aliases/module calls/factory assignment checked separately. __new__ stubs are inert and not constructors. Docs/Evidence are historical non-executable source, excluded. Every discovered successful instance has explicit current-instance or server ownership closure.",
+  "constructor_calls": 30,
+  "files": 18,
+  "calls": [
+    {
+      "path": "tests/test_approve_as_is.py",
+      "line": 35,
+      "owner": "ApproveFixture.start",
+      "disposition": "ApproveFixture.start registers each actual service.close with addCleanup."
+    },
+    {
+      "path": "tests/test_automatic_media.py",
+      "line": 35,
+      "owner": "AutomaticMediaTests.setUp",
+      "disposition": "tearDown closes current service; PNG fixture replacement first closes previous service."
+    },
+    {
+      "path": "tests/test_automatic_media.py",
+      "line": 174,
+      "owner": "AutomaticMediaTests.test_normal_start_readmits_old_png_chapter_refusal_with_current_proof",
+      "disposition": "tearDown closes current service; PNG fixture replacement first closes previous service."
+    },
+    {
+      "path": "tests/test_catalog_busy.py",
+      "line": 96,
+      "owner": "RunTests.setUp",
+      "disposition": "addCleanup(self.close), close calls current self.merge.close."
+    },
+    {
+      "path": "tests/test_cleanup_resume.py",
+      "line": 418,
+      "owner": "InlineAndStartTests.test_merge_service_wires_pause_and_quit_into_the_retry_wait",
+      "disposition": "local constructor is enclosed in try/finally service.close."
+    },
+    {
+      "path": "tests/test_desktop_update.py",
+      "line": 328,
+      "owner": "RealWorkerResumeTests.setUp",
+      "disposition": "fixture addCleanup(self.close) closes current merge; local instance uses finally merge.close."
+    },
+    {
+      "path": "tests/test_desktop_update.py",
+      "line": 547,
+      "owner": "RealWorkerResumeTests.test_a_new_engine_leaves_the_queue_the_scan_and_automatic_processing_stopped",
+      "disposition": "fixture addCleanup(self.close) closes current merge; local instance uses finally merge.close."
+    },
+    {
+      "path": "tests/test_destination_admission.py",
+      "line": 121,
+      "owner": "QueuedDestinationNative.queued",
+      "disposition": "inherits RetryIntent.tearDown closing current service; replacement closes old before construct."
+    },
+    {
+      "path": "tests/test_inplace_m4b.py",
+      "line": 1095,
+      "owner": "ServiceTests.setUp",
+      "disposition": "tearDown closes current service; reopening explicitly closes prior."
+    },
+    {
+      "path": "tests/test_inplace_m4b.py",
+      "line": 1144,
+      "owner": "ServiceTests.test_automatic_single_m4b_is_edited_moved_retired_and_counted",
+      "disposition": "tearDown closes current service; reopening explicitly closes prior."
+    },
+    {
+      "path": "tests/test_local_admission.py",
+      "line": 22,
+      "owner": "LocalAdmissionTests.setUp",
+      "disposition": "tearDown closes current service before temporary directory cleanup."
+    },
+    {
+      "path": "tests/test_merge_service.py",
+      "line": 56,
+      "owner": "MergeTests.setUp",
+      "disposition": "normal/reopened instances use current-service tearDown. NativeMoveStartupFence constructor lambda must fail before setup/runtime startup; positive source fence checks catalog unchanged."
+    },
+    {
+      "path": "tests/test_merge_service.py",
+      "line": 132,
+      "owner": "MergeTests.test_review_to_validated_file_and_restart_reuse",
+      "disposition": "normal/reopened instances use current-service tearDown. NativeMoveStartupFence constructor lambda must fail before setup/runtime startup; positive source fence checks catalog unchanged."
+    },
+    {
+      "path": "tests/test_merge_service.py",
+      "line": 27,
+      "owner": "NativeMoveStartupFenceTests.test_pending_move_blocks_both_entry_points_before_recovery_writes",
+      "disposition": "normal/reopened instances use current-service tearDown. NativeMoveStartupFence constructor lambda must fail before setup/runtime startup; positive source fence checks catalog unchanged."
+    },
+    {
+      "path": "tests/test_output_rename.py",
+      "line": 172,
+      "owner": "ProductionMoveIntegrationTests.test_conversion_to_reviewed_native_move_keeps_job_receipt_and_recovery",
+      "disposition": "addCleanup(f.tearDown) resolves current f.service; replacement closes previous service first."
+    },
+    {
+      "path": "tests/test_retry_intent.py",
+      "line": 34,
+      "owner": "RetryIntent.activate",
+      "disposition": "tearDown closes current service; activate closes old before replacement."
+    },
+    {
+      "path": "tests/test_retry_intent.py",
+      "line": 108,
+      "owner": "RetryIntent.test_bound_user_universe_migration_keeps_current_view_and_ready",
+      "disposition": "tearDown closes current service; activate closes old before replacement."
+    },
+    {
+      "path": "tests/test_shared_routing.py",
+      "line": 333,
+      "owner": "CuratedApprovalTests.approve",
+      "disposition": "each initial/reopened service has addCleanup(service.close); deterministic restart patch keeps runtime inert until actual run_once."
+    },
+    {
+      "path": "tests/test_shared_routing.py",
+      "line": 368,
+      "owner": "CuratedApprovalTests.approve",
+      "disposition": "each initial/reopened service has addCleanup(service.close); deterministic restart patch keeps runtime inert until actual run_once."
+    },
+    {
+      "path": "tests/test_sorted_wiring.py",
+      "line": 29,
+      "owner": "ProductionSortedWiringTests.setUp",
+      "disposition": "addCleanup(current service.close) for the one constructed instance."
+    },
+    {
+      "path": "tests/test_split_books.py",
+      "line": 271,
+      "owner": "SplitAdmissionTests.build",
+      "disposition": "each constructor registers service.close with addCleanup, ahead of temporary-directory cleanup."
+    },
+    {
+      "path": "tests/test_split_books.py",
+      "line": 443,
+      "owner": "PartBookAdmissionTests.build",
+      "disposition": "each constructor registers service.close with addCleanup, ahead of temporary-directory cleanup."
+    },
+    {
+      "path": "tests/test_split_books.py",
+      "line": 542,
+      "owner": "M4AGroupAdmissionTests.test_chaptered_m4a_file_keeps_its_group_whole",
+      "disposition": "each constructor registers service.close with addCleanup, ahead of temporary-directory cleanup."
+    },
+    {
+      "path": "tests/test_startup_loading.py",
+      "line": 304,
+      "owner": "ConstructionTests.test_the_first_status_reads_each_enrolled_book_once_with_a_counter",
+      "disposition": "local construction tests close in finally; cold-serve factory owner is serve_owned, whose finally server_close closes current Merge. New failure case explicitly closes constructor service; RED fixture capture cleanup is honest."
+    },
+    {
+      "path": "tests/test_startup_loading.py",
+      "line": 251,
+      "owner": "ConstructionTests.test_server_background_failure_closes_constructed_merge_owner.factory",
+      "disposition": "local construction tests close in finally; cold-serve factory owner is serve_owned, whose finally server_close closes current Merge. New failure case explicitly closes constructor service; RED fixture capture cleanup is honest."
+    },
+    {
+      "path": "tests/test_startup_loading.py",
+      "line": 274,
+      "owner": "ConstructionTests.test_each_finished_book_is_looked_up_once_and_seeds_the_status_cache",
+      "disposition": "local construction tests close in finally; cold-serve factory owner is serve_owned, whose finally server_close closes current Merge. New failure case explicitly closes constructor service; RED fixture capture cleanup is honest."
+    },
+    {
+      "path": "tests/test_startup_loading.py",
+      "line": 378,
+      "owner": "ColdServePendingPageTests.start.factory",
+      "disposition": "local construction tests close in finally; cold-serve factory owner is serve_owned, whose finally server_close closes current Merge. New failure case explicitly closes constructor service; RED fixture capture cleanup is honest."
+    },
+    {
+      "path": "tests/test_start_while_converting.py",
+      "line": 31,
+      "owner": "StartWhileConvertingTests.setUp",
+      "disposition": "addCleanup(self.close); close calls current merge.close."
+    },
+    {
+      "path": "tests/test_status_read_contention.py",
+      "line": 59,
+      "owner": "StatusReadContentionTests.test_real_server_state_succeeds_while_private_writer_remains_held.factory",
+      "disposition": "tearDown calls BrowserServer.server_close, which calls merge.close (not only automatic/jobs close)."
+    },
+    {
+      "path": "tests/test_working_lifecycle.py",
+      "line": 41,
+      "owner": "WorkingLifecycleTests.test_startup_does_not_cleanup_or_start_but_explicit_resume_retries_published_attention",
+      "disposition": "tearDown delegates current AutomaticMediaTests.tearDown; replacement closes previous service first."
+    }
+  ],
+  "production_factory": "BrowserServer._open_merge uses default factory=MergeService. Synchronous __init__ now closes assigned merge on background-start failure. Deferred _load owns self.merge after return; preassignment abort closes local merge, later abort/error/quit/update is closed through server_close/finish_shutdown and serve_owned finally. Merge constructor DecisionRuntime.start remains final operation after aborting progress/enrollment work. Merge.close signals approval stops before joining decisions and closes remaining catalog readers/workers.",
+  "open_dispositions": []
+}

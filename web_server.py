@@ -278,7 +278,12 @@ class BrowserServer(ThreadingHTTPServer):
             self.merge = self._open_merge()
             self._start_background()
         except BaseException:
-            super().server_close()
+            try:
+                if self.merge is not None:
+                    self.merge.close()
+                    self.merge=None
+            finally:
+                super().server_close()
             raise
 
     @property

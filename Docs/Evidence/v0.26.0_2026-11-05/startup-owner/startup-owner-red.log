@@ -1,0 +1,15 @@
+test_server_background_failure_closes_constructed_merge_owner (test_startup_loading.ConstructionTests.test_server_background_failure_closes_constructed_merge_owner) ... FAIL
+
+======================================================================
+FAIL: test_server_background_failure_closes_constructed_merge_owner (test_startup_loading.ConstructionTests.test_server_background_failure_closes_constructed_merge_owner)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\0260-release-20261105-r1\tests\test_startup_loading.py", line 257, in test_server_background_failure_closes_constructed_merge_owner
+    self.assertFalse(made[0].decisions.thread.is_alive(),'Constructor failure left a non-daemon decision owner without a server owner')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false : Constructor failure left a non-daemon decision owner without a server owner
+
+----------------------------------------------------------------------
+Ran 1 test in 0.456s
+
+FAILED (failures=1)

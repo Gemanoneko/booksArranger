@@ -1,0 +1,8 @@
+test_each_finished_book_is_looked_up_once_and_seeds_the_status_cache (test_startup_loading.ConstructionTests.test_each_finished_book_is_looked_up_once_and_seeds_the_status_cache) ... ok
+test_server_background_failure_closes_constructed_merge_owner (test_startup_loading.ConstructionTests.test_server_background_failure_closes_constructed_merge_owner) ... ok
+test_the_first_status_reads_each_enrolled_book_once_with_a_counter (test_startup_loading.ConstructionTests.test_the_first_status_reads_each_enrolled_book_once_with_a_counter) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.150s
+
+OK

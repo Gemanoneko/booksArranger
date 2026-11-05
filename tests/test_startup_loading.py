@@ -244,6 +244,23 @@ class ConstructionTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_server_background_failure_closes_constructed_merge_owner(self):
+        from merge_service import MergeService
+        made=[]
+        def factory(inventory,cache):
+            merge=MergeService(inventory,cache);made.append(merge);return merge
+        try:
+            with patch.object(web_server.BrowserServer,'_start_background',side_effect=RuntimeError('Private background startup failure')):
+                with self.assertRaisesRegex(RuntimeError,'Private background startup failure'):
+                    web_server.BrowserServer(('127.0.0.1',0),self.inventory,factory)
+            self.assertEqual(len(made),1)
+            self.assertFalse(made[0].decisions.thread.is_alive(),'Constructor failure left a non-daemon decision owner without a server owner')
+            self.assertTrue(made[0].decisions.stop.is_set())
+        finally:
+            # The RED proof must also close its privately captured service; this
+            # is explicit fixture ownership, never a force-exit runner shortcut.
+            for merge in made:merge.close()
+
     def test_each_finished_book_is_looked_up_once_and_seeds_the_status_cache(self):
         from merge_service import MergeService
         from publication_binding import PublicationBindings

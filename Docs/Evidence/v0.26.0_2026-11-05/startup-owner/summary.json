@@ -1,0 +1,77 @@
+{
+  "baseline": "4941b06a42542450a83cc68c8a7cdd33fae0ec3d",
+  "files": [
+    {
+      "path": "web_server.py",
+      "bytes": 116729,
+      "sha256": "32971eee0621ff258d3069a70a3fb18706a6e654672e61e7383df0a1339afa01",
+      "lf_sha256": "a467dbff23b08eca7dcc234500bc3d1f28e558ee9ce3c2e6331a4f34950b7e23",
+      "baseline_lf_sha256": "f39c0982c9aa56440cbe0465a5ede563f5ef14fed6b5d4e2b6aba8c7b511c685"
+    },
+    {
+      "path": "tests/test_startup_loading.py",
+      "bytes": 25916,
+      "sha256": "5aae30b5b1d7b3d460ad8c22b68490b21132c72ceb3dd6a49a2fad6369e58139",
+      "lf_sha256": "cb93efb6c420e57a5dc8718293831f8c2919dc093667f3d7076629b63de881d3",
+      "baseline_lf_sha256": "ba6345a65dd2315260f473c3291b00d4600ccbb8fa537ae9713688a21cc49243"
+    }
+  ],
+  "patch_sha256": "81515b0a9df5ca8537b4a1cf9058cabf42016a21fbab79cf6bbea07a15a0c89a",
+  "cause": "BrowserServer synchronous constructor had assigned a real MergeService, then background startup failure closed only HTTP socket. Its new non-daemon durable-decision owner had no returned server owner and remained alive.",
+  "fix": "Close assigned merge before socket on constructor exception, clear reference only after successful closure, always close socket in finally. Do not force-exit/daemonize/skip closure. Exception cleanup preserves normal close failure semantics.",
+  "proof": "Actual constructor regression RED(owner alive), then3/3construction GREEN1.150s and17/17complete startup/loading+real SQLite writer-contention PASS23.154s; owned23.798s/normalzero/closed/outputComplete. Abort/quit/update/unload/cold-page included. RED fixture explicitly closes its captured private service in finally, not runner force exit.",
+  "inventory": {
+    "calls": 30,
+    "files": 18,
+    "sha256": "07fc0537251ba9eb4ada4fea6c2ac77bcf457282a5357103290f9917d5f5476e",
+    "open_dispositions": []
+  },
+  "scope": "Private fixtures only; no live/source/Z/focus/full/build/native run. Other dirty four files already represented by committed4941 baseline; no stale overwrite.",
+  "evidence": [
+    {
+      "path": "owned.mjs",
+      "bytes": 2091,
+      "sha256": "4fc505c791d0ed426c6c62a08fdcf73115da6a7cff082ec25c217028bee3c69a"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 794,
+      "sha256": "a0b02cdf06f23fcf5c3018cb7670f0aedfcce43c79bd9dac0711acb5d172ef2d"
+    },
+    {
+      "path": "freeze-startup.py",
+      "bytes": 7448,
+      "sha256": "e092a0ec62c76a23bf235bdbf09d88c743ba9b9b275d89d22bae73f3fa2d7a05"
+    },
+    {
+      "path": "startup-owner-red.json",
+      "bytes": 1948,
+      "sha256": "4af9d2d28d95e12464466371c19af47947819f1084e216e3d70025e5c60f7943"
+    },
+    {
+      "path": "startup-owner-red.log",
+      "bytes": 1225,
+      "sha256": "ffec81068e6032d63bcfb2c1bd58a510af0520c72aa02b1a133b586d46f38a26"
+    },
+    {
+      "path": "startup-owner-green.json",
+      "bytes": 1346,
+      "sha256": "9835db93365e681bf955b801571904ef21f2a0ef0415819b142c340e982b22d6"
+    },
+    {
+      "path": "startup-owner-green.log",
+      "bytes": 646,
+      "sha256": "bc50347f1bc61eb3385e0d4299007a4ddb31f701146626c3730e26657626b92f"
+    },
+    {
+      "path": "startup-owner-cohort.json",
+      "bytes": 4462,
+      "sha256": "e75ad0c52c87493a7e464319cb4c31377222d6abac3ca9d4d36e39ec038faf63"
+    },
+    {
+      "path": "startup-owner-cohort.log",
+      "bytes": 3721,
+      "sha256": "693634d3a47a6aebc4fd721885f2c1bde515c763168bc7b27d95fe34c7624230"
+    }
+  ]
+}
