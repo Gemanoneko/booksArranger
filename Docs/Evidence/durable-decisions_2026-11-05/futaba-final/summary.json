@@ -1,0 +1,270 @@
+{
+  "schema": "books-durable-decisions-futaba-focused-v1",
+  "source_commit": "c567adbaa8e7b57109ac9a5c979aee228fd7c3b1",
+  "scope": "Pinned source archive; 54 backend Python methods, 32 affected DOM scripts and six real loopback production JS to Handler actions. No packaged/full/native app/live/Z/focus/user data.",
+  "source_archive_sha256": "a47ef6aca1823a812e8cf1df3c6733a56cbcc5492ce6c7923ebe819b1f6bc261",
+  "source_pin_sha256": "1d95b944ffb7ff7a586c8e611509cf585936149661dd2bfb339a565a5f414a3b",
+  "reviewed_ui_manifest_sha256": "72cbd13ef5579773b297faf33ee7fd36c6a7ef603200fef73dc1a1202110bcf5",
+  "authoritative_bridge_freeze_sha256": "9534e2af428fcbd2707fe794b93bfe6003d769acb5d5732401b6d9fa84df9088",
+  "app_committed_blob_sha256": "f2f2c279a91de04d40c78fc01e5172559aa389e92faaa01804808168cbf7b8eb",
+  "index_committed_blob_sha256": "ac82a8174b36e85c213de4b8eb81f44f6c32711ad34042feb248dee0f1b3ddb3",
+  "backend_unchanged_since_commit": "03fe85f11bde97c784a68f931e88be7680552557",
+  "backend": {
+    "methods": 54,
+    "passed": 54,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "nativeZero": true,
+    "forced": false,
+    "timedOut": false,
+    "elapsedMs": 33300.8303
+  },
+  "dom": {
+    "scripts": 32,
+    "passed": 32,
+    "failed": 0,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "nativeZero": true,
+    "forced": false,
+    "timedOut": false,
+    "elapsedMs": 5766.7537999999995
+  },
+  "bridge": {
+    "routes": [
+      {
+        "action": "names",
+        "pass": true,
+        "status": "accepted",
+        "request_id": "14f45072-b3a1-4a83-a04e-fea1eda7edb3",
+        "payload_sha256_match": true,
+        "head_book_match": true,
+        "recorded_raw_stdout_sha256": "124d608c6c273aadd78f45b4dc17b7b38e1f11ed080014e60e0c201d78ca341d",
+        "preserved_stdout_lf_hash_match": true,
+        "process_seconds": 4.1243
+      },
+      {
+        "action": "review",
+        "pass": true,
+        "status": "accepted",
+        "request_id": "5cbab613-9e99-4aa3-a82c-e112d13cfc5b",
+        "payload_sha256_match": true,
+        "head_book_match": true,
+        "recorded_raw_stdout_sha256": "4c3919f0bc9db1f1e4491feb863f685d41769ad867017f2e72524085faf5fbe6",
+        "preserved_stdout_lf_hash_match": true,
+        "process_seconds": 4.1255
+      },
+      {
+        "action": "tracks",
+        "pass": true,
+        "status": "accepted",
+        "request_id": "01a32247-89aa-4b90-803a-1eb59c9cea4b",
+        "payload_sha256_match": true,
+        "head_book_match": true,
+        "recorded_raw_stdout_sha256": "1759e011f53aa355a2578dcf755d5c1eb603048383c98e54059d99466dbf8c66",
+        "preserved_stdout_lf_hash_match": true,
+        "process_seconds": 4.1319
+      },
+      {
+        "action": "metadata_choices",
+        "pass": true,
+        "status": "accepted",
+        "request_id": "a6012e3d-abfe-45fe-95df-64d7c7e6f22a",
+        "payload_sha256_match": true,
+        "head_book_match": true,
+        "recorded_raw_stdout_sha256": "f13da42f2171a8bf4c9989a5a24cc74e715d26eef860ab634e816efa1b41785e",
+        "preserved_stdout_lf_hash_match": true,
+        "process_seconds": 4.1355
+      },
+      {
+        "action": "approve",
+        "pass": true,
+        "status": "accepted",
+        "request_id": "ef423dac-5ccf-42ae-a54c-7f0532309d09",
+        "payload_sha256_match": true,
+        "head_book_match": true,
+        "recorded_raw_stdout_sha256": "4e9fb47e014a20ef8929a9a8a0341f624b5e0fa07205eb15bb0665f0b6fa0676",
+        "preserved_stdout_lf_hash_match": true,
+        "process_seconds": 4.1493
+      },
+      {
+        "action": "file_review",
+        "pass": true,
+        "status": "applied",
+        "request_id": "5fff20d9-8ec1-4a24-8c26-12f456ba14dd",
+        "payload_sha256_match": true,
+        "head_book_match": true,
+        "recorded_raw_stdout_sha256": "ccd13e05503ffb53829badc9daceb692106b5cf5931ce9146082c6ef24c89aea",
+        "preserved_stdout_lf_hash_match": true,
+        "process_seconds": 4.1282
+      }
+    ],
+    "unique_request_ids": 6,
+    "code": 0,
+    "closed": true,
+    "outputComplete": true,
+    "nativeZero": true,
+    "forced": false,
+    "timedOut": false,
+    "elapsedMs": 29084.616700000002,
+    "raw_stdout_note": "Python write_text stored CRLF on Windows; LF-normalized preserved per-route stdout hash matches original captured bytes"
+  },
+  "limitations": "The six bridge requests prove actual frontend helper, HTTP Handler acceptance/status/head under unrelated locks; they do not visually inspect a window or prove every action fully applies. Source/DOM backend tests cover restart/crash/guard semantics; this is not a full release gate.",
+  "files": [
+    {
+      "path": "backend-54.json",
+      "bytes": 11169,
+      "sha256": "e936c4044d02c7fccc94d94438a0aaffa6243b6bf006af5a8384b552df76abf3"
+    },
+    {
+      "path": "backend-54.log",
+      "bytes": 10357,
+      "sha256": "7a8bb012e29b0740cb21edc6968458fbd4490fc7dbe15e48d250a065a64d21a2"
+    },
+    {
+      "path": "bridge-six.json",
+      "bytes": 15872,
+      "sha256": "75eb09df998cc0ae3df7e05e52311512e198fc59d033868a169adda7d68e978d"
+    },
+    {
+      "path": "bridge-six.log",
+      "bytes": 13074,
+      "sha256": "31494a50358615520598d4b810102e050a3e3c7684ae0adbaef5990584ae9cf9"
+    },
+    {
+      "path": "bridge/durable_frontend_http_bridge.js",
+      "bytes": 3723,
+      "sha256": "4721d9abf2c22a59bbb44b21d32429e85f534631ee5323f7ea79d1e8849c5550"
+    },
+    {
+      "path": "bridge/frontend-backend-bridge.py",
+      "bytes": 5677,
+      "sha256": "c5b4bbb9f5624e8e311c91375eb365c5ef817e6899f8087e15bc214c38e8bb6d"
+    },
+    {
+      "path": "bridge/run.cjs",
+      "bytes": 795,
+      "sha256": "101348a0b166b46d708991ce5edc4c9dc283f92855cff16e6e1cc061d15af604"
+    },
+    {
+      "path": "dom-32.json",
+      "bytes": 2321,
+      "sha256": "515cf9d9a50a8358ee9ddd422c6373d1dfa6f5b7aedc2e5b7aaedf6f1073d8b6"
+    },
+    {
+      "path": "dom-32.log",
+      "bytes": 1592,
+      "sha256": "1e8c3a5579aceb2591e9c91522b37701463b787cf392996404eb74dba14d5e3f"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 723,
+      "sha256": "89e1537771803095d437a2e98741ef16b6dadba1e31103fb8594f3cb360c03ac"
+    },
+    {
+      "path": "owned.mjs",
+      "bytes": 1994,
+      "sha256": "c29da5ef385416a1e7ff4544dcf92fbdfa67688b09a778121a811d70920b4a54"
+    },
+    {
+      "path": "routes/bridge-approve.json",
+      "bytes": 8476,
+      "sha256": "6e1f2258730ba5a16eefd8c6a5cbbd438c6e86d3af4c45435922037cf57e7133"
+    },
+    {
+      "path": "routes/bridge-approve.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "routes/bridge-approve.stdout.log",
+      "bytes": 1482,
+      "sha256": "7b61976f24c19cc56f8d2d2b69339c595b1119bf7986af3a4853e7956a85405a"
+    },
+    {
+      "path": "routes/bridge-file_review.json",
+      "bytes": 965,
+      "sha256": "46750fbabe3c9cc9080d82e781f046f2cb6b6fdf2f874f45b41694153206a70c"
+    },
+    {
+      "path": "routes/bridge-file_review.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "routes/bridge-file_review.stdout.log",
+      "bytes": 1651,
+      "sha256": "ff2d835f70d2252cc7e30bb636cad601cfd20da928e979a423d64ea2ac3d0d23"
+    },
+    {
+      "path": "routes/bridge-metadata_choices.json",
+      "bytes": 8447,
+      "sha256": "82945da26bc83188493425a7d5fdb5fdb8144e65acbc617e6dfd1ab3c166e4d2"
+    },
+    {
+      "path": "routes/bridge-metadata_choices.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "routes/bridge-metadata_choices.stdout.log",
+      "bytes": 1359,
+      "sha256": "4f3733e62e6bb7021e4220ca7d7b7cd77acb473354a4bcbf782e9e47b11cb66b"
+    },
+    {
+      "path": "routes/bridge-names.json",
+      "bytes": 8410,
+      "sha256": "3ede750932c724fffc631fcfedc69fbc0aabc36caf81a37043e13731c9fd9b0d"
+    },
+    {
+      "path": "routes/bridge-names.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "routes/bridge-names.stdout.log",
+      "bytes": 1291,
+      "sha256": "095fc91c50021167f64ebce2ba8ea939ea453a733f835655c48577c33492f1f9"
+    },
+    {
+      "path": "routes/bridge-review.json",
+      "bytes": 8635,
+      "sha256": "78adb76c6a28a651becec2ed3d53bf1f3b66058a4cbe20ecb19ba19aff7473dc"
+    },
+    {
+      "path": "routes/bridge-review.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "routes/bridge-review.stdout.log",
+      "bytes": 1484,
+      "sha256": "487f76abbd836ecd1fd94acc8dbd3c553ef8b915e11d417758684cdcb7e26481"
+    },
+    {
+      "path": "routes/bridge-tracks.json",
+      "bytes": 8605,
+      "sha256": "cc4f9610e957b2756521cbb99dc5c2f7447c0c3f54194454085e59c5f50113f9"
+    },
+    {
+      "path": "routes/bridge-tracks.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "routes/bridge-tracks.stdout.log",
+      "bytes": 1469,
+      "sha256": "14c518efbf293ee5bef5514a6a70bfb8b155926b547f31a1a612fabc6d2d1d32"
+    },
+    {
+      "path": "source-pin.json",
+      "bytes": 7398,
+      "sha256": "1d95b944ffb7ff7a586c8e611509cf585936149661dd2bfb339a565a5f414a3b"
+    }
+  ]
+}

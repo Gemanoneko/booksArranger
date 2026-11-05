@@ -1,0 +1,17 @@
+{
+  "schema": "books-durable-decisions-futaba-cleanup-v1",
+  "source_commit": "c567adbaa8e7b57109ac9a5c979aee228fd7c3b1",
+  "roots": [
+    "C:/Antigravity Projects/d26",
+    "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/futaba-durable-20261105"
+  ],
+  "roots_absent": true,
+  "removed_files": 447,
+  "removed_mib": 16.35,
+  "kept_targets": 0,
+  "dryrun_sha256": "7ea6c848f2fd64b270a9a52284417c152c11a7e7dda76e0f4c724538065d9b2d",
+  "apply_sha256": "0f8223f6dba7929a8991e60e79976e44ea45792860586e9eb452a512ba329fc2",
+  "focused_summary_sha256": "6c2a8383b2c2019f037165c86e98b0a0f59f2e1d926f40423e2a7eda0c915fae",
+  "report_sha256": "f1f8743f903b57b1ae14a317a82b07bfa3b2fb1cbf363e95c74580124ba93ea3",
+  "excluded": "Implementation worktrees, blocked historical arenas, installed app, live collection/Z, user data, current release artifacts and unrelated Docs"
+}

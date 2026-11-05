@@ -1,0 +1,6 @@
+studio-sweep approved targets (apply): removed 447 file(s), 16.35 MB; refused or kept 0 target(s).
+  REMOVED      C:\Antigravity Projects\d26  [Sergei standing cleanup of Futaba private durable-decision six-route fixture arena; all 18 raw route files preserved in Docs]
+               before 18 files, 51.05 KB; removed 18 files, 51.05 KB; after 0 files, 0 B
+  REMOVED      C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\futaba-durable-20261105  [Sergei standing cleanup of Futaba pinned c567adb focused source/DOM/bridge scratch; 31 raw evidence files preserved in Docs]
+               before 429 files, 16.30 MB; removed 429 files, 16.30 MB; after 0 files, 0 B
+  free space on C:\: 91.88 GB -> 91.90 GB (+14.07 MB, statfs)

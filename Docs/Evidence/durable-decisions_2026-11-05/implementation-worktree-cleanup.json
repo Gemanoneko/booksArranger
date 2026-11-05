@@ -1,0 +1,38 @@
+{
+  "status": "REMOVED_BY_GIT_WORKTREE",
+  "recorded_utc": "2026-11-05T10:28:05.978216+00:00",
+  "repo_head": "c73be1527e71b33201b9a8d64b87f81a23a495d3",
+  "worktrees": [
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\resume-hold-20261105",
+      "absent": true,
+      "unique_commits": 0,
+      "ignored_files": 0,
+      "verified_dirty_paths": 9,
+      "provenance": "Each modified file matched current main or committed 885264ef after LF normalization."
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-20261105",
+      "absent": true,
+      "unique_commits": 0,
+      "ignored_files": 0,
+      "verified_dirty_paths": 16,
+      "provenance": "Every modified or untracked file matched current main raw bytes."
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\durable-decisions-ui-20261105",
+      "absent": true,
+      "unique_commits": 0,
+      "ignored_files": 0,
+      "verified_dirty_paths": 18,
+      "provenance": "Every modified or untracked file matched current main raw bytes."
+    }
+  ],
+  "preserved": [
+    "approve-retrieved-20261105",
+    "books-0242-candidate-20261101",
+    "0250-release-20261105-r3"
+  ],
+  "method": "git worktree remove --force on each exact verified checkout; no broader parent removal",
+  "qa_dependency": "Futaba confirmed QA used separate Git archive and private arena; no process or file dependency on these three worktrees."
+}
