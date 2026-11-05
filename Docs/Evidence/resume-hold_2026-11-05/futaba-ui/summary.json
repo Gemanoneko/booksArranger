@@ -1,0 +1,108 @@
+{
+  "schema": "books-resume-hold-futaba-ui-focused-v1",
+  "source_commit": "885264ef7568fb94b1797a861ba9866a4a85d4af",
+  "source_origin_match": true,
+  "frozen_ui_summary_sha256": "5cf45e274275f7966947f77986af939f60bfa6f9bba451f239c99c34cb797bad",
+  "source_archive_sha256": "9385ed58ef434a3431835860ea11aa943760b14cd9dc1d0652faeb6ce3ba91d4",
+  "seven_modified_files_match_frozen_manifest": true,
+  "python": {
+    "modules": [
+      "test_progress_rows",
+      "test_quiet_status"
+    ],
+    "run": 26,
+    "passed": 26,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "ownedCode": 0,
+    "closed": true,
+    "outputComplete": true,
+    "nativeZero": true,
+    "elapsedMs": 10485.717200000001
+  },
+  "node": [
+    {
+      "script": "test_progress_frontend.js",
+      "ownedCode": 0,
+      "closed": true,
+      "outputComplete": true,
+      "nativeZero": true,
+      "elapsedMs": 231.5223
+    },
+    {
+      "script": "test_0242_frontend.js",
+      "ownedCode": 0,
+      "closed": true,
+      "outputComplete": true,
+      "nativeZero": true,
+      "elapsedMs": 233.5575
+    },
+    {
+      "script": "test_ruling35_frontend.js",
+      "ownedCode": 0,
+      "closed": true,
+      "outputComplete": true,
+      "nativeZero": true,
+      "elapsedMs": 279.6822
+    }
+  ],
+  "verified": [
+    "Paused 418 queued and 65 need attention remains distinct from Metadata 0/292; old cleanup attention is not guessed as pause cause",
+    "Real claimed preproducer work says Checking pending audiobook work, with no fabricated conversion row",
+    "Queued Save remains in session memory and not saved; ahead count, confirmed Cancel, preserved draft, refused/lost reply, and durable success are distinguished"
+  ],
+  "limitations": "Committed source plus private Python SQLite/DOM doubles only. No actual window, packaged build, full entry, native app, live source/Z or user data. Core behavior was independently verified at prior 433885 commit; this checks UI slice.",
+  "files": [
+    {
+      "name": "focused.py",
+      "bytes": 405,
+      "sha256": "730cdaebeff59bfca8fce05abb8579c64ed2c61787efdee840ca2b86238fe55f"
+    },
+    {
+      "name": "node-1.json",
+      "bytes": 830,
+      "sha256": "7797b6444d7a4887055d030c3f6cd7cb92c623a33e946802c6d832bec3691931"
+    },
+    {
+      "name": "node-1.log",
+      "bytes": 147,
+      "sha256": "4fa3ef4fc86112a7153eb89abbb7bcde5d2c94a78a675e97594be961924ef32e"
+    },
+    {
+      "name": "node-2.json",
+      "bytes": 827,
+      "sha256": "b56619cc688c98a19626c04e5378702d7cde2bdf419ec8108f5434929f5ae8c7"
+    },
+    {
+      "name": "node-2.log",
+      "bytes": 144,
+      "sha256": "a53fbca6458d3a2d67ac0acd1a4c7f60bc4d66ad716aba530e9cbdab06b4eaf8"
+    },
+    {
+      "name": "node-3.json",
+      "bytes": 900,
+      "sha256": "ba90cfe629c7dc440a1fa9277e18b64bfc816dd014e6e688c4577493b1385f60"
+    },
+    {
+      "name": "node-3.log",
+      "bytes": 217,
+      "sha256": "246c69f1877918128cb7397194e6d4e371890f20df450279fc9cfe8e902908a9"
+    },
+    {
+      "name": "owned.mjs",
+      "bytes": 1882,
+      "sha256": "8f093aa2887612eb4f7861b182550aab4da54c881113c803bfdadd12075b11e8"
+    },
+    {
+      "name": "python-progress.json",
+      "bytes": 4611,
+      "sha256": "fd5fe6e97e13c54091c7ea6c853b8748002a07b2b9b67b9ac7a53645add13c2a"
+    },
+    {
+      "name": "python-progress.log",
+      "bytes": 3854,
+      "sha256": "2b309523a178ca8ac98e274230e721a21581af36145f2db656aacdda2e06dab4"
+    }
+  ]
+}

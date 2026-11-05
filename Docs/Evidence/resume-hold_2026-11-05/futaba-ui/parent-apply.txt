@@ -1,0 +1,4 @@
+studio-sweep approved targets (apply): removed 0 file(s), 0 B; refused or kept 0 target(s).
+  REMOVED      C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\scratch\resume-hold-futaba-20261105  [Sergei standing cleanup; Futaba UI task left only empty owned parent after sanctioned child sweep]
+               before 0 files, 0 B; removed 0 files, 0 B; after 0 files, 0 B
+  free space on C:\: 93.88 GB -> 93.88 GB (+0 B, statfs)

@@ -1,0 +1,15 @@
+{
+  "schema": "books-resume-hold-futaba-ui-cleanup-v1",
+  "source_commit": "885264ef7568fb94b1797a861ba9866a4a85d4af",
+  "removed_child": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/resume-hold-futaba-20261105/ui",
+  "removed_files": 393,
+  "removed_mib": 15.35,
+  "child_dryrun_sha256": "a69953d3ce5d080b05a42260405ca5e7dd1515c443e8bab726489eb4d30392ec",
+  "child_apply_sha256": "bcb8eb31d2144d94782edbd645ec7f07d3e835c084ba889e57fb922c753eaadc",
+  "empty_parent_dryrun_sha256": "d1dd4f7c514aedb694eba6713f024b640321619f78e485337446447dc745aeee",
+  "empty_parent_apply_sha256": "a62bf5ed4465af8739ab36a020470d5e72854129187bba0ec72fa6390299001b",
+  "both_roots_absent": true,
+  "kept_targets": 0,
+  "focused_summary_sha256": "d05e3d536de89a51712265e072c0a213b609c6e8eab6a5dfc59c25e7257c995c",
+  "report_sha256": "1f452cf07a33e2efde55a2ad441572dd94affbc4a9b8f61d744cfe9e39032472"
+}
