@@ -9,22 +9,21 @@ const fields=new Map();
 for(const name of ['original_language','title','author','canonical_author','narrator','universe','series','number','genre','topic','multi_author','anthology']) fields.set(name,{value:'',checked:false});
 const nodes=new Map();
 function node(id){
-  if(!nodes.has(id))nodes.set(id,{value:id==='library'?'Audiobooks':'',textContent:'',hidden:false,children:[],handlers:{},
-    addEventListener(type,fn){this.handlers[type]=fn;},setAttribute(){},replaceChildren(){this.children=[];},append(value){this.children.push(value);}});
+  if(!nodes.has(id))nodes.set(id,{value:id==='library'?'Audiobooks':'',textContent:'',hidden:false,children:[],handlers:{},attrs:{},dataset:{},
+    addEventListener(type,fn){this.handlers[type]=fn;},setAttribute(key,value){this.attrs[key]=String(value);},removeAttribute(key){delete this.attrs[key];},getAttribute(key){return this.attrs[key] ?? null;},replaceChildren(){this.children=[];},append(value){this.children.push(value);}});
   return nodes.get(id);
 }
 node('review-form').elements={namedItem:name=>fields.get(name)};
 const oldRow={path:'C:/fixture/book.mp3',root:'C:/fixture',kind:'audiobook',size:10,modified:'2000000000000000001',missing:0,error:'',
   metadata:{method:'fixture',tags:{}},preview:{path:'',reason:'review'},review:null};
 const newRow={...oldRow,size:25,modified:'2000000000000000002',metadata:{method:'fixture',title:'Changed source',tags:{}}};
-let posted=null;
-const context=vm.createContext({console,document:{getElementById:node,querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:()=>({value:'',textContent:'',children:[],dataset:{},append(value){this.children.push(value);},setAttribute(){},addEventListener(){}})},
+let posted=null;const decisionBodies=[],durableMemory=new Map(),durableFixture=require('./durable_frontend_fixture.js')();
+const legacyMetadata=async(route,options)=>{assert.equal(route,'/api/review');posted=JSON.parse(options.body);return {ok:false,status:400,json:async()=>({error:'Inventory file changed; reload evidence'})};};
+const context=vm.createContext({console,TextEncoder,crypto:{randomUUID:require('node:crypto').randomUUID,subtle:{digest:async(_algorithm,data)=>Uint8Array.from(require('node:crypto').createHash('sha256').update(data).digest()).buffer}},localStorage:{getItem:k=>durableMemory.get(k)||null,setItem:(k,v)=>durableMemory.set(k,v)},location:{origin:'http://127.0.0.1:5211'},URL,document:{getElementById:node,querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:()=>({value:'',textContent:'',children:[],dataset:{},attrs:{},append(value){this.children.push(value);},setAttribute(key,value){this.attrs[key]=String(value);},removeAttribute(key){delete this.attrs[key];},addEventListener(){}})},
   setTimeout:()=>0,clearTimeout(){},oldRow,newRow,
   fetch:async(route,options)=>{
-    if(route==='/api/review'){
-      posted=JSON.parse(options.body);
-      return {ok:false,status:400,json:async()=>({error:'Inventory file changed; reload evidence'})};
-    }
+    if(route.startsWith('/api/book-decisions')){if(route==='/api/book-decisions')decisionBodies.push(JSON.parse(options.body));return durableFixture(route,options,legacyMetadata);}
+    if(route==='/api/review')throw Error('Production must use durable file_review, never a legacy direct mutation');
     // Initial polling stays pending so the test controls the catalog refresh precisely.
     return new Promise(()=>{});
   }});
@@ -38,6 +37,7 @@ vm.runInContext('select(newRow,false)',context);
 assert.equal(fields.get('title').value,'Old canonical title','polling must preserve unsaved text');
 (async()=>{
   await node('review-form').handlers.submit({preventDefault(){}});
+  assert.equal(decisionBodies.length,1);assert.equal(decisionBodies[0].action,'file_review');assert.equal(decisionBodies[0].payload.modified,oldRow.modified);assert.equal(decisionBodies[0].payload.size,oldRow.size);
   assert.equal(posted.modified,oldRow.modified,'save must retain the fingerprint reviewed by the user');
   assert.equal(posted.size,oldRow.size,'save must not adopt a newer source size from polling');
   assert.equal(posted.review.title,'Old canonical title');

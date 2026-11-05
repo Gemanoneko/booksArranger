@@ -3,9 +3,9 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const nodes=new Map(),fields=new Map();
 function make(id=''){
-  let text='';return {id,value:id==='library'?'Audiobooks':'',hidden:false,children:[],dataset:{},handlers:{},writes:0,
+  let text='';return {id,value:id==='library'?'Audiobooks':'',hidden:false,children:[],dataset:{},attrs:{},handlers:{},writes:0,
     get textContent(){return text;},set textContent(value){text=value;this.writes++;},
-    addEventListener(type,fn){this.handlers[type]=fn;},setAttribute(){},
+    addEventListener(type,fn){this.handlers[type]=fn;},setAttribute(key,value){this.attrs[key]=String(value);},removeAttribute(key){delete this.attrs[key];},getAttribute(key){return this.attrs[key] ?? null;},
     replaceChildren(){this.children=[];},append(child){this.children.push(child);},
     insertAdjacentElement(_where,child){nodes.set(child.id,child);}};
 }

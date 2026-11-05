@@ -1,0 +1,2 @@
+PASS browser unsaved-review fingerprint survives source refresh and stale save is surfaced
+PASS anthology toggling preserves/restores reviewed fields, reloads roles, keeps comment sources distinct, excludes ebooks

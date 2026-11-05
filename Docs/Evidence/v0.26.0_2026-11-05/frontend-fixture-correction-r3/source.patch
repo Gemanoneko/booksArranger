@@ -1,0 +1,71 @@
+diff --git a/tests/test_browser.js b/tests/test_browser.js
+index 3dd6f45..15c7e5d 100644
+--- a/tests/test_browser.js
++++ b/tests/test_browser.js
+@@ -9,22 +9,21 @@ const fields=new Map();
+ for(const name of ['original_language','title','author','canonical_author','narrator','universe','series','number','genre','topic','multi_author','anthology']) fields.set(name,{value:'',checked:false});
+ const nodes=new Map();
+ function node(id){
+-  if(!nodes.has(id))nodes.set(id,{value:id==='library'?'Audiobooks':'',textContent:'',hidden:false,children:[],handlers:{},
+-    addEventListener(type,fn){this.handlers[type]=fn;},setAttribute(){},replaceChildren(){this.children=[];},append(value){this.children.push(value);}});
++  if(!nodes.has(id))nodes.set(id,{value:id==='library'?'Audiobooks':'',textContent:'',hidden:false,children:[],handlers:{},attrs:{},dataset:{},
++    addEventListener(type,fn){this.handlers[type]=fn;},setAttribute(key,value){this.attrs[key]=String(value);},removeAttribute(key){delete this.attrs[key];},getAttribute(key){return this.attrs[key] ?? null;},replaceChildren(){this.children=[];},append(value){this.children.push(value);}});
+   return nodes.get(id);
+ }
+ node('review-form').elements={namedItem:name=>fields.get(name)};
+ const oldRow={path:'C:/fixture/book.mp3',root:'C:/fixture',kind:'audiobook',size:10,modified:'2000000000000000001',missing:0,error:'',
+   metadata:{method:'fixture',tags:{}},preview:{path:'',reason:'review'},review:null};
+ const newRow={...oldRow,size:25,modified:'2000000000000000002',metadata:{method:'fixture',title:'Changed source',tags:{}}};
+-let posted=null;
+-const context=vm.createContext({console,document:{getElementById:node,querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:()=>({value:'',textContent:'',children:[],dataset:{},append(value){this.children.push(value);},setAttribute(){},addEventListener(){}})},
++let posted=null;const decisionBodies=[],durableMemory=new Map(),durableFixture=require('./durable_frontend_fixture.js')();
++const legacyMetadata=async(route,options)=>{assert.equal(route,'/api/review');posted=JSON.parse(options.body);return {ok:false,status:400,json:async()=>({error:'Inventory file changed; reload evidence'})};};
++const context=vm.createContext({console,TextEncoder,crypto:{randomUUID:require('node:crypto').randomUUID,subtle:{digest:async(_algorithm,data)=>Uint8Array.from(require('node:crypto').createHash('sha256').update(data).digest()).buffer}},localStorage:{getItem:k=>durableMemory.get(k)||null,setItem:(k,v)=>durableMemory.set(k,v)},location:{origin:'http://127.0.0.1:5211'},URL,document:{getElementById:node,querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:()=>({value:'',textContent:'',children:[],dataset:{},attrs:{},append(value){this.children.push(value);},setAttribute(key,value){this.attrs[key]=String(value);},removeAttribute(key){delete this.attrs[key];},addEventListener(){}})},
+   setTimeout:()=>0,clearTimeout(){},oldRow,newRow,
+   fetch:async(route,options)=>{
+-    if(route==='/api/review'){
+-      posted=JSON.parse(options.body);
+-      return {ok:false,status:400,json:async()=>({error:'Inventory file changed; reload evidence'})};
+-    }
++    if(route.startsWith('/api/book-decisions')){if(route==='/api/book-decisions')decisionBodies.push(JSON.parse(options.body));return durableFixture(route,options,legacyMetadata);}
++    if(route==='/api/review')throw Error('Production must use durable file_review, never a legacy direct mutation');
+     // Initial polling stays pending so the test controls the catalog refresh precisely.
+     return new Promise(()=>{});
+   }});
+@@ -38,6 +37,7 @@ vm.runInContext('select(newRow,false)',context);
+ assert.equal(fields.get('title').value,'Old canonical title','polling must preserve unsaved text');
+ (async()=>{
+   await node('review-form').handlers.submit({preventDefault(){}});
++  assert.equal(decisionBodies.length,1);assert.equal(decisionBodies[0].action,'file_review');assert.equal(decisionBodies[0].payload.modified,oldRow.modified);assert.equal(decisionBodies[0].payload.size,oldRow.size);
+   assert.equal(posted.modified,oldRow.modified,'save must retain the fingerprint reviewed by the user');
+   assert.equal(posted.size,oldRow.size,'save must not adopt a newer source size from polling');
+   assert.equal(posted.review.title,'Old canonical title');
+diff --git a/tests/test_connection.js b/tests/test_connection.js
+index 65f5419..09927e3 100644
+--- a/tests/test_connection.js
++++ b/tests/test_connection.js
+@@ -3,9 +3,9 @@
+ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const nodes=new Map(),fields=new Map();
+ function make(id=''){
+-  let text='';return {id,value:id==='library'?'Audiobooks':'',hidden:false,children:[],dataset:{},handlers:{},writes:0,
++  let text='';return {id,value:id==='library'?'Audiobooks':'',hidden:false,children:[],dataset:{},attrs:{},handlers:{},writes:0,
+     get textContent(){return text;},set textContent(value){text=value;this.writes++;},
+-    addEventListener(type,fn){this.handlers[type]=fn;},setAttribute(){},
++    addEventListener(type,fn){this.handlers[type]=fn;},setAttribute(key,value){this.attrs[key]=String(value);},removeAttribute(key){delete this.attrs[key];},getAttribute(key){return this.attrs[key] ?? null;},
+     replaceChildren(){this.children=[];},append(child){this.children.push(child);},
+     insertAdjacentElement(_where,child){nodes.set(child.id,child);}};
+ }
+diff --git a/tests/test_metadata_frontend.js b/tests/test_metadata_frontend.js
+index afb698e..c46153f 100644
+--- a/tests/test_metadata_frontend.js
++++ b/tests/test_metadata_frontend.js
+@@ -15,7 +15,7 @@ const context=vm.createContext({document,console,URL,location:{origin:'http://12
+ let source=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');source=source.replace(/viewControls\(\);poll\(\);\s*$/,'');vm.runInContext(source,context);
+ vm.runInContext('refresh=async()=>true',context);
+ function run(js){return vm.runInContext(js,context);}
+-const row={id:'book1',revision:4,path:'book1',kind:'candidate',library:'Audiobooks',scope:'fixture',grouping:'Leaf folder',coverage:'Folder scan complete',title_evidence:[],conflicts:[],metadata:{tags:{}},preview:{reason:'Review',path:''},review:{title:'Saved',canonical_author:'Author',author:'Author Folder',original_language:'Other'},title_clue:'Book One',artists:[],companions:[],members:[{member_key:'one',path:'01.mp3',order:1,track_title:'Introduction',duration:10},{member_key:'two',path:'02.mp3',order:2,track_title:'Part one',duration:20}],included:['one','two'],track_order:['one','two'],matching:{state:'completed',proposals:[{id:'proposal1',title:'Proposed',authors:['Verified Author'],original_language:'Unknown',public_url:'https://example.org/work',provider:'Fixture',per_field_evidence:{title:'Work catalog'}}]},review_context:{metadata_actor:'assistant',source_coverage_confirmed:true,order_confirmed:true,track_actor:'assistant'},cover_choices:[],creation:{status:'Ready to create',can_create:true,destination:'Z:/Audiobooks/Author/Book.m4b',duration_seconds:30,reasons:[],device:'Apple Books sync not checked'}};
++const row={id:'book1',revision:4,fingerprint:'a'.repeat(64),path:'book1',kind:'candidate',library:'Audiobooks',scope:'fixture',grouping:'Leaf folder',coverage:'Folder scan complete',title_evidence:[],conflicts:[],metadata:{tags:{}},preview:{reason:'Review',path:''},review:{title:'Saved',canonical_author:'Author',author:'Author Folder',original_language:'Other'},title_clue:'Book One',artists:[],companions:[],members:[{member_key:'one',path:'01.mp3',order:1,track_title:'Introduction',duration:10},{member_key:'two',path:'02.mp3',order:2,track_title:'Part one',duration:20}],included:['one','two'],track_order:['one','two'],matching:{state:'completed',proposals:[{id:'proposal1',title:'Proposed',authors:['Verified Author'],original_language:'Unknown',public_url:'https://example.org/work',provider:'Fixture',per_field_evidence:{title:'Work catalog'}}]},review_context:{metadata_actor:'assistant',source_coverage_confirmed:true,order_confirmed:true,track_actor:'assistant'},cover_choices:[],creation:{status:'Ready to create',can_create:true,destination:'Z:/Audiobooks/Author/Book.m4b',duration_seconds:30,reasons:[],device:'Apple Books sync not checked'}};
+ context.row=row;run('select(row,true)');
+ // Ruling 36 (Sergei 2026-10-26): no Manual evidence field and no evidence display in the metadata panel; a saved note stays in the catalog unused.
+ const page=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');for(const gone of ['manual-evidence','"accepted-evidence"','Enter verified identities','Record the source and which fields you verified','Only when verified','Surname first when verified','Saved values are evidence','Matches prepare drafts'])assert.equal(page.includes(gone),false,gone);

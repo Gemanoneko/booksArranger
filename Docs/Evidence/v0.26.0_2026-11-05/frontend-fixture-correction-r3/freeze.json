@@ -1,0 +1,135 @@
+{
+  "schema": "books-0260-frontend-fixture-freeze-v1",
+  "base_head": "a7e20113fabcb5c7a4c7896e8b64304aa918eafc",
+  "source_files": [
+    {
+      "path": "tests/test_browser.js",
+      "base_lf_sha256": "3581f55c0a137f570653a4f57a32eb81eef67e8766dfeeb3537a3f4a84d4053f",
+      "raw_sha256": "08ef6b2d9ee74b48cf46b29d8046d03510b234d146ce2272628d4f56ebf29163",
+      "lf_sha256": "c8eceee35628459c28cded0a33ae7332f9409ade3996a8013d00e540357d07c9",
+      "bytes": 6686,
+      "assertion_calls_before": 21,
+      "assertion_calls_after": 26
+    },
+    {
+      "path": "tests/test_connection.js",
+      "base_lf_sha256": "1a0e47abfce2982c191f9757d4f6362fee5f1bc15d7fef571d6909bb74eb56cb",
+      "raw_sha256": "3be7522b6d901cf0ed2aeb49e8e6235d3394abd58f938cc2e60e521aa24c07b7",
+      "lf_sha256": "a8e512780c6d2ee39a5a80fda3eb67704fdbec53b14c0a2b2d409663a03a7134",
+      "bytes": 10964,
+      "assertion_calls_before": 49,
+      "assertion_calls_after": 49
+    },
+    {
+      "path": "tests/test_metadata_frontend.js",
+      "base_lf_sha256": "38c04f84c6598e3b177568c56813ede51c87b8b6993b8f4c6199e14bcaa6ecb2",
+      "raw_sha256": "4275299e7c3b2e96c4c126c4ee3181749c5fe76137e350251f2a501b9ed6b3f9",
+      "lf_sha256": "545d03cbf088e1b389f2e69df7baaaac7a38a5f4c9fd4914e8d1e5e89b89a4ac",
+      "bytes": 10302,
+      "assertion_calls_before": 45,
+      "assertion_calls_after": 45
+    }
+  ],
+  "files": [
+    {
+      "path": "owned-node.mjs",
+      "size": 2113,
+      "sha256": "15687e98a0b0f0b7bad1b33806d97bdd5a5e089dade9f0496587c9b3450cb034"
+    },
+    {
+      "path": "isolated-dom-audit-before.json",
+      "size": 4180,
+      "sha256": "db31c80b5bcc7b3fba5309daa639f10604fd755a7592e276927f5dea80a66bbf"
+    },
+    {
+      "path": "complete-phase-baseline.json",
+      "size": 86506,
+      "sha256": "bcd975864b915f25c357b200715e6a0e33fd4a195b2857817d0656e411f605ab"
+    },
+    {
+      "path": "complete-phase-baseline.log",
+      "size": 82785,
+      "sha256": "b7adbad718921562fe13ac6b7151530f37e5153f39928a020f564f09496bf047"
+    },
+    {
+      "path": "browser-target-green.json",
+      "size": 898,
+      "sha256": "464916eb283f9fd9997f6cfe5ef7465fdf4f5ed96a1e3637b6a52993d2863407"
+    },
+    {
+      "path": "browser-target-green.log",
+      "size": 214,
+      "sha256": "982808577c59a1db3738dc7fb6bea6f364fdc78393b60a3d5b12044d224baf5b"
+    },
+    {
+      "path": "complete-phase-green.json",
+      "size": 80107,
+      "sha256": "5b65d7fbefdc08b7442bf6826cc4be02a588078b1c641cd45319f49f678b7e10"
+    },
+    {
+      "path": "complete-phase-green.log",
+      "size": 76603,
+      "sha256": "e550aaaf857cd8b506020d2e1e33644889aaff2277ccf2d60a863aa255c0fb8a"
+    },
+    {
+      "path": "baseline/phase.mjs",
+      "size": 4405,
+      "sha256": "2adbfacf67e56a95e0ae52642ab2b68faac2b6dad47a156756740fc44f933378"
+    },
+    {
+      "path": "baseline/phase-plan.json",
+      "size": 9869,
+      "sha256": "115cad57b9e5c47f2e42e72c304ac62426e0535f255adb0845e83b35024b7093"
+    },
+    {
+      "path": "baseline/phase-result.json",
+      "size": 89764,
+      "sha256": "e7732e29af00e434b13c2e941b6d77ad8e1e2267c2111e260b3f475317e82c70"
+    },
+    {
+      "path": "green/phase.mjs",
+      "size": 4405,
+      "sha256": "2adbfacf67e56a95e0ae52642ab2b68faac2b6dad47a156756740fc44f933378"
+    },
+    {
+      "path": "green/phase-plan.json",
+      "size": 9869,
+      "sha256": "115cad57b9e5c47f2e42e72c304ac62426e0535f255adb0845e83b35024b7093"
+    },
+    {
+      "path": "green/phase-result.json",
+      "size": 83375,
+      "sha256": "eb5efd9d1ea758f347862501e03baf247002f1cc8465295c756e8aa8bfbaff6c"
+    },
+    {
+      "path": "frozen-source/tests/test_browser.js",
+      "size": 6686,
+      "sha256": "08ef6b2d9ee74b48cf46b29d8046d03510b234d146ce2272628d4f56ebf29163"
+    },
+    {
+      "path": "frozen-source/tests/test_connection.js",
+      "size": 10964,
+      "sha256": "3be7522b6d901cf0ed2aeb49e8e6235d3394abd58f938cc2e60e521aa24c07b7"
+    },
+    {
+      "path": "frozen-source/tests/test_metadata_frontend.js",
+      "size": 10302,
+      "sha256": "4275299e7c3b2e96c4c126c4ee3181749c5fe76137e350251f2a501b9ed6b3f9"
+    },
+    {
+      "path": "source.patch",
+      "size": 8922,
+      "sha256": "2f55172815be38a3253fce59b55658bac8f65e752456cff93bebb929e94e2646"
+    },
+    {
+      "path": "dom-surface-audit.json",
+      "size": 23107,
+      "sha256": "8cd745a799a43d466040e15fd6df924eba2d007b43abaed1fd4c9969c5f876e5"
+    },
+    {
+      "path": "summary.json",
+      "size": 8838,
+      "sha256": "712e095b3eeaa8e336da8be60c615b8c325fa6a701c154372592d69779c84cb9"
+    }
+  ]
+}

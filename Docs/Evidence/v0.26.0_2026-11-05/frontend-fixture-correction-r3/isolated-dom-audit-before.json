@@ -1,0 +1,102 @@
+{
+  "scope": "Every CJS/MJS/Python tests file with local DOM/VM surface; source scan not an execution claim",
+  "count": 12,
+  "files": [
+    {
+      "path": "tests/desktop-loading.test.mjs",
+      "sha256": "21a0d7726c0fb01bbbf67668a480d68a2a93a58bf33f4e14e521cd50cd3e4269",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_automatic_frontend.js",
+      "sha256": "b583abc160005509d9dfcd6e3efceef9ec839e7ed9d10e9f53d0356078a20b0a",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_browser.js",
+      "sha256": "117eba95c7c0514e86e26aae268498108efe128b73deb03e72fe94a952ad3fc4",
+      "setAttribute_tokens": 2,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_connection.js",
+      "sha256": "76a796b713fe494c74672081e6559677325a02ef062acade76580e7dd050a069",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_durable_decisions_frontend.js",
+      "sha256": "f4f36be9775a0e73d56ca81e182d8114e4c2b7118db7970f527088c666e435e3",
+      "setAttribute_tokens": 0,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "shared fullapp harness"
+    },
+    {
+      "path": "tests/test_metadata_choices.py",
+      "sha256": "7647ee866eda92067ddfbe9d981bfcceeff3dda77610ccb661d6a7f1f1889f1b",
+      "setAttribute_tokens": 3,
+      "removeAttribute_tokens": 1,
+      "embedded_python": true,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_metadata_frontend.js",
+      "sha256": "b7118e12152d917bcfd0b9f4ebb5655184f7fc7894b06e50475925a372814fc9",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_progress_frontend.js",
+      "sha256": "6b0c0ed099ea7a8e37d7f4e0b1e603228d29284c35e47006759c688bd870b1f8",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_retry_frontend.js",
+      "sha256": "28e682bbad72d724e184a784b545bf61e1de8d785b961f5529144b30cf1febf0",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_save_metadata_frontend.js",
+      "sha256": "16d2d7a90a00c8e352a9ff480dca2934989d36469bf9db009722e2ca9b0da3d4",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/test_startup_frontend.js",
+      "sha256": "e626d4cad6a7b87fe550c6901c1a40a8fb09f293bd158b6d49e27bc83e23b5b7",
+      "setAttribute_tokens": 2,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    },
+    {
+      "path": "tests/update-controller.test.mjs",
+      "sha256": "a3754441dc9c456195e929243206703ac5388c39654112a6167e73e60d74328d",
+      "setAttribute_tokens": 0,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome"
+    }
+  ]
+}

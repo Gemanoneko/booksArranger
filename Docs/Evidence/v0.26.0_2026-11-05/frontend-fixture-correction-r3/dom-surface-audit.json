@@ -1,0 +1,545 @@
+{
+  "schema": "books-0260-isolated-dom-audit-v1",
+  "scope": "All test CJS/MJS/Python files with direct DOM/VM surface signatures plus every declared41frontend consumer; all18pureTAP entries executed. Python asset-reference test_web.py is not an embedded DOM fixture. No fullPython rerun.",
+  "direct_surface_count": 12,
+  "surfaces": [
+    {
+      "path": "tests/desktop-loading.test.mjs",
+      "sha256": "21a0d7726c0fb01bbbf67668a480d68a2a93a58bf33f4e14e521cd50cd3e4269",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "21a0d7726c0fb01bbbf67668a480d68a2a93a58bf33f4e14e521cd50cd3e4269",
+      "setAttribute_tokens_after": 1,
+      "removeAttribute_tokens_after": 0,
+      "disposition": "Unchanged isolated surface exercised by passing declared Node/TAP/frontend phase"
+    },
+    {
+      "path": "tests/test_automatic_frontend.js",
+      "sha256": "b583abc160005509d9dfcd6e3efceef9ec839e7ed9d10e9f53d0356078a20b0a",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "b583abc160005509d9dfcd6e3efceef9ec839e7ed9d10e9f53d0356078a20b0a",
+      "setAttribute_tokens_after": 1,
+      "removeAttribute_tokens_after": 1,
+      "disposition": "Unchanged isolated surface exercised by passing declared Node/TAP/frontend phase"
+    },
+    {
+      "path": "tests/test_browser.js",
+      "sha256": "117eba95c7c0514e86e26aae268498108efe128b73deb03e72fe94a952ad3fc4",
+      "setAttribute_tokens": 2,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "08ef6b2d9ee74b48cf46b29d8046d03510b234d146ce2272628d4f56ebf29163",
+      "setAttribute_tokens_after": 2,
+      "removeAttribute_tokens_after": 2,
+      "disposition": "Corrected proven legacy fixture; full53-command GREEN"
+    },
+    {
+      "path": "tests/test_connection.js",
+      "sha256": "76a796b713fe494c74672081e6559677325a02ef062acade76580e7dd050a069",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "3be7522b6d901cf0ed2aeb49e8e6235d3394abd58f938cc2e60e521aa24c07b7",
+      "setAttribute_tokens_after": 1,
+      "removeAttribute_tokens_after": 1,
+      "disposition": "Corrected proven legacy fixture; full53-command GREEN"
+    },
+    {
+      "path": "tests/test_durable_decisions_frontend.js",
+      "sha256": "f4f36be9775a0e73d56ca81e182d8114e4c2b7118db7970f527088c666e435e3",
+      "setAttribute_tokens": 0,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "shared fullapp harness",
+      "after_sha256": "f4f36be9775a0e73d56ca81e182d8114e4c2b7118db7970f527088c666e435e3",
+      "setAttribute_tokens_after": 0,
+      "removeAttribute_tokens_after": 0,
+      "disposition": "Shared test_retry full-app DOM harness; production six-action transport tests pass in declared41script cohort"
+    },
+    {
+      "path": "tests/test_metadata_choices.py",
+      "sha256": "7647ee866eda92067ddfbe9d981bfcceeff3dda77610ccb661d6a7f1f1889f1b",
+      "setAttribute_tokens": 3,
+      "removeAttribute_tokens": 1,
+      "embedded_python": true,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "7647ee866eda92067ddfbe9d981bfcceeff3dda77610ccb661d6a7f1f1889f1b",
+      "setAttribute_tokens_after": 3,
+      "removeAttribute_tokens_after": 1,
+      "disposition": "Unchanged embedded Python DOM consumer; originalq27 fullPython2447PASS; prior two-test correction already uses real attribute deletion/current durable boundary"
+    },
+    {
+      "path": "tests/test_metadata_frontend.js",
+      "sha256": "b7118e12152d917bcfd0b9f4ebb5655184f7fc7894b06e50475925a372814fc9",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "4275299e7c3b2e96c4c126c4ee3181749c5fe76137e350251f2a501b9ed6b3f9",
+      "setAttribute_tokens_after": 1,
+      "removeAttribute_tokens_after": 1,
+      "disposition": "Corrected proven legacy fixture; full53-command GREEN"
+    },
+    {
+      "path": "tests/test_progress_frontend.js",
+      "sha256": "6b0c0ed099ea7a8e37d7f4e0b1e603228d29284c35e47006759c688bd870b1f8",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "6b0c0ed099ea7a8e37d7f4e0b1e603228d29284c35e47006759c688bd870b1f8",
+      "setAttribute_tokens_after": 1,
+      "removeAttribute_tokens_after": 1,
+      "disposition": "Unchanged isolated surface exercised by passing declared Node/TAP/frontend phase"
+    },
+    {
+      "path": "tests/test_retry_frontend.js",
+      "sha256": "28e682bbad72d724e184a784b545bf61e1de8d785b961f5529144b30cf1febf0",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "28e682bbad72d724e184a784b545bf61e1de8d785b961f5529144b30cf1febf0",
+      "setAttribute_tokens_after": 1,
+      "removeAttribute_tokens_after": 1,
+      "disposition": "Unchanged isolated surface exercised by passing declared Node/TAP/frontend phase"
+    },
+    {
+      "path": "tests/test_save_metadata_frontend.js",
+      "sha256": "16d2d7a90a00c8e352a9ff480dca2934989d36469bf9db009722e2ca9b0da3d4",
+      "setAttribute_tokens": 1,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "16d2d7a90a00c8e352a9ff480dca2934989d36469bf9db009722e2ca9b0da3d4",
+      "setAttribute_tokens_after": 1,
+      "removeAttribute_tokens_after": 1,
+      "disposition": "Unchanged isolated surface exercised by passing declared Node/TAP/frontend phase"
+    },
+    {
+      "path": "tests/test_startup_frontend.js",
+      "sha256": "e626d4cad6a7b87fe550c6901c1a40a8fb09f293bd158b6d49e27bc83e23b5b7",
+      "setAttribute_tokens": 2,
+      "removeAttribute_tokens": 1,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "e626d4cad6a7b87fe550c6901c1a40a8fb09f293bd158b6d49e27bc83e23b5b7",
+      "setAttribute_tokens_after": 2,
+      "removeAttribute_tokens_after": 1,
+      "disposition": "Unchanged isolated surface exercised by passing declared Node/TAP/frontend phase"
+    },
+    {
+      "path": "tests/update-controller.test.mjs",
+      "sha256": "a3754441dc9c456195e929243206703ac5388c39654112a6167e73e60d74328d",
+      "setAttribute_tokens": 0,
+      "removeAttribute_tokens": 0,
+      "embedded_python": false,
+      "dom_surface": "local isolated DOM surface; inspect consumers/fullphase outcome",
+      "after_sha256": "a3754441dc9c456195e929243206703ac5388c39654112a6167e73e60d74328d",
+      "setAttribute_tokens_after": 0,
+      "removeAttribute_tokens_after": 0,
+      "disposition": "Unchanged isolated surface exercised by passing declared Node/TAP/frontend phase"
+    }
+  ],
+  "frontend_consumers": [
+    {
+      "path": "tests/test_0223_ui_frontend.js",
+      "sha256": "a5c911f4b4fa7c3f7709546d19893dd6afedf6129a0adda44abdba9acfc54eef",
+      "borrowed_harness_names": [
+        "test_0223_ui_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_0231_destination_frontend.js",
+      "sha256": "6cc773c5b776aab732c1dc7638e80ab2ad57806a54211d3d95047a60aeb07d72",
+      "borrowed_harness_names": [
+        "test_0231_destination_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_0231_rows_frontend.js",
+      "sha256": "f6775e2c4b1b79a7309d75c4c966bab40ab6a957dc2549825ec8eaef9f826683",
+      "borrowed_harness_names": [
+        "test_0231_rows_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_0242_frontend.js",
+      "sha256": "961a73799a0ade3c77a51351f13c43710332f7f65ef406e2c8cd336aecc5e95f",
+      "borrowed_harness_names": [
+        "test_0242_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_attention_frontend.js",
+      "sha256": "85256039ab8b90ba71b7a75610d993ebec6c3bdbf2a61ef531e0c7cca34ae148",
+      "borrowed_harness_names": [
+        "test_attention_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_automatic_frontend.js",
+      "sha256": "b583abc160005509d9dfcd6e3efceef9ec839e7ed9d10e9f53d0356078a20b0a",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_browser.js",
+      "sha256": "08ef6b2d9ee74b48cf46b29d8046d03510b234d146ce2272628d4f56ebf29163",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_bulk_retry_receipts_frontend.js",
+      "sha256": "6a32bb13d8dbb6aa5d53b721a2257f0b193397ddc70af1c73754a8f446b09d32",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_busy_frontend.js",
+      "sha256": "f3e34d2ef4af3a7006166aaba1709c986c4d781f3cf1616ac951b8dfcae7150f",
+      "borrowed_harness_names": [
+        "test_busy_frontend.js",
+        "test_connection.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_cleanup_frontend.js",
+      "sha256": "67052d61e6ddc62610e3f477f50d4315e4c64951cfd5bfc18d941a1b3875e437",
+      "borrowed_harness_names": [
+        "test_metadata_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_connection.js",
+      "sha256": "3be7522b6d901cf0ed2aeb49e8e6235d3394abd58f938cc2e60e521aa24c07b7",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_delete_frontend.js",
+      "sha256": "7d93f62fb5140f055d1d0ca4572a7b4d1ae0e4e302c817016c64225e62d35c74",
+      "borrowed_harness_names": [
+        "test_delete_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_delete_leaves_frontend.js",
+      "sha256": "3f60ea797c417248f090d0177d27ef60fe235af13dacdc0ee393c3e84d82148d",
+      "borrowed_harness_names": [
+        "test_delete_leaves_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_durable_decisions_frontend.js",
+      "sha256": "f4f36be9775a0e73d56ca81e182d8114e4c2b7118db7970f527088c666e435e3",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_durable_drafts_frontend.js",
+      "sha256": "66f9c8d9edfb193e56dd9415002585a5dc3be001e83593b1fa59e7eea7c4c7d6",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_inline_series_frontend.js",
+      "sha256": "7b4b49b10d198340040e64d3fd8ed1539e5d6c70d0ef102c3551e618f6c101fc",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_iron_skazka_frontend.js",
+      "sha256": "fdaf2612a64f6c89ee58d378164f8891f33d86858f41f935eb7a9990d76ec40d",
+      "borrowed_harness_names": [
+        "test_iron_skazka_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_kept_frontend.js",
+      "sha256": "44413391a1c41ecf5280662de117c0617a0cbeffbdeabfd576b88c8f3002fda2",
+      "borrowed_harness_names": [
+        "test_kept_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_metadata_frontend.js",
+      "sha256": "4275299e7c3b2e96c4c126c4ee3181749c5fe76137e350251f2a501b9ed6b3f9",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_missing_files_frontend.js",
+      "sha256": "9bafbee47cd504d41f8df9669fa6dd5bac3f16b9f741d86d3f8f098b4fcab285",
+      "borrowed_harness_names": [
+        "test_missing_files_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_odd_names_frontend.js",
+      "sha256": "ecadf41218c710ad987cf188c7344fbc87ac2b06917626f800e655d1d84323cd",
+      "borrowed_harness_names": [
+        "test_odd_names_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_original_title_frontend.js",
+      "sha256": "54af8e6efe015758e37ba4662420caf4e38284e3ad503c357c4e3a0126ee7746",
+      "borrowed_harness_names": [
+        "test_original_title_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_panel_lock_frontend.js",
+      "sha256": "83bb3d2a54dc2ae17bc66d83f8414f0d7e9d38fdefe498039adf8c2e97e601aa",
+      "borrowed_harness_names": [
+        "test_panel_lock_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_precheck_frontend.js",
+      "sha256": "b47b4fd7794c45a6c6e3dcd0b0fb782327fc656722747ff0b19279a53c5f2314",
+      "borrowed_harness_names": [
+        "test_precheck_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_producer_recovery_frontend.js",
+      "sha256": "75197985abf13e60bb51afc2064a845e20358dba42b8cb9c611f587ee816da98",
+      "borrowed_harness_names": [
+        "test_producer_recovery_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_progress_frontend.js",
+      "sha256": "6b0c0ed099ea7a8e37d7f4e0b1e603228d29284c35e47006759c688bd870b1f8",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_queue_frontend.js",
+      "sha256": "4e0261350de347497587208a6a9414ad7b3a12f4ba941d861bf278a3da7d5d99",
+      "borrowed_harness_names": [
+        "test_queue_frontend.js",
+        "test_retry_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_recovery_frontend.js",
+      "sha256": "8c47e4c83afcc1ca3ab2afa77bd2b11154e0cb9a9704484d35c66b96e0d9e3a7",
+      "borrowed_harness_names": [
+        "test_metadata_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_refused_retry_frontend.js",
+      "sha256": "28705377a24c6041fa089907c46b1a6bfce441098ebc8f1c0a2b1afd7833f521",
+      "borrowed_harness_names": [
+        "test_refused_retry_frontend.js",
+        "test_retry_frontend.js",
+        "test_working_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_retry_frontend.js",
+      "sha256": "28e682bbad72d724e184a784b545bf61e1de8d785b961f5529144b30cf1febf0",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_retry_selected_frontend.js",
+      "sha256": "854fb3b4491da92aa80a14b086e3f1e256f005c520da4baa044aa9bb7385938d",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js",
+        "test_retry_selected_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_ruling35_frontend.js",
+      "sha256": "0cef839bde03c64fe68f916fa35c4828e664efcbbc9768c575a2183834e8e2ef",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js",
+        "test_ruling35_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_ruling37_frontend.js",
+      "sha256": "885b8d37dfeba6575f26d1f3b1b34222801fc059528c42f620a76c05579881f5",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js",
+        "test_ruling37_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_save_metadata_frontend.js",
+      "sha256": "16d2d7a90a00c8e352a9ff480dca2934989d36469bf9db009722e2ca9b0da3d4",
+      "borrowed_harness_names": [
+        "test_metadata_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_setup_frontend.js",
+      "sha256": "009bbb0d86005d362a58a7acda7918eadd98a403e334fccfba5334ef128f749a",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_stale_list_frontend.js",
+      "sha256": "b68e5891fd168ed4cfb005c8b1ca6393ee3dd3e866a6dc887491b4c24394eb83",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js",
+        "test_stale_list_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_stale_wording_frontend.js",
+      "sha256": "a6f99deb547e8459620f467a7a082745f34894b72f0bf4223a3c2b945f5503dc",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_startover_frontend.js",
+      "sha256": "45ff9d832505efc8ef43cca2cc1361be708f62959fc9aece1cbd31c0bad69f6e",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js",
+        "test_startover_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_startup_frontend.js",
+      "sha256": "e626d4cad6a7b87fe550c6901c1a40a8fb09f293bd158b6d49e27bc83e23b5b7",
+      "borrowed_harness_names": [],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_todo_frontend.js",
+      "sha256": "ee450c32df221a98d1cd56018ea24758d4fd7ec49e2e6ba76bbe4db8720cea04",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js",
+        "test_todo_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    },
+    {
+      "path": "tests/test_todo_holds_frontend.js",
+      "sha256": "3023360cf6322109ba939cb593b8785db1cd619e3f4004dba7f20a7ef7412c3f",
+      "borrowed_harness_names": [
+        "test_retry_frontend.js",
+        "test_todo_holds_frontend.js"
+      ],
+      "execution": "PASS in final declared41frontend script cohort"
+    }
+  ],
+  "producer_files": [
+    {
+      "path": "groups.py",
+      "sha256": "191e7a24346b48e206485d00801bc82cd42b44f54042a87127e5a64b262042a7",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "scanner.py",
+      "sha256": "d2b1b4ba122cd5bf6bef454057ba5abbcf92833dc9323b0bca670a236202be1e",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "review_backend.py",
+      "sha256": "41e2a20d6a8d579055e84d1a676a67bdb386c4fd42607208346e1bdd30dc5c4a",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "merge_service.py",
+      "sha256": "255477a3951136cf7ad5903d704cbdcd9c2bbf3cee5835ae2ce57c3f70c72190",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "web_server.py",
+      "sha256": "32971eee0621ff258d3069a70a3fb18706a6e654672e61e7383df0a1339afa01",
+      "unchanged_from_base": true
+    }
+  ],
+  "candidate_fingerprint_contract": [
+    {
+      "file": "groups.py",
+      "lines": "872-878,890-913",
+      "fact": "Every inserted/refreshed real group has SHA256 fingerprint. render ALWAYS explicitly emits fingerprint=row[\"fingerprint\"], so even a legacy SQLNULL becomes JSONnull rather than an omitted key."
+    },
+    {
+      "file": "scanner.py",
+      "lines": "719-757,760-787",
+      "fact": "Normal/multi-source pages and individual candidate reads route through groups.render."
+    },
+    {
+      "file": "review_backend.py",
+      "lines": "219-325,462-543",
+      "fact": "enrich deepcopies the real row, held/attention filters select the same inventory rows, and added page fields preserve fingerprint."
+    },
+    {
+      "file": "merge_service.py",
+      "lines": "625-648",
+      "fact": "cached_page returns/deepcopies reviews.page; it does not synthesize partial candidate identities."
+    },
+    {
+      "file": "web_server.py",
+      "lines": "724-727,756-766",
+      "fact": "Not-loaded inventory returns503; successful candidate pages use cached_page/reviews.page. No success fallback emits a partial candidate without fingerprint."
+    }
+  ],
+  "limitation": "This proves existing normal/held/partial-loading producer routes, not arbitrary malformed third-party candidate JSON. No runtime defensive change is made without a reachable producer omission. Explicit null is distinct from undefined and does not enter the failing optional-chain equality branch."
+}
