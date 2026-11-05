@@ -1,0 +1,6 @@
+test_all_six_saved_decision_routes_accept_during_real_worker_locks_and_reconcile (test_lock_timing.SourceFolderDispatchTests.test_all_six_saved_decision_routes_accept_during_real_worker_locks_and_reconcile) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 5.933s
+
+OK

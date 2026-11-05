@@ -1,0 +1,715 @@
+diff --git a/decision_contract.py b/decision_contract.py
+new file mode 100644
+--- /dev/null
++++ b/decision_contract.py
+@@ -0,0 +1,66 @@
++"""Bounded HTTP intent shape and deterministic, server-derived effect domains."""
++import copy
++from durable_decisions import digest
++from scanner import connect
++
++
++def effects(action,payload):
++    if action=='names':return sorted('names.'+key for key in payload['names'])
++    if action=='approve':
++        keys={'approval'}|{'names.'+key for key in payload.get('names') or {}}
++        for key in ('title','author'):
++            if payload.get(key) is not None and payload[key].strip():keys.add('names.'+key)
++        return sorted(keys)
++    if action in ('review','tracks','metadata_choices','file_review'):return [action]
++    raise ValueError('Unsupported saved-decision action')
++
++
++def file_identity(library,path):return 'file:'+digest({'library':library,'path':path})
++
++
++def file_fingerprint(library,path,size,modified):return digest({'library':library,'path':path,'size':size,'modified':modified})
++
++
++def file_row(inventory,library,path):
++    roots=inventory.source_roots(library) if hasattr(inventory,'source_roots') else (inventory.roots[library],)
++    with connect(inventory.database) as db:
++        rows=[dict(row) for row in db.execute('SELECT root,path,size,modified,kind,error,missing FROM files WHERE path=?',(path,)) if row['root'] in roots]
++    if len(rows)!=1 or rows[0]['kind'] not in ('audiobook','ebook'):raise ValueError('Only a known audiobook/ebook catalog file can receive saved metadata')
++    return rows[0]
++
++
++def validate(handler,action,payload):
++    """Validate without normalizing away any byte of the submitted JSON values."""
++    if not isinstance(payload,dict):raise ValueError('Saved choices must be an object')
++    if action=='names':
++        handler.shape(payload,{'names'});handler.names_value(payload['names'])
++    elif action=='approve':
++        handler.shape(payload,set(),{'title','author','names','without_missing','choice','path'})
++        for key in ('title','author','path'):handler.text_value(payload.get(key),1000,nullable=True)
++        if payload.get('names') is not None:handler.names_value(payload['names'],partial=True)
++        if type(payload.get('without_missing',False)) is not bool or payload.get('choice') not in (None,'same','different'):raise ValueError('Invalid saved approval choice')
++    elif action=='review':
++        handler.shape(payload,{'review','approve'},{'manual_note','proposal_id','cover_id','names_row_only'})
++        handler.review_data(copy.deepcopy(payload['review']))
++        if type(payload['approve']) is not bool or type(payload.get('names_row_only',False)) is not bool:raise ValueError('Review choices must be explicit booleans')
++        handler.text_value(payload.get('manual_note',''))
++        for key in ('proposal_id','cover_id'):
++            if payload.get(key) is not None:handler.uuid_value(payload[key])
++    elif action=='tracks':
++        handler.shape(payload,{'order','included','source_coverage_confirmed','order_confirmed','chapters'},{'evidence_note'})
++        for key in ('order','included'):
++            values=payload[key]
++            if not isinstance(values,list) or len(values)>10000 or any(not isinstance(value,str) or not 1<=len(value)<=128 for value in values) or len(set(values))!=len(values):raise ValueError('Invalid bounded source member list')
++        for key in ('source_coverage_confirmed','order_confirmed','chapters'):
++            if type(payload[key]) is not bool:raise ValueError('Track choices must be explicit booleans')
++        handler.text_value(payload.get('evidence_note',''))
++    elif action=='metadata_choices':
++        handler.shape(payload,{'signature','choices'},{'manual_note'});handler.text_value(payload['signature'],1000);handler.text_value(payload.get('manual_note',''))
++        if not isinstance(payload['choices'],list) or len(payload['choices'])>100 or any(not isinstance(value,dict) for value in payload['choices']):raise ValueError('Invalid saved metadata choices')
++    elif action=='file_review':
++        handler.shape(payload,{'path','size','modified','review'})
++        handler.text_value(payload['path'],32767)
++        if type(payload['size']) is not int or payload['size']<0 or not isinstance(payload['modified'],str) or not payload['modified'].isascii() or not payload['modified'].isdigit() or len(payload['modified'])>19 or int(payload['modified'])>9223372036854775807:raise ValueError('Invalid saved source fingerprint')
++        handler.review_data(copy.deepcopy(payload['review']))
++    else:raise ValueError('Unsupported saved-decision action')
++    return copy.deepcopy(payload)
+diff --git a/decision_runtime.py b/decision_runtime.py
+--- a/decision_runtime.py
++++ b/decision_runtime.py
+@@ -2,9 +2,14 @@
+ import json
+ import sqlite3
+ import threading
++import contextlib
+ 
+ from durable_decisions import Decisions,DecisionChanged
+ from scanner import connect
++
++
++class DecisionBusy(ValueError):
++    code='busy'
+ 
+ 
+ class DecisionRuntime:
+@@ -12,16 +17,28 @@
+         self.merge=merge;self.store=Decisions(merge.inventory.database)
+         self.stop=threading.Event();self.wake=threading.Event();self.thread=None
+         self.lock=threading.Lock();self.failure=None
++        self._prune_needed=True
+ 
+     def accept_names(self,request_id,book,revision,fingerprint,names,predecessor=None):
+         import entered_names
+         entered_names.check(names)
+-        with connect(self.store.database) as db:
+-            row=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(book,)).fetchone()
+-        if row is None:raise ValueError('This book is no longer in the current catalog')
+-        answer=self.store.accept(request_id=request_id,book_id=book,action='names',revision=revision,fingerprint=fingerprint,
+-                                 payload={'names':names},effects=['names.'+field for field in names],predecessor=predecessor,
+-                                 current_revision=row['revision'],current_fingerprint=row['fingerprint'])
++        return self.accept(request_id,book,revision,fingerprint,'names',{'names':names},predecessor)
++
++    def accept(self,request_id,book,revision,fingerprint,action,payload,predecessor=None,*,library='Audiobooks'):
++        from decision_contract import effects,file_row,file_identity,file_fingerprint
++        old=self.store.get(request_id)
++        if old is not None:current={'revision':None,'fingerprint':None}
++        elif action=='file_review':
++            row=file_row(self.merge.inventory,library,payload['path'])
++            if book!=file_identity(library,payload['path']) or revision!=0 or fingerprint!=file_fingerprint(library,payload['path'],payload['size'],payload['modified']):raise ValueError('Saved file review requires its exact shown catalog identity')
++            current={'revision':0,'fingerprint':file_fingerprint(library,row['path'],row['size'],str(row['modified']))}
++        else:
++            with connect(self.store.database) as db:
++                current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(book,)).fetchone()
++            if current is None:raise ValueError('This book is no longer in the current catalog')
++        answer=self.store.accept(request_id=request_id,book_id=book,action=action,revision=revision,fingerprint=fingerprint,
++                                 payload=payload,effects=effects(action,payload),predecessor=predecessor,
++                                 current_revision=current['revision'],current_fingerprint=current['fingerprint'])
+         self.wake.set()
+         if not self.stop.is_set():
+             try:self.start()
+@@ -30,6 +47,57 @@
+                 # cannot turn this durable receipt into a refused Save.
+                 self.failure={'code':'decision_application_unavailable','message':'Saved decisions are retained; application could not start: '+(str(error) or type(error).__name__)[:1000],'transient':False}
+         return answer
++
++    @contextlib.contextmanager
++    def admission(self):
++        with contextlib.ExitStack() as stack:
++            for lock in (self.merge.operation_lock,self.merge.reviews.lock,self.merge.inventory.group_lock):
++                if not lock.acquire(blocking=False):raise DecisionBusy('Saved decision is waiting for the current book check')
++                stack.callback(lock.release)
++            yield
++
++    def _apply(self,request,scope,row):
++        from decision_effects import Effect
++        action=request['action'];payload=request['payload'];revision=row['revision'];book=request['book_id']
++        projection=action=='approve' and 'approval' not in request['active_effects']
++        if action=='names' or projection:
++            fields={key.split('.',1)[1] for key in request['active_effects'] if key.startswith('names.')}
++            original=dict(payload.get('names') or {})
++            if projection:
++                for key in ('title','author'):
++                    if payload.get(key) is not None and payload[key].strip():original[key]=payload[key]
++            names={key:value for key,value in original.items() if key in fields}
++            if not names:raise ValueError('Saved names no longer own an applicable field')
++            return self.merge.names_save(book,revision,names,fingerprint=request['source_fingerprint'],decision=scope)
++        with self.admission():
++            if action=='approve':return self.merge.approve_book(book,revision,**payload,fingerprint=request['source_fingerprint'],decision=scope)
++            effect=Effect(scope,action,actions=(action,),final=True)
++            if action=='review':return self.merge.reviews.save('Audiobooks',book,revision,**payload,effect=effect)
++            if action=='tracks':return self.merge.reviews.tracks('Audiobooks',book,revision,**payload,effect=effect)
++            if action=='metadata_choices':return self.merge.reviews.choose_metadata('Audiobooks',book,revision,**payload,effect=effect)
++            raise ValueError('Unsupported saved decision consumer')
++
++    def _apply_file(self,request,scope):
++        from decision_contract import file_identity,file_fingerprint
++        from durable_decisions import packed
++        payload=request['payload'];path=payload['path']
++        labels=[library for library in self.merge.inventory.roots if file_identity(library,path)==request['book_id']]
++        if len(labels)!=1:raise ValueError('Saved file review has no exact configured library binding')
++        library=labels[0];inventory=self.merge.inventory
++        roots=inventory.source_roots(library) if hasattr(inventory,'source_roots') else (inventory.roots[library],)
++        with connect(self.store.database) as db:
++            db.execute('BEGIN IMMEDIATE');saved,_=scope.check(db)
++            if saved['action']!='file_review' or packed(json.loads(saved['payload']))!=packed(payload):raise DecisionChanged('Saved file metadata differs from its accepted decision')
++            rows=[row for row in db.execute('SELECT * FROM files WHERE path=?',(path,)) if row['root'] in roots]
++            if len(rows)!=1 or rows[0]['kind'] not in ('audiobook','ebook') or rows[0]['error'] or rows[0]['missing']:raise ValueError('The catalog file is unavailable; saved metadata is retained for review')
++            row=rows[0]
++            if file_fingerprint(library,path,row['size'],str(row['modified']))!=saved['source_fingerprint'] or row['size']!=payload['size'] or str(row['modified'])!=payload['modified']:
++                raise DecisionChanged('Inventory file changed; review the retained metadata against the new source')
++            review=payload['review']
++            if row['kind']!='audiobook' and (review.get('anthology') or review.get('canonical_author') or review.get('narrator')):raise ValueError('Audiobook role and anthology fields do not apply to ebooks')
++            result=db.execute('UPDATE files SET review=? WHERE root=? AND path=? AND size=? AND modified=?',(json.dumps(review,ensure_ascii=False),row['root'],path,row['size'],row['modified']))
++            if result.rowcount!=1:raise DecisionChanged('Inventory file changed before saved metadata could commit')
++            scope.commit_step(db,'file_review',{'payload':payload},{'outcome':'saved','candidate_id':request['book_id'],'candidate_revision':0},final=True,applied_revision=0)
+ 
+     def status(self):
+         return {'state':'needs_review' if self.failure and self.failure['transient'] is False else 'waiting' if self.failure else 'paused' if self.stop.is_set() else 'running' if self.thread and self.thread.is_alive() else 'idle',
+@@ -52,6 +120,8 @@
+     def _work(self):
+         while not self.stop.is_set():
+             try:
++                if self._prune_needed:
++                    self.store.purge_fulfilled();self._prune_needed=False
+                 requests=self.store.pending()
+                 worked=self.run_once(requests)
+             except Exception as error:
+@@ -71,29 +141,30 @@
+         worked=False
+         for request in self.store.pending() if requests is None else requests:
+             if self.stop.is_set() or getattr(self.merge,'draining',False) or self.merge.__dict__.get('_closing'):break
+-            if request['action']!='names':continue  # Other consumers are integrated separately.
+             scope=self.store.application(request['request_id'],request['generation'])
+             try:
++                if request['action']=='file_review':
++                    self._apply_file(request,scope);self._prune_needed=True;worked=True;continue
+                 with connect(self.store.database) as db:
+-                    row=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(request['book_id'],)).fetchone()
++                    db.execute('BEGIN');row=db.execute('SELECT id,revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(request['book_id'],)).fetchone()
+                 if row is None or row['fingerprint']!=request['source_fingerprint']:
+                     self.store.hold(request['request_id'],request['generation'],'This book’s sources changed; review the saved names before applying them')
+                     worked=True;continue
+-                if row['revision']!=request['observed_revision']:
+-                    self.store.hold(request['request_id'],request['generation'],'This book’s revision changed; review the saved names before applying them')
+-                    worked=True;continue
+-                fields={key.split('.',1)[1] for key in request['active_effects'] if key.startswith('names.')}
+-                names={key:value for key,value in request['payload']['names'].items() if key in fields}
+-                if not names:raise ValueError('Saved names no longer own an applicable field')
+-                self.merge.names_save(request['book_id'],row['revision'],names,fingerprint=request['source_fingerprint'],decision=scope)
++                with connect(self.store.database) as db:
++                    db.execute('BEGIN');scope.check_current(db,dict(row))
++                self._apply(request,scope,row)
+                 # This only purges payload after the consumer's atomic receipt is
+                 # already committed; receipt/tombstone reconciliation survives.
+-                self.store.purge_fulfilled();worked=True
+-            except DecisionChanged:
++                self._prune_needed=True;worked=True
++            except DecisionChanged as error:
+                 # A new head fenced the old in-flight read. Its retained cumulative
+                 # effects will be read afresh, never marked failed or overwritten.
++                try:self.store.hold(request['request_id'],request['generation'],str(error))
++                except DecisionChanged:pass
+                 continue
+             except (ValueError,sqlite3.Error) as error:
++                if (self.store.get(request['request_id']) or {}).get('state')=='applied':
++                    self._prune_needed=True;worked=True;continue
+                 if getattr(error,'code',None)=='busy' or isinstance(error,sqlite3.OperationalError) and getattr(error,'sqlite_errorcode',0)&255==sqlite3.SQLITE_BUSY:
+                     continue
+                 try:self.store.hold(request['request_id'],request['generation'],str(error) or type(error).__name__)
+@@ -102,6 +173,8 @@
+             except Exception as error:
+                 # An unknown consumer failure is held, not generically retried.
+                 # If its final receipt committed, hold() refuses to undo it.
++                if (self.store.get(request['request_id']) or {}).get('state')=='applied':
++                    self._prune_needed=True;worked=True;continue
+                 try:self.store.hold(request['request_id'],request['generation'],'Saved-decision application needs review: '+(str(error) or type(error).__name__))
+                 except DecisionChanged:pass
+                 worked=True
+diff --git a/merge_service.py b/merge_service.py
+--- a/merge_service.py
++++ b/merge_service.py
+@@ -3352,6 +3352,7 @@
+                 def finish_unchanged(db):
+                     current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(id,)).fetchone()
+                     if not current or tuple(current)!=(row['revision'],row['fingerprint']):raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing')
++                    decision.check_current(db,{'id':id,'revision':row['revision'],'fingerprint':row['fingerprint']})
+                     decision.bind_names(db,id,row['fingerprint'],values)
+                     return decision.commit_step(db,'names',{'request_id':decision.request_id},answer,final=True,applied_revision=row['revision'])
+                 transaction(self.inventory.database,finish_unchanged)
+@@ -3365,6 +3366,7 @@
+             from sqlite_retry import transaction
+             def write(db):
+                 if decision is not None:
++                    decision.check_current(db,{'id':id,'revision':row['revision'],'fingerprint':row['fingerprint']})
+                     decision.bind_names(db,id,row['fingerprint'],values)
+                     previous=decision.prior_step(db,'names',{'request_id':decision.request_id})
+                     if previous is not None:return previous
+@@ -3386,8 +3388,12 @@
+             except sqlite3.Error:raise self.NamesRefused('refused',self.NAMES_REFUSED) from None
+         outcome='saved'
+         if job['state']=='pending':
+-            try:self._names_replan(job['row'])
+-            except (ValueError,sqlite3.Error):pass  # claimed meanwhile or busy: the claim check re-plans it before it starts
++            if decision is None:
++                try:self._names_replan(job['row'])
++                except (ValueError,sqlite3.Error):pass  # the claim check re-plans it before it starts
++            # A durable Save's terminal receipt already commits its names and
++            # pending-job hold. Leave derivative re-planning to the existing
++            # claim check, so Save→Approve sees no unreceipted revision advance.
+             outcome='replanned'
+         elif job['state']=='retry_queued':outcome='replanned'  # the retry's child is checked against these names
+         elif job['state']=='ready':outcome='ready_only'
+@@ -3685,14 +3691,23 @@
+         import author_rules
+         if choice not in ('same','different'):raise ValueError('Choose Same author or Different author')
+         row=self.reviews._row('Audiobooks',id,revision)
++        from decision_effects import approval
++        effect=approval(press,'same_author')
++        prior=effect.replay(row,'same_author',{'choice':choice}) if effect is not None else None
++        if prior is not None:
++            if press is not None:press['rule_id']=prior['rule_id']
++            return prior['author']
+         record=self.automatic.candidate(row) or {}
+         question=record.get('ask') or {}
+         if question.get('kind')!='same_author':raise ValueError('This book has no Same author? question. Nothing was changed.')
+         title=(((question.get('fields') or {}).get('title') or {}).get('proposal') or row.get('title_clue') or '')
+         with connect(self.inventory.database) as db:
+             author_rules.setup(db)
++            if effect is not None:
++                db.execute('BEGIN IMMEDIATE');effect.before(db,row)
+             if choice=='same':rule=author_rules.append(db,'same_as',question['new'],target=question['existing'],actor='user',source='Sergei (Same author?)',question=title)
+             else:rule=author_rules.append(db,'keep',question['new'],actor='user',source='Sergei (Same author?)',question=title)
++            if effect is not None:effect.commit(db,row,row['revision'],rule_id=rule,author=question['existing'] if choice=='same' else question['new'])
+         if press is not None:press['rule_id']=rule
+         else:self._continue_after_rule(skip=id)
+         return question['existing'] if choice=='same' else question['new']
+@@ -3803,7 +3818,7 @@
+         except (ValueError,KeyError,TypeError):return False
+         return bool(context.get('automatic_approval')) and not context.get('user_approval')
+ 
+-    def _replace_automatic_job(self,identity):
++    def _replace_automatic_job(self,identity,decision=None):
+         """Ruling 76a: the job automatic processing queued for this book, while it has not started, is set aside (kind
+         'approve'; its row, journal and working files are kept, as Start over keeps them) so his Approve files the book with
+         his values. Returns (job_id, its reason) to put back if his Approve is refused, or None. A job that has started is
+@@ -3812,6 +3827,11 @@
+         import book_restart
+         from audio_jobs import _now
+         from sqlite_retry import transaction
++        from decision_effects import Effect
++        effect=Effect(decision,'replace_automatic',actions=('approve',)) if decision is not None else None
++        book=self.reviews._row('Audiobooks',identity) if effect is not None else None
++        prior=effect.replay(book,'replace_automatic',{'book_id':identity}) if effect is not None else None
++        if prior is not None:return tuple(prior['replaced']) if prior.get('replaced') else None
+         with connect(self.inventory.database) as db:
+             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return None
+             job_id=book_restart.current_job(db,identity)
+@@ -3828,6 +3848,8 @@
+             if not facts:raise book_restart.Changed('Book changed')
+             db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'",(self.APPROVE_REPLACED,_now(),job_id))
+             db.execute('INSERT INTO audio_job_set_aside VALUES(?,?,?,?,?)',(job_id,identity,facts['revision'],'approve',book_restart.stamp()))
++            if effect is not None:
++                effect.before(db,book);effect.commit(db,book,book['revision'],replaced=[job_id,found['reason']])
+         with self.jobs._lock:
+             # Under the queue's lock: its claim either came first (it is converting: refused here) or finds the job set aside.
+             if self.jobs.claimed(job_id):raise ValueError(self._approve_converting(identity))
+@@ -3858,7 +3880,7 @@
+         except (sqlite3.Error,book_restart.Changed):pass
+         self.__dict__.pop('_needs_cache',None);self.invalidate_status()
+ 
+-    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None,fingerprint=None):
++    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None,fingerprint=None,*,decision=None):
+         """Sergei's Approve (rulings 6a, 6b, 10, 11a): converts if needed, renames and moves the book to its Audiobooks
+         Sorted folder with the values shown (typed values win and are saved as "Entered by you"). without_missing:
+         Convert what's there, leaving out the files missing from disk. choice ('same' / 'different'): his answer to the
+@@ -3869,12 +3891,20 @@
+         fingerprint (ruling 76a): the files the row showed; with it, his Approve applies to the book as it is now when only
+         its records moved on, and replaces a job automatic processing queued and has not started (put back if his Approve is
+         refused with nothing filed). Raises ValueError with the reason it is refused."""
++        if decision is not None:
++            from durable_decisions import DecisionChanged,packed
++            row=self.reviews._row('Audiobooks',id,revision)
++            with connect(self.inventory.database) as db:
++                db.execute('BEGIN');saved,_=decision.check_current(db,row)
++                expected={'title':None,'author':None,'without_missing':False,'choice':None,'path':None,'names':None}|json.loads(saved['payload'])
++                actual={'title':title,'author':author,'without_missing':without_missing,'choice':choice,'path':path,'names':names}
++                if saved['action']!='approve' or packed(expected)!=packed(actual):raise DecisionChanged('Approve values differ from the durably accepted decision')
+         revision=self._his_revision(id,revision,fingerprint) if path is not None else revision
+-        replaced=self._replace_automatic_job(id) if fingerprint else None
+-        approval={}
++        replaced=self._replace_automatic_job(id,**({'decision':decision} if decision is not None else {})) if fingerprint else None
++        approval={'decision':decision} if decision is not None else {}
+         try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+         except BaseException:
+-            if replaced and not (approval.get('accepted') or approval.get('answered')):self._restore_automatic_job(replaced,id)
++            if decision is None and replaced and not (approval.get('accepted') or approval.get('answered')):self._restore_automatic_job(replaced,id)
+             raise
+ 
+     def _approve_values(self,id,revision,title,author,without_missing,choice,path,names,approval):
+@@ -3890,9 +3920,20 @@
+         entries=entered_names.plan(row,values,read,scope,now)
+         # Ruling 57: an Approve's corrected series belongs to this book, never the author's other books (M12).
+         entries=[entry for entry in entries if not (entry[0]=='fix' and entry[1]=='series')]
+-        press=entered_names.save(self.inventory.database,row,entries) if entries else ''
++        from decision_effects import approval as approval_effect
++        effect=approval_effect(approval,'names')
++        if effect is not None:effect.bind('names',{'names':values})
++        if effect is None:press=entered_names.save(self.inventory.database,row,entries) if entries else ''
++        else:
++            with connect(self.inventory.database) as db:
++                db.execute('BEGIN IMMEDIATE');prior=effect.before(db,row)
++                if prior is not None:press=prior['names_press_id']
++                else:
++                    press=entered_names.save_in_transaction(db,row,entries)
++                    effect.commit(db,row,row['revision'],names_press_id=press)
+         try:return self._approve_book(id,revision,title,author,without_missing,choice,path,names=values,press=approval)
+         except BaseException as error:
++            if effect is not None:raise  # Accepted decisions retain their own receipted names on a later hold.
+             if approval.get('accepted') or approval.get('answered'):raise  # queued (M4), or answered with the series next (M10): his names stay
+             if press and (self.draining or self.__dict__.get('_closing')):
+                 # Ruling 35: closing is no reason to lose his input; the names stay saved for the next session.
+@@ -3915,7 +3956,7 @@
+                 # M10: the press answered his Same author? question and the series is asked next: the rule stays.
+                 try:self._continue_after_rule(skip=id)
+                 except Exception:pass
+-            elif press.get('rule_id') and not press.get('accepted'):self._drop_answer_rule(press['rule_id'],skip=id)
++            elif press.get('rule_id') and not press.get('accepted') and press.get('decision') is None:self._drop_answer_rule(press['rule_id'],skip=id)
+             raise
+         if press.get('rule_id'):
+             try:self._continue_after_rule(skip=id)
+@@ -3945,6 +3986,7 @@
+         # Senua's 0.22.2 review, m7: the English-spelling answer is planned now and saved only once this Approve is accepted
+         # (below); a refused Approve (the path changed, the name is taken, a safety hold) leaves no rule and requeues nothing.
+         spelling=self._english_spelling_answer(id,revision,author)
++        if press.get('decision') is not None:press['spelling']=spelling
+         row,result=self._approval_result(id,revision,title,author,chosen,names=names)
+         import local_identity
+         approved_author=(result.get('approval') or {}).get('author') or ''
+@@ -4014,6 +4056,7 @@
+             files=[by_key[k] for k in ctx['track_order'] if k in ctx['included'] and k in by_key and (include is None or by_key[k] in include)]
+         approved_by={'actor':'user','at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'values':{'title':approval['title'],'author':approval['author']},
+                      'typed':list(approval['typed']),'collection':approval['collection'],'files':files,'without_missing':bool(include)}
++        if press.get('decision') is not None:approved_by['at']=press['decision'].store.get(press['decision'].request_id)['accepted_utc']
+         result['reasons']=[]
+         # Senua's 0.22.0 review, m4: closing or draining the app stops a press still checking the files (hashes, probes).
+         stop=threading.Event();presses=self.__dict__.setdefault('_approve_stops',set());presses.add(stop)
+@@ -4030,7 +4073,9 @@
+         press['accepted']=True
+         # The book is approved: his English-spelling answer becomes his rule for the author (m7). A failure to save it never
+         # turns the accepted Approve into a refusal; the author's other books then ask again.
+-        try:self._answer_english_spelling(id,spelling)
++        try:
++            if press.get('decision') is None:self._answer_english_spelling(id,spelling)
++            elif spelling:self._continue_after_rule(skip=id)
+         except Exception:pass
+         try:self.automatic._record(fresh,'Queued',dict(result,user_approval=approved_by))
+         except Exception:pass  # the job is queued; the automatic record only drives the list's status line
+@@ -4055,6 +4100,24 @@
+             # Approve as shown answers the author too. An empty author is an explicit no-author answer (ruling 11).
+             proposal=author if author is not None else (((held.get('fields') or {}).get('author') or {}).get('proposal') or '')
+             entries.append(('book','author',str(proposal),'','',''))
++        from decision_effects import approval
++        effect=approval(press,'answer_then_series',final=True)
++        if effect is not None:effect.bind('answer_then_series',{'entries':entries,'spelling':spelling})
++        if effect is not None:
++            import author_rules,book_restart
++            with connect(self.inventory.database) as db:
++                db.execute('BEGIN IMMEDIATE')
++                if effect.before(db,book) is None:
++                    names_press=entered_names.save_in_transaction(db,book,entries)
++                    rules=[]
++                    if spelling:
++                        author_rules.setup(db)
++                        rules.append(author_rules.append(db,spelling['kind'],spelling['credit'],target=spelling['target'] or '',actor='user',source='Sergei (English spelling, ruling 39)',question=spelling['title']))
++                    book_restart.reset_automatic(db,row['id'],book['revision'],book['fingerprint'])
++                    effect.commit(db,book,book['revision'],outcome='answer_saved',code='series_needed',message=self.SERIES_ASKED,names_press_id=names_press,author_rule_ids=rules)
++            press['answered']=True
++            self.__dict__.pop('_needs_cache',None);self.automatic.requeue(row['id'])
++            raise self.SeriesAsked(self.SERIES_ASKED)
+         if entries:entered_names.save(self.inventory.database,book,entries)
+         if spelling:self._answer_english_spelling(row['id'],spelling)
+         press['answered']=True
+@@ -4096,6 +4159,10 @@
+         from review_backend import image_kind,source_hash,identity
+         from audio_pipeline import generated_artifacts,run_owned,probe
+         from encoding_policy import choose_encoding,choose_automatic_encoding
++        from decision_effects import approval
++        def saved_step(name):
++            effect=approval(queued,name)
++            return {'effect':effect} if effect is not None else {}
+         result=self._shared_result(row,result)
+         standing=bool(result.get('metadata_facts'))
+         # Rulings 69 and 71i: the folder Sergei chose is frozen with the book's facts, so the preview, the manifest, every
+@@ -4135,6 +4202,16 @@
+             if (approved_by is not None or __import__('book_restart').restart_current(current,ctx)) and ctx.get('track_actor')=='user':
+                 keys=[member_key(m['path']) for m in current['members']];order=ctx.get('track_order');chosen=ctx.get('included')
+                 if isinstance(order,list) and sorted(order)==sorted(keys) and isinstance(chosen,list) and chosen and set(chosen)<=set(keys):saved=(order,chosen)
++            plan=approval(queued,'track_choice')
++            if plan is not None:
++                # A resumed approval must not mistake its own committed track
++                # review for a different earlier user choice. Freeze the checked
++                # original choice before any of this approval's review writes.
++                plan.bind('track_choice',{'include':sorted(include) if include is not None else None})
++                with connect(self.inventory.database) as db:
++                    db.execute('BEGIN IMMEDIATE');prior=plan.before(db,current)
++                    if prior is None:plan.commit(db,current,current['revision'],saved=list(saved) if saved else None)
++                    else:saved=tuple(prior['saved']) if prior.get('saved') is not None else None
+             if include is not None:
+                 # Convert what's there (ruling 10): only the present files named by the press; the left-out ones are reported.
+                 chosen=[m for m in current['members'] if m['path'] in include]
+@@ -4225,14 +4302,14 @@
+                         restarting=__import__('book_restart').restart_current(current,ctx)
+                         retained_cover=self.reviews._cover(ctx) if restarting and ctx.get('cover_id') else None
+                         if restarting and ctx.get('cover_id') and retained_cover is None:raise ValueError('Previously selected cover is unavailable or changed; choose its replacement before approval')
+-                        fresh=self.reviews.covers('Audiobooks',current['id'],current['revision'],all_embedded=True,stop=stop)
++                        fresh=self.reviews.covers('Audiobooks',current['id'],current['revision'],all_embedded=True,stop=stop,**saved_step('covers'))
+                         if restarting:
+                             if fresh['fingerprint']!=current['fingerprint'] or fresh.get('review')!=current.get('review'):raise ValueError('Restart choices changed during cover inspection')
+                             renewed=self.reviews._context(fresh)
+                             renewed['automatic_restart']=dict(ctx['automatic_restart'],revision=fresh['revision'])
+                             if retained_cover and not any(c['id']==retained_cover['id'] for c in renewed.get('cover_choices',[])):
+                                 renewed['cover_choices']=list(renewed.get('cover_choices',[]))+[retained_cover]
+-                            fresh=self.reviews._write(fresh,renewed,bump=False)
++                            fresh=self.reviews._write(fresh,renewed,bump=False,**(saved_step('restart_choices')|{'effect_values':{'automatic_restart':renewed['automatic_restart'],'retained_cover':retained_cover}} if (queued or {}).get('decision') is not None else {}))
+                         if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
+                         covers=[c for c in fresh['cover_choices'] if c['source_label'].startswith('Embedded artwork:')]
+                         if standing:
+@@ -4253,7 +4330,7 @@
+                                         if digest(path,stop)!=hash:raise ValueError('Neutral artwork cache changed')
+                                 selected_cover={'id':cover_id,'source_label':'Neutral cover','source_url':'','evidence_kind':'Generated neutral label; no edition identity claimed','thumbnail_url':'/api/cover?id='+cover_id,'sha256':hash}
+                                 context=self.reviews._context(fresh);context['cover_choices']=fresh['cover_choices']+[selected_cover]
+-                                fresh=self.reviews._write(fresh,context,bump=False)
++                                fresh=self.reviews._write(fresh,context,bump=False,**(saved_step('neutral_cover')|{'effect_values':{'selected_cover':selected_cover}} if (queued or {}).get('decision') is not None else {}))
+                                 result['metadata_facts']['cover']={'kind':'neutral'}
+                             reuse_parent=self._recording_review(gate_row,result,stop)  # the files being converted
+                         else:
+@@ -4289,31 +4366,34 @@
+                             note='Approved by you on '+approved_by['at']+' (Sergei 2026-10-24, ruling 6b): "'+approved_by['values']['title']+'" by "'+(approved_by['values']['author'] or 'Разные авторы')+'", '+str(len(paths))+' file(s) in the order shown'+(' (typed: '+', '.join(sorted(approved_by['typed']))+')' if approved_by['typed'] else '')+'. Converted if needed, renamed and moved to Audiobooks Sorted; the originals are removed only after the result is verified there.'
+                             evidence=[dict(record,reviewer_actor='user',reviewer_identity='Sergei (Approve)',basis=note) for record in result['evidence']]
+                         fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=selected_cover['id'],actor=actor,evidence=evidence,automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']},automatic_facts=result.get('metadata_facts'),
+-                                              capture_manual=bool(typed),manual_source_values=({'title':typed['title']} if 'title' in typed else {})|({'canonical_author':typed['author']} if 'author' in typed else {}) if typed else None,user_approval=approved_by is not None)
++                                              capture_manual=bool(typed),manual_source_values=({'title':typed['title']} if 'title' in typed else {})|({'canonical_author':typed['author']} if 'author' in typed else {}) if typed else None,user_approval=approved_by is not None,**saved_step('metadata'))
+                         context=self.reviews._context(fresh);context['duplicate_review']=copy.deepcopy(result.get('duplicate_review'));context['metadata_approved']=False;context['automatic_pending']={'matcher_version':VERSION,'work_id':result['work']['id']}
+                         if approved_by is not None:context['user_approval']=copy.deepcopy(approved_by)
+-                        fresh=self.reviews._write(fresh,context,bump=False)
++                        fresh=self.reviews._write(fresh,context,bump=False,**(saved_step('pending_context')|{'effect_values':{'duplicate_review':context['duplicate_review'],'automatic_pending':context['automatic_pending'],'user_approval':context.get('user_approval')}} if (queued or {}).get('decision') is not None else {}))
+                         keys=list(saved[0]) if saved else [m['member_key'] for m in fresh['members']]
+                         included=[k for k in keys if k in {m['member_key'] for m in fresh['members'] if m['path'] in paths}]
+                         if stop.is_set():raise InterruptedError()
+                         fresh=self.reviews.tracks('Audiobooks',fresh['id'],fresh['revision'],keys,included,True,True,len(included)>1,actor=actor,keep_pending=approved_by is not None,
+-                            evidence_note=('Approved by you: the files shown, in the order shown'+(' (the order and files you saved)' if saved else '')+(' (missing files left out)' if include is not None else '')+'; every included file SHA256 verified.') if approved_by is not None else 'Automatic recording scope: consistent verified work album/source identity; embedded gap-free unique track/disc order, or one self-contained source. All observed source files selected and SHA256 verified; commercial recording completeness unknown.',stop=stop)
++                            evidence_note=('Approved by you: the files shown, in the order shown'+(' (the order and files you saved)' if saved else '')+(' (missing files left out)' if include is not None else '')+'; every included file SHA256 verified.') if approved_by is not None else 'Automatic recording scope: consistent verified work album/source identity; embedded gap-free unique track/disc order, or one self-contained source. All observed source files selected and SHA256 verified; commercial recording completeness unknown.',stop=stop,**saved_step('tracks'))
+                         with self.automatic.lock:
+                             if stop.is_set() or approved_by is None and self.automatic.manual_draft(fresh):raise InterruptedError() if stop.is_set() else ValueError('Manual draft retained')
+                             context=self.reviews._context(fresh);context['metadata_approved']=True
+                             # Pending metadata stays invisible to approval counts/public creation.
+-                            fresh=self.reviews._write(fresh,context,bump=False)
++                            fresh=self.reviews._write(fresh,context,bump=False,**(saved_step('approved_checkpoint')|{'effect_values':{'metadata_approved':True}} if (queued or {}).get('decision') is not None else {}))
+                             try:
+                                 manifest=self.reviews.build_manifest('Audiobooks',fresh['id'],fresh['revision'],allow_automatic_pending=True,stop=stop,**({'reuse_parent':reuse_parent} if standing and reuse_parent else {}))
+                                 approved=copy.deepcopy(context);approved.pop('automatic_pending',None)
+                                 approved['automatic_approval']={'matcher_version':VERSION,'work_id':result['work']['id'],'sources':result['sources'],'approved_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
+                                 # Queue insertion and final approval become durable together.
+-                                job=self.jobs.enqueue(manifest,approval_context=(fresh['id'],fresh['revision'],context,approved))
++                                decision_args={}
++                                if (queued or {}).get('decision') is not None:
++                                    decision_args={'decision':queued['decision'],'decision_rules':[queued['spelling']] if queued.get('spelling') else []}
++                                job=self.jobs.enqueue(manifest,approval_context=(fresh['id'],fresh['revision'],context,approved),**decision_args)
+                                 # Senua's 0.22.3 review, M4: Sergei's Approve is accepted the moment its job is queued.
+                                 if queued is not None:queued.update(accepted=True,job_id=job)
+                                 fresh=self.reviews.enrich(self.reviews._row('Audiobooks',fresh['id'],fresh['revision']))
+                             except BaseException:
+-                                if not self.candidate_status(fresh['id']):
++                                if (queued or {}).get('decision') is None and not self.candidate_status(fresh['id']):
+                                     context['metadata_approved']=False;context.pop('automatic_approval',None)
+                                     self.reviews._write(fresh,context,bump=False)
+                                 raise
+diff --git a/web_server.py b/web_server.py
+--- a/web_server.py
++++ b/web_server.py
+@@ -1375,7 +1375,7 @@
+             path,query=self.query()
+             if query: raise ValueError('Control requests do not accept query parameters')
+             data=self.body()
+-            if path in ('/api/book-decisions','/api/book-decisions/status'):
++            if path in ('/api/book-decisions','/api/book-decisions/status','/api/book-decisions/book'):
+                 self.status_control=False
+                 merge=self.server.merge
+                 if merge is None or self.server.closing:
+@@ -1383,16 +1383,23 @@
+                 if path.endswith('/status'):
+                     self.shape(data,{'request_id'})
+                     answer=merge.decisions.store.get(self.uuid_value(data['request_id']),include_payload=True)
++                    if answer is None:self.response(404,{'error':'No durable decision with this request ID','code':'decision_not_found'});return
+                     self.response(200,{'decision':answer,'application':merge.decisions.status()});return
++                if path.endswith('/book'):
++                    self.shape(data,{'library','id'});self.library(data['library'])
++                    if not isinstance(data['id'],str) or not 1<=len(data['id'])<=200:raise ValueError('Invalid saved-decision book identity')
++                    self.response(200,merge.decisions.store.book(data['id'])|{'application':merge.decisions.status()});return
+                 self.shape(data,{'library','id','revision','fingerprint','action','payload','request_id'},{'predecessor'})
+-                library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+-                if library!='Audiobooks':raise ValueError('Saved book decisions are for Audiobooks')
+-                if data['action']!='names':raise ValueError('This saved-decision action is not available yet')
+-                self.shape(data['payload'],{'names'})
+-                names=self.names_value(data['payload']['names']);seen=self.fingerprint_value(data['fingerprint'])
++                from decision_contract import validate
++                payload=validate(self,data['action'],data['payload'])
++                if data['action']=='file_review':
++                    library=self.library(data['library']);id=data['id'];revision=data['revision']
++                    if not isinstance(id,str) or type(revision) is not int or revision!=0:raise ValueError('Invalid catalog file decision identity')
++                else:library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
++                seen=self.fingerprint_value(data['fingerprint'])
+                 if seen is None:raise ValueError('The shown source fingerprint is required')
+                 predecessor=None if data.get('predecessor') is None else self.uuid_value(data['predecessor'])
+-                answer=merge.decisions.accept_names(self.uuid_value(data['request_id']),id,revision,seen,names,predecessor)
++                answer=merge.decisions.accept(self.uuid_value(data['request_id']),id,revision,seen,data['action'],payload,predecessor,library=library)
+                 self.response(202,{'decision':answer,'application':merge.decisions.status()});return
+             if path=='/api/queue/approval-reconcile':
+                 self.status_control=False
+diff --git a/tests/test_lock_timing.py b/tests/test_lock_timing.py
+--- a/tests/test_lock_timing.py
++++ b/tests/test_lock_timing.py
+@@ -62,7 +62,7 @@
+         body={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'fingerprint':row['fingerprint'],
+               'action':'names','payload':{'names':{'title':'A durably accepted private title'}},'request_id':request_id}
+         self.assertEqual(route.call('/api/book-decisions',body,token=False)[0],403)
+-        unsupported=dict(body,request_id=str(uuid.uuid4()),action='approve')
++        unsupported=dict(body,request_id=str(uuid.uuid4()),action='delete')
+         self.assertEqual(route.call('/api/book-decisions',unsupported)[0],400)
+         self.assertIsNone(self.service.decisions.store.get(unsupported['request_id']),'Unwired actions cannot be accepted')
+         original={str(path):path.read_bytes() for path in self.sources}
+@@ -91,6 +91,53 @@
+         self.assertEqual(route.call('/api/book-decisions',body)[1]['decision']['state'],'applied')
+         self.assertEqual(self.service.jobs.status()['jobs'],[],'Saving a name never starts a producer')
+         self.assertEqual({str(path):path.read_bytes() for path in self.sources},original)
++
++    def test_all_six_saved_decision_routes_accept_during_real_worker_locks_and_reconcile(self):
++        import uuid
++        from decision_contract import effects,file_identity,file_fingerprint
++        from durable_decisions import digest
++        from decision_runtime import DecisionRuntime
++        from test_merge_service import MergeTests
++        from test_merge_http import MergeHTTPTests
++        for action in ('names','review','tracks','metadata_choices','approve','file_review'):
++            with self.subTest(action=action):
++                fixture=MergeTests();fixture.setUp()
++                route=MergeHTTPTests();route.setUp();route.server.inventory=fixture.inv;route.server.merge=fixture.service
++                release=threading.Event();entered=threading.Event();holder=None
++                try:
++                    row=fixture.inv.candidates('Audiobooks')['rows'][0];book=row['id'];revision=row['revision'];fingerprint=row['fingerprint']
++                    snapshot=fixture.service.reviews.metadata_questions(row,fixture.service.reviews._context(row))
++                    choices=[{'question_id':question['id'],'mode':'unresolved'} for question in snapshot['questions']]
++                    payload={'names':{'title':'Durably retained private title'}} if action=='names' else {'review':fixture.review,'approve':False,'names_row_only':True} if action=='review' else {
++                        'order':fixture.service.reviews.enrich(row)['track_order'],'included':fixture.service.reviews.enrich(row)['included'],
++                        'source_coverage_confirmed':True,'order_confirmed':True,'chapters':False} if action=='tracks' else {'signature':snapshot['signature'],'choices':choices} if action=='metadata_choices' else {
++                        'title':'Private approved title','author':'Private Author','names':None,'without_missing':False,'choice':None,'path':None}
++                    if action=='file_review':
++                        source=fixture.sources[0];facts=source.stat();payload={'path':str(source),'size':facts.st_size,'modified':str(facts.st_mtime_ns),'review':fixture.review}
++                        book=file_identity('Audiobooks',str(source));revision=0;fingerprint=file_fingerprint('Audiobooks',str(source),facts.st_size,str(facts.st_mtime_ns))
++                    body={'library':'Audiobooks','id':book,'revision':revision,'fingerprint':fingerprint,'action':action,'payload':payload,'request_id':str(uuid.uuid4()),'predecessor':None}
++                    original=[path.read_bytes() for path in fixture.sources]
++                    def hold():
++                        with fixture.service.operation_lock,fixture.service.reviews.lock,fixture.inv.group_lock,fixture.service.jobs._lock:entered.set();release.wait(5)
++                    holder=threading.Thread(target=hold);holder.start();self.assertTrue(entered.wait(2))
++                    start=time.monotonic();answer=route.call('/api/book-decisions',body)
++                    self.assertLess(time.monotonic()-start,1.0);self.assertTrue(holder.is_alive());self.assertEqual(answer[0],202,answer)
++                    receipt=answer[1]['decision'];expected=digest({'book_id':book,'action':action,'revision':revision,'fingerprint':fingerprint,'payload':payload,'effects':effects(action,payload),'predecessor':None})
++                    self.assertEqual(receipt['request_id'],body['request_id']);self.assertEqual(receipt['payload_sha256'],expected)
++                    status=route.call('/api/book-decisions/status',{'request_id':body['request_id']});self.assertEqual(status[1]['decision']['payload_sha256'],expected)
++                    restored=route.call('/api/book-decisions/book',{'library':'Audiobooks','id':book});self.assertEqual(restored[0],200)
++                    fixture.service.decisions.close();release.set();holder.join(5);self.assertFalse(holder.is_alive())
++                    fixture.service.decisions=DecisionRuntime(fixture.service)
++                    with patch.object(fixture.service,'_approval_result',side_effect=ValueError('Private source-identity review required')):fixture.service.decisions.run_once()
++                    final=fixture.service.decisions.store.get(body['request_id'],include_payload=True)
++                    self.assertEqual(final['state'],'needs_review' if action=='approve' else 'applied',final)
++                    if action=='approve':self.assertEqual(final['payload'],payload);self.assertIn('Private source-identity',final['reason'])
++                    self.assertEqual(fixture.service.jobs.status()['jobs'],[]);self.assertEqual([path.read_bytes() for path in fixture.sources],original)
++                    replay=route.call('/api/book-decisions',body);self.assertEqual(replay[1]['decision']['payload_sha256'],expected);self.assertEqual(replay[1]['decision']['state'],final['state'])
++                finally:
++                    release.set()
++                    if holder:holder.join(5)
++                    fixture.tearDown();route.tearDown()
+     def test_source_folder_dispatches_while_unrelated_worker_holds_group_lock(self):
+         row=self.service.reviews._row('Audiobooks',self.inv.candidates('Audiobooks')['rows'][0]['id'])
+         with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
+diff --git a/tests/test_shared_routing.py b/tests/test_shared_routing.py
+--- a/tests/test_shared_routing.py
++++ b/tests/test_shared_routing.py
+@@ -314,7 +314,7 @@
+         self.temp=tempfile.TemporaryDirectory(dir=os.environ['BOOKS_QA_FIXTURE_ROOT']);self.addCleanup(self.temp.cleanup)
+         self.base=Path(self.temp.name);self.audio=self.base/'a';self.audio.mkdir();self.sorted=self.base/'s';self.sorted.mkdir()
+ 
+-    def approve(self,number,legacy=False):
++    def approve(self,number,legacy=False,durable=False,interrupt=None):
+         import json,threading,shutil
+         from pathlib import Path
+         from unittest.mock import patch
+@@ -343,10 +343,40 @@
+             'sources':[{'kind':'publisher_or_journal','url':'https://publisher.example/tolkien','verified_identity':True}],
+             'approval':{'title':title,'author':credit,'typed':[],'collection':False}}
+         result=attach_shared_routing(result)
+-        with patch.object(service,'_approval_result',return_value=(row,result)),patch.object(service,'_english_spelling_answer',return_value=None):
+-            approved=service.approve_book(row['id'],row['revision'])
++        extra={};saved=None
++        if durable:
++            import uuid
++            service.decisions.close();store=service.decisions.store
++            saved=store.accept(request_id=str(uuid.uuid4()),book_id=row['id'],action='approve',revision=row['revision'],fingerprint=row['fingerprint'],
++                               payload={'title':None,'author':None,'names':None,'without_missing':False,'choice':None,'path':None},effects=['approval'],current_revision=row['revision'],current_fingerprint=row['fingerprint'])
++            extra['decision']=store.application(saved['request_id'],store.head(row['id'])['generation'])
++        def press():return service.approve_book(row['id'],service.reviews._row('Audiobooks',row['id'])['revision'],**extra)
++        if interrupt:
++            from decision_effects import Effect
++            commit=Effect.commit;failed=[]
++            def interrupted(effect,*args,**kwargs):
++                if effect.step==interrupt and not failed:
++                    failed.append(effect.step);raise RuntimeError('Private process interruption before '+interrupt+' receipt')
++                return commit(effect,*args,**kwargs)
++            with patch.object(service,'_approval_result',return_value=(row,result)),patch.object(service,'_english_spelling_answer',return_value=None),patch.object(Effect,'commit',new=interrupted):
++                with self.assertRaisesRegex(RuntimeError,'Private process interruption'):press()
++            self.assertEqual(failed,[interrupt]);self.assertEqual(service.jobs.status()['jobs'],[])
++            self.assertEqual(store.get(saved['request_id'])['state'],'applying');service.close()
++            # Reopen through the real constructor, retaining the durable request.
++            # Keep only this test's scheduling deterministic; run_once is the
++            # same production owner pass and uses no second accept/press.
++            with patch('decision_runtime.DecisionRuntime.start'):service=MergeService(inv,self.base/'c')
++            self.addCleanup(service.close);service.automatic.research=research
++            with patch.object(service,'_approval_result',side_effect=lambda *args,**kwargs:(service.reviews._row('Audiobooks',row['id']),result)),patch.object(service,'_english_spelling_answer',return_value=None):
++                service.decisions.run_once()
++            recovered=store.get(saved['request_id']);self.assertEqual(recovered['state'],'applied',recovered)
++            approved={'job_id':recovered['result']['job_id']}
++        else:
++            with patch.object(service,'_approval_result',return_value=(row,result)),patch.object(service,'_english_spelling_answer',return_value=None):approved=press()
+         jobs=service.jobs.status()['jobs'];self.assertEqual(len(jobs),1);job=jobs[0]
+         self.assertEqual(job['job_id'],approved['job_id']);self.assertEqual(job['state'],'pending')
++        if durable:
++            receipt=store.get(saved['request_id']);self.assertEqual(receipt['state'],'applied');self.assertEqual(receipt['result']['job_id'],job['job_id'])
+         self.assertIsNone(job.get('output'));self.assertIsNone(job.get('attempt_id'))
+         records=job['manifest']['evidence']['metadata_fields'];curated=[r for r in records if r.get('source_kind')=='curated_user_decision']
+         self.assertEqual({r['field'] for r in curated},{'universe'} if legacy else {'series','universe'})
+@@ -366,6 +396,10 @@
+     def test_two_towers_actual_approve_persists_and_queues(self):self.approve(2)
+     def test_fellowship_actual_approve_persists_and_queues(self):self.approve(1)
+     def test_legacy_middle_earth_actual_approve_persists_and_queues(self):self.approve(2,legacy=True)
++    def test_durable_return_king_actual_approve_has_atomic_job_receipt(self):self.approve(3,durable=True)
++    def test_durable_two_towers_actual_approve_has_atomic_job_receipt(self):self.approve(2,durable=True)
++    def test_durable_approve_recovers_after_metadata_commit_without_another_press(self):self.approve(3,durable=True,interrupt='tracks')
++    def test_durable_approve_recovers_after_track_commit_without_another_press(self):self.approve(2,durable=True,interrupt='approved_checkpoint')
+     def test_private_review_consumer_refuses_malformed_or_mismatched_curated_records_before_writes(self):
+         import json
+         from scanner import connect

@@ -62,7 +62,7 @@ class SourceFolderDispatchTests(unittest.TestCase):
         body={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'fingerprint':row['fingerprint'],
               'action':'names','payload':{'names':{'title':'A durably accepted private title'}},'request_id':request_id}
         self.assertEqual(route.call('/api/book-decisions',body,token=False)[0],403)
-        unsupported=dict(body,request_id=str(uuid.uuid4()),action='approve')
+        unsupported=dict(body,request_id=str(uuid.uuid4()),action='delete')
         self.assertEqual(route.call('/api/book-decisions',unsupported)[0],400)
         self.assertIsNone(self.service.decisions.store.get(unsupported['request_id']),'Unwired actions cannot be accepted')
         original={str(path):path.read_bytes() for path in self.sources}
@@ -91,6 +91,53 @@ class SourceFolderDispatchTests(unittest.TestCase):
         self.assertEqual(route.call('/api/book-decisions',body)[1]['decision']['state'],'applied')
         self.assertEqual(self.service.jobs.status()['jobs'],[],'Saving a name never starts a producer')
         self.assertEqual({str(path):path.read_bytes() for path in self.sources},original)
+
+    def test_all_six_saved_decision_routes_accept_during_real_worker_locks_and_reconcile(self):
+        import uuid
+        from decision_contract import effects,file_identity,file_fingerprint
+        from durable_decisions import digest
+        from decision_runtime import DecisionRuntime
+        from test_merge_service import MergeTests
+        from test_merge_http import MergeHTTPTests
+        for action in ('names','review','tracks','metadata_choices','approve','file_review'):
+            with self.subTest(action=action):
+                fixture=MergeTests();fixture.setUp()
+                route=MergeHTTPTests();route.setUp();route.server.inventory=fixture.inv;route.server.merge=fixture.service
+                release=threading.Event();entered=threading.Event();holder=None
+                try:
+                    row=fixture.inv.candidates('Audiobooks')['rows'][0];book=row['id'];revision=row['revision'];fingerprint=row['fingerprint']
+                    snapshot=fixture.service.reviews.metadata_questions(row,fixture.service.reviews._context(row))
+                    choices=[{'question_id':question['id'],'mode':'unresolved'} for question in snapshot['questions']]
+                    payload={'names':{'title':'Durably retained private title'}} if action=='names' else {'review':fixture.review,'approve':False,'names_row_only':True} if action=='review' else {
+                        'order':fixture.service.reviews.enrich(row)['track_order'],'included':fixture.service.reviews.enrich(row)['included'],
+                        'source_coverage_confirmed':True,'order_confirmed':True,'chapters':False} if action=='tracks' else {'signature':snapshot['signature'],'choices':choices} if action=='metadata_choices' else {
+                        'title':'Private approved title','author':'Private Author','names':None,'without_missing':False,'choice':None,'path':None}
+                    if action=='file_review':
+                        source=fixture.sources[0];facts=source.stat();payload={'path':str(source),'size':facts.st_size,'modified':str(facts.st_mtime_ns),'review':fixture.review}
+                        book=file_identity('Audiobooks',str(source));revision=0;fingerprint=file_fingerprint('Audiobooks',str(source),facts.st_size,str(facts.st_mtime_ns))
+                    body={'library':'Audiobooks','id':book,'revision':revision,'fingerprint':fingerprint,'action':action,'payload':payload,'request_id':str(uuid.uuid4()),'predecessor':None}
+                    original=[path.read_bytes() for path in fixture.sources]
+                    def hold():
+                        with fixture.service.operation_lock,fixture.service.reviews.lock,fixture.inv.group_lock,fixture.service.jobs._lock:entered.set();release.wait(5)
+                    holder=threading.Thread(target=hold);holder.start();self.assertTrue(entered.wait(2))
+                    start=time.monotonic();answer=route.call('/api/book-decisions',body)
+                    self.assertLess(time.monotonic()-start,1.0);self.assertTrue(holder.is_alive());self.assertEqual(answer[0],202,answer)
+                    receipt=answer[1]['decision'];expected=digest({'book_id':book,'action':action,'revision':revision,'fingerprint':fingerprint,'payload':payload,'effects':effects(action,payload),'predecessor':None})
+                    self.assertEqual(receipt['request_id'],body['request_id']);self.assertEqual(receipt['payload_sha256'],expected)
+                    status=route.call('/api/book-decisions/status',{'request_id':body['request_id']});self.assertEqual(status[1]['decision']['payload_sha256'],expected)
+                    restored=route.call('/api/book-decisions/book',{'library':'Audiobooks','id':book});self.assertEqual(restored[0],200)
+                    fixture.service.decisions.close();release.set();holder.join(5);self.assertFalse(holder.is_alive())
+                    fixture.service.decisions=DecisionRuntime(fixture.service)
+                    with patch.object(fixture.service,'_approval_result',side_effect=ValueError('Private source-identity review required')):fixture.service.decisions.run_once()
+                    final=fixture.service.decisions.store.get(body['request_id'],include_payload=True)
+                    self.assertEqual(final['state'],'needs_review' if action=='approve' else 'applied',final)
+                    if action=='approve':self.assertEqual(final['payload'],payload);self.assertIn('Private source-identity',final['reason'])
+                    self.assertEqual(fixture.service.jobs.status()['jobs'],[]);self.assertEqual([path.read_bytes() for path in fixture.sources],original)
+                    replay=route.call('/api/book-decisions',body);self.assertEqual(replay[1]['decision']['payload_sha256'],expected);self.assertEqual(replay[1]['decision']['state'],final['state'])
+                finally:
+                    release.set()
+                    if holder:holder.join(5)
+                    fixture.tearDown();route.tearDown()
     def test_source_folder_dispatches_while_unrelated_worker_holds_group_lock(self):
         row=self.service.reviews._row('Audiobooks',self.inv.candidates('Audiobooks')['rows'][0]['id'])
         with connect(self.inv.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')

@@ -1,0 +1,67 @@
+test_durable_return_king_actual_approve_has_atomic_job_receipt (test_shared_routing.CuratedApprovalTests.test_durable_return_king_actual_approve_has_atomic_job_receipt) ... ERROR
+test_durable_two_towers_actual_approve_has_atomic_job_receipt (test_shared_routing.CuratedApprovalTests.test_durable_two_towers_actual_approve_has_atomic_job_receipt) ... ERROR
+
+======================================================================
+ERROR: test_durable_return_king_actual_approve_has_atomic_job_receipt (test_shared_routing.CuratedApprovalTests.test_durable_return_king_actual_approve_has_atomic_job_receipt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_shared_routing.py", line 378, in test_durable_return_king_actual_approve_has_atomic_job_receipt
+    def test_durable_return_king_actual_approve_has_atomic_job_receipt(self):self.approve(3,durable=True)
+                                                                             ~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_shared_routing.py", line 354, in approve
+    approved=service.approve_book(row['id'],row['revision'],**extra)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 3899, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 3905, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 3947, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 4057, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 4374, in approve_automatic
+    job=self.jobs.enqueue(manifest,approval_context=(fresh['id'],fresh['revision'],context,approved),**decision_args)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\audio_jobs.py", line 729, in enqueue
+    raise ValueError('Saved author rule requires its explicit English-name decision')
+ValueError: Saved author rule requires its explicit English-name decision
+
+======================================================================
+ERROR: test_durable_two_towers_actual_approve_has_atomic_job_receipt (test_shared_routing.CuratedApprovalTests.test_durable_two_towers_actual_approve_has_atomic_job_receipt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_shared_routing.py", line 379, in test_durable_two_towers_actual_approve_has_atomic_job_receipt
+    def test_durable_two_towers_actual_approve_has_atomic_job_receipt(self):self.approve(2,durable=True)
+                                                                            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_shared_routing.py", line 354, in approve
+    approved=service.approve_book(row['id'],row['revision'],**extra)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 3899, in approve_book
+    try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+               ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 3905, in _approve_values
+    if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
+                            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 3947, in _approve_book
+    try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 4057, in _approve_once
+    try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 189, in locked
+    with self.operation_lock:return method(self,*args,**kwargs)
+                                    ~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\merge_service.py", line 4374, in approve_automatic
+    job=self.jobs.enqueue(manifest,approval_context=(fresh['id'],fresh['revision'],context,approved),**decision_args)
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\audio_jobs.py", line 729, in enqueue
+    raise ValueError('Saved author rule requires its explicit English-name decision')
+ValueError: Saved author rule requires its explicit English-name decision
+
+----------------------------------------------------------------------
+Ran 2 tests in 3.892s
+
+FAILED (errors=2)

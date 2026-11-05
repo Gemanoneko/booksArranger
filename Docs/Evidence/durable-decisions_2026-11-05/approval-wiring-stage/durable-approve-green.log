@@ -1,0 +1,7 @@
+test_durable_return_king_actual_approve_has_atomic_job_receipt (test_shared_routing.CuratedApprovalTests.test_durable_return_king_actual_approve_has_atomic_job_receipt) ... ok
+test_durable_two_towers_actual_approve_has_atomic_job_receipt (test_shared_routing.CuratedApprovalTests.test_durable_two_towers_actual_approve_has_atomic_job_receipt) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 4.061s
+
+OK

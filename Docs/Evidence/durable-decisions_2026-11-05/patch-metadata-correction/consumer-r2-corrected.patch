@@ -1,0 +1,535 @@
+diff --git a/durable_decisions.py b/durable_decisions.py
+--- a/durable_decisions.py
++++ b/durable_decisions.py
+@@ -71,6 +71,8 @@
+     return {'schema':SCHEMA,'request_id':row['request_id'],'book_id':row['book_id'],
+             'action':row['action'],'sequence':row['seq'],'accepted_utc':row['accepted_utc'],
+             'state':row['state'],'reason':row['reason'],'payload_sha256':row['payload_hash'],
++            'observed_revision':row['observed_revision'],'source_fingerprint':row['source_fingerprint'],
++            'predecessor':row['predecessor'],'effects':json.loads(row['effects']),
+             'result':json.loads(row['result']) if row['result'] else None,
+             'applied_revision':row['applied_revision']}
+ 
+@@ -114,7 +116,10 @@
+             elif predecessor!=(head['request_id'] if head else None):reason='A newer decision was accepted first; review these saved choices before applying them'
+             compatible=not reason
+             inherited=json.loads(head['effects']) if head else {}
+-            dependencies={key:owner for key,owner in inherited.items() if key!='approval'} if action=='approve' else {}
++            # An explicit overlapping value is fulfilled by this approval's own
++            # snapshot. Only unresolved disjoint effects require their original
++            # owner; a fully superseded owner can never become applied.
++            dependencies={key:owner for key,owner in inherited.items() if key!='approval' and key not in effect_keys} if action=='approve' else {}
+             db.execute('INSERT INTO book_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                        (request_id,book_id,action,seq,predecessor,revision,fingerprint,encoded,payload_hash,
+                         packed(effect_keys),packed(dependencies),utc(),'accepted' if compatible else 'needs_review',reason,None,None,None))
+@@ -148,6 +153,18 @@
+             result=dict(row);result['effects']=json.loads(result['effects'])
+             return result
+ 
++    def book(self,book_id):
++        """Only effective unresolved choices overlay a reopened book editor."""
++        with connect(self.database) as db:
++            saved=db.execute('SELECT * FROM book_decision_heads WHERE book_id=?',(book_id,)).fetchone()
++            if saved is None:return {'head':None,'decisions':[]}
++            head=dict(saved);head['effects']=json.loads(head['effects']);owners=set(head['effects'].values());items=[]
++            for row in db.execute("SELECT * FROM book_decisions WHERE book_id=? AND state IN ('accepted','applying','needs_review') ORDER BY seq",(book_id,)):
++                if row['request_id'] not in owners:continue
++                item=receipt(row);item['payload']=json.loads(row['payload']) if row['payload'] else None
++                item['active_effects']=sorted(key for key,owner in head['effects'].items() if owner==row['request_id']);items.append(item)
++            return {'head':head,'decisions':items}
++
+     def pending(self):
+         """Current compatible cumulative effects, in original acceptance order."""
+         with connect(self.database) as db:
+@@ -158,7 +175,7 @@
+                 for row in db.execute("SELECT * FROM book_decisions WHERE book_id=? AND state IN ('accepted','applying') ORDER BY seq",(head['book_id'],)):
+                     if row['request_id'] not in owners:continue
+                     dependencies=json.loads(row['dependencies'])
+-                    if row['action']=='approve':
++                    if row['action']=='approve' and json.loads(head['effects']).get('approval')==row['request_id']:
+                         dependency_ids=set(dependencies.values())-{row['request_id']}
+                         if any((db.execute('SELECT state FROM book_decisions WHERE request_id=?',(key,)).fetchone() or ['missing'])[0]!='applied' for key in dependency_ids):continue
+                     item=dict(row);item['payload']=json.loads(item['payload']);item['generation']=head['generation']
+@@ -208,6 +225,23 @@
+             raise DecisionChanged('A newer saved decision changed this application generation')
+         return row,head
+ 
++    def check_current(self,db,current):
++        row,head=self.check(db)
++        if row['book_id']!=current['id'] or row['source_fingerprint']!=current['fingerprint']:
++            raise DecisionChanged('Saved decision does not bind this current book/source generation')
++        # Only this compatible head's predecessor chain can explain revision
++        # advancement. An unrelated same-source legacy edit is not a rebase.
++        revisions=db.execute('''WITH RECURSIVE chain(request_id,predecessor,observed_revision,applied_revision) AS (
++          SELECT request_id,predecessor,observed_revision,applied_revision FROM book_decisions WHERE request_id=?
++          UNION SELECT d.request_id,d.predecessor,d.observed_revision,d.applied_revision FROM book_decisions d
++            JOIN chain c ON d.request_id=c.predecessor WHERE d.book_id=? AND d.source_fingerprint=?
++        ) SELECT MAX(revision) FROM (
++          SELECT observed_revision AS revision FROM chain UNION ALL SELECT applied_revision FROM chain
++          UNION ALL SELECT json_extract(s.result,'$.candidate_revision') FROM book_decision_steps s JOIN chain c ON s.request_id=c.request_id
++        )''',(head['request_id'],row['book_id'],row['source_fingerprint'])).fetchone()[0]
++        if current['revision']!=revisions:raise DecisionChanged('Book revision changed outside this saved decision’s committed steps')
++        return row,head
++
+     def prior_step(self,db,name,inputs):
+         self.check(db)
+         if not isinstance(name,str) or not name or len(name)>128:raise ValueError('Invalid decision step')
+@@ -218,10 +252,14 @@
+ 
+     def bind_names(self,db,book_id,fingerprint,values):
+         row,head=self.check(db)
+-        if row['book_id']!=book_id or row['action']!='names' or row['source_fingerprint']!=fingerprint:
++        projection=row['action']=='approve' and json.loads(head['effects']).get('approval')!=self.request_id
++        if row['book_id']!=book_id or row['action']!='names' and not projection or row['source_fingerprint']!=fingerprint:
+             raise DecisionChanged('Saved names do not bind this exact book/source generation')
+         payload=json.loads(row['payload']) if row['payload'] else {}
+-        original=payload.get('names')
++        original=dict(payload.get('names') or {})
++        if projection:
++            for field in ('title','author'):
++                if payload.get(field) is not None and str(payload[field]).strip():original[field]=payload[field]
+         if not isinstance(original,dict):raise DecisionChanged('Saved names payload is unavailable')
+         owned={key.split('.',1)[1] for key,owner in json.loads(head['effects']).items() if owner==self.request_id and key.startswith('names.')}
+         if values!={key:value for key,value in original.items() if key in owned}:
+diff --git a/audio_jobs.py b/audio_jobs.py
+--- a/audio_jobs.py
++++ b/audio_jobs.py
+@@ -658,8 +658,11 @@
+             except Exception:
+                 continue  # resume() repeats this exact check before any new work
+ 
+-    def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None,retry_context=None):
++    def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None,retry_context=None,decision=None,decision_rules=None):
+         """Freeze JSON-safe authoritative server manifest. Never HTTP path input."""
++        if decision is not None and (approval_context is None or any(value is not None for value in (replacement_context,repair_context,retry_context))):
++            raise ValueError('Saved approval requires its private approval checkpoint')
++        if decision_rules is not None and decision is None:raise ValueError('Saved approval rules require their decision boundary')
+         frozen = json.loads(json.dumps(manifest, ensure_ascii=False, allow_nan=False))
+         if not isinstance(frozen, dict):
+             raise ValueError("Manifest must be an object")
+@@ -713,6 +716,23 @@
+             with self._db() as db:
+                 if not db.in_transaction:db.execute('BEGIN IMMEDIATE')
+                 reacquire_sources.require_admission(db,frozen['candidate_id'])
++                if decision is not None:
++                    group=db.execute('SELECT id,revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(frozen['candidate_id'],)).fetchone()
++                    saved,_=decision.check_current(db,dict(group)) if group else decision.check(db)
++                    if saved['action']!='approve' or saved['book_id']!=frozen['candidate_id'] or not group or saved['source_fingerprint']!=group['fingerprint']:
++                        raise ValueError('Saved approval does not bind this exact current book/source generation')
++                    if decision_rules is not None:
++                        import author_rules,local_identity
++                        payload=json.loads(saved['payload'])
++                        typed=payload.get('author')
++                        if not isinstance(decision_rules,list) or len(decision_rules)>1 or decision_rules and (not isinstance(typed,str) or local_identity.script(typed)!='latin'):
++                            raise ValueError('Saved author rule requires its explicit English-name decision')
++                        for rule in decision_rules:
++                            if not isinstance(rule,dict) or set(rule)!={'kind','credit','target','title'} or rule['kind'] not in ('same_as','keep'):
++                                raise ValueError('Invalid saved author-rule plan')
++                            if any(not isinstance(rule[field],str) or len(rule[field])>2000 for field in ('credit','title')):raise ValueError('Invalid saved author-rule text')
++                            if rule['kind']=='same_as' and rule['target']!=local_identity.surname_first(typed)[0] or rule['kind']=='keep' and (rule['target'] is not None or author_rules.key(rule['credit'])!=author_rules.key(typed)):
++                                raise ValueError('Saved author rule differs from the accepted name')
+                 if retry_context is not None:
+                     parent,group,context=retry_context[:3]
+                     expected_destination=retry_context[3] if len(retry_context)>3 else None
+@@ -764,6 +784,15 @@
+                 import publication_reuse
+                 if publication_reuse.task(frozen):publication_reuse.admit(db,frozen)
+                 db.execute("INSERT INTO audio_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (frozen["job_id"], encoded, digest, "pending", "queued", None, "{}", None, "", timestamp, timestamp))
++                if decision is not None:
++                    rules=[]
++                    if decision_rules:
++                        author_rules.setup(db)
++                        for rule in decision_rules:
++                            rules.append(author_rules.append(db,rule['kind'],rule['credit'],target=rule['target'] or '',actor='user',source='Sergei (English spelling, ruling 39)',question=rule['title']))
++                    decision.commit_step(db,'enqueue',{'candidate_id':frozen['candidate_id'],'manifest_sha256':digest},
++                                         {'outcome':'queued','candidate_id':frozen['candidate_id'],'job_id':frozen['job_id'],'author_rule_ids':rules},
++                                         final=True,applied_revision=frozen['candidate_revision'])
+             return frozen["job_id"]
+ 
+     def _step_started(self, job_id, attempt, phase):
+diff --git a/decision_effects.py b/decision_effects.py
+new file mode 100644
+--- /dev/null
++++ b/decision_effects.py
+@@ -0,0 +1,59 @@
++"""Request-bound receipts for the existing book-review transactions."""
++import copy
++import json
++from durable_decisions import DecisionChanged,packed
++from scanner import connect
++
++
++class Effect:
++    def __init__(self,application,step,*,actions,final=False):
++        self.application=application;self.step=step;self.actions=frozenset(actions);self.final=final
++        self.inputs=None
++
++    def bind(self,operation,values):
++        if self.inputs is None:self.inputs={'request_id':self.application.request_id,'step':self.step,'operation':operation,'values':copy.deepcopy(values)}
++        elif operation==self.inputs['operation']:
++            if packed(values)!=packed(self.inputs['values']):raise DecisionChanged('Decision effect was reused with changed mutation values')
++        elif not (operation=='context' or self.inputs['operation']=='metadata_choices' and operation=='review'):
++            raise DecisionChanged('Decision effect was reused by a different consumer')
++
++    def _payload(self,saved):
++        if self.inputs is None:raise ValueError('Decision effect requires its exact semantic mutation values')
++        payload=json.loads(saved['payload'])
++        action=saved['action'];values=self.inputs['values']
++        if action in ('review','tracks','metadata_choices'):
++            # Endpoint payload is immutable; compare all caller-controlled fields,
++            # including fields whose application fills an existing default.
++            defaults={'review':{'approve':False,'manual_note':'','proposal_id':None,'cover_id':None,'names_row_only':False},
++                      'tracks':{'evidence_note':''},'metadata_choices':{'manual_note':''}}[action]
++            expected=dict(defaults,**payload)
++            public={key:value for key,value in values.items() if not key.startswith('_')}
++            if packed(expected)!=packed(public):raise DecisionChanged('Book-review values differ from the accepted decision payload')
++            if action=='review' and (values.get('_actor')!='user' or values.get('_automatic_facts') is not None or values.get('_user_approval')):
++                raise DecisionChanged('A saved user review cannot authorize private approval evidence')
++
++    def before(self,db,row):
++        saved,_=self.application.check_current(db,row)
++        self._payload(saved)
++        if saved['action'] not in self.actions or saved['book_id']!=row['id'] or saved['source_fingerprint']!=row['fingerprint']:
++            raise DecisionChanged('Saved decision does not bind this book-review operation')
++        current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(row['id'],)).fetchone()
++        if not current or current['revision']!=row['revision'] or current['fingerprint']!=row['fingerprint']:
++            raise DecisionChanged('Book changed before its saved decision could commit')
++        return self.application.prior_step(db,self.step,self.inputs)
++
++    def replay(self,row,operation=None,values=None):
++        if operation is not None:self.bind(operation,values)
++        with connect(self.application.store.database) as db:
++            db.execute('BEGIN')
++            return self.before(db,row)
++
++    def commit(self,db,row,revision,**result):
++        return self.application.commit_step(db,self.step,self.inputs,
++            dict(result,candidate_id=row['id'],candidate_revision=revision),
++            final=self.final,applied_revision=revision if self.final else None)
++
++
++def approval(press,step,*,final=False):
++    application=(press or {}).get('decision')
++    return Effect(application,step,actions=('approve',),final=final) if application is not None else None
+diff --git a/review_backend.py b/review_backend.py
+--- a/review_backend.py
++++ b/review_backend.py
+@@ -170,20 +170,29 @@
+             saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(row['id'],)).fetchone()
+         return json.loads(saved['data']) if saved and saved['revision']==row['revision'] else {}
+ 
+-    def _write(self,row,ctx,bump=True,manual_source=None,decision_record=None):
++    def _write_in_transaction(self,db,row,ctx,bump=True,manual_source=None,decision_record=None,effect=None):
++        import reacquire_sources
++        marker=reacquire_sources.marker(db,row['id'])
++        if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
++        current=db.execute('SELECT revision FROM book_groups WHERE id=?',(row['id'],)).fetchone()
++        if not current or current['revision']!=row['revision']:raise ValueError('Candidate changed; reload evidence before reviewing')
++        revision=row['revision']+int(bump)
++        if bump:db.execute('UPDATE book_groups SET revision=?,approved=0 WHERE id=?',(revision,row['id']))
++        db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(row['id'],revision,json.dumps(ctx,ensure_ascii=False)))
++        manual_metadata.append(db,manual_source)
++        if decision_record is not None:
++            import metadata_choices
++            metadata_choices.append(db,decision_record,applied_revision=revision)
++        if effect is not None:effect.commit(db,row,revision,outcome='saved')
++
++    def _write(self,row,ctx,bump=True,manual_source=None,decision_record=None,effect=None,effect_values=None):
++        if effect is not None:
++            values=effect_values if effect_values is not None else {'context':{key:value for key,value in ctx.items() if key not in ('metadata_utc','track_utc')},'bump':bump}
++            effect.bind('context',values)
+         with self.inventory.group_lock,connect(self.inventory.database) as db:
+-            import reacquire_sources
+-            marker=reacquire_sources.marker(db,row['id'])
+-            if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
+-            current=db.execute('SELECT revision FROM book_groups WHERE id=?',(row['id'],)).fetchone()
+-            if not current or current['revision']!=row['revision']:raise ValueError('Candidate changed; reload evidence before reviewing')
+-            revision=row['revision']+int(bump)
+-            if bump:db.execute('UPDATE book_groups SET revision=?,approved=0 WHERE id=?',(revision,row['id']))
+-            db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(row['id'],revision,json.dumps(ctx,ensure_ascii=False)))
+-            manual_metadata.append(db,manual_source)
+-            if decision_record is not None:
+-                import metadata_choices
+-                metadata_choices.append(db,decision_record,applied_revision=revision)
++            if effect is not None:db.execute('BEGIN IMMEDIATE')
++            prior=effect.before(db,row) if effect is not None else None
++            if prior is None:self._write_in_transaction(db,row,ctx,bump,manual_source,decision_record,effect)
+         return self.enrich(self._row('Audiobooks',row['id']))
+ 
+     def _source_root(self,row,library='Audiobooks'):
+@@ -326,17 +335,18 @@
+             entered=manual_metadata.records(db,row)
+             return metadata_choices.present(db,row,matching.get('proposals') or [],entered,conflicts)
+ 
+-    def choose_metadata(self,library,id,revision,signature,choices,manual_note=''):
++    def choose_metadata(self,library,id,revision,signature,choices,manual_note='',effect=None):
+         """Save an explicit evidence-scoped draft choice; never approve or queue."""
+         import metadata_choices
+         with self.lock:
+             try:row=self._row(library,id,revision)
+             except ValueError:raise metadata_choices.ChoiceChanged() from None
++            if effect is not None and effect.replay(row,'metadata_choices',{'signature':signature,'choices':choices,'manual_note':manual_note}) is not None:return {'row':self.enrich(row)}
+             ctx=self._context(row);snapshot=self.metadata_questions(row,ctx)
+             prepared=metadata_choices.prepare(row,snapshot,signature,choices,actor='user',note=manual_note)
+             if prepared['record']['choices'] and all(choice['mode']=='unresolved' for choice in prepared['record']['choices']):
+                 held=copy.deepcopy(ctx);held['metadata_approved']=False
+-                saved=self._write(row,held,decision_record=prepared['record'])
++                saved=self._write(row,held,decision_record=prepared['record'],effect=effect)
+                 questions=saved.get('metadata_questions') or self.metadata_questions(saved,self._context(saved))
+                 return {'row':saved,'unresolved_count':questions['unresolved_count'],'decision':prepared['record']}
+             review=copy.deepcopy(row.get('review') or {})
+@@ -347,7 +357,7 @@
+             review.update(patch)
+             saved=self.save(library,id,revision,review,approve=False,manual_note=manual_note or ctx.get('manual_note',''),
+                 proposal_id=ctx.get('proposal_id') or None,cover_id=ctx.get('cover_id') or None,actor='user',
+-                capture_manual=bool(prepared['corrected_values']),manual_source_values=prepared['corrected_values'],decision_record=prepared['record'])
++                capture_manual=bool(prepared['corrected_values']),manual_source_values=prepared['corrected_values'],decision_record=prepared['record'],effect=effect)
+             questions=saved.get('metadata_questions') or self.metadata_questions(saved,self._context(saved))
+             return {'row':saved,'unresolved_count':questions['unresolved_count'],'decision':prepared['record']}
+ 
+@@ -587,13 +597,15 @@
+             draft['organization_policy']='books-hierarchy-v2'
+             return propose(row['members'][0]['path'],self._output_root(row,draft,library),'audiobook',row['metadata'],draft,automatic_facts=facts if isinstance(names,dict) else self._context(row).get('metadata_facts'))
+ 
+-    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None,user_approval=False,names_row_only=False):
++    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None,user_approval=False,names_row_only=False,effect=None):
+         """user_approval: Sergei's Approve through the private admission (MergeService.approve_book, ruling 6b): the
+         user actor may carry the admission checkpoint and standing facts, and open metadata questions do not refuse.
+         names_row_only (ruling 40; Senua's 0.22.3 review, M3): a book's names are edited on its row only, so the six name
+         fields keep the saved draft's values and are no part of the "Entered by you" source this Save records."""
+         with self.lock:
+             row=self._row(library,id,revision); ctx=self._context(row); self._actor(actor,manual_note)
++            if effect is not None and effect.replay(row,'review',{'review':review,'approve':approve,'manual_note':manual_note,'proposal_id':proposal_id,'cover_id':cover_id,'names_row_only':names_row_only,
++                    '_actor':actor,'_evidence':evidence,'_automatic_facts':automatic_facts,'_automatic_pending':automatic_pending,'_user_approval':user_approval,'_capture_manual':capture_manual,'_manual_source_values':manual_source_values}) is not None:return self.enrich(row)
+             if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid canonical metadata')
+             review=copy.deepcopy(review)
+             if names_row_only:
+@@ -657,15 +669,28 @@
+             if approve and not preview['path']:raise ValueError(preview['reason'])
+             if proposal_id is not None and not any(p['id']==proposal_id for p in self.matching.get(id,ctx.get('matching',{})).get('proposals',[])):raise ValueError('Unknown metadata proposal')
+             changed=review!=row.get('review') or manual_note!=ctx.get('manual_note') or trial['cover_id']!=ctx.get('cover_id') or records!=ctx.get('metadata_evidence',[])
++            def prepared(fresh):
++                if automatic_facts is not None:ctx['metadata_facts']=copy.deepcopy(automatic_facts)
++                else:ctx.pop('metadata_facts',None);ctx.pop('duplicate_review',None)
++                ctx.update(manual_note=manual_note,proposal_id=proposal_id,cover_id=trial['cover_id'],metadata_actor=actor,metadata_utc=utc(),metadata_evidence=records,metadata_approved=bool(approve and automatic_pending is None))
++                ctx.pop('manual_metadata_acceptance',None)
++                if actor=='user' and approve:ctx['manual_metadata_acceptance']=manual_metadata.acceptance(fresh,review)
++                if user_approval:ctx.pop('names_approval_pending',None)
++                if changed:ctx.update(source_coverage_confirmed=False,order_confirmed=False,source_hashes={})
++                return manual_metadata.capture(fresh,manual_source_values if manual_source_values is not None else review,manual_note) if actor=='user' and capture_manual else None
++            if effect is not None:
++                # The group review, its context/evidence, and the application
++                # receipt must not become separately committed crash states.
++                import groups
++                with self.inventory.group_lock,connect(self.inventory.database) as db:
++                    db.execute('BEGIN IMMEDIATE')
++                    if effect.before(db,row) is None:
++                        fresh=groups.save(db,self._source_root(row,library),id,revision,review,False)
++                        source=prepared(fresh)
++                        self._write_in_transaction(db,fresh,ctx,manual_source=source,decision_record=decision_record,effect=effect)
++                return self.enrich(self._row(library,id))
+             fresh=self.inventory.save_candidate(library,id,revision,review,False)
+-            if automatic_facts is not None:ctx['metadata_facts']=copy.deepcopy(automatic_facts)
+-            else:ctx.pop('metadata_facts',None);ctx.pop('duplicate_review',None)
+-            ctx.update(manual_note=manual_note,proposal_id=proposal_id,cover_id=trial['cover_id'],metadata_actor=actor,metadata_utc=utc(),metadata_evidence=records,metadata_approved=bool(approve and automatic_pending is None))
+-            ctx.pop('manual_metadata_acceptance',None)
+-            if actor=='user' and approve:ctx['manual_metadata_acceptance']=manual_metadata.acceptance(fresh,review)
+-            if user_approval:ctx.pop('names_approval_pending',None)
+-            if changed:ctx.update(source_coverage_confirmed=False,order_confirmed=False,source_hashes={})
+-            return self._write(fresh,ctx,manual_source=manual_metadata.capture(fresh,manual_source_values if manual_source_values is not None else review,manual_note) if actor=='user' and capture_manual else None,decision_record=decision_record)
++            return self._write(fresh,ctx,manual_source=prepared(fresh),decision_record=decision_record)
+ 
+     def match(self,library,id,revision):
+         with self.lock:
+@@ -691,11 +716,12 @@
+             worker=threading.Thread(target=lookup,daemon=True);self.workers[id]=worker;worker.start()
+             return copy.deepcopy(self.matching[id])
+ 
+-    def covers(self,library,id,revision,all_embedded=False,stop=None):
++    def covers(self,library,id,revision,all_embedded=False,stop=None,effect=None):
+         with self.lock:
+             stop=stop or threading.Event()
+             if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
+             row=self._row(library,id,revision);ctx=self._context(row);choices=[]
++            if effect is not None and effect.replay(row,'covers',{'all_embedded':all_embedded}) is not None:return self.enrich(row)
+             def add(data,label):
+                 if len(data)>MAX_COVER:raise ValueError('Cover exceeds8 MB')
+                 kind=image_kind(data);hash=hashlib.sha256(data).hexdigest();cover_id=str(uuid.uuid5(uuid.NAMESPACE_URL,id+hash))
+@@ -744,7 +770,7 @@
+             changed=choices!=ctx.get('cover_choices',[])
+             if changed:ctx['cover_choices']=choices
+             if ctx.get('cover_id') and not any(c['id']==ctx['cover_id'] for c in choices):ctx.update(metadata_approved=False,source_hashes={})
+-            return self._write(row,ctx,bump=bool(changed and ctx.get('cover_id')))
++            return self._write(row,ctx,bump=bool(changed and ctx.get('cover_id')),effect=effect)
+ 
+     def cover_file(self,id):
+         try:
+@@ -824,10 +850,11 @@
+                 if digest(cached)!=hash:raise ValueError('Cached source cover bytes changed')
+         return {'id':id,'thumbnail_url':'/api/cover?id='+id,'label':'Embedded/source cover — edition unverified','status':'Source cover','sha256':hash}
+ 
+-    def tracks(self,library,id,revision,order,included,source_coverage_confirmed,order_confirmed,chapters,actor='user',evidence_note='',stop=None,keep_pending=False):
++    def tracks(self,library,id,revision,order,included,source_coverage_confirmed,order_confirmed,chapters,actor='user',evidence_note='',stop=None,keep_pending=False,effect=None):
+         """keep_pending: Sergei's Approve (MergeService.approve_book) keeps its pending admission through this step."""
+         with self.lock:
+             row=self._row(library,id,revision);ctx=self._context(row);keys=self._keys(row);self._actor(actor,evidence_note)
++            if effect is not None and effect.replay(row,'tracks',{'order':order,'included':included,'source_coverage_confirmed':source_coverage_confirmed,'order_confirmed':order_confirmed,'chapters':chapters,'evidence_note':evidence_note}) is not None:return self.enrich(row)
+             if actor=='user' and not keep_pending:ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
+             if not isinstance(order,list) or len(order)!=len(keys) or set(order)!=set(keys) or not isinstance(included,list) or len(set(included))!=len(included) or not set(included)<=set(keys):raise ValueError('Review the exact known member list and order')
+             if any(type(v)is not bool for v in (source_coverage_confirmed,order_confirmed,chapters)):raise ValueError('Track confirmations must be explicit booleans')
+@@ -847,7 +874,7 @@
+                     if identity(before)!=identity(after):raise ValueError('Source changed — review required')
+                     hashes[key]={'sha256':hash,'size':before.st_size,'modified':str(before.st_mtime_ns),'dev':before.st_dev,'ino':before.st_ino}
+             ctx.update(track_order=order,included=included,source_coverage_confirmed=source_coverage_confirmed,order_confirmed=order_confirmed,chapters=chapters,track_actor=actor,track_utc=utc(),track_evidence=evidence_note,source_hashes=hashes)
+-            return self._write(row,ctx)
++            return self._write(row,ctx,effect=effect)
+ 
+     def source_chapter_plan(self,row,member,source,stop,*,joined):
+         from audio_pipeline import source_chapters,verified_source_chapters,ChapterValidationError
+diff --git a/tests/test_action_queue.py b/tests/test_action_queue.py
+--- a/tests/test_action_queue.py
++++ b/tests/test_action_queue.py
+@@ -126,6 +126,68 @@
+         self.assertIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
+         newer=self.accept('tracks',['tracks'],approval['request_id'])
+         self.assertEqual(newer['state'],'accepted');self.assertEqual(self.store.get(approval['request_id'])['state'],'needs_review')
++
++    def test_approve_overlapping_names_does_not_depend_on_its_superseded_owner(self):
++        names=self.accept(effects=['names.title','names.series'])
++        approval=self.accept('approve',['approval','names.title','names.series'],names['request_id'])
++        self.assertEqual(self.store.get(names['request_id'])['state'],'superseded')
++        self.assertIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
++
++    def test_approve_still_waits_for_disjoint_predecessor_names(self):
++        names=self.accept(effects=['names.title','names.series'])
++        approval=self.accept('approve',['approval','names.title'],names['request_id'])
++        self.assertEqual(self.store.get(names['request_id'])['state'],'accepted')
++        self.assertNotIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
++        self.finish(names['request_id'],self.store.head(self.book)['generation'])
++        self.assertIn(approval['request_id'],{item['request_id'] for item in self.store.pending()})
++
++    def test_new_approval_keeps_disjoint_names_from_an_older_approval_without_replaying_its_approve(self):
++        from scanner import connect
++        first=self.accept('approve',['approval','names.series'],payload={'names':{'series':'Accepted earlier series'}})
++        second=self.accept('approve',['approval','names.title'],first['request_id'],payload={'title':'Accepted later title'})
++        pending=self.store.pending();self.assertEqual([item['request_id'] for item in pending],[first['request_id']])
++        self.assertEqual(pending[0]['active_effects'],['names.series'])
++        scope=self.store.application(first['request_id'],self.store.head(self.book)['generation'])
++        with connect(self.database) as db:
++            db.execute('BEGIN IMMEDIATE');scope.bind_names(db,self.book,self.fp,{'series':'Accepted earlier series'})
++            scope.commit_step(db,'names',{}, {'outcome':'names_saved_approval_superseded'},final=True,applied_revision=1)
++        self.assertEqual([item['request_id'] for item in self.store.pending()],[second['request_id']])
++
++    def test_approval_enqueue_and_applied_receipt_share_one_commit(self):
++        import json
++        import groups
++        from durable_decisions import Application
++        from scanner import connect
++        queue=audio_jobs.AudioJobs(self.database,None,lambda value:True,lambda value:True);self.addCleanup(queue.close)
++        accepted=self.accept('approve',['approval'],payload={'author':'William Gibson'});scope=self.store.application(accepted['request_id'],self.store.head(self.book)['generation'])
++        checkpoint={'automatic_pending':{'matcher_version':'private','work_id':'private'},'metadata_approved':True}
++        approved={'metadata_approved':True,'automatic_approval':{'matcher_version':'private','work_id':'private'}}
++        with connect(self.database) as db:
++            groups.setup(db)
++            db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence,review) VALUES(?,?,?,?,?,?,?)',(self.book,str(self.database.parent),self.book,1,self.fp,'{}','{}'))
++            db.execute('CREATE TABLE candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
++            db.execute('INSERT INTO candidate_context VALUES(?,?,?)',(self.book,1,json.dumps(checkpoint)))
++        manifest={'job_id':str(uuid.uuid4()),'candidate_id':self.book,'candidate_revision':1,
++                  'sources':[{'path':str(self.database.parent/'private.mp3'),'sha256':'b'*64,'fingerprint':{'size':1,'modified':'1'}}],
++                  'metadata':{'title':'Private book'},'destination':str(self.database.parent/'private.m4b'),'profile':'private','evidence':{},'cover':{}}
++        import local_identity
++        args={'approval_context':(self.book,1,checkpoint,approved),'decision':scope,
++              'decision_rules':[{'kind':'same_as','credit':'Уильям Гибсон','target':local_identity.surname_first('William Gibson')[0],'title':'Private book'}]}
++        with mock.patch.object(Application,'commit_step',side_effect=RuntimeError('private enqueue commit interruption')):
++            with self.assertRaisesRegex(RuntimeError,'private enqueue commit interruption'):queue.enqueue(manifest,**args)
++        with connect(self.database) as db:
++            self.assertEqual(db.execute('SELECT count(*) FROM audio_jobs').fetchone()[0],0)
++            self.assertEqual(json.loads(db.execute('SELECT data FROM candidate_context').fetchone()[0]),checkpoint)
++            self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='author_rules'").fetchone(),'Rule schema/write must roll back with the failed receipt')
++        self.assertEqual(self.store.get(accepted['request_id'])['state'],'accepted')
++        self.assertEqual(queue.enqueue(manifest,**args),manifest['job_id'])
++        receipt=self.store.get(accepted['request_id']);self.assertEqual(receipt['state'],'applied');self.assertEqual(receipt['result']['job_id'],manifest['job_id'])
++        with connect(self.database) as db:
++            self.assertEqual(db.execute('SELECT state FROM audio_jobs').fetchone()[0],'pending')
++            self.assertEqual(json.loads(db.execute('SELECT data FROM candidate_context').fetchone()[0]),approved)
++            self.assertEqual(db.execute('SELECT count(*) FROM author_rules').fetchone()[0],1)
++        self.assertEqual(self.store.purge_fulfilled(),1)
++        self.assertEqual(self.store.get(accepted['request_id'])['result']['job_id'],manifest['job_id'])
+ 
+     def test_replaced_payload_is_retained_until_explicit_successor_applies(self):
+         old=self.accept();new=self.accept(predecessor=old['request_id'],payload={'value':'new explicit choice'})
+diff --git a/tests/test_review_backend.py b/tests/test_review_backend.py
+--- a/tests/test_review_backend.py
++++ b/tests/test_review_backend.py
+@@ -51,6 +51,71 @@
+         self.assertIn('Original comment',manifest['comments']);self.assertIn('Narrator: Reader',manifest['comments'])
+         self.assertEqual(manifest['chapters'],[])
+         self.assertEqual(self.service.page(limit=1,status='ready')['total'],1)
++
++    def durable_effect(self,action,step,*,final=False,payload=None):
++        import uuid
++        from decision_effects import Effect
++        from durable_decisions import Decisions
++        store=Decisions(self.inventory.database)
++        saved=store.accept(request_id=str(uuid.uuid4()),book_id=self.row['id'],action=action,revision=self.row['revision'],fingerprint=self.row['fingerprint'],
++                           payload=payload if payload is not None else {'review':self.review},effects=[action],current_revision=self.row['revision'],current_fingerprint=self.row['fingerprint'])
++        scope=store.application(saved['request_id'],store.head(self.row['id'])['generation'])
++        return store,saved,Effect(scope,step,actions=(action,),final=final)
++
++    def test_durable_review_receipt_failure_rolls_back_group_context_and_manual_evidence(self):
++        from durable_decisions import Application
++        from unittest.mock import patch
++        store,saved,effect=self.durable_effect('review','review',final=True)
++        before=self.service._row('Audiobooks',self.row['id'])
++        with patch.object(Application,'commit_step',side_effect=RuntimeError('Private receipt interruption')):
++            with self.assertRaisesRegex(RuntimeError,'Private receipt interruption'):
++                self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,effect=effect)
++        after=self.service._row('Audiobooks',self.row['id'])
++        self.assertEqual((after['revision'],after.get('review')),(before['revision'],before.get('review')))
++        self.assertEqual(self.service._context(after),{});self.assertEqual(store.get(saved['request_id'])['state'],'accepted')
++        fresh=self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,effect=effect)
++        receipt=store.get(saved['request_id']);self.assertEqual(receipt['state'],'applied')
++        self.assertEqual(receipt['result']['candidate_revision'],fresh['revision']);self.assertEqual(fresh['review']['title'],'Book')
++
++    def test_durable_partial_review_reopens_without_repeating_its_committed_mutations(self):
++        from durable_decisions import Decisions
++        from decision_effects import Effect
++        store,saved,effect=self.durable_effect('review','review')
++        first=self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,effect=effect)
++        self.assertEqual(store.get(saved['request_id'])['state'],'applying')
++        restarted=Decisions(self.inventory.database)
++        scope=restarted.application(saved['request_id'],restarted.head(self.row['id'])['generation'])
++        replay=Effect(scope,'review',actions=('review',))
++        second=self.service.save('Audiobooks',first['id'],first['revision'],self.review,effect=replay)
++        self.assertEqual(second['revision'],first['revision']);self.assertEqual(second['review_context'],first['review_context'])
++        with connect(self.inventory.database) as db:
++            self.assertEqual(db.execute('SELECT count(*) FROM book_decision_steps WHERE request_id=?',(saved['request_id'],)).fetchone()[0],1)
++
++    def test_durable_track_receipt_failure_rolls_back_hashes_and_confirmations(self):
++        from durable_decisions import Application
++        from unittest.mock import patch
++        store,saved,effect=self.durable_effect('tracks','tracks',final=True,payload={'order':self.row['track_order'],'included':self.row['included'],'source_coverage_confirmed':True,'order_confirmed':True,'chapters':False})
++        def save():return self.service.tracks('Audiobooks',self.row['id'],self.row['revision'],self.row['track_order'],self.row['included'],True,True,False,effect=effect)
++        with patch.object(Application,'commit_step',side_effect=RuntimeError('Private track receipt interruption')):
++            with self.assertRaisesRegex(RuntimeError,'Private track receipt interruption'):save()
++        self.assertEqual(self.service._context(self.row),{});self.assertEqual(store.get(saved['request_id'])['state'],'accepted')
++        result=save();self.assertTrue(result['review_context']['source_coverage_confirmed'])
++        self.assertEqual(len(self.service._context(result)['source_hashes']),2)
++        self.assertEqual(store.get(saved['request_id'])['state'],'applied')
++
++    def test_durable_effect_rejects_different_values_and_unrelated_revision(self):
++        from durable_decisions import DecisionChanged
++        from decision_effects import Effect
++        store,saved,effect=self.durable_effect('review','review')
++        changed=dict(self.review,title='A different unaccepted title')
++        with self.assertRaises(DecisionChanged):self.service.save('Audiobooks',self.row['id'],self.row['revision'],changed,effect=effect)
++        self.assertEqual(store.get(saved['request_id'])['state'],'accepted')
++        scope=effect.application
++        fresh=self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,effect=Effect(scope,'review',actions=('review',)))
++        with self.assertRaises(DecisionChanged):self.service.save('Audiobooks',fresh['id'],fresh['revision'],changed,effect=Effect(scope,'review',actions=('review',)))
++        legacy=self.service.save('Audiobooks',fresh['id'],fresh['revision'],dict(self.review,genre='Fantasy'))
++        with self.assertRaises(DecisionChanged):self.service.save('Audiobooks',legacy['id'],legacy['revision'],self.review,effect=Effect(scope,'review',actions=('review',)))
++        self.assertEqual(store.get(saved['request_id'])['state'],'applying')
+ 
+     def test_source_change_invalidates_exact_revision(self):
+         row=self.ready();self.sources[0].write_bytes(b'changed private fixture content')

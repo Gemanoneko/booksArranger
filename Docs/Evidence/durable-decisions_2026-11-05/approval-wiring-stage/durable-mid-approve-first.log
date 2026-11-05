@@ -1,0 +1,6 @@
+test_durable_approve_recovers_after_metadata_commit_without_another_press (test_shared_routing.CuratedApprovalTests.test_durable_approve_recovers_after_metadata_commit_without_another_press) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 3.641s
+
+OK

@@ -314,7 +314,7 @@ class CuratedApprovalTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(dir=os.environ['BOOKS_QA_FIXTURE_ROOT']);self.addCleanup(self.temp.cleanup)
         self.base=Path(self.temp.name);self.audio=self.base/'a';self.audio.mkdir();self.sorted=self.base/'s';self.sorted.mkdir()
 
-    def approve(self,number,legacy=False):
+    def approve(self,number,legacy=False,durable=False,interrupt=None):
         import json,threading,shutil
         from pathlib import Path
         from unittest.mock import patch
@@ -343,10 +343,40 @@ class CuratedApprovalTests(unittest.TestCase):
             'sources':[{'kind':'publisher_or_journal','url':'https://publisher.example/tolkien','verified_identity':True}],
             'approval':{'title':title,'author':credit,'typed':[],'collection':False}}
         result=attach_shared_routing(result)
-        with patch.object(service,'_approval_result',return_value=(row,result)),patch.object(service,'_english_spelling_answer',return_value=None):
-            approved=service.approve_book(row['id'],row['revision'])
+        extra={};saved=None
+        if durable:
+            import uuid
+            service.decisions.close();store=service.decisions.store
+            saved=store.accept(request_id=str(uuid.uuid4()),book_id=row['id'],action='approve',revision=row['revision'],fingerprint=row['fingerprint'],
+                               payload={'title':None,'author':None,'names':None,'without_missing':False,'choice':None,'path':None},effects=['approval'],current_revision=row['revision'],current_fingerprint=row['fingerprint'])
+            extra['decision']=store.application(saved['request_id'],store.head(row['id'])['generation'])
+        def press():return service.approve_book(row['id'],service.reviews._row('Audiobooks',row['id'])['revision'],**extra)
+        if interrupt:
+            from decision_effects import Effect
+            commit=Effect.commit;failed=[]
+            def interrupted(effect,*args,**kwargs):
+                if effect.step==interrupt and not failed:
+                    failed.append(effect.step);raise RuntimeError('Private process interruption before '+interrupt+' receipt')
+                return commit(effect,*args,**kwargs)
+            with patch.object(service,'_approval_result',return_value=(row,result)),patch.object(service,'_english_spelling_answer',return_value=None),patch.object(Effect,'commit',new=interrupted):
+                with self.assertRaisesRegex(RuntimeError,'Private process interruption'):press()
+            self.assertEqual(failed,[interrupt]);self.assertEqual(service.jobs.status()['jobs'],[])
+            self.assertEqual(store.get(saved['request_id'])['state'],'applying');service.close()
+            # Reopen through the real constructor, retaining the durable request.
+            # Keep only this test's scheduling deterministic; run_once is the
+            # same production owner pass and uses no second accept/press.
+            with patch('decision_runtime.DecisionRuntime.start'):service=MergeService(inv,self.base/'c')
+            self.addCleanup(service.close);service.automatic.research=research
+            with patch.object(service,'_approval_result',side_effect=lambda *args,**kwargs:(service.reviews._row('Audiobooks',row['id']),result)),patch.object(service,'_english_spelling_answer',return_value=None):
+                service.decisions.run_once()
+            recovered=store.get(saved['request_id']);self.assertEqual(recovered['state'],'applied',recovered)
+            approved={'job_id':recovered['result']['job_id']}
+        else:
+            with patch.object(service,'_approval_result',return_value=(row,result)),patch.object(service,'_english_spelling_answer',return_value=None):approved=press()
         jobs=service.jobs.status()['jobs'];self.assertEqual(len(jobs),1);job=jobs[0]
         self.assertEqual(job['job_id'],approved['job_id']);self.assertEqual(job['state'],'pending')
+        if durable:
+            receipt=store.get(saved['request_id']);self.assertEqual(receipt['state'],'applied');self.assertEqual(receipt['result']['job_id'],job['job_id'])
         self.assertIsNone(job.get('output'));self.assertIsNone(job.get('attempt_id'))
         records=job['manifest']['evidence']['metadata_fields'];curated=[r for r in records if r.get('source_kind')=='curated_user_decision']
         self.assertEqual({r['field'] for r in curated},{'universe'} if legacy else {'series','universe'})
@@ -366,6 +396,10 @@ class CuratedApprovalTests(unittest.TestCase):
     def test_two_towers_actual_approve_persists_and_queues(self):self.approve(2)
     def test_fellowship_actual_approve_persists_and_queues(self):self.approve(1)
     def test_legacy_middle_earth_actual_approve_persists_and_queues(self):self.approve(2,legacy=True)
+    def test_durable_return_king_actual_approve_has_atomic_job_receipt(self):self.approve(3,durable=True)
+    def test_durable_two_towers_actual_approve_has_atomic_job_receipt(self):self.approve(2,durable=True)
+    def test_durable_approve_recovers_after_metadata_commit_without_another_press(self):self.approve(3,durable=True,interrupt='tracks')
+    def test_durable_approve_recovers_after_track_commit_without_another_press(self):self.approve(2,durable=True,interrupt='approved_checkpoint')
     def test_private_review_consumer_refuses_malformed_or_mismatched_curated_records_before_writes(self):
         import json
         from scanner import connect

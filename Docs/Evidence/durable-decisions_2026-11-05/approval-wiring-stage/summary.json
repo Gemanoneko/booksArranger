@@ -1,0 +1,145 @@
+{
+  "baseline": "229a5c2a291d780f7e0daa62f3028e07f52b2892",
+  "files": [
+    {
+      "path": "decision_contract.py",
+      "bytes": 4511,
+      "sha256": "87ca4421d5be8c03c198092b175b217f43cee6b8d66354637d35d3d87d4c2137",
+      "lf_sha256": "87ca4421d5be8c03c198092b175b217f43cee6b8d66354637d35d3d87d4c2137",
+      "baseline_lf_sha256": null
+    },
+    {
+      "path": "decision_runtime.py",
+      "bytes": 12377,
+      "sha256": "41e28c039439d309aa910f7606a7a4de77b13070eb7a9bef3169d5fb72847349",
+      "lf_sha256": "41e28c039439d309aa910f7606a7a4de77b13070eb7a9bef3169d5fb72847349",
+      "baseline_lf_sha256": "00e9a4ba06760995b84991dbbb9bcd431a0691be8b26c30b442a587fc521d487"
+    },
+    {
+      "path": "merge_service.py",
+      "bytes": 451791,
+      "sha256": "4e5719819335fa44aa09a8869d77f0e1a630d8abcd31f4588312492c2c275e27",
+      "lf_sha256": "d59ab8892e8a5ea5ce35f39beee28e6f087f89b5951861566ec6c270983ec22f",
+      "baseline_lf_sha256": "4cd20b35cd43c915f576596505c76767fa428dd8cfb19a8f96abb600fc7cb81e"
+    },
+    {
+      "path": "web_server.py",
+      "bytes": 116564,
+      "sha256": "148d26506782113f7e8f963034624cbaba127b07ca8181992db5c3a6a4ea1edc",
+      "lf_sha256": "f39c0982c9aa56440cbe0465a5ede563f5ef14fed6b5d4e2b6aba8c7b511c685",
+      "baseline_lf_sha256": "b374998d10968883ce6bae18dcb822b429d7bfdfdbd5a52eee3bd27999e443c5"
+    },
+    {
+      "path": "tests/test_lock_timing.py",
+      "bytes": 41266,
+      "sha256": "ec1fdd01260e60c6f6679493670da63b0d6cdae615b4ef05fd0b3a97925c9bf9",
+      "lf_sha256": "878330212be2d42ab36f683e2564ec90d833dc3525658b4a86e238a08919cdbf",
+      "baseline_lf_sha256": "6cb5e7d76ff71324841a94f40f7702998448906ca6e4f2362f64373299ae41fb"
+    },
+    {
+      "path": "tests/test_shared_routing.py",
+      "bytes": 31634,
+      "sha256": "8dae74f0faf3af3e27fd6d669e176a6c2d25dcbd67a6ebcd002fa2e4d4cc76cf",
+      "lf_sha256": "056febfb10766585e38fe5cd7fbf05824655166f2085801b264d3238e83132b2",
+      "baseline_lf_sha256": "5d8cb269c6e2eb7f495d99115f2d2ef36b2dcd93375424f31f494001ac7da224"
+    }
+  ],
+  "patch_sha256": "1d0b4a71692864e83b33c6f7bdc3eef4a12a718382293158a23414083c2dfbb0",
+  "patch_method": "Direct committed baseline blob to actual source bytes, LF-normalized; never relies on this old-base checkout index. Previously integrated six consumer files match229a5c2 exactly after LF normalization and are excluded.",
+  "contract": "All six authenticated durable actions accept before worker/global admission. Exact original payload, server-derived effect keys and request ID/hash are retained; status404 enables same-ID reconciliation; book returns only effective unresolved head owners for reopen overlay. File review has deterministic library/path identity and exact catalog size/modified generation. No media/source file access at acceptance.",
+  "application": "Existing source/identity/metadata/cover/chapter/overwrite guards remain. Approve binds every legacy argument to captured payload before effects; set-aside/names/same-author/review/context/tracks/checkpoints have request receipts; English-name rules and final approval+job+applied receipt share enqueue transaction. Answer-only terminal outcome has atomic names/rules/reset+receipt. Original track choice plan freezes before self-writes so restart does not reinterpret internal track evidence as a different user choice. Runtime recovers compatible exact receipted revisions, projects only disjoint names from superseded approval, retains validation holds, never starts an audio producer for Save/Approve.",
+  "results": "54/54 affected methods PASS36.389s (owned37.159s, closed/outputComplete/native complete+zero, no timeout/force). HTTP six-action method explicitly checks every action acceptance under four real worker locks <1s, status/request/hash/reopen, close/restart and same-ID replay. Five Save types apply; controlled approval validation hold retains payload. Two actual native Tolkien approval cases queue one pending job without conversion/source mutation. Injected interruptions after metadata and after tracks recover the same request into exactly one pending job after reopening MergeService, no second press. Post-track initial RED exposed self-write interpretation and is preserved; corrected two-point proof PASS6.071s. Runtime SQLite failure/recovery and constructor abort ownership cases remain in affected cohort.",
+  "boundaries": "Backend wiring only. Frontend independently owned by Ender_m4b; no UI source edits here. No liveAPI/liveDB/Z/focus/full check/build/release. No whole-feature QA or release claim until integrated backend+frontend focused verification.",
+  "evidence": [
+    {
+      "path": "owned.mjs",
+      "bytes": 1985,
+      "sha256": "328e8f89372c9c511b54d14dc87ff7f7e36aea9c083f64a7558f460afef30c28"
+    },
+    {
+      "path": "focused.py",
+      "bytes": 961,
+      "sha256": "be2e7c35c7e2dabe21ad28bfd99106f4fdab76d29916cccbcaa69db821b551ca"
+    },
+    {
+      "path": "freeze-wiring.py",
+      "bytes": 5139,
+      "sha256": "8224c4fae58c8f0376a39b6bb36f0465916f796c1751d6148c0e23ad023431c3"
+    },
+    {
+      "path": "approval-wiring.patch",
+      "bytes": 59963,
+      "sha256": "1d0b4a71692864e83b33c6f7bdc3eef4a12a718382293158a23414083c2dfbb0"
+    },
+    {
+      "path": "durable-approve-first.json",
+      "bytes": 7878,
+      "sha256": "cab9c3c7107910396110cf2c9370289073d30c4d673f8898fe8b157826ea8c99"
+    },
+    {
+      "path": "durable-approve-first.log",
+      "bytes": 6927,
+      "sha256": "5fbdbcfde22514f5471b11e73042724d9231b29353417a66514100759dc5f050"
+    },
+    {
+      "path": "durable-approve-green.json",
+      "bytes": 1154,
+      "sha256": "3296d55b33cb4d5213d81d2fd93d1673d4584665ccb87df01e60fe23e24b857c"
+    },
+    {
+      "path": "durable-approve-green.log",
+      "bytes": 455,
+      "sha256": "87201d1feda67e638ae8140718afc5691c69c5cba0e106907486f72b9ed332d1"
+    },
+    {
+      "path": "durable-mid-approve-first.json",
+      "bytes": 997,
+      "sha256": "04b53cec9be6a86eb373674e2834f05270c54734a1ddbde1ed286870974d39af"
+    },
+    {
+      "path": "durable-mid-approve-first.log",
+      "bytes": 301,
+      "sha256": "1cfb1d7a2bbc7783ff61be0b49ced4c899e5f370eb415a202db7e70657a8f2fb"
+    },
+    {
+      "path": "durable-post-track-red.json",
+      "bytes": 2939,
+      "sha256": "3ae5bba97e9d7724c85af736ebd2c28bfedd707f0fa258072217eaa684293c36"
+    },
+    {
+      "path": "durable-post-track-red.log",
+      "bytes": 2195,
+      "sha256": "37a2be430c1f454788a52ff6bf0a2f057f8d39752c1c2c7ef0c9dedd2964b05b"
+    },
+    {
+      "path": "durable-restart-green.json",
+      "bytes": 1202,
+      "sha256": "000a617f849a238a7ea7e94819f9bf9009abf42929b2068d2b6332cb4a30efd1"
+    },
+    {
+      "path": "durable-restart-green.log",
+      "bytes": 495,
+      "sha256": "ed3e7c65a419ecfa4985bf984f066ede5be47e2344975dadbc17ec0a2a877403"
+    },
+    {
+      "path": "durable-six-http-first.json",
+      "bytes": 1014,
+      "sha256": "4a9d002fff3345654de797ed52ae33195b9c022c37a872712b2d985da557d6db"
+    },
+    {
+      "path": "durable-six-http-first.log",
+      "bytes": 317,
+      "sha256": "81c206d151ae15b9a6863e457e4ceb0a3ff8ac44ec6cce6225255cc4ad58980b"
+    },
+    {
+      "path": "durable-wiring-cohort.json",
+      "bytes": 11178,
+      "sha256": "e97dc0c36ead54d96ff3829c34c7f8b91295b2761a03e891fec079959df2b536"
+    },
+    {
+      "path": "durable-wiring-cohort.log",
+      "bytes": 10358,
+      "sha256": "f4a49b83074bdbda9a9905cbbd09461f13e9d256b9636133177a164fc0911567"
+    }
+  ]
+}

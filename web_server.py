@@ -1375,7 +1375,7 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            if path in ('/api/book-decisions','/api/book-decisions/status'):
+            if path in ('/api/book-decisions','/api/book-decisions/status','/api/book-decisions/book'):
                 self.status_control=False
                 merge=self.server.merge
                 if merge is None or self.server.closing:
@@ -1383,16 +1383,23 @@ class Handler(BaseHTTPRequestHandler):
                 if path.endswith('/status'):
                     self.shape(data,{'request_id'})
                     answer=merge.decisions.store.get(self.uuid_value(data['request_id']),include_payload=True)
+                    if answer is None:self.response(404,{'error':'No durable decision with this request ID','code':'decision_not_found'});return
                     self.response(200,{'decision':answer,'application':merge.decisions.status()});return
+                if path.endswith('/book'):
+                    self.shape(data,{'library','id'});self.library(data['library'])
+                    if not isinstance(data['id'],str) or not 1<=len(data['id'])<=200:raise ValueError('Invalid saved-decision book identity')
+                    self.response(200,merge.decisions.store.book(data['id'])|{'application':merge.decisions.status()});return
                 self.shape(data,{'library','id','revision','fingerprint','action','payload','request_id'},{'predecessor'})
-                library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
-                if library!='Audiobooks':raise ValueError('Saved book decisions are for Audiobooks')
-                if data['action']!='names':raise ValueError('This saved-decision action is not available yet')
-                self.shape(data['payload'],{'names'})
-                names=self.names_value(data['payload']['names']);seen=self.fingerprint_value(data['fingerprint'])
+                from decision_contract import validate
+                payload=validate(self,data['action'],data['payload'])
+                if data['action']=='file_review':
+                    library=self.library(data['library']);id=data['id'];revision=data['revision']
+                    if not isinstance(id,str) or type(revision) is not int or revision!=0:raise ValueError('Invalid catalog file decision identity')
+                else:library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+                seen=self.fingerprint_value(data['fingerprint'])
                 if seen is None:raise ValueError('The shown source fingerprint is required')
                 predecessor=None if data.get('predecessor') is None else self.uuid_value(data['predecessor'])
-                answer=merge.decisions.accept_names(self.uuid_value(data['request_id']),id,revision,seen,names,predecessor)
+                answer=merge.decisions.accept(self.uuid_value(data['request_id']),id,revision,seen,data['action'],payload,predecessor,library=library)
                 self.response(202,{'decision':answer,'application':merge.decisions.status()});return
             if path=='/api/queue/approval-reconcile':
                 self.status_control=False

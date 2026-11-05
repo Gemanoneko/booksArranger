@@ -1,0 +1,21 @@
+test_durable_approve_recovers_after_track_commit_without_another_press (test_shared_routing.CuratedApprovalTests.test_durable_approve_recovers_after_track_commit_without_another_press) ... FAIL
+
+======================================================================
+FAIL: test_durable_approve_recovers_after_track_commit_without_another_press (test_shared_routing.CuratedApprovalTests.test_durable_approve_recovers_after_track_commit_without_another_press)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_shared_routing.py", line 402, in test_durable_approve_recovers_after_track_commit_without_another_press
+    def test_durable_approve_recovers_after_track_commit_without_another_press(self):self.approve(2,durable=True,interrupt='approved_checkpoint')
+                                                                                     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\Worktrees\Books Arranger\durable-decisions-20261105\tests\test_shared_routing.py", line 372, in approve
+    recovered=store.get(saved['request_id']);self.assertEqual(recovered['state'],'applied',recovered)
+                                             ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'needs_review' != 'applied'
+- needs_review
++ applied
+ : {'schema': 'books-durable-decision-v1', 'request_id': '915d958f-a7d8-4d49-b89f-f69364a90323', 'book_id': '122cbfaf-166c-4a72-82d9-033b8dc6a4cd', 'action': 'approve', 'sequence': 1, 'accepted_utc': '2026-11-05T09:21:46.483892+00:00', 'state': 'needs_review', 'reason': 'Saved decision step inputs changed', 'payload_sha256': '23309157e1315f577dd5b93fa05c965d340b8887a288f51234b016d4c1158322', 'observed_revision': 1, 'source_fingerprint': '23dec919086452c50b3a8c65f58ac2c40889363625aa904f719f317063b95fdf', 'predecessor': None, 'effects': ['approval'], 'result': None, 'applied_revision': None}
+
+----------------------------------------------------------------------
+Ran 1 test in 2.786s
+
+FAILED (failures=1)

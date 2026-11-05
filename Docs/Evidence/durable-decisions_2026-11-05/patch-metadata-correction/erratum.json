@@ -1,0 +1,62 @@
+{
+  "cause": "The implementation worktree index remained on eb38 while newer main tracked modules still appeared untracked locally. git diff newer-main -- path therefore compared the newer commit to an index lacking that file and emitted a deletion hunk, despite the actual source file existing. Frozen raw/LF source manifests and reviewed actual file bytes remained authoritative. Sully copied those exact raw bytes, verified them before commit, and independently verified all corresponding committed blobs and latest main source hashes on 2026-11-05. No source correction or test rerun is required for this patch-only bookkeeping.",
+  "affected": [
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage/names-backend.patch",
+      "sha256": "ea3af812b7bab016cecb6c482b8cc5ffb4e9c708bc05305b1895c4909c713161",
+      "incorrect_deletion_hunks": [
+        "durable_decisions.py"
+      ],
+      "preserved": true
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r2/names-backend.patch",
+      "sha256": "4df09b2ebd68e327344f06c5a15885543c07dcc203a94f2fdb4e0ab10b809876",
+      "incorrect_deletion_hunks": [
+        "durable_decisions.py"
+      ],
+      "preserved": true
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/names-backend-stage-r3/names-backend.patch",
+      "sha256": "d5dcf46e74e52803272c6df21cced03adff620b5dfccee9821ce22eefe5eb765",
+      "incorrect_deletion_hunks": [
+        "durable_decisions.py"
+      ],
+      "preserved": true
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage/consumer-transactions.patch",
+      "sha256": "2e543741e79b69393c95ee14acd0744e65d416ee327b1470a3f40b53c7056ae2",
+      "incorrect_deletion_hunks": [
+        "durable_decisions.py"
+      ],
+      "preserved": true
+    },
+    {
+      "path": "Docs/Evidence/durable-decisions_2026-11-05/consumer-transactions-stage-r2/consumer-transactions.patch",
+      "sha256": "9d75121115bc167fca2f290908fad3f29eee34c59371fb970d892642a9895ffa",
+      "incorrect_deletion_hunks": [
+        "durable_decisions.py"
+      ],
+      "preserved": true
+    }
+  ],
+  "corrected_latest_integrated_stages": [
+    {
+      "path": "names-r3-corrected.patch",
+      "baseline": "c92b724e2969aa2d277f1fcac4216ec1fc122293",
+      "target": "9bcc58b5876e0ad2e6de8e4de39597f2bb9b7ac5",
+      "sha256": "cb6be8b504d28169d806115cdc98121814c049e48616552629b30a684f548371",
+      "source_LF_hashes_verified_against_original_manifest": true
+    },
+    {
+      "path": "consumer-r2-corrected.patch",
+      "baseline": "9bcc58b5876e0ad2e6de8e4de39597f2bb9b7ac5",
+      "target": "229a5c2a291d780f7e0daa62f3028e07f52b2892",
+      "sha256": "eb6174395fc8884b41f3ab850b66fc4abe8a674792cfe0bbc462e64c52d59ec6",
+      "source_LF_hashes_verified_against_original_manifest": true
+    }
+  ],
+  "superseded_intermediate_patches": "Earlier unintegrated stage patches stay preserved and are not application instructions. The corrected patches reproduce the latest cleared integrated stages directly from their committed baseline and target blobs; future freezes compare baseline blob to actual raw source, without consulting the stale index."
+}
