@@ -1,0 +1,17 @@
+TAP version 13
+# BOOKS_PA1_FUNCTIONAL {"schema":"books-pa1-functional-v1","binding":{"version":"0.27.0","source_head":"d11302ab70a2831e2096ec4a6a4629f33fc0f9c9","product_digest":"3974edbd7b058b1fecdaef9b46573cbb729b8817364ec8a1739633913222cb41","build_id":"0245e25b-e185-4357-b48c-8f1cb4b242c0","artifact_manifest_sha256":"8825b291e3d55abc45bc0ba488d98c2d5a32d32c29d17a64dd5de4c7639a66b7","runtime_manifest_sha256":"f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e","phase_contract_sha256":"6e647bf7486c127ab68367b61596e13bb1d7d94937ac6d8064820df82817a2ee"},"case":{"phase":"PA-1","entry":"tests/real-shell-update.test.mjs","title":"PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again"},"assertions":["update_available_next_version","download_sha512_verified","shell_still_running_after_failed_install","installer_blocked_cause","windows_refusal_positive_control","fake_github_download_seen","old_engine_health_version","normal_quit_ends_shell"],"fixture_root":"C:/Antigravity Projects/n28/pa1-0245e25b-e185-4357-b48c-8f1cb4b242c0","exe":"C:\\\\Antigravity Projects\\\\n28\\\\pa1-0245e25b-e185-4357-b48c-8f1cb4b242c0\\\\app\\\\Books Arranger.exe","downloadVerified":true,"invalidInstallerRefused":true,"oldEngineRecovered":true,"shellStayedRunning":true,"healthVersionMatched":true,"closedByQuit":true,"payloadUnchanged":true,"endpointsOwned":true,"noVisibleOwnWindow":true,"intrusion":null,"window_observations":217,"listener_observations":{"checks":217,"intrusion":null,"listenerTableClass":3,"listenerQueries":73,"reportedListenerStates":[0,6]}}
+# Subtest: PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again
+ok 1 - PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again
+  ---
+  duration_ms: 29115.5268
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 29264.3591
