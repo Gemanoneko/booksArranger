@@ -60,8 +60,9 @@ class ManualConversionTests(unittest.TestCase):
             self.service.jobs._thread.join(.15)
         self.assertTrue(self.service.drained())
 
-    def request(self, source, tracks, name='chosen name.m4b'):
-        return {'id': str(uuid.uuid4()), 'revision': 0, 'source': source, 'tracks': tracks,
+    def request(self, inspection, tracks=None, name='chosen name.m4b'):
+        return {'id': str(uuid.uuid4()), 'revision': 0, 'source': inspection['source'],
+                'tracks': inspection['tracks'] if tracks is None else tracks, 'inspections': inspection['inspections'],
                 'metadata': {'title': 'A collection', 'author': 'Known Author', 'series': 'Saga', 'number': '2',
                              'universe': 'World', 'collection': 'Stories', 'anthology': True},
                 'destination': str(self.output / name)}
@@ -86,7 +87,7 @@ class ManualConversionTests(unittest.TestCase):
         self.assertEqual(pick['suggestions']['author'], 'Known Author')
         job = self.fake_auto_job([self.first])
         other = self.fake_auto_job([self.other])
-        request = self.request(pick['source'], list(reversed(pick['tracks'])))
+        request = self.request(pick, list(reversed(pick['tracks'])))
         request['metadata_touched'] = ['title', 'author']
         saved = self.manual.save(request)['draft']
         self.assertEqual(saved['metadata_touched'], ['author', 'title'])
@@ -108,10 +109,16 @@ class ManualConversionTests(unittest.TestCase):
                          if any(item['path'] == str(self.first) for item in row['members']))
         automatic = self.fake_auto_job([self.first, self.unrelated], candidate['id'])
         pick = self.manual.inspect({'kind': 'files', 'paths': [str(self.first), str(self.second)]})
-        request = self.request(pick['source'], list(reversed(pick['tracks'])))
+        request = self.request(pick, list(reversed(pick['tracks'])))
+        saved = self.manual.save(request)['draft']
+        self.service.close()
+        self.open()
+        request['revision'] = saved['revision']
+        del request['inspections']
         with patch.object(self.service, 'resume'):
             queued = self.manual.queue(request)['draft']
             self.assertEqual(queued['state'], 'queued')
+            self.assertEqual(queued['revision'], saved['revision'])
         self.service.close()
         self.open()
         self.assertEqual(self.manual.queue(request)['draft']['job_id'], queued['job_id'])
@@ -148,7 +155,7 @@ class ManualConversionTests(unittest.TestCase):
 
     def test_path_collision_and_running_overlap_leave_saved_draft_unchanged(self):
         pick = self.manual.inspect({'kind': 'files', 'paths': [str(self.first)]})
-        request = self.request(pick['source'], pick['tracks'])
+        request = self.request(pick)
         job = self.fake_auto_job([self.first])
         self.assertEqual(self.service.jobs._claim(self.service.jobs._pending_unreserved(None)[0]), 'claimed')
         with self.assertRaisesRegex(ValueError, job['job_id']):
@@ -166,12 +173,83 @@ class ManualConversionTests(unittest.TestCase):
         self.assertEqual(self.manual.list(), {'drafts': [saved]})
         self.assertTrue(self.first.exists())
 
+    def replace_first_audio(self):
+        before = self.first.stat()
+        preserved = self.first.with_suffix('.original')
+        self.first.rename(preserved)
+        shutil.copyfile(preserved, self.first)
+        os.utime(self.first, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertNotEqual(self.first.stat().st_ino, before.st_ino)
+
+    def replace_saved_audio(self):
+        pick = self.manual.inspect({'kind': 'files', 'paths': [str(self.first), str(self.second)]})
+        request = self.request(pick)
+        original = self.manual.save(request)['draft']
+        request['revision'] = original['revision']
+        self.replace_first_audio()
+        return request, original
+
+    def require_inspected_first_admission(self, action):
+        selection = {'kind': 'files', 'paths': [str(self.first), str(self.second)]}
+        request = self.request(self.manual.inspect(selection))
+        self.replace_first_audio()
+        submit = getattr(self.manual, action)
+        with patch.object(self.service, 'resume'):
+            with self.assertRaisesRegex(ValueError, 'Source audio changed'):
+                submit(request)
+            without_proof = {key: value for key, value in request.items() if key != 'inspections'}
+            with self.assertRaisesRegex(ValueError, 'Inspect source audio'):
+                submit(without_proof)
+            self.assertEqual(self.manual.list()['drafts'], [])
+            self.assertTrue(self.first.exists() and self.second.exists())
+            current = self.manual.inspect(selection)
+            accepted = submit(request | {'inspections': current['inspections']})['draft']
+            self.assertEqual(accepted['state'], 'queued' if action == 'queue' else 'draft')
+
+    def test_first_admission_save_refuses_uninspected_replacement(self):
+        self.require_inspected_first_admission('save')
+
+    def test_first_admission_queue_refuses_uninspected_replacement(self):
+        self.require_inspected_first_admission('queue')
+
+    def test_replaced_saved_source_cannot_queue_after_reorder_or_subset(self):
+        request, original = self.replace_saved_audio()
+        reversed_tracks = list(reversed(request['tracks']))
+        subset = [request['tracks'][0], request['tracks'][1] | {'included': False}]
+        with patch.object(self.service, 'resume'):
+            for tracks in (reversed_tracks, subset):
+                with self.assertRaisesRegex(ValueError, 'Source audio changed'):
+                    self.manual.queue(request | {'tracks': tracks})
+        self.assertEqual(self.manual.list()['drafts'], [original])
+        self.assertTrue(self.first.exists() and self.second.exists())
+
+    def test_replaced_saved_source_requires_reinspection_before_saving(self):
+        request, original = self.replace_saved_audio()
+        reversed_tracks = list(reversed(request['tracks']))
+        subset = [request['tracks'][0], request['tracks'][1] | {'included': False}]
+        for tracks in (reversed_tracks, subset):
+            with self.assertRaisesRegex(ValueError, 'Source audio changed'):
+                self.manual.save(request | {'tracks': tracks})
+        self.assertEqual(self.manual.list()['drafts'], [original])
+        without_replacement = [request['tracks'][0] | {'included': False}, request['tracks'][1]]
+        excluded = self.manual.save(request | {'tracks': without_replacement})['draft']
+        request['revision'] = excluded['revision']
+        with self.assertRaisesRegex(ValueError, 'Source audio changed'):
+            self.manual.save(request)
+        with self.assertRaisesRegex(ValueError, 'Source audio changed'):
+            self.manual.save(request | {'tracks': request['tracks'][1:] + request['tracks'][:1],
+                                        'inspections': self.manual.inspect({'kind': 'files', 'paths': [str(self.second)]})['inspections']})
+        inspected = self.manual.inspect({'kind': 'files', 'paths': [str(self.first), str(self.second)]})
+        refreshed = self.manual.save(request | {'tracks': reversed_tracks, 'inspections': inspected['inspections']})['draft']
+        self.assertEqual(refreshed['tracks'], reversed_tracks)
+        self.assertNotIn('inspections', refreshed)
+
     def test_external_folder_and_blank_author_use_the_same_verified_cleanup(self):
         external = self.root / 'external'
         external.mkdir()
         original = self.media(external / 'Chapter.mp3', 220)
         pick = self.manual.inspect({'kind': 'folder', 'path': str(external)})
-        request = self.request(pick['source'], pick['tracks'], 'external export.m4b')
+        request = self.request(pick, name='external export.m4b')
         request['metadata']['author'] = ''
         draft = self.manual.queue(request)['draft']
         self.service.jobs._thread.join(60)
@@ -183,7 +261,7 @@ class ManualConversionTests(unittest.TestCase):
     def late_collision(self):
         self.service.pause_work()
         pick = self.manual.inspect({'kind': 'files', 'paths': [str(self.first)]})
-        request = self.request(pick['source'], pick['tracks'])
+        request = self.request(pick)
         queued = self.manual.queue(request)['draft']
         self.assertEqual(queued['state'], 'queued')
         path = Path(request['destination'])
@@ -235,7 +313,7 @@ class ManualConversionTests(unittest.TestCase):
             self.inventory.worker = scan
             scan.start()
             pick = self.manual.inspect({'kind': 'files', 'paths': [str(path)]})
-            request = self.request(pick['source'], pick['tracks'], f'{path.stem}.m4b')
+            request = self.request(pick, name=f'{path.stem}.m4b')
             draft = self.manual.queue(request)['draft']
             self.assertEqual(draft['state'], 'queued')
             self.assertIn('scan', draft['reason'])

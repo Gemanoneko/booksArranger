@@ -5125,7 +5125,7 @@ function setupManualConversion(){
     const data=draft?copyDraft(draft):{id:globalThis.crypto.randomUUID(),revision:0,source:null,tracks:[],metadata:{},destination:''};
     const editor={data,accepted:draft || null,kind:data.source?.kind || '',path:data.source?.path || '',
       touched:touchedFields(draft),edit:0,savedEdit:0,inspect:0,sourceBusy:false,sourceStale:false,
-      sourceNote:'',matchNote:'',outputNote:'',note:'',flight:null,unknown:null,picker:false,discard:false,focusExport:false};
+      inspections:[],sourceNote:'',matchNote:'',outputNote:'',note:'',flight:null,unknown:null,picker:false,discard:false,focusExport:false};
     editors.set(data.id,editor);
     return editor;
   }
@@ -5362,16 +5362,26 @@ function setupManualConversion(){
   }
   function changed(editor){editor.edit++;editor.note='';}
 
+  function matchesEdit(draft,flight){
+    const {inspections,...body}=flight.body;
+    return decisionPacked(copyDraft(draft))===decisionPacked({...body,revision:draft.revision});
+  }
+  function acknowledgesQueue(draft,flight){
+    return draft.id===flight.body.id && draft.candidate_id===draft.id && typeof draft.job_id==='string' && !!draft.job_id &&
+      draft.state!=='draft' && [flight.body.revision,flight.body.revision+1].includes(draft.revision) && matchesEdit(draft,flight);
+  }
+
   function accept(draft){
     if(!draft?.id || !Number.isSafeInteger(draft.revision))throw Error('The app did not confirm this draft.');
-    saved.set(draft.id,draft);
     const editor=editors.get(draft.id);
+    if(editor?.unknown?.action==='queue' && draft.state!=='draft' && !acknowledgesQueue(draft,editor.unknown))return;
+    saved.set(draft.id,draft);
     if(!editor)return;
     const previous=editor.accepted;
     editor.accepted=draft;
     if(editor.unknown){
-      const queued=editor.unknown.action==='queue' && !!draft.job_id && draft.revision>editor.unknown.body.revision;
-      const persisted=editor.unknown.action==='save' && decisionPacked(copyDraft(draft))===decisionPacked({...editor.unknown.body,revision:draft.revision});
+      const queued=editor.unknown.action==='queue' && acknowledgesQueue(draft,editor.unknown);
+      const persisted=editor.unknown.action==='save' && matchesEdit(draft,editor.unknown);
       const retried=editor.unknown.action==='retry' && draft.job_id===previous?.job_id && draft.state!=='failed';
       const reopened=editor.unknown.action==='reopen' && draft.state==='draft' && !draft.job_id && draft.revision>editor.unknown.body.revision;
       if(queued || persisted || retried || reopened)settle(editor,editor.unknown,draft);
@@ -5424,6 +5434,11 @@ function setupManualConversion(){
       if(sequence!==editor.inspect)return;
       if(!result.source || !Array.isArray(result.tracks))throw Error('The app did not return the selected audio files.');
       if(!result.tracks.length)throw Error('No supported audio files found.');
+      if(!Array.isArray(result.inspections) || result.inspections.length!==result.tracks.length ||
+        result.inspections.some(proof=>typeof proof!=='string' || !/^[0-9a-f]{64}$/.test(proof))){
+        throw Error('Couldn’t verify the selected audio files. Load the folder or choose the files again.');
+      }
+      editor.inspections=result.inspections;
       const same=result.source.kind===editor.data.source?.kind && result.source.path===editor.data.source?.path;
       const found=new Map(result.tracks.map(track=>[track.path,track]));
       const order=same && result.source.kind==='folder'?editor.data.tracks.filter(track=>found.delete(track.path)):[];
@@ -5537,6 +5552,7 @@ function setupManualConversion(){
         for(const field of textFields)body.metadata[field]=String(body.metadata[field] ?? '').trim();
         body.metadata.anthology=body.metadata.anthology===true;
         body.metadata_touched=[...editor.touched].sort();
+        if(editor.inspections.length)body.inspections=[...editor.inspections];
       }
       flight={action,body,edit:editor.edit};
     }
@@ -5554,6 +5570,7 @@ function setupManualConversion(){
       }else{
         const draft=result.draft;
         if(draft?.id!==data.id || !Number.isSafeInteger(draft.revision))throw Error('The app did not confirm this book.');
+        if(action==='queue' && !acknowledgesQueue(draft,flight))throw Error('The app did not confirm this conversion.');
         if(action==='reopen' && (draft.state!=='draft' || draft.job_id || draft.revision<=flight.body.revision)){
           throw Error('The app did not confirm that this job reopened as a draft.');
         }

@@ -9,6 +9,8 @@ const first=fixtureFolder+'\\02.mp3',second=fixtureFolder+'\\10.flac';
 const destination='D:\\Finished\\Мой сборник.m4b';
 const server=new Map(),saves=[],queuePosts=[],reopenPosts=[];
 let saveFinish=null,delaySave=false,dropQueueReply=true,chosenOutput=null,chosenFiles=null,inspectionError='',inspected=[];
+let unchangedQueueRevision=false,reportDifferentQueuePlan=false,acceptedQueue=null,omitSourceProofs=false;
+const sourceProofs=['a'.repeat(64),'b'.repeat(64)];
 let suggestions={title:'Matched collection',author:'Matched author'};
 const baseFetch=context.fetch;
 const response=result=>({ok:true,status:200,json:async()=>result});
@@ -27,7 +29,7 @@ context.fetch=async(route,options)=>{
     if(inspectionError)return {ok:false,status:400,json:async()=>({error:inspectionError})};
     const source=body.kind==='folder'?body:{kind:'files'};
     const paths=body.kind==='folder'?[first,second]:body.paths;
-    return response({source,tracks:paths.map(path=>({path,included:true})),suggestions,match_source:'Matching embedded audio metadata'});
+    return response({source,tracks:paths.map(path=>({path,included:true})),suggestions,inspections:omitSourceProofs?[]:sourceProofs.slice(0,paths.length),match_source:'Matching embedded audio metadata'});
   }
   if(route.endsWith('/discard')){server.delete(body.id);return response({discarded:true});}
   if(route.endsWith('/reopen')){
@@ -45,8 +47,9 @@ context.fetch=async(route,options)=>{
   }
   if(route.endsWith('/queue')){
     queuePosts.push(body);
-    const draft={...body,revision:body.revision+1,state:'queued',job_id:'manual-job',candidate_id:body.id};
-    server.set(draft.id,draft);
+    const draft={...body,revision:body.revision+(unchangedQueueRevision?0:1),state:'queued',job_id:'manual-job',candidate_id:body.id};
+    acceptedQueue=draft;
+    server.set(draft.id,reportDifferentQueuePlan?{...draft,metadata:{...draft.metadata,title:'A different accepted plan'}}:draft);
     if(dropQueueReply){dropQueueReply=false;throw new Error('Accepted reply lost');}
     return response({draft});
   }
@@ -97,6 +100,7 @@ function enter(id,value){const input=get(id);input.value=value;input.handlers.in
   assert.equal(saves[0].metadata.number,'2.5');
   assert.equal(saves[0].destination,destination);
   assert.deepEqual(saves[0].metadata_touched,['author','number','series','title','universe']);
+  assert.deepEqual(saves[0].inspections,sourceProofs,'latest explicit inspection travels with the edited set');
 
   await click('manual-queue');await flush();
   assert.equal(queuePosts.length,1);
@@ -138,6 +142,11 @@ function enter(id,value){const input=get(id);input.value=value;input.handlers.in
   assert.equal(get('manual-meta-title').value,'','an obsolete suggested title is cleared');
   assert.equal(get('manual-match').textContent,'','the UI claims no match when all suggestions were declined');
 
+  omitSourceProofs=true;
+  await click('manual-files-choose');
+  assert.equal(get('manual-save').disabled,true,'incomplete inspection cannot replace the loaded selection');
+  assert.match(get('manual-source-status').textContent,/Couldn’t verify the selected audio files/);
+  omitSourceProofs=false;
   inspectionError='An audio file is unavailable.';
   await click('manual-files-choose');
   assert.equal(get('manual-queue').disabled,true);
@@ -174,6 +183,19 @@ function enter(id,value){const input=get(id);input.value=value;input.handlers.in
   chosenOutput='D:\\Finished\\Replacement.m4b';
   await click('manual-output-choose');
   assert.equal(get('manual-output-path').textContent,chosenOutput);
+
+  await click('manual-save');await flush();
+  const unchanged=server.get(failed.id);
+  unchangedQueueRevision=true;dropQueueReply=true;reportDifferentQueuePlan=true;
+  await click('manual-queue');await flush();
+  assert.equal(queuePosts[1].id,unchanged.id);
+  assert.equal(queuePosts[1].revision,unchanged.revision);
+  assert.equal(server.get(unchanged.id).revision,unchanged.revision,'unchanged admission retains the saved revision');
+  assert.match(get('manual-editor-status').textContent,/Waiting for confirmation/,'same revision alone does not acknowledge a different plan');
+  assert.equal(get('manual-meta-title').value,unchanged.metadata.title,'an unrelated reported plan cannot replace the pending edit');
+  server.set(acceptedQueue.id,acceptedQueue);
+  click('manual-conversion-tab');await flush();
+  assert.doesNotMatch(get('manual-editor-status').textContent,/Waiting for confirmation/,'same-revision matching job acknowledges the lost queue reply');
   console.log('Manual Conversion renderer passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

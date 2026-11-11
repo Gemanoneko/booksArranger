@@ -1,9 +1,11 @@
 """Durable user-selected audiobook sources and immutable queue admission."""
 
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
+import secrets
 import threading
 import uuid
 
@@ -19,6 +21,7 @@ from scanner import connect, fresh_stat, inside
 TEXT_FIELDS = ('title', 'author', 'series', 'number', 'universe', 'collection', 'narrator', 'genre')
 AUDIO_SUFFIXES = frozenset(INPUT_FORMATS) - {'.png', '.jpg', '.jpeg'}
 MAX_TRACKS = 500
+SOURCE_FACT_FIELDS = ('path', 'size', 'modified', 'dev', 'ino')
 
 
 def packed(value):
@@ -165,24 +168,30 @@ def _source(value):
 
 def _edit(value):
     required = {'id', 'revision', 'source', 'tracks', 'metadata', 'destination'}
-    if not isinstance(value, dict) or not required <= value.keys() <= required | {'metadata_touched'}:
+    if not isinstance(value, dict) or not required <= value.keys() <= required | {'metadata_touched', 'inspections'}:
         raise ValueError('Invalid manual draft details')
     destination = value['destination']
     metadata = _metadata(value['metadata'])
     touched = value.get('metadata_touched', list(value['metadata']))
     if not isinstance(touched, list) or any(not isinstance(field, str) or field not in metadata for field in touched) or len(touched) != len(set(touched)):
         raise ValueError('Invalid edited metadata fields')
+    inspections = value.get('inspections', [])
+    if not isinstance(inspections, list) or len(inspections) > MAX_TRACKS or any(
+        not isinstance(proof, str) or len(proof) != 64 or any(char not in '0123456789abcdef' for char in proof) for proof in inspections
+    ):
+        raise ValueError('Invalid source inspection proofs')
     return _uuid(value['id']), _revision(value['revision']), {
         'source': _source(value['source']), 'tracks': _track_paths(value['tracks']),
         'metadata': metadata, 'metadata_touched': sorted(touched),
         'destination': str(_path(destination)) if destination != '' else '',
-    }
+    }, set(inspections)
 
 
 class ManualConversions:
     def __init__(self, service):
         self.service = service
         self.inventory = service.inventory
+        self._inspection_key = secrets.token_bytes(32)
         with connect(self.inventory.database) as db:
             setup(db)
 
@@ -232,6 +241,25 @@ class ManualConversions:
     def _read(self, path):
         return self.inventory.reader(str(path), 'audiobook', threading.Event())
 
+    def _inspection_proof(self, item):
+        facts = [path_key(item['path']), *(item[field] for field in SOURCE_FACT_FIELDS[1:])]
+        return hmac.digest(self._inspection_key, packed(facts).encode('utf-8'), 'sha256').hex()
+
+    def _saved_edit(self, prior, data, root, catalog_root, files, inspections):
+        previous = {path_key(item['path']): item for item in prior.get('source_facts', []) + prior.get('excluded_source_facts', [])}
+        for item in files:
+            original = previous.pop(path_key(item['path']), None)
+            changed = original is None or any(original[field] != item[field] for field in SOURCE_FACT_FIELDS[1:])
+            if changed and self._inspection_proof(item) not in inspections:
+                if original is None and not inspections:
+                    raise ValueError('Inspect source audio before saving or queuing. Load the folder or choose the files again.')
+                raise ValueError(f'Source audio changed: {Path(item["path"]).name}. Load the folder or choose the files again to review it.')
+        enriched = data | {'source_root': root, 'catalog_root': catalog_root, 'source_facts': files}
+        excluded = [previous[key] for track in data['tracks'] if (key := path_key(track['path'])) in previous]
+        if excluded:
+            enriched['excluded_source_facts'] = excluded
+        return enriched
+
     def inspect(self, request):
         import groups
         if isinstance(request, dict) and request.get('kind') == 'files' and set(request) == {'kind', 'paths'}:
@@ -251,6 +279,7 @@ class ManualConversions:
         _, _, files = self._selection({'source': source, 'tracks': tracks})
         suggestions = self._suggestions(files)
         return {'source': source, 'tracks': tracks, 'suggestions': suggestions,
+                'inspections': [self._inspection_proof(item) for item in files],
                 'match_source': 'Matching embedded audio metadata' if suggestions else ''}
 
     def _suggestions(self, files):
@@ -287,6 +316,7 @@ class ManualConversions:
     def _view(self, db, row):
         value = json.loads(row['data']) | {'id': row['id'], 'revision': row['revision'], 'state': 'draft'}
         value.pop('source_facts', None)
+        value.pop('excluded_source_facts', None)
         value.pop('source_root', None)
         value.pop('catalog_root', None)
         if row['job_id'] is None:
@@ -354,12 +384,12 @@ class ManualConversions:
             overlap.append((job, manifest))
         return overlap
 
-    def _save(self, db, identity, revision, data, root, catalog_root, files):
+    def _save(self, db, identity, revision, data, root, catalog_root, files, inspections):
         previous = db.execute('SELECT * FROM manual_conversions WHERE id=?', (identity,)).fetchone()
         prior = json.loads(previous['data']) if previous else {}
         if previous and previous['job_id']:
             raise ValueError('This manual conversion is already queued')
-        enriched = data | {'source_root': root, 'catalog_root': catalog_root, 'source_facts': files}
+        enriched = self._saved_edit(prior, data, root, catalog_root, files, inspections)
         if prior == enriched and previous['revision'] in {revision, revision + 1}:
             return previous
         if (previous['revision'] if previous else 0) != revision:
@@ -373,11 +403,11 @@ class ManualConversions:
         return db.execute('SELECT * FROM manual_conversions WHERE id=?', (identity,)).fetchone()
 
     def save(self, request):
-        identity, revision, data = _edit(request)
+        identity, revision, data, inspections = _edit(request)
         root, catalog_root, files = self._selection(data)
         with self.service.jobs._lock, connect(self.inventory.database) as db:
             db.execute('BEGIN IMMEDIATE')
-            return {'draft': self._view(db, self._save(db, identity, revision, data, root, catalog_root, files))}
+            return {'draft': self._view(db, self._save(db, identity, revision, data, root, catalog_root, files, inspections))}
 
     def discard(self, request):
         if not isinstance(request, dict) or set(request) != {'id', 'revision'}:
@@ -484,8 +514,8 @@ class ManualConversions:
         binding = cleanup_binding(db, manifest)
         db.execute('INSERT INTO candidate_context VALUES(?,?,?)', (identity, manifest['candidate_revision'], packed(binding['context'])))
 
-    def _admit(self, db, manifest, identity, revision, data, root, catalog_root, facts, members):
-        saved = self._save(db, identity, revision, data, root, catalog_root, facts)
+    def _admit(self, db, manifest, identity, revision, data, root, catalog_root, facts, members, inspections):
+        saved = self._save(db, identity, revision, data, root, catalog_root, facts, inspections)
         if saved['revision'] != manifest['candidate_revision']:
             raise ValueError('Manual draft changed while the job was prepared')
         for job, _ in self._overlaps(db, facts, identity):
@@ -512,7 +542,7 @@ class ManualConversions:
                     book_restart.set_aside(db, job['job_id'], other['candidate_id'], other['candidate_revision'], kind='manual_conversion')
 
     def queue(self, request):
-        identity, revision, data = _edit(request)
+        identity, revision, data, inspections = _edit(request)
         with connect(self.inventory.database) as db:
             prior = db.execute('SELECT * FROM manual_conversions WHERE id=?', (identity,)).fetchone()
             if prior and prior['job_id']:
@@ -522,13 +552,10 @@ class ManualConversions:
                 raise ValueError('This manual conversion is already queued')
         root, catalog_root, files = self._selection(data, read=True)
         destination = self._destination(data['destination'], root)
-        facts = [{key: item[key] for key in ('path', 'size', 'modified', 'dev', 'ino')} for item in files]
+        facts = [{key: item[key] for key in SOURCE_FACT_FIELDS} for item in files]
         saved = json.loads(prior['data']) if prior else {}
-        old_paths = [item['path'] for item in saved.get('source_facts', [])]
-        if old_paths == [item['path'] for item in facts] and saved['source_facts'] != facts:
-            raise ValueError('Source audio changed since the draft was saved. Review the files and save the draft again.')
+        enriched = self._saved_edit(saved, data, root, catalog_root, facts, inspections)
         manifest, members = self._plan(identity, data, root, destination, files)
-        enriched = data | {'source_root': root, 'catalog_root': catalog_root, 'source_facts': facts}
         if prior and prior['revision'] != revision:
             raise ValueError('Draft changed. Reopen its saved details and try again.')
         manifest['candidate_revision'] = revision if prior and enriched == saved else revision + 1
@@ -540,7 +567,7 @@ class ManualConversions:
                         return {'draft': self._view(db, current)}
                     raise ValueError('This manual conversion is already queued')
             self.service.jobs.enqueue(manifest, manual_context=lambda db, frozen: self._admit(
-                db, frozen, identity, revision, data, root, catalog_root, facts, members))
+                db, frozen, identity, revision, data, root, catalog_root, facts, members, inspections))
         self._resume()
         with connect(self.inventory.database) as db:
             return {'draft': self._view(db, db.execute('SELECT * FROM manual_conversions WHERE id=?', (identity,)).fetchone())}
