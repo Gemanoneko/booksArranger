@@ -1,0 +1,17 @@
+
+> books-arranger@0.27.0 release
+> node scripts/release.mjs
+
+[release] Authentication acquired from GitHub CLI; token is supplied only to the publisher child.
+  • loaded configuration  file=package.json ("build" field)
+  • electron-builder  version=26.15.3 os=10.0.26300
+  • loaded configuration  file=package.json ("build" field)
+  • author is missed in the package.json  appPackageFile=C:\Antigravity Projects\Studio Illuminati\WIP\Books Arranger\package.json
+  • publishing      publisher=Github (owner: Gemanoneko, project: booksArranger, version: 0.27.0)
+  • uploading       file=Books-Arranger-Setup-0.27.0.exe.blockmap provider=github
+  • uploading       file=Books-Arranger-Setup-0.27.0.exe provider=github
+  • uploading       file=latest.yml provider=github
+  • creating GitHub release  reason=release doesn't exist tag=v0.27.0 version=0.27.0
+
+[release] Keep-four verified; Sully must now git fetch --prune --prune-tags and verify local tag parity.
+[release] Published v0.27.0 from 0d4829d3f3a1129b392f96914dfdf886b683061f; verified 3 assets.

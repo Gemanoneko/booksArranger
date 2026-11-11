@@ -1,0 +1,24 @@
+{
+  "plan_sha256": "f87a9e95e205991f46c07a17c64ca32737efbab079a874494440616d7a3c96d0",
+  "schema": "books-0270-one-use-publication-v1",
+  "tag": "v0.27.0",
+  "started_utc": "2026-11-11T14:26:06.9061319Z",
+  "head": "0d4829d3f3a1129b392f96914dfdf886b683061f",
+  "priorOwners": [
+    "055a6bd6-8513-4b43-b8af-0e27faaeba4a",
+    "09401652-e193-42ac-af66-19e0fb6432e3",
+    "0c085259-6ce3-4abf-bdb0-f321bb134ef6",
+    "17d45785-c2f1-463e-8b89-7fbf15b48ced",
+    "3f63b5b0-e2b9-4f62-8d73-08bd51a8c18a",
+    "4b1c966d-28e7-4764-b743-9c76ce189b59",
+    "6703692c-96c1-403c-b4ba-1d3020a4d73d",
+    "6dc4979d-c081-49df-b016-5d22862a7c28",
+    "72db06f5-9a6c-4547-a8ee-d97704d15a7a",
+    "7cd8cf81-d300-433e-8634-509955fffabc",
+    "961eb276-4f27-4a17-a100-23dc6356b37e",
+    "b19eb43a-6155-4e64-a521-9e1afe6c3986",
+    "d85ad42b-3ea0-4159-922f-e1ce9c20b110",
+    "dc320941-6b7a-46c7-9efd-f9562ce3bf20",
+    "e563f21f-c2d1-4bfb-8291-333d961d3cbe"
+  ]
+}

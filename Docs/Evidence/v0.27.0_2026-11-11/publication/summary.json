@@ -1,0 +1,60 @@
+{
+  "schema": "books-0270-publication-verification-v1",
+  "verifiedUtc": "2026-11-11T14:28:22.173Z",
+  "releaseUrl": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.27.0",
+  "releaseId": 441801211,
+  "publishedAt": "2026-11-11T14:26:34Z",
+  "tag": "v0.27.0",
+  "tagCommit": "0d4829d3f3a1129b392f96914dfdf886b683061f",
+  "productSource": "d11302ab70a2831e2096ec4a6a4629f33fc0f9c9",
+  "productDigest": "3974edbd7b058b1fecdaef9b46573cbb729b8817364ec8a1739633913222cb41",
+  "buildId": "0245e25b-e185-4357-b48c-8f1cb4b242c0",
+  "artifactManifestSha256": "8825b291e3d55abc45bc0ba488d98c2d5a32d32c29d17a64dd5de4c7639a66b7",
+  "nativeQaSha256": "0fb88e58649711e0beac803b56cb13f842927a0ac9e046c61ae6e2675e7962c0",
+  "oneUsePlanSha256": "f87a9e95e205991f46c07a17c64ca32737efbab079a874494440616d7a3c96d0",
+  "launchMarkerSha256": "1481a4637fb54b4ac94d1429e109f402743fd5c993fc7a6c9ab0d62dd1629be7",
+  "publisherLogSha256": "0a5c8602a0ad8725ef55c7acdbc6d50335252175d63060a50739b6761edf86f8",
+  "publisherNativeReceiptSha256": "da20cdd64f42d93df30d123d927c0c70cdd1fa0011ca9736927303f7252129ce",
+  "publisherNativeActiveAfter": 0,
+  "canonicalPublishedLine": true,
+  "canonicalKeepFourLine": true,
+  "remoteAssets": [
+    {
+      "name": "Books-Arranger-Setup-0.27.0.exe",
+      "size": 174843164,
+      "sha256": "3c55a291e7609c967a7a9eea6d1e8b83269ae02dbff8a72a6b7f4c899d2f9f82",
+      "githubId": 735800118,
+      "state": "uploaded",
+      "downloadUrl": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.27.0/Books-Arranger-Setup-0.27.0.exe",
+      "downloadedAndMatched": true
+    },
+    {
+      "name": "Books-Arranger-Setup-0.27.0.exe.blockmap",
+      "size": 182391,
+      "sha256": "417965791929e8db58f259a2047ac48d2a5096360f6a0088cdb1b7c9cfa55079",
+      "githubId": 735800108,
+      "state": "uploaded",
+      "downloadUrl": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.27.0/Books-Arranger-Setup-0.27.0.exe.blockmap",
+      "downloadedAndMatched": true
+    },
+    {
+      "name": "latest.yml",
+      "size": 360,
+      "sha256": "36da86b3c5a8cd8d2e5e26ab078c9313a327016cb0dbae2c3d19af9e226ea67c",
+      "githubId": 735800099,
+      "state": "uploaded",
+      "downloadUrl": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.27.0/latest.yml",
+      "downloadedAndMatched": true
+    }
+  ],
+  "updaterLatest": true,
+  "updaterInstallerSha512": "OLqanHDxi02Y/GcecOxGJil/0ffbrs9btknMtGjvuGqb5BtSr6pyL/S1EHrUg2jMhKNwFbG/deIer7jiUdNsmg==",
+  "retainedReleases": [
+    "v0.27.0",
+    "v0.26.0",
+    "v0.25.0",
+    "v0.24.5"
+  ],
+  "removedReleaseAndTag": "v0.24.4",
+  "installerExecuted": false
+}

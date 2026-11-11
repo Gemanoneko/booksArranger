@@ -1,0 +1,57 @@
+{
+  "source": "3f636e15bb865f7a1f412fc39a9d33615591397b",
+  "version": "0.27.0",
+  "buildId": "0abe7ca2-c4b3-4e58-8625-44f9b6e6c0b5",
+  "unpacked": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\dist\\builds\\0abe7ca2-c4b3-4e58-8625-44f9b6e6c0b5\\win-unpacked",
+  "owned": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\build-cache\\builds\\7cd8cf81-d300-433e-8634-509955fffabc",
+  "manifest": {
+    "file": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\dist\\release-artifacts.json",
+    "sha256": "1cd7d57bbb0fa7d887a94e97f4afecce418cc340fc9219ae389f2bb86e0e940a",
+    "size": 65124
+  },
+  "pointer": {
+    "file": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\build-cache\\runtime-pointer.json",
+    "sha256": "bc28ef63db663bf22e89f48d2004b2baa4e4ef90e77acdcf91204058083ef8e3",
+    "size": 5806
+  },
+  "native": {
+    "file": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\build-cache\\builds\\7cd8cf81-d300-433e-8634-509955fffabc\\native-operation-result.json",
+    "sha256": "bbde9fb16be8467752c5e2bf061491e52d3076900e70152d4ced2ab62524c29d",
+    "size": 521,
+    "root_exit_code": 0,
+    "native_job_closed": true,
+    "active_processes_after": 0
+  },
+  "producer": {
+    "file": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\build-cache\\builds\\7cd8cf81-d300-433e-8634-509955fffabc\\producer-receipt.json",
+    "sha256": "e25f8029c47cf425f410fd2cf5fb636bff832086af95b6c97a26a50bd780ce30",
+    "size": 397169
+  },
+  "artifacts": [
+    {
+      "file": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\dist\\builds\\0abe7ca2-c4b3-4e58-8625-44f9b6e6c0b5\\Books-Arranger-Setup-0.27.0.exe",
+      "sha256": "716be254e720cbebd8ec2d7975d32efda1b4c85e91379c1afee0fa151ef2ef36",
+      "size": 174841116
+    },
+    {
+      "file": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\dist\\builds\\0abe7ca2-c4b3-4e58-8625-44f9b6e6c0b5\\Books-Arranger-Setup-0.27.0.exe.blockmap",
+      "sha256": "1c930af059d1ef2733c5b2fc2b6c783d473c41039aaa782de9a699747b0a59d2",
+      "size": 182190
+    },
+    {
+      "file": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\dist\\builds\\0abe7ca2-c4b3-4e58-8625-44f9b6e6c0b5\\latest.yml",
+      "sha256": "ec09041e05d5f7c21d35950e8f482abf94a82d7ba40d537f8f9319d616318ea5",
+      "size": 360
+    }
+  ],
+  "payload": {
+    "verified": true,
+    "installer_equivalent": true,
+    "files": 334,
+    "sha256": "b3174bf74648a21af442ca5f8cb6000e2e36416df4496f54261cf803b62a5d81"
+  },
+  "runtimeFiles": 48,
+  "product_digest": "edbb8f7d8dea71bdba9f7fb1073fbba50ddc6df0cb697c187bfe3056b21bea9e",
+  "staging_cleanup_removed": 805,
+  "cleanup_warning": null
+}

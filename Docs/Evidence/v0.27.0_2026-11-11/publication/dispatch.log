@@ -1,0 +1,5 @@
+
+> books-arranger-027-dispatch-probe@0.0.0 publication-shell-probe
+> node -p "113000 + 27"
+
+113027
