@@ -982,8 +982,8 @@ class MergeService:
         if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','This start was superseded by Pause or closing; saved requests are retained.')
         if self.__dict__.get('_resume_pending') and self.__dict__.get('_resume_pending_owner') is not pending_owner:
             raise StartRefused('busy','A previous start request is still checking. Retry Start after it stops; saved retry requests are retained.')
-        if self.inventory.worker and self.inventory.worker.is_alive():
-            raise StartRefused('busy','Wait for the scan to stop before creating audiobooks')
+        try:self._no_scan()
+        except ValueError as error:raise StartRefused('busy',str(error)) from error
         if self.jobs._thread and self.jobs._thread.is_alive():
             if self.jobs._stop.is_set():raise StartRefused('busy','The audiobook worker is still pausing. Retry Start after it stops.')
             self._authorize_automatic_cleanup(generation)

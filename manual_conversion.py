@@ -29,6 +29,11 @@ def path_key(path):
     return os.path.normcase(os.path.abspath(path))
 
 
+def source_keys(manifest):
+    return {path_key(path) for source in manifest.get('sources', ())
+            if isinstance(path := source.get('path'), str) and path}
+
+
 def has_table(db):
     return db.execute("SELECT 1 FROM sqlite_master WHERE name='manual_conversions'").fetchone() is not None
 
@@ -69,10 +74,12 @@ def grouping_inputs(db, root):
 def reserved_by(db, manifest):
     if not has_table(db):
         return None
-    keys = [path_key(source['path']) for source in manifest['sources']]
+    keys = source_keys(manifest)
+    if not keys:
+        return None
     return db.execute('''SELECT path_key,draft_id FROM manual_conversion_sources
         WHERE path_key IN (SELECT value FROM json_each(?)) AND draft_id!=? LIMIT 1''',
-        (packed(keys), manifest.get('manual_conversion', ''))).fetchone()
+        (packed(sorted(keys)), manifest.get('manual_conversion', ''))).fetchone()
 
 
 def exact_binding(db, manifest):
@@ -336,7 +343,8 @@ class ManualConversions:
         overlap = []
         for job in db.execute('SELECT * FROM audio_jobs WHERE ' + audio_jobs.CURRENT):
             manifest = json.loads(job['manifest'])
-            shared = next((item['path'] for item in manifest['sources'] if path_key(item['path']) in keys), None)
+            shared = next((path for item in manifest.get('sources', ())
+                           if isinstance(path := item.get('path'), str) and path and path_key(path) in keys), None)
             if shared is None or manifest.get('manual_conversion') == identity:
                 continue
             if job['state'] == 'completed' and db.execute("SELECT 1 FROM source_cleanup WHERE job_id=? AND state='completed'", (job['job_id'],)).fetchone():

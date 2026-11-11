@@ -816,10 +816,11 @@ def _sync_build(connection,root,inputs):
     from manual_conversion import path_key
     rows=connection.execute('SELECT * FROM files WHERE root=? ORDER BY path',(root,)).fetchall()
     frozen=inputs['frozen']
+    manual_blocked=inputs.get('manual_blocked',())
     frozen_paths={member['path'] for item in frozen.values() for member in item['members']}
-    rows=[row for row in rows if row['path'] not in frozen_paths and path_key(row['path']) not in inputs['manual_blocked']]
+    rows=[row for row in rows if row['path'] not in frozen_paths and path_key(row['path']) not in manual_blocked]
     groups=build(rows,inputs['protected'],*inputs['parts'],blocked_members=[m for item in frozen.values() for m in item['members']])
-    for scope in inputs['overlapping'] & groups.keys():
+    for scope in inputs.get('overlapping',set()) & groups.keys():
         evidence=groups.pop(scope)
         residual=scope+'\x1fmanual-remaining'
         groups[residual]=evidence|{'scope':residual}
@@ -879,11 +880,12 @@ def _sync_write(connection,root,revision,groups,inputs):
     """Store a regroup: new and changed groups, superseded ones, then the root's synced revision."""
     retired,archived,frozen,protected=inputs['retired'],inputs['archived'],inputs['frozen'],inputs['protected']
     from manual_conversion import path_key
+    manual=inputs.get('manual',());manual_blocked=inputs.get('manual_blocked',())
     for scope,evidence in groups.items():
         if scope in frozen:continue
         old=connection.execute('SELECT * FROM book_groups WHERE root=? AND scope=?',(root,scope)).fetchone()
         if old:
-            if not any(path_key(member['path']) in inputs['manual_blocked'] for member in json.loads(old['evidence'])['members']):
+            if not manual_blocked or not any(path_key(member['path']) in manual_blocked for member in json.loads(old['evidence'])['members']):
                 evidence=_preserve_retired_evidence(old,evidence,retired)
             connection.execute('UPDATE book_groups SET superseded=0 WHERE id=?',(old['id'],))
         fingerprint=hashlib.sha256(json.dumps(evidence,ensure_ascii=False,sort_keys=True).encode('utf-8')).hexdigest()
@@ -895,7 +897,7 @@ def _sync_write(connection,root,revision,groups,inputs):
                 (fingerprint,json.dumps(evidence,ensure_ascii=False),old['id']))
     # A formerly indexed group no longer present retains evidence but cannot stay approved.
     for old in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)).fetchall():
-        if old['id'] in archived or old['scope'] in frozen or old['scope'] in inputs['manual']:continue
+        if old['id'] in archived or old['scope'] in frozen or old['scope'] in manual:continue
         former=json.loads(old['evidence'])['members']
         all_retired=bool(former) and all(m['path'] in retired for m in former)
         if old['scope'] not in groups and old['scope'] not in protected:

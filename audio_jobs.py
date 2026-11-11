@@ -1253,7 +1253,7 @@ class AudioJobs:
 
     def status(self):
         import m4b_readmission
-        from manual_conversion import active_keys, path_key
+        from manual_conversion import active_keys, source_keys
         with self._db() as db:
             waiting_requests=m4b_readmission.pending_count(db)
             reserved=active_keys(db)
@@ -1262,7 +1262,7 @@ class AudioJobs:
             def held(row):
                 if row['state'] != 'pending':return False
                 manifest=json.loads(row['manifest'])
-                return not manifest.get('manual_conversion') and any(path_key(source['path']) in reserved for source in manifest['sources'])
+                return not manifest.get('manual_conversion') and not reserved.isdisjoint(source_keys(manifest))
             rows=[row for row in rows if not held(row)]
         counts = {"queued": 0, "completed": 0, "failed": 0}
         current = None
@@ -1288,8 +1288,11 @@ class AudioJobs:
         """Same answer as scanning status()['jobs'] for pending/running rows, without loading every manifest."""
         with self._db() as db:
             import m4b_readmission
-            if db.execute("SELECT 1 FROM audio_jobs WHERE state='running' AND " + CURRENT + " LIMIT 1").fetchone() or m4b_readmission.pending_count(db)>0:
+            if m4b_readmission.pending_count(db)>0:
                 return True
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='audio_job_set_aside'").fetchone():
+                return db.execute("SELECT 1 FROM audio_jobs WHERE state IN ('pending','running') LIMIT 1").fetchone() is not None
+            if db.execute("SELECT 1 FROM audio_jobs WHERE state='running' AND " + CURRENT + " LIMIT 1").fetchone():return True
         return bool(self._pending_unreserved(None))
 
     def _work(self):
@@ -1338,7 +1341,7 @@ class AudioJobs:
     NAMES_CHANGED = 'Names changed since this job was queued. Press Retry to queue it with these names.'
 
     def _pending_unreserved(self, priority):
-        from manual_conversion import active_keys
+        from manual_conversion import active_keys, source_keys
         with self._db() as db:
             query = "SELECT * FROM audio_jobs WHERE state='pending' AND " + CURRENT
             keys = active_keys(db)
@@ -1348,7 +1351,7 @@ class AudioJobs:
                 return [dict(row)] if row else []
             for row in db.execute(query + order, (priority,)):
                 manifest = json.loads(row['manifest'])
-                if manifest.get('manual_conversion') or not any(os.path.normcase(os.path.abspath(source['path'])) in keys for source in manifest['sources']):
+                if manifest.get('manual_conversion') or keys.isdisjoint(source_keys(manifest)):
                     return [dict(row)]
             return []
 
