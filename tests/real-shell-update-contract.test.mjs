@@ -312,18 +312,31 @@ test('private Quit command has a finite wait without any PID kill or command fal
  assert.throws(()=>createPrivateShellCommands({spawn,exe:'C:/private/app/Books Arranger.exe',profile:'C:/private/profile',env:{},timeoutMs:60001}));
 });
 
-function tcpRows(rows){const b=Buffer.alloc(4+24*rows.length);b.writeUInt32LE(rows.length);rows.forEach((r,n)=>{const at=4+n*24;b.writeUInt32LE(r.state??0,at);Buffer.from(r.address||[127,0,0,1]).copy(b,at+4);b.writeUInt16BE(r.port??61169,at+8);b.writeUInt32LE(r.pid??42,at+20);});return b;}
+function tcpRows(rows){const b=Buffer.alloc(4+24*rows.length);b.writeUInt32LE(rows.length);rows.forEach((r,n)=>{const at=4+n*24;b.writeUInt32LE(r.state??0,at);Buffer.from(r.address||[127,0,0,1]).copy(b,at+4);b.writeUInt16BE(r.port??61169,at+8);b.writeUInt32LE(r.remoteAddress??0,at+12);b.writeUInt32LE(r.remotePort??0,at+16);b.writeUInt32LE(r.pid??42,at+20);});return b;}
 test('exact SDK listener-only role keeps raw state diagnostics without mapping state zero to LISTEN',()=>{
  for(const state of [0,2]){const buffer=tcpRows([{state}]);assert.deepEqual(listenerOnlyRows(buffer,3,2,61169),[{pid:42,state,listenerTableClass:3}]);assert.equal(buffer.readUInt32LE(4),state);}
  for(const cls of [0,4,5])assert.throws(()=>listenerOnlyRows(tcpRows([{state:0}]),cls,2,61169),/listener-only query/);
  assert.throws(()=>listenerOnlyRows(tcpRows([{}]),3,23,61169),/IPv4/);
 });
 test('listener-role decoder rejects nonlistener contradictions, wildcard, unknown owner, duplicate and malformed rows',()=>{
- for(const state of [1,3,4,5,6,7,8,9,10,11,12,0xffffffff])assert.throws(()=>listenerOnlyRows(tcpRows([{state}]),3,2,61169),/non-listener/);
+ for(const state of [1,3,4,5,7,8,9,10,11,12,0xffffffff])assert.throws(()=>listenerOnlyRows(tcpRows([{state}]),3,2,61169),/non-listener/);
  for(const address of [[0,0,0,0],[192,168,1,2],[127,0,0,2]])assert.throws(()=>listenerOnlyRows(tcpRows([{address}]),3,2,61169),/loopback-only/);
  assert.throws(()=>listenerOnlyRows(tcpRows([{pid:0}]),3,2,61169),/PID/);assert.throws(()=>listenerOnlyRows(tcpRows([{},{}]),3,2,61169),/Ambiguous/);
  assert.throws(()=>listenerOnlyRows(Buffer.alloc(3),3,2,61169));const truncated=tcpRows([{}]);truncated.writeUInt32LE(2);assert.throws(()=>listenerOnlyRows(truncated,3,2,61169),/truncated/);
  assert.deepEqual(listenerOnlyRows(tcpRows([{port:61170}]),3,2,61169),[],'another port supplies no positive role evidence');
+});
+test('observed raw state six requires the exact IPv4 listener-only row shape',()=>{
+ const row={state:6};
+ assert.deepEqual(listenerOnlyRows(tcpRows([row]),3,2,61169),[{pid:42,state:6,listenerTableClass:3}]);
+ assert.throws(()=>listenerOnlyRows(tcpRows([row]),5,2,61169),/listener-only query/);
+ assert.throws(()=>listenerOnlyRows(tcpRows([row]),3,23,61169),/IPv4/);
+ for(const address of [[0,0,0,0],[192,168,1,2]])assert.throws(()=>listenerOnlyRows(tcpRows([{...row,address}]),3,2,61169),/loopback-only/);
+ assert.throws(()=>listenerOnlyRows(tcpRows([{...row,pid:0}]),3,2,61169),/PID/);
+ for(const remote of [{remoteAddress:0x0100007f},{remotePort:0x0000aa01}]){
+  assert.throws(()=>listenerOnlyRows(tcpRows([{...row,...remote}]),3,2,61169),/non-listener state 6.*port 61169.*PID 42.*remote endpoint present/);
+ }
+ assert.throws(()=>listenerOnlyRows(tcpRows([row,{...row,pid:43}]),3,2,61169),/Ambiguous/);
+ assert.deepEqual(listenerOnlyRows(tcpRows([{...row,port:61170}]),3,2,61169),[]);
 });
 
 async function knownFourthFixture(t){

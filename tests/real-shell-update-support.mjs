@@ -221,9 +221,9 @@ export function requiredWindowPid(query,window){
  need(Number.isSafeInteger(thread)&&thread>0&&thread<=0xffffffff&&Number.isSafeInteger(pid[0])&&pid[0]>0&&pid[0]<=0xffffffff,'Window PID lookup failed or returned an unknown identity');
  return pid[0];
 }
-// The successful SDK LISTENER-only query proves the row's role. This machine
-// reports raw state 0 for actual listeners; keep it as a diagnostic, never map
-// it to LISTEN or accept it from a connections/all-rows query.
+// The SDK LISTENER-only query identifies the role. Private loopback probes on
+// Windows also returned raw state 6 on listener rows with both remote fields
+// zero. Keep the raw state as a diagnostic and reject other contradictions.
 // https://learn.microsoft.com/en-us/windows/win32/api/iprtrmib/ne-iprtrmib-tcp_table_class
 export function listenerOnlyRows(buffer,tableClass,family,port){
  need(tableClass===3&&family===2,'Exact SDK IPv4 owner-PID listener-only query required');
@@ -232,9 +232,12 @@ export function listenerOnlyRows(buffer,tableClass,family,port){
  for(let n=0;n<count;n++){
   const at=4+n*24;if(buffer.readUInt16BE(at+8)!==port)continue;
   const state=buffer.readUInt32LE(at),pid=buffer.readUInt32LE(at+20);
-  need(state===0||state===2,'Listener-only membership contradicts a known non-listener state');
   need(buffer.subarray(at+4,at+8).equals(Buffer.from([127,0,0,1])),'Private endpoint is not loopback-only');
-  need(pid>0,'TCP listener owner PID is unknown');rows.push({pid,state,listenerTableClass:3});
+  need(pid>0,'TCP listener owner PID is unknown');
+  const hasRemoteEndpoint=buffer.readUInt32LE(at+12)!==0||buffer.readUInt32LE(at+16)!==0;
+  need(state===0||state===2||(state===6&&!hasRemoteEndpoint),
+   `Listener-only membership contradicts raw non-listener state ${state} for port ${port}, PID ${pid}, remote endpoint ${hasRemoteEndpoint?'present':'absent'}`);
+  rows.push({pid,state,listenerTableClass:3});
  }
  need(rows.length<=1,'Ambiguous private listener ownership');return rows;
 }
