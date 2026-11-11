@@ -1258,7 +1258,8 @@ def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
         expected_tags += [('grouping',review['series']),('album',' - '.join([review['series'],review.get('number',''),review['title']]))]
         if str(review.get('number','')).isdigit() and 0<int(review['number'])<65536:expected_tags.append(('track',str(int(review['number']))))
     for key,value in expected_tags:
-        if tags.get(key)!=value:raise ValidationError('Output metadata check failed: '+key)
+        actual=tags.get(key,'' if manifest.get('manual_conversion') and key in ('artist','album_artist') else None)
+        if actual!=value:raise ValidationError('Output metadata check failed: '+key)
     picture=Path(stage)/(uuid.uuid4().hex+('.png' if pictures[0].get('codec_name')=='png' else '.jpg'))
     plan_generated(picture)
     run_owned([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-protocol_whitelist','file','-i',str(output),'-map','0:v:0','-c:v','copy','-frames:v','1',str(picture)],stage,stop,30)

@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.27.0] - 2026-11-11
+
+### Added
+
+- Combine the audio files directly inside a folder or a selection of tracks into one audiobook in the Manual Conversion tab. Set the track order, edit metadata, and choose the exact M4B destination.
+- Save manual drafts and resume queued conversions after a restart. A saved draft reserves its selected files from automatic jobs. After verification, the app cleans up the included originals and lists the finished audiobook in Converted.
+
 ## [v0.26.0] - 2026-11-05
 
 ### Added

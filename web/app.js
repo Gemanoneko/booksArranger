@@ -646,7 +646,7 @@ async function action(route, data) {
   finally { busy=false; controls(); }
 }
 // Provisional copy (ruling 35's rest, sent to Judy): what a kept Resume waits for.
-const START_WAITS={pause:'the pause',start:'the earlier start'};
+const START_WAITS={pause:'the pause',start:'the earlier start',scan:'the library scan'};
 function startWaitLine(reason){return `Resume queued. It starts when ${START_WAITS[reason] || 'the current start check'} finishes. Press Resume again to cancel.`;}
 function automaticStartWord(){return state?.automatic_processing?.state==='Paused'?'Resume':'Start';}
 function pauseLine(pause,automatic=false){
@@ -704,7 +704,7 @@ function startWaitTip(button,waiting){
 function readError(row){return row.error && !row.missing ? row.error : '';}
 function select(row, reset) {
   row=decisionDisplayRow(row,row.library || $('library').value);
-  $('manual-review').hidden=false;
+  $('manual-review').hidden=row.manual_conversion===true;
   const changing=selectedPath!==row.path;
   if(reset && (changing || dirty || trackDirty)){discardManualDraft();if(changing)$('manual-review').open=row.kind!=='candidate';}
   // Technical details: closed again on every selection; "Copied." stays until the selection changes (Judy, section 4.6).
@@ -823,9 +823,13 @@ function renderRows(force=false) {
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
         // Where the files are, then where the book goes or is (Judy 0.23.1 sections 3.4, 15 and 16): every candidate row.
-        buildSourceLine(row,td);buildDestination(row,td);
+        buildSourceLine(row,td);
+        if(row.manual_conversion===true){
+          const path=row.output?.absolute || row.output?.path || row.creation?.destination;
+          if(path)td.append(node('p',path,'path'));
+        }else buildDestination(row,td);
         }
-        buildNamesBlock(row,td);  // Edit names (Judy 0.22.2 section 1): Place, Entered by you, the editor when open
+        if(row.manual_conversion!==true)buildNamesBlock(row,td);  // Edit names (Judy 0.22.2 section 1): Place, Entered by you, the editor when open
       }
       tr.append(td); }
     const actions=node('td'),buttons=node('div','','row-actions'),name=row.title_clue || row.metadata?.title || row.path.split(/[\\/]/).pop();actions.setAttribute('role','cell');
@@ -846,7 +850,7 @@ function renderRows(force=false) {
       clear.addEventListener('keydown',event=>event.stopPropagation());buttons.append(clear);
     }
     if(askOf(row))buildAskActions(row,buttons);
-    if(row.kind==='candidate')buildNamesButton(row,buttons);  // after the row's own buttons, before View metadata (Judy 1.1)
+    if(row.kind==='candidate' && row.manual_conversion!==true)buildNamesButton(row,buttons);  // after the row's own buttons, before View metadata (Judy 1.1)
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
     // One "Open source folder" on every book row (Judy 0.23.1 section 3; ruling 70: "Open book folder" once the originals are gone).
     if(row.kind==='candidate')buildFolderButton(row,buttons);
@@ -1062,7 +1066,7 @@ async function poll() {
         if(error.httpStatus!==503)refreshFailed(error);
       }
     }
-    finally { polling=false; }
+    finally { polling=false; manualConversion?.poll(); }
   }
   if (!ended) timer=setTimeout(poll,800);
 }
@@ -1212,7 +1216,7 @@ function sourceLink(url,label){const link=node('a',label);try{const parsed=new U
 // Ruling 36 (Sergei 2026-10-26): no evidence field; a save keeps whatever note the catalog already holds (unused).
 function keptNote(row){const note=row?.review_context?.manual_note;return typeof note==='string'?note:'';}
 function reviewContext(row=reviewRow || selectedRow){return {manual_note:keptNote(row),proposal_id:proposalId,cover_id:coverId,actor:'user'};}
-function readyForQueue(row){return !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
+function readyForQueue(row){return row.manual_conversion!==true && !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
 function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryItems=attentionSelection()?retrySelectable():[],retryable=retryItems.length,conditional=conditionalRetries(retryItems),waiting=selected.filter(row=>readmissionOf(row)?.state==='queued').length,queuedSel=selected.filter(row=>queuedFor(row) || queueRunning(row)).length,leftOut=selected.length-retryable-waiting-queuedSel,already=queuedSel?` · ${queuedSel} already queued`:'';const releasable=releaseSelection()?releaseSelectable().length:0;
   // Let the app handle selected (O14): in Started over the selection is counted against it; in Held it is added to the usual line.
   const approvable=bulkChip()?approveSelectable().items.length:0;
@@ -2978,7 +2982,7 @@ const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames an
   found:[null,'Files found. The book is checked again.'],separate:[null,'Kept as separate books. Each is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
   changed:[null,'Changes found. The book is checked again.'],deleted:[null,'Deleted. The book is gone from the app.'],copy_removed:[null,'Removed. The copy is gone from the app.'],later:[null,'Changes found. The next library scan will pick them up.']};
 const ASK_REFUSED={delete:'Delete was not accepted. Nothing was deleted.',copy:'Remove was not accepted. Nothing was deleted.',approve:'Approve was not accepted. Nothing was changed.',separate:'Keep as separate books was not accepted. Nothing was changed.',convert:'Convert was not accepted. Nothing was changed.',scan:'Scan did not finish. Nothing was changed.',remove:'Remove from list was not accepted. Nothing was changed.'};
-function askOf(row){const ask=row?.kind==='candidate'?row.ask:null;return ask && typeof ask==='object' && typeof ask.kind==='string'?ask:null;}
+function askOf(row){const ask=row?.kind==='candidate' && row.manual_conversion!==true?row.ask:null;return ask && typeof ask==='object' && typeof ask.kind==='string'?ask:null;}
 function askKind(ask){return ask.kind==='files_missing'?ask.also || '':ask.kind;}
 function askName(row){return row.title_clue || row.review?.title || 'Book';}
 function askDraft(id){if(!askDrafts.has(id))askDrafts.set(id,{seq:0,previewKey:'{}',timer:null});return askDrafts.get(id);}
@@ -5085,6 +5089,563 @@ $('copy-technical').addEventListener('click',async()=>{
   catch(error){setText('copy-technical-status',"Couldn't copy. Select the text and press Ctrl+C.");}  // 0.22.0 review A1d
 });
 
+// Manual conversion owns its editor and the drafts the engine has accepted. Polls update job
+// state in place; only an acknowledged draft can reserve or release source tracks.
+function setupManualConversion(){
+  const panel=$('manual-conversion'),manualTab=$('manual-conversion-tab'),libraryTab=$('library-tab');
+  if(!panel || !manualTab || !libraryTab || preEngine)return null;
+  const base='/api/manual-conversion', list=$('manual-books');
+  const textFields=['title','author','series','number','universe','collection','narrator','genre'];
+  const fields=[...textFields,'anthology'];
+  const saved=new Map(), editors=new Map(), entries=new Map();
+  const labels={draft:'Draft',queued:'Queued',running:'Converting',cleanup:'Source cleanup',failed:'Needs attention',converted:'Converted'};
+  const timeout=30000;
+  let active=null, shown=false, loaded=false, reading=false, readAfter=0, mutation=0, listNote='';
+
+  function basename(path){return String(path || '').split(/[\\/]/).filter(Boolean).pop() || '';}
+  function included(draft){return draft?.tracks?.filter(track=>track.included) || [];}
+  function title(draft){return draft.metadata?.title || basename(draft.source?.path || included(draft)[0]?.path) || 'New book';}
+  function line(id,value){setText(id,value);}
+  function editable(editor){return !editor.accepted || editor.accepted.state==='draft';}
+  function locked(editor){return !editable(editor) || ['queue','discard'].includes(editor.flight?.action || editor.unknown?.action);}
+  function stateLabel(draft){
+    if(draft.state==='queued' && /paused|pausing|idle|stopped/i.test(state?.audiobook_jobs?.state || ''))return 'Waiting for audiobook jobs to resume';
+    if(draft.state==='running' && conversionSteps[draft.stage])return conversionSteps[draft.stage];
+    if(draft.state==='cleanup' && cleanupSteps[draft.stage])return cleanupSteps[draft.stage];
+    return labels[draft.state] || 'Draft';
+  }
+  function copyDraft(draft){
+    const copied={id:draft.id,revision:draft.revision,source:draft.source?{...draft.source}:null,
+      tracks:(draft.tracks || []).map(track=>({...track})),metadata:{...(draft.metadata || {})},destination:draft.destination || ''};
+    if(Array.isArray(draft.metadata_touched))copied.metadata_touched=[...draft.metadata_touched].sort();
+    return copied;
+  }
+  function touchedFields(draft){return new Set(draft?.metadata_touched || Object.keys(draft?.metadata || {}));}
+  function makeEditor(draft){
+    const data=draft?copyDraft(draft):{id:globalThis.crypto.randomUUID(),revision:0,source:null,tracks:[],metadata:{},destination:''};
+    const editor={data,accepted:draft || null,kind:data.source?.kind || '',path:data.source?.path || '',
+      touched:touchedFields(draft),edit:0,savedEdit:0,inspect:0,sourceBusy:false,sourceStale:false,
+      sourceNote:'',matchNote:'',outputNote:'',note:'',flight:null,unknown:null,picker:false,discard:false,focusExport:false};
+    editors.set(data.id,editor);
+    return editor;
+  }
+  function activate(editor,focus=false){
+    if(active && !active.accepted && !active.edit && !active.flight)editors.delete(active.data.id);
+    active=editor;
+    render();
+    if(focus)$('manual-editor-title').focus?.();
+  }
+  function activateTab(manual,focus=true){
+    shown=manual;
+    panel.hidden=!manual;
+    $('library-workspace').hidden=manual;
+    for(const [tab,selected] of [[libraryTab,!manual],[manualTab,manual]]){
+      tab.setAttribute('aria-selected',String(selected));
+      tab.classList.toggle('quiet',!selected);
+      tab.tabIndex=selected?0:-1;
+    }
+    if(focus)(manual?manualTab:libraryTab).focus?.();
+    if(manual){
+      render();
+      readAfter=0;
+      void read();
+    }
+  }
+  for(const tab of [libraryTab,manualTab]){
+    tab.addEventListener('click',()=>activateTab(tab===manualTab));
+    tab.addEventListener('keydown',event=>{
+      const next={ArrowLeft:tab===libraryTab?manualTab:libraryTab,ArrowRight:tab===libraryTab?manualTab:libraryTab,Home:libraryTab,End:manualTab}[event.key];
+      if(!next)return;
+      event.preventDefault();
+      for(const choice of [libraryTab,manualTab])choice.tabIndex=choice===next?0:-1;
+      next.focus();
+    });
+  }
+  $('workspace-tabs').hidden=false;
+
+  function renderList(){
+    const items=new Map([...saved].filter(([id,draft])=>draft.state!=='converted' || active?.data.id===id));
+    for(const editor of editors.values()){
+      const {data}=editor;
+      if(!saved.has(data.id) && (editor===active || editor.edit || editor.flight))items.set(data.id,data);
+    }
+    for(const [id,entry] of entries){
+      if(!items.has(id)){list.removeChild(entry.item);entries.delete(id);}
+    }
+    for(const [id,draft] of items){
+      let entry=entries.get(id);
+      if(!entry){
+        const item=node('li'),button=node('button','','quiet'),summary=node('p','','field-help'),path=node('p','','path');
+        button.type='button';button.title='Open this manual book.';
+        button.addEventListener('click',()=>{
+          const current=editors.get(id) || (saved.has(id)?makeEditor(saved.get(id)):null);
+          if(current)activate(current,true);
+        });
+        item.append(button,summary,path);list.append(item);
+        entry={item,button,summary,path};entries.set(id,entry);
+      }
+      const count=included(draft).length;
+      const summary=[saved.has(id)?stateLabel(draft):'Unsaved draft',`${count} ${count===1?'file':'files'}`].join(' · ');
+      const name=title(draft);
+      if(entry.button.textContent!==name)entry.button.textContent=name;
+      if(entry.summary.textContent!==summary)entry.summary.textContent=summary;
+      if(entry.path.textContent!==(draft.destination || ''))entry.path.textContent=draft.destination || '';
+      entry.path.hidden=!draft.destination;
+      if(active?.data.id===id)entry.button.setAttribute('aria-current','true');
+      else entry.button.removeAttribute('aria-current');
+    }
+  }
+
+  function trackButton(label,tip,press){
+    const button=node('button',label,'quiet');
+    button.type='button';button.title=tip;
+    button.setAttribute('aria-label',tip);
+    button.addEventListener('click',press);
+    return button;
+  }
+  function renderTracks(editor,focus=null){
+    const trackList=$('manual-track-list'),tracks=editor.data.tracks;
+    const readOnly=locked(editor);
+    trackList.replaceChildren();
+    const counts=new Map();
+    for(const {path} of tracks){const name=basename(path);counts.set(name,(counts.get(name)||0)+1);}
+    let focusTarget=null;
+    tracks.forEach((track,index)=>{
+      const name=basename(track.path),row=node('li'),controls=node('div','','toolbar');
+      const identity=counts.get(name)>1?track.path:name;
+      row.tabIndex=-1;
+      row.append(node('span',name,'manual-track-name'));
+      if(identity!==name)row.append(node('p',track.path,'path'));
+      if(!readOnly){
+        const move=delta=>{
+          const position=index+delta;
+          if(position<0 || position>=tracks.length)return;
+          [tracks[index],tracks[position]]=[tracks[position],tracks[index]];
+          changed(editor);
+          renderTracks(editor,{path:track.path,move:delta});
+          renderEditor();
+        };
+        const up=trackButton('Move up','Move up: '+identity,()=>move(-1)),down=trackButton('Move down','Move down: '+identity,()=>move(1));
+        up.disabled=index===0;down.disabled=index===tracks.length-1;
+        controls.append(up,down);
+        if(editor.data.source?.kind==='folder'){
+          const label=node('label','','check'),input=node('input');
+          input.type='checkbox';input.checked=track.included;
+          input.title='Include '+identity+' in this audiobook.';
+          input.setAttribute('aria-label','Include: '+identity);
+          input.addEventListener('change',()=>{track.included=input.checked;changed(editor);renderEditor();});
+          label.append(input,node('span','Include'));controls.append(label);
+        }else{
+          controls.append(trackButton('Remove','Remove from this book: '+identity,()=>{
+            tracks.splice(index,1);changed(editor);
+            renderTracks(editor,{path:tracks[Math.min(index,tracks.length-1)]?.path});
+            renderEditor();
+            if(!tracks.length)$('manual-files-choose').focus?.();
+          }));
+        }
+        row.append(controls);
+        if(track.path===focus?.path){
+          const preferred=focus.move===-1?up:down,other=focus.move===-1?down:up;
+          focusTarget=focus.move?(!preferred.disabled?preferred:!other.disabled?other:row):row;
+        }
+      }else if(!track.included)row.append(node('span','Excluded','field-help'));
+      trackList.append(row);
+    });
+    focusTarget?.focus?.({preventScroll:true});
+  }
+
+  let tracksKey='';
+  function renderEditor(){
+    $('manual-editor').hidden=!active;
+    if(!active)return;
+    const editor=active,{data,accepted}=editor;
+    const editing=editable(editor),frozen=locked(editor);
+    const count=included(data).length;
+    const loadedSelection=!!data.source && data.source.kind===editor.kind && (editor.kind!=='folder' || data.source.path===editor.path.trim());
+    const working=!!editor.flight, usable=shown && !ended && !recoveryDisconnected;
+    const uncertain=!!editor.unknown;
+    const pendingControls=editor.sourceBusy || editor.picker;
+    const changed=editor.edit!==editor.savedEdit;
+    line('manual-editor-title',title(data));
+    $('manual-editable').hidden=!editing;
+    $('manual-editable').disabled=frozen;
+    $('manual-folder-controls').hidden=editor.kind!=='folder';
+    $('manual-files-choose').hidden=editor.kind!=='files';
+    $('manual-source-folder').checked=editor.kind==='folder';
+    $('manual-source-files').checked=editor.kind==='files';
+    if($('manual-folder-path').value!==editor.path)$('manual-folder-path').value=editor.path;
+    $('manual-folder-load').disabled=!usable || pendingControls;
+    $('manual-folder-browse').disabled=!usable || pendingControls || typeof globalThis.booksDesktop?.chooseFolder!=='function';
+    $('manual-files-choose').disabled=!usable || pendingControls || typeof globalThis.booksDesktop?.chooseAudioFiles!=='function';
+    const sourceHelp=editor.sourceNote || (editor.sourceBusy?'Reading selected files…':editor.kind==='files' && !globalThis.booksDesktop?.chooseAudioFiles?'Open the desktop app to choose audio files.':'');
+    line('manual-source-status',sourceHelp+(editor.sourceStale && data.source?' Choose a new source or confirm the previously loaded files.':''));
+    const reuse=$('manual-source-reuse');
+    reuse.hidden=!editor.sourceStale || !data.source;
+    reuse.disabled=!usable || frozen || pendingControls;
+    $('manual-tracks').hidden=!data.tracks.length || (editing && !loadedSelection);
+    line('manual-track-count',`${count} included ${count===1?'file':'files'}. One M4B plays them in the order shown.`);
+    const key=JSON.stringify([data.id,frozen,data.tracks]);
+    if(key!==tracksKey){
+      tracksKey=key;
+      const focused=$('manual-track-list').contains(document.activeElement);
+      if(!focused)renderTracks(editor);
+      else if(frozen){renderTracks(editor);$('manual-editor-title').focus?.({preventScroll:true});}
+    }
+    $('manual-metadata').hidden=!data.source;
+    $('manual-metadata').disabled=frozen;
+    for(const field of textFields){
+      const element=$('manual-meta-'+field),value=String(data.metadata[field] ?? '');
+      if(element.value!==value)element.value=value;
+    }
+    $('manual-meta-anthology').checked=data.metadata.anthology===true;
+    line('manual-match',editor.matchNote);
+    $('manual-export').hidden=!data.source;
+    $('manual-output-choose').hidden=!editing;
+    $('manual-output-choose').disabled=!usable || frozen || editor.picker || typeof globalThis.booksDesktop?.chooseAudiobookOutput!=='function';
+    line('manual-output-path',data.destination || 'No export path selected.');
+    line('manual-output-status',editor.outputNote || (editing && !globalThis.booksDesktop?.chooseAudiobookOutput?'Open the desktop app to choose the export path.':''));
+    $('manual-draft-actions').hidden=!editing || !data.source;
+    const canEditSource=count && loadedSelection && !editor.sourceStale;
+    $('manual-save').disabled=!usable || pendingControls || (uncertain?editor.unknown.action!=='save':!canEditSource);
+    $('manual-queue').disabled=!usable || pendingControls || (uncertain?editor.unknown.action!=='queue':!canEditSource);
+    $('manual-discard').disabled=!usable || pendingControls || uncertain && editor.unknown.action!=='discard';
+    $('manual-discard-question').hidden=!editor.discard;
+    $('manual-discard-confirm').disabled=!usable;
+    for(const id of ['manual-save','manual-queue','manual-discard','manual-discard-confirm','manual-discard-cancel','manual-job-retry','manual-job-reopen']){
+      if(working)$(id).setAttribute('aria-disabled','true');
+      else $(id).removeAttribute('aria-disabled');
+    }
+    const reserved=accepted?.state==='draft'?included(accepted).length:0;
+    $('manual-saved-reservation').hidden=!reserved;
+    line('manual-saved-reservation',reserved?`${reserved} saved ${reserved===1?'file is':'files are'} reserved for manual conversion.`:'');
+    const note=accepted && !editing?[stateLabel(accepted),accepted.reason].filter(Boolean).join(' · '):'';
+    line('manual-editor-status', [editor.note,editing && changed?'Unsaved changes.':'',note].filter(Boolean).join(' '));
+    const jobs=state?.audiobook_jobs;
+    const activity=accepted?.job_id && accepted.job_id===jobs?.current_job_id && Array.isArray(state.activities)?
+      state.activities.find(row=>['conversion','cleanup'].includes(row.kind) && row.state!=='attention'):null;
+    $('manual-job-progress').hidden=!activity;
+    if(activity){
+      const finishing=activity.done>=activity.total && activity.total>0;
+      const step=activityStep(activity,finishing),detail=activityDetail(activity,finishing),bar=$('manual-job-bar');
+      line('manual-job-stage',step);line('manual-job-measure',detail);
+      bar.setAttribute('aria-valuetext',[step,detail].filter(Boolean).join(', '));
+      if(detail && activity.done>=0)bar.value=Math.min(99,Math.floor(activity.done/activity.total*100));
+      else bar.removeAttribute('value');
+    }
+    $('manual-job-actions').hidden=editing;
+    for(const action of ['pause','resume']){
+      const button=$('manual-job-'+action),original=$(action+'-jobs');
+      button.hidden=!['queued','running','cleanup'].includes(accepted?.state);
+      button.disabled=!usable || original.disabled;
+      button.title=original.title;
+      if(original.textContent)button.textContent=original.textContent;
+    }
+    $('manual-job-retry').hidden=accepted?.retry_allowed!==true;
+    $('manual-job-retry').disabled=!usable || uncertain && editor.unknown.action!=='retry';
+    $('manual-job-reopen').hidden=accepted?.reopen_allowed!==true;
+    $('manual-job-reopen').disabled=!usable || uncertain && editor.unknown.action!=='reopen';
+    const jobView=$('manual-job-view');
+    jobView.hidden=!accepted?.candidate_id || !['failed','cleanup','converted'].includes(accepted.state);
+    const finished=accepted?.state==='converted';
+    jobView.title=finished?'Show this audiobook in the Converted list.':'Show this book’s job status and available cleanup actions in the library.';
+    line('manual-job-view',finished?'View in Converted':'View job in Library');
+    if(editor.focusExport && editing){
+      editor.focusExport=false;
+      const exportButton=$('manual-output-choose');
+      (exportButton.disabled?$('manual-discard'):exportButton).focus?.({preventScroll:true});
+    }
+  }
+  function render(){
+    if(!shown)return;
+    renderList();
+    renderEditor();
+  }
+  function changed(editor){editor.edit++;editor.note='';}
+
+  function accept(draft){
+    if(!draft?.id || !Number.isSafeInteger(draft.revision))throw Error('The app did not confirm this draft.');
+    saved.set(draft.id,draft);
+    const editor=editors.get(draft.id);
+    if(!editor)return;
+    const previous=editor.accepted;
+    editor.accepted=draft;
+    if(editor.unknown){
+      const queued=editor.unknown.action==='queue' && !!draft.job_id && draft.revision>editor.unknown.body.revision;
+      const persisted=editor.unknown.action==='save' && decisionPacked(copyDraft(draft))===decisionPacked({...editor.unknown.body,revision:draft.revision});
+      const retried=editor.unknown.action==='retry' && draft.job_id===previous?.job_id && draft.state!=='failed';
+      const reopened=editor.unknown.action==='reopen' && draft.state==='draft' && !draft.job_id && draft.revision>editor.unknown.body.revision;
+      if(queued || persisted || retried || reopened)settle(editor,editor.unknown,draft);
+    }
+    if(draft.state!=='draft' || (previous?.revision!==draft.revision && editor.edit===editor.savedEdit && !editor.flight && !editor.unknown)){
+      editor.data=copyDraft(draft);
+      editor.kind=editor.data.source?.kind || '';
+      editor.path=editor.data.source?.path || '';
+      editor.touched=touchedFields(draft);
+    }
+  }
+  async function read(){
+    if(!shown || ended || reading || Date.now()<readAfter)return;
+    reading=true;
+    readAfter=Date.now()+1600;
+    const at=mutation;
+    try{
+      const answer=await request(base,undefined,timeout);
+      if(at!==mutation)return;
+      if(!Array.isArray(answer.drafts))throw Error('Saved manual books are unavailable.');
+      const ids=new Set(answer.drafts.map(draft=>draft.id));
+      for(const [id] of saved){
+        if(ids.has(id) || editors.get(id)?.flight)continue;
+        saved.delete(id);
+        const editor=editors.get(id);
+        if(editor?.unknown?.action==='discard')finishDiscard(editor);
+        else if(editor){
+          editor.note='This draft is no longer saved. Start a new book to reserve its files again.';
+          editor.accepted=null;
+        }
+      }
+      for(const draft of answer.drafts){if(!editors.get(draft.id)?.flight)accept(draft);}
+      loaded=true;
+      line('manual-list-status',listNote || (answer.drafts.some(draft=>draft.state!=='converted')?'':'No saved drafts or pending manual jobs.'));
+      if(!active){
+        const first=answer.drafts.find(draft=>draft.state!=='converted');
+        activate(makeEditor(first));
+      }else render();
+    }catch(error){
+      line('manual-list-status',loaded?'Couldn’t refresh saved manual books. Retrying…':error.message || 'Couldn’t load saved manual books. Retrying…');
+    }finally{reading=false;}
+  }
+
+  async function inspect(editor,selection){
+    const sequence=++editor.inspect;
+    editor.sourceBusy=true;editor.sourceNote='';editor.matchNote='Looking for matching metadata…';
+    render();
+    try{
+      const result=await request(base+'/inspect',selection,timeout);
+      if(sequence!==editor.inspect)return;
+      if(!result.source || !Array.isArray(result.tracks))throw Error('The app did not return the selected audio files.');
+      if(!result.tracks.length)throw Error('No supported audio files found.');
+      const same=result.source.kind===editor.data.source?.kind && result.source.path===editor.data.source?.path;
+      const found=new Map(result.tracks.map(track=>[track.path,track]));
+      const order=same && result.source.kind==='folder'?editor.data.tracks.filter(track=>found.delete(track.path)):[];
+      if(!order.length)editor.data.tracks=result.tracks;
+      else editor.data.tracks=[...order,...found.values()];
+      editor.data.source=result.source;
+      editor.kind=result.source.kind;
+      if(result.source.kind==='folder')editor.path=result.source.path;
+      editor.sourceStale=false;
+      let filled=false;
+      for(const field of fields){
+        if(editor.touched.has(field))continue;
+        if(result.suggestions?.[field]!=null){editor.data.metadata[field]=result.suggestions[field];filled=true;}
+        else delete editor.data.metadata[field];
+      }
+      editor.matchNote=filled && result.match_source?`${result.match_source}. Review the filled fields.`:'';
+      changed(editor);
+    }catch(error){
+      if(sequence===editor.inspect)sourceFailed(editor,error.message || 'Couldn’t read the selected source.');
+    }finally{
+      if(sequence===editor.inspect){editor.sourceBusy=false;render();}
+    }
+  }
+  function loadFolder(editor){
+    if(!editor)return;
+    const path=editor.path.trim();
+    if(!path){sourceFailed(editor,'Enter or browse to a folder path.');render();return;}
+    return inspect(editor,{kind:'folder',path});
+  }
+  function sourceFailed(editor,message){
+    editor.sourceStale=true;
+    editor.sourceNote=message;
+    editor.matchNote='';
+  }
+  function suggestedName(editor){
+    const stem=title(editor.data).replace(/[<>:"/\\|?*\x00-\x1f]/g,' ').trim().replace(/[. ]+$/g,'').slice(0,160);
+    return (stem || 'Audiobook')+'.m4b';
+  }
+  async function choose(kind,button){
+    const editor=active;
+    if(!editor || button.disabled || editor.picker)return;
+    editor.picker=true;
+    render();
+    try{
+      const desktop=globalThis.booksDesktop;
+      if(kind==='output'){
+        const path=await desktop.chooseAudiobookOutput({defaultPath:editor.data.destination,suggestedName:suggestedName(editor)});
+        if(path){editor.data.destination=path;editor.outputNote='';changed(editor);}
+      }else if(kind==='folder'){
+        const path=await desktop.chooseFolder({title:'Choose a source folder',defaultPath:editor.path,buttonLabel:'Choose folder'});
+        if(path){editor.path=path;await loadFolder(editor);}
+      }else{
+        const paths=await desktop.chooseAudioFiles();
+        if(paths)await inspect(editor,{kind:'files',paths});
+      }
+    }catch(error){
+      const text=String(error.message || 'Couldn’t open the picker. Try again.').replace(/^Error invoking remote method '[^']+': Error: /,'');
+      if(kind==='output')editor.outputNote=text;
+      else sourceFailed(editor,text);
+    }finally{
+      editor.picker=false;
+      render();
+      if(shown && editor===active)button.focus?.({preventScroll:true});
+    }
+  }
+
+  function finishDiscard(editor){
+    editors.delete(editor.data.id);
+    saved.delete(editor.data.id);
+    if(active===editor){
+      active=null;
+      listNote=editor.accepted?'Draft discarded. Its files are available for automatic processing.':'Unsaved draft discarded.';
+      line('manual-list-status',listNote);
+      if(shown)$('manual-new').focus?.();
+    }
+    render();
+  }
+  function settle(editor,flight,draft){
+    editor.unknown=null;
+    editor.data.revision=draft.revision;
+    editor.savedEdit=flight.edit;
+    if(editor.edit===flight.edit || draft.state!=='draft'){
+      editor.data=copyDraft(draft);
+      editor.path=editor.data.source?.path || '';
+      editor.kind=editor.data.source?.kind || '';
+      editor.touched=touchedFields(draft);
+    }
+    if(flight.action==='reopen'){
+      editor.outputNote='';
+      editor.note='Draft reopened. Use Save As to change the export path, or discard the draft to release its files.';
+      editor.focusExport=shown && editor===active && document.activeElement===$('manual-job-reopen');
+    }else editor.note=flight.action==='save'?'Draft saved.':'';
+  }
+  async function write(action){
+    const editor=active;
+    if(!editor || editor.flight || recoveryDisconnected || ended)return;
+    const {data}=editor;
+    let flight=editor.unknown;
+    if(flight && flight.action!==action)return;
+    if(!flight){
+      if(['save','queue'].includes(action) && editor.sourceStale)return;
+      if(action==='queue' && (!String(data.metadata.title || '').trim() || !data.destination)){
+        editor.note=!String(data.metadata.title || '').trim()?'Enter a title before queuing.':'Choose the export path with Save As before queuing.';
+        render();
+        $(!String(data.metadata.title || '').trim()?'manual-meta-title':'manual-output-choose').focus?.();
+        return;
+      }
+      if(action==='reopen' && editor.accepted?.reopen_allowed!==true)return;
+      const body=['retry','discard','reopen'].includes(action)?{id:data.id,revision:data.revision}:copyDraft(data);
+      if(body.metadata){
+        for(const field of textFields)body.metadata[field]=String(body.metadata[field] ?? '').trim();
+        body.metadata.anthology=body.metadata.anthology===true;
+        body.metadata_touched=[...editor.touched].sort();
+      }
+      flight={action,body,edit:editor.edit};
+    }
+    if(action==='discard' && !data.revision){finishDiscard(editor);return;}
+    editor.flight=flight;
+    listNote='';
+    editor.note={save:'Saving draft…',queue:'Queuing conversion…',retry:'Requesting a retry…',discard:'Discarding draft…',reopen:'Reopening draft…'}[action];
+    ++mutation;
+    render();
+    try{
+      const result=await request(base+'/'+action,flight.body,timeout);
+      if(action==='discard'){
+        if(result.discarded!==true)throw Error('The app did not confirm that it released these files.');
+        finishDiscard(editor);
+      }else{
+        const draft=result.draft;
+        if(draft?.id!==data.id || !Number.isSafeInteger(draft.revision))throw Error('The app did not confirm this book.');
+        if(action==='reopen' && (draft.state!=='draft' || draft.job_id || draft.revision<=flight.body.revision)){
+          throw Error('The app did not confirm that this job reopened as a draft.');
+        }
+        accept(draft);
+        settle(editor,flight,draft);
+        if(shown && editor===active && draft.state!=='draft' && document.activeElement===$('manual-queue'))$('manual-editor-title').focus?.({preventScroll:true});
+      }
+    }catch(error){
+      if(error.httpStatus && ![502,503,504].includes(error.httpStatus)){
+        editor.unknown=null;
+        if(action==='queue' && /export|\.m4b|output already exists/i.test(error.message)){
+          editor.outputNote=error.message;editor.note='';
+        }else editor.note=error.message;
+      }else{
+        editor.unknown=flight;
+        const button={save:'Save draft',queue:'Queue conversion',retry:'Retry',discard:'Discard draft',reopen:'Reopen draft'}[action];
+        editor.note=`Waiting for confirmation. If it doesn’t appear, press ${button} again to check the same request.`;
+      }
+    }finally{
+      editor.flight=null;
+      ++mutation;readAfter=0;
+      render();
+      if(action!=='discard' || editors.has(data.id))void read();
+    }
+  }
+
+  $('manual-new').addEventListener('click',()=>{listNote='';activate(makeEditor(),true);});
+  for(const kind of ['folder','files']){
+    $('manual-source-'+kind).addEventListener('change',()=>{
+      if(!active || !$('manual-source-'+kind).checked)return;
+      active.kind=kind;active.sourceNote='';
+      if(active.sourceBusy){++active.inspect;active.sourceBusy=false;active.matchNote='';}
+      changed(active);render();
+    });
+  }
+  $('manual-folder-path').addEventListener('input',()=>{
+    active.path=$('manual-folder-path').value;
+    active.sourceNote='';
+    if(active.sourceBusy){++active.inspect;active.sourceBusy=false;active.matchNote='';}
+    changed(active);renderEditor();
+  });
+  $('manual-folder-path').addEventListener('keydown',event=>{
+    if(event.key==='Enter'){event.preventDefault();$('manual-folder-load').click();}
+  });
+  $('manual-folder-load').addEventListener('click',()=>loadFolder(active));
+  $('manual-source-reuse').addEventListener('click',()=>{
+    const editor=active;
+    if(!editor?.data.source || !editor.sourceStale || $('manual-source-reuse').disabled)return;
+    editor.kind=editor.data.source.kind;
+    editor.path=editor.data.source.path || '';
+    editor.sourceStale=false;
+    editor.sourceNote='Using the previously loaded files.';
+    render();
+    $(editor.kind==='folder'?'manual-folder-load':'manual-files-choose').focus?.({preventScroll:true});
+  });
+  for(const [kind,id] of [['folder','manual-folder-browse'],['files','manual-files-choose'],['output','manual-output-choose']]){
+    const button=$(id);button.addEventListener('click',()=>choose(kind,button));
+  }
+  for(const field of fields){
+    const element=$('manual-meta-'+field);
+    element.addEventListener('input',()=>{
+      if(!active)return;
+      active.touched.add(field);
+      active.data.metadata[field]=field==='anthology'?element.checked:element.value;
+      changed(active);renderEditor();
+    });
+  }
+  for(const [id,action] of [['manual-save','save'],['manual-queue','queue'],['manual-discard-confirm','discard'],['manual-job-retry','retry'],['manual-job-reopen','reopen']]){
+    $(id).addEventListener('click',()=>write(action));
+  }
+  $('manual-discard').addEventListener('click',()=>{if(!active || active.flight)return;active.discard=true;render();$('manual-discard-cancel').focus?.();});
+  $('manual-discard-cancel').addEventListener('click',()=>{if(!active || active.flight)return;active.discard=false;render();$('manual-discard').focus?.();});
+  for(const action of ['pause','resume'])$('manual-job-'+action).addEventListener('click',()=>$(action+'-jobs').click());
+  $('manual-job-view').addEventListener('click',async()=>{
+    const draft=active?.accepted;
+    if(!draft?.candidate_id)return;
+    activateTab(false);
+    $('library').value='Audiobooks';view='candidates';filters.candidates=draft.state==='converted'?'converted':'all';attentionGroup='all';resetStrip();
+    const first=included(draft)[0]?.path || '';
+    $('search').value=(first.length<=500 && first?first:title(draft)).slice(0,500);
+    viewControls();
+    await updateList();
+    const row=rows.find(item=>item.id===draft.candidate_id);
+    if(!row){message('The library did not return this audiobook. Clear the search to refresh the list.');return;}
+    select(row,true);
+    const tr=[...$('inventory').children].find(item=>item.dataset.path===row.path);
+    tr?.scrollIntoView?.({block:'center'});tr?.focus?.({preventScroll:true});
+  });
+  return {poll(){if(shown){renderEditor();void read();}}};
+}
+
+const manualConversion=setupManualConversion();
 controls();
 viewControls();
 if(LS){

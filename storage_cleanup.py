@@ -747,6 +747,8 @@ class StorageCleanup:
 
     @staticmethod
     def _folder_candidates(manifest):
+        if manifest.get('manual_conversion'):
+            return []  # The selected audio files are the entire manual cleanup scope.
         root=ordinary(manifest['root']);candidates=set()
         for source in manifest['sources']:
             path=ordinary(source['path'])

@@ -265,10 +265,10 @@ class CandidateReviewService:
         prepare_chapters(row['members'])
         selected=[m for m in row['members'] if m['member_key'] in included]
         albums={str({k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}.get('album') or '').strip().casefold() for m in selected}
-        if len(row['members'])>1 and (len(albums)!=1 or not next(iter(albums),'').strip()) and not facts:reasons.append('Establish one common book source context; loose files cannot establish recording membership')
+        if len(row['members'])>1 and (len(albums)!=1 or not next(iter(albums),'').strip()) and not facts and not row.get('manual_conversion'):reasons.append('Establish one common book source context; loose files cannot establish recording membership')
         # Only the files being converted: Convert what's there (ruling 10) leaves the missing ones out of the tracks.
         if any(m.get('error') or m.get('missing') for m in selected):reasons.append('Source files unavailable or unreadable')
-        if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not facts and not manual_metadata.approved(row,ctx):reasons.append('Single audiobook file')
+        if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not facts and not row.get('manual_conversion') and not manual_metadata.approved(row,ctx):reasons.append('Single audiobook file')
         destination=row.get('preview',{}).get('path','')
         if not destination:reasons.append(row.get('preview',{}).get('reason') or 'Confirm output destination')
         elif check_sources and os.path.exists(destination):reasons.append('An audiobook already exists at this path. Review it or choose a different reviewed destination.')
@@ -283,6 +283,7 @@ class CandidateReviewService:
         if row.get('retired_source_count'):reasons.append('Original sources intentionally removed; use the created audiobook')
         status='Ready to create' if not reasons else 'Single audiobook file' if 'Single audiobook file' in reasons else 'Source changed — review required' if row.get('changed') or source_changed else 'Needs metadata review' if not metadata_ok else 'Tracks need review'
         if job:status=job.get('state',status)
+        if row.get('manual_conversion'):reasons.append('This book is managed in Manual Conversion')
         row.update(metadata_approved=metadata_ok,matching=copy.deepcopy(self.matching.get(row['id'],ctx.get('matching',{'state':'idle','proposals':[],'error':''}))),
                    review_context={k:ctx.get(k,False if k in ('source_coverage_confirmed','order_confirmed','chapters') else '') for k in ('manual_note','proposal_id','cover_id','metadata_actor','metadata_utc','source_coverage_confirmed','order_confirmed','track_actor','track_utc','chapters')},
                    cover_choices=ctx.get('cover_choices',[]),selected_cover=cover,track_order=order,included=included,

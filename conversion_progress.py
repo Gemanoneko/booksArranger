@@ -12,10 +12,10 @@ def approved_scope(row,ctx,key_for):
     included=ctx.get('included',[]);order=ctx.get('track_order',[])
     if not included or len(set(included))!=len(included) or set(order)!=set(keys) or len(order)!=len(keys) or not set(included)<=set(keys):return False
     selected=[m for m,k in zip(members,keys) if k in included]
-    if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not ctx.get('metadata_facts') and not manual_metadata.approved(row,ctx):return False
+    if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not row.get('manual_conversion') and not ctx.get('metadata_facts') and not manual_metadata.approved(row,ctx):return False
     if any(m.get('error') or m.get('missing') for m in members):return False
     albums={str({k.casefold():v for k,v in m.get('metadata',{}).get('tags',{}).items()}.get('album') or '').strip().casefold() for m in selected}
-    if len(members)>1 and (len(albums)!=1 or not next(iter(albums),'').strip()) and not ctx.get('metadata_facts'):return False
+    if len(members)>1 and (len(albums)!=1 or not next(iter(albums),'').strip()) and not row.get('manual_conversion') and not ctx.get('metadata_facts'):return False
     for m in selected:
         saved=ctx.get('source_hashes',{}).get(key_for(m['path']),{})
         value=saved.get('sha256','')

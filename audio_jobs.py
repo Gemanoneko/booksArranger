@@ -658,7 +658,7 @@ class AudioJobs:
             except Exception:
                 continue  # resume() repeats this exact check before any new work
 
-    def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None,retry_context=None,decision=None,decision_rules=None):
+    def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None,retry_context=None,decision=None,decision_rules=None,manual_context=None):
         """Freeze JSON-safe authoritative server manifest. Never HTTP path input."""
         if decision is not None and (approval_context is None or any(value is not None for value in (replacement_context,repair_context,retry_context))):
             raise ValueError('Saved approval requires its private approval checkpoint')
@@ -716,6 +716,10 @@ class AudioJobs:
             with self._db() as db:
                 if not db.in_transaction:db.execute('BEGIN IMMEDIATE')
                 reacquire_sources.require_admission(db,frozen['candidate_id'])
+                from manual_conversion import reserved_by
+                if reserved_by(db,frozen):raise ValueError('A selected source is reserved by a manual conversion draft')
+                if bool(frozen.get('manual_conversion')) != bool(manual_context):raise ValueError('Manual conversion requires its exact draft admission')
+                if manual_context:manual_context(db,frozen)
                 if decision is not None:
                     group=db.execute('SELECT id,revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(frozen['candidate_id'],)).fetchone()
                     saved,_=decision.check_current(db,dict(group)) if group else decision.check(db)
@@ -1249,8 +1253,17 @@ class AudioJobs:
 
     def status(self):
         import m4b_readmission
-        with self._db() as db:waiting_requests=m4b_readmission.pending_count(db)
-        rows = self._rows("SELECT * FROM audio_jobs WHERE " + CURRENT + " ORDER BY created, job_id")
+        from manual_conversion import active_keys, path_key
+        with self._db() as db:
+            waiting_requests=m4b_readmission.pending_count(db)
+            reserved=active_keys(db)
+            rows=[dict(row) for row in db.execute("SELECT * FROM audio_jobs WHERE " + CURRENT + " ORDER BY created, job_id")]
+        if reserved:
+            def held(row):
+                if row['state'] != 'pending':return False
+                manifest=json.loads(row['manifest'])
+                return not manifest.get('manual_conversion') and any(path_key(source['path']) in reserved for source in manifest['sources'])
+            rows=[row for row in rows if not held(row)]
         counts = {"queued": 0, "completed": 0, "failed": 0}
         current = None
         for row in rows:
@@ -1275,7 +1288,9 @@ class AudioJobs:
         """Same answer as scanning status()['jobs'] for pending/running rows, without loading every manifest."""
         with self._db() as db:
             import m4b_readmission
-            return db.execute("SELECT 1 FROM audio_jobs WHERE state IN ('pending','running') LIMIT 1").fetchone() is not None or m4b_readmission.pending_count(db)>0
+            if db.execute("SELECT 1 FROM audio_jobs WHERE state='running' AND " + CURRENT + " LIMIT 1").fetchone() or m4b_readmission.pending_count(db)>0:
+                return True
+        return bool(self._pending_unreserved(None))
 
     def _work(self):
         # Resume only explicitly paused durable postprocessing; never loop unclassified failures.
@@ -1291,7 +1306,7 @@ class AudioJobs:
             except Exception as error:
                 self.report_priority({'state':'blocked','job_id':None,'reason':str(error) or type(error).__name__})
                 priority = None # Durable requests are kept; expose the actual failed admission.
-            pending = (self._rows("SELECT * FROM audio_jobs WHERE job_id=? AND state='pending'", (priority,)) if priority else []) or self._rows("SELECT * FROM audio_jobs WHERE state='pending' ORDER BY created, job_id LIMIT 1")
+            pending = self._pending_unreserved(priority)
             if not pending: return
             row = pending[0]
             claim = self._claim(row)
@@ -1322,6 +1337,21 @@ class AudioJobs:
 
     NAMES_CHANGED = 'Names changed since this job was queued. Press Retry to queue it with these names.'
 
+    def _pending_unreserved(self, priority):
+        from manual_conversion import active_keys
+        with self._db() as db:
+            query = "SELECT * FROM audio_jobs WHERE state='pending' AND " + CURRENT
+            keys = active_keys(db)
+            order = ' ORDER BY CASE WHEN job_id=? THEN 0 ELSE 1 END,created,job_id'
+            if not keys:
+                row = db.execute(query + order + ' LIMIT 1', (priority,)).fetchone()
+                return [dict(row)] if row else []
+            for row in db.execute(query + order, (priority,)):
+                manifest = json.loads(row['manifest'])
+                if manifest.get('manual_conversion') or not any(os.path.normcase(os.path.abspath(source['path'])) in keys for source in manifest['sources']):
+                    return [dict(row)]
+            return []
+
     def _claim(self, row):
         """The worker takes a pending job: 'claimed', 'gone' (no longer pending, or set aside) or 'stale' (planned under other
         names than Sergei's saved ones). The names check reads outside the lock; the stamp, read again under it, proves no
@@ -1336,9 +1366,11 @@ class AudioJobs:
                 except Exception:
                     stamp, stale = None, False  # an unreadable store never stops the queue; the job runs as planned
             with self._lock:
-                current = self._rows('SELECT state FROM audio_jobs WHERE job_id=? AND ' + CURRENT, (row['job_id'],))
-                if not current or current[0]['state'] != 'pending':
-                    return 'gone'
+                from manual_conversion import reserved_by
+                with self._db() as db:
+                    current = db.execute('SELECT state FROM audio_jobs WHERE job_id=? AND ' + CURRENT, (row['job_id'],)).fetchone()
+                    if not current or current['state'] != 'pending' or reserved_by(db,json.loads(row['manifest'])):
+                        return 'gone'
                 if stamp is not None:
                     try:
                         if self.names_stamp() != stamp:

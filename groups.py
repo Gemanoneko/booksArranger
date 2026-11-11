@@ -784,6 +784,9 @@ def _sync_inputs(connection,root):
     """What a regroup depends on beyond the catalog revision (files, retirements, part chapters and volumes bump that):
     the retired sources, the reacquire markers and the protected groups (approved, reviewed or with a job)."""
     retired=retired_sources(connection,root)
+    from manual_conversion import grouping_inputs, path_key
+    manual_ids,manual_blocked=grouping_inputs(connection,root)
+    manual=set();overlapping=set()
     import reacquire_sources
     archived=reacquire_sources.archived_ids(connection,root)
     frozen={json.loads(item['snapshot'])['group']['scope']:json.loads(item['snapshot']) for item in reacquire_sources.markers(connection,root) if item['state']=='required'}
@@ -796,18 +799,30 @@ def _sync_inputs(connection,root):
         jobs={json.loads(r[0])['candidate_id'] for r in connection.execute('SELECT manifest FROM audio_jobs'+regrouped)}
     for r in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)):
         if r['id'] in archived:continue
-        if r['approved'] or r['review'] or r['id'] in jobs:protected[r['scope']]=json.loads(r['evidence'])
+        if r['id'] in manual_ids:
+            manual.add(r['scope'])
+        else:
+            evidence=json.loads(r['evidence']) if manual_blocked or r['approved'] or r['review'] or r['id'] in jobs else None
+            if evidence and any(path_key(member['path']) in manual_blocked for member in evidence['members']):
+                overlapping.add(r['scope'])
+            elif evidence and (r['approved'] or r['review'] or r['id'] in jobs):
+                protected[r['scope']]=evidence
     ignored=_confirmed_internal_parts(connection,root,protected,frozen)
-    return {'retired':retired,'archived':archived,'frozen':frozen,'protected':protected,
+    return {'retired':retired,'archived':archived,'frozen':frozen,'protected':protected,'manual':manual,'manual_blocked':manual_blocked,'overlapping':overlapping,
             'parts':(chaptered_parts(connection,root),volume_parts(connection,root)-ignored,kept_parts(connection,root))}
 
 
 def _sync_build(connection,root,inputs):
+    from manual_conversion import path_key
     rows=connection.execute('SELECT * FROM files WHERE root=? ORDER BY path',(root,)).fetchall()
     frozen=inputs['frozen']
     frozen_paths={member['path'] for item in frozen.values() for member in item['members']}
-    rows=[row for row in rows if row['path'] not in frozen_paths]
+    rows=[row for row in rows if row['path'] not in frozen_paths and path_key(row['path']) not in inputs['manual_blocked']]
     groups=build(rows,inputs['protected'],*inputs['parts'],blocked_members=[m for item in frozen.values() for m in item['members']])
+    for scope in inputs['overlapping'] & groups.keys():
+        evidence=groups.pop(scope)
+        residual=scope+'\x1fmanual-remaining'
+        groups[residual]=evidence|{'scope':residual}
     for scope,item in frozen.items():groups[scope]=json.loads(item['group']['evidence'])
     return groups
 
@@ -863,11 +878,13 @@ def sync(connection,root):
 def _sync_write(connection,root,revision,groups,inputs):
     """Store a regroup: new and changed groups, superseded ones, then the root's synced revision."""
     retired,archived,frozen,protected=inputs['retired'],inputs['archived'],inputs['frozen'],inputs['protected']
+    from manual_conversion import path_key
     for scope,evidence in groups.items():
         if scope in frozen:continue
         old=connection.execute('SELECT * FROM book_groups WHERE root=? AND scope=?',(root,scope)).fetchone()
         if old:
-            evidence=_preserve_retired_evidence(old,evidence,retired)
+            if not any(path_key(member['path']) in inputs['manual_blocked'] for member in json.loads(old['evidence'])['members']):
+                evidence=_preserve_retired_evidence(old,evidence,retired)
             connection.execute('UPDATE book_groups SET superseded=0 WHERE id=?',(old['id'],))
         fingerprint=hashlib.sha256(json.dumps(evidence,ensure_ascii=False,sort_keys=True).encode('utf-8')).hexdigest()
         if old is None:
@@ -878,7 +895,7 @@ def _sync_write(connection,root,revision,groups,inputs):
                 (fingerprint,json.dumps(evidence,ensure_ascii=False),old['id']))
     # A formerly indexed group no longer present retains evidence but cannot stay approved.
     for old in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)).fetchall():
-        if old['id'] in archived or old['scope'] in frozen:continue
+        if old['id'] in archived or old['scope'] in frozen or old['scope'] in inputs['manual']:continue
         former=json.loads(old['evidence'])['members']
         all_retired=bool(former) and all(m['path'] in retired for m in former)
         if old['scope'] not in groups and old['scope'] not in protected:
@@ -891,7 +908,8 @@ def render(row,root,coverage,retired=None):
     evidence=json.loads(row['evidence'])
     review=json.loads(row['review']) if row['review'] else None
     first=evidence['members'][0]
-    preview=propose(first['path'],root,'audiobook',evidence['metadata'],review)
+    preview=({'confidence':'Reviewed preview','path':evidence['manual_destination'],'reason':'Exact Save As path'}
+             if evidence.get('manual_conversion') else propose(first['path'],root,'audiobook',evidence['metadata'],review))
     reasons=list(evidence['conflicts'])
     if not preview['path']:reasons.append(preview['reason'])
     approved=bool(row['approved'])

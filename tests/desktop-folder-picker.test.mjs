@@ -48,7 +48,7 @@ test('IPC answers the app window only; another sender is refused before any dial
   const appEvent = { sender: 'app' }, setupEvent = { sender: 'setup' }, strangerEvent = { sender: 'other' };
   const sender = (event) => { if (event.sender === 'app') return 'app'; if (event.sender === 'setup') return 'setup'; throw new Error('Unknown desktop control sender'); };
   register({ ipcMain, dialog, sender, window: () => ({ isDestroyed: () => false }) });
-  assert.deepEqual(Object.keys(handlers), ['books:choose-folder']);
+  assert.deepEqual(Object.keys(handlers), ['books:choose-folder','books:choose-audio-files','books:choose-audiobook-output']);
   assert.equal(await handlers['books:choose-folder'](appEvent, { title: 'Choose a folder for X', defaultPath: 'C:\\', buttonLabel: 'Move here', extra: 1 }), 'E:\\Audio');
   assert.equal(dialog.calls.length, 1);
   await assert.rejects(handlers['books:choose-folder'](setupEvent, {}), /unavailable/);
@@ -82,4 +82,49 @@ test('a rejected native picker releases its single-flight lock for the next requ
   await assert.rejects(handlers['books:choose-folder']({}, {}), /Native opening failed/);
   assert.equal(await handlers['books:choose-folder']({}, {}), null);
   assert.equal(calls, 2);
+});
+
+test('manual file and export pickers return exact selections, stay modal and share the folder lock', async () => {
+  const handlers = {}, calls = [], win = {id: 10};
+  const tracks = ['Z:\\Аудиокниги\\02.MP3','Z:\\Аудиокниги\\10.flac'];
+  const output = '\\\\server\\share\\Аудиокнига.m4b';
+  let finish;
+  const dialog = {
+    showOpenDialog: (...args) => { calls.push(args); return new Promise(resolve => {finish=resolve;}); },
+    showSaveDialog: async (...args) => { calls.push(args); return {filePath:output}; },
+  };
+  register({ipcMain:{handle:(channel,fn)=>{handlers[channel]=fn;}},dialog,sender:event=>event.sender,window:()=>win});
+  const event = {sender:'app'}, files = handlers['books:choose-audio-files'], save = handlers['books:choose-audiobook-output'];
+  await assert.rejects(files({sender:'setup'}), /unavailable/);
+  await assert.rejects(save({sender:'setup'}), /unavailable/);
+  const pending = files(event);
+  assert.equal(calls[0][0],win);
+  assert.deepEqual(calls[0][1].properties,['openFile','multiSelections','dontAddToRecent']);
+  assert.deepEqual(calls[0][1].filters[0].extensions,['mp3','m4a','m4b','aac','flac','ogg','opus','wav','wma']);
+  await assert.rejects(save(event), /already open/);
+  finish({filePaths:tracks});
+  assert.deepEqual(await pending, tracks);
+  assert.equal(await save(event, {suggestedName:'Аудиокнига.m4b'}), output);
+  assert.equal(calls[1][0],win);
+  assert.equal(calls[1][1].defaultPath,'Аудиокнига.m4b');
+  assert.deepEqual(calls[1][1].filters[0].extensions,['m4b']);
+  await save(event, {defaultPath:output});
+  assert.equal(calls[2][1].defaultPath,output);
+});
+
+test('manual pickers distinguish cancellation from wrong extensions and incomplete paths', async () => {
+  const handlers = {};
+  let pick, destination;
+  register({ipcMain:{handle:(channel,fn)=>{handlers[channel]=fn;}},sender:()=> 'app',window:()=>null,
+    dialog:{showOpenDialog:async()=>pick,showSaveDialog:async()=>destination}});
+  const files=handlers['books:choose-audio-files'], save=handlers['books:choose-audiobook-output'];
+  pick={canceled:true};destination={canceled:true};
+  assert.equal(await files({}),null);
+  assert.equal(await save({}),null);
+  pick={filePaths:['C:\\foo\\story.txt']};destination={filePath:'C:\\foo\\story.mp3'};
+  await assert.rejects(files({}), /supported audio files/);
+  await assert.rejects(save({}), /ending in .m4b/);
+  pick={filePaths:['\\foo\\story.mp3']};destination={filePath:'C:story.m4b'};
+  await assert.rejects(files({}), /absolute paths/);
+  await assert.rejects(save({}), /absolute path/);
 });

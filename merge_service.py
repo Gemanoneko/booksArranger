@@ -221,6 +221,8 @@ class MergeService:
         with DirectoryBoundary(self.cache_dir.anchor,self.cache_dir,create=True):pass
         self.stage_root = self.cache_dir / 'audio-staging'
         self.reviews = CandidateReviewService(inventory, self.cache_dir / 'covers')
+        from manual_conversion import ManualConversions
+        self.manual_conversions = ManualConversions(self)
         with connect(inventory.database) as db:
             db.execute('CREATE TABLE IF NOT EXISTS owned_artifacts(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER)')
             # Last full verification of each published book (path, sha) and the file identity it had then.
@@ -240,6 +242,7 @@ class MergeService:
         self.jobs.pending_postprocessing=self._pending_replacement_postprocessing
         self.jobs.postprocessing=self._finish_replacement
         self.cleanup = CleanupJobs(inventory.database,self.cache_dir.parent/'source-recovery',self._cleanup_guard,self._review_boundary,output_location=self.publication_bindings.current,output_location_guard=self.publication_bindings.guard,output_policy=lambda:self.output_policy())
+        self.cleanup.manual_output=self.manual_conversions.cleanup_output
         self.cleanup.stop=self.jobs._stop
         # Pause and Stop set the shared stop; a Quit drain does not, so it is checked separately.
         self.cleanup.interrupt=lambda:self.draining or self.jobs._drain.is_set()
@@ -426,6 +429,9 @@ class MergeService:
     def _attempt_boundary(self,row):
         import destination_admission
         manifest=json.loads(row['manifest'])
+        if manifest.get('manual_conversion'):
+            yield
+            return
         if __import__('publication_reuse').task(manifest):
             if not self._guard(manifest):raise ValueError('Extra-source review or publication changed')
             yield
@@ -735,6 +741,19 @@ class MergeService:
         with _QUIET_LOCK:
             self._quiet_generation=self.__dict__.get('_quiet_generation',0)+1;self._quiet_state=None;self._quiet_pages={}
 
+    def _invalidate_manual_projection(self):
+        """A manual book reached a durable boundary the normal poll may not have observed yet."""
+        with _QUIET_LOCK:
+            self._manual_projection_changed_at=time.monotonic()
+            self._converted_cache=None
+        self.invalidate_status()
+
+    def _remember_converted(self,started,identities,token):
+        with _QUIET_LOCK:
+            cached=self.__dict__.get('_converted_cache')
+            if started>=self.__dict__.get('_manual_projection_changed_at',0) and (cached is None or started>=cached[0]):
+                self._converted_cache=(started,set(identities),token)
+
     def state(self):
         snapshot=getattr(getattr(self,'replacements',None),'snapshot',None)
         if snapshot is None:value=self._state()
@@ -821,7 +840,7 @@ class MergeService:
             attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason',''),'task_kind':held['manifest'].get('task_kind') if held else None}
             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
         totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
-        self._converted_cache=(started,set(totals.get('converted_ids') or ()),token)
+        self._remember_converted(started,totals.get('converted_ids') or (),token)
         # One predicate feeds every count and every list (Judy 2026-10-24, section 1): stale job rows are not counted, and
         # the books only Sergei can move on are counted beside the stopped jobs.
         summary=self.attention_summary(retry=False)
@@ -876,7 +895,7 @@ class MergeService:
             if not computing.acquire(blocking=False):return set(cached[1])
             computing.release()
         token=self._quiet_token();started=time.monotonic()
-        value=set(self.progress_books()['converted_ids']);self._converted_cache=(started,value,token);return set(value)
+        value=set(self.progress_books()['converted_ids']);self._remember_converted(started,value,token);return value
 
     def pause(self,origin=None):
         if self.draining:return None
@@ -963,7 +982,8 @@ class MergeService:
         if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','This start was superseded by Pause or closing; saved requests are retained.')
         if self.__dict__.get('_resume_pending') and self.__dict__.get('_resume_pending_owner') is not pending_owner:
             raise StartRefused('busy','A previous start request is still checking. Retry Start after it stops; saved retry requests are retained.')
-        self._no_scan()
+        if self.inventory.worker and self.inventory.worker.is_alive():
+            raise StartRefused('busy','Wait for the scan to stop before creating audiobooks')
         if self.jobs._thread and self.jobs._thread.is_alive():
             if self.jobs._stop.is_set():raise StartRefused('busy','The audiobook worker is still pausing. Retry Start after it stops.')
             self._authorize_automatic_cleanup(generation)
@@ -990,6 +1010,9 @@ class MergeService:
         return answer()|{'start_admission':admission}
 
     def _cleanup_binding(self,db,manifest):
+        if manifest.get('manual_conversion'):
+            from manual_conversion import cleanup_binding
+            return cleanup_binding(db,manifest)
         row=db.execute('SELECT revision,review FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
         context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
         if not row or not context or row['revision']!=manifest['candidate_revision'] or context['revision']!=row['revision']:
@@ -1034,6 +1057,8 @@ class MergeService:
             job=dict(row);job['manifest']=json.loads(job['manifest']);job['output']=json.loads(job['output']) if job['output'] else None
             if not historical and not job['manifest'].get('cleanup_policy',{}).get('enabled'):raise ValueError('Original removal was not enrolled for this job')
             binding=self._cleanup_binding(db,job['manifest'])
+        if job['manifest'].get('manual_conversion'):
+            self.manual_conversions.settle_overlapping_jobs(job['manifest'])
         id=self.cleanup.enroll(job,binding,historical=historical)
         return {'cleanup_id':id,'status':self.cleanup.status(job_id)}
 
@@ -1461,6 +1486,8 @@ class MergeService:
 
     def _prune_completed(self,job_id,source_completed=False,stop=None):
         with connect(self.inventory.database) as db:raw=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+        manual=bool(raw and json.loads(raw[0]).get('manual_conversion'))
+        if manual and hasattr(self,'manual_conversions'):self.manual_conversions.release_cleaned(job_id)
         duplicate=bool(raw and __import__('publication_reuse').task(json.loads(raw[0])))
         if source_completed and not duplicate:self.working.schedule_published(job_id)
         if hasattr(self,'replacements'):
@@ -1477,8 +1504,10 @@ class MergeService:
         prior=next((r for r in self.storage_cleanup.status() if r['job_id']==job_id),None)
         self._post_current=(job_id,'temporary')
         try:
-            if not prior or prior['state']!='completed':self.storage_cleanup.run(job_id)
-            self.storage_cleanup.run_folders(job_id,progress=lambda phase:setattr(self,'_post_current',(job_id,phase)))
+            if not prior or prior['state']!='completed':
+                self.storage_cleanup.run(job_id)
+                if manual:self._invalidate_manual_projection()
+            if not manual:self.storage_cleanup.run_folders(job_id,progress=lambda phase:setattr(self,'_post_current',(job_id,phase)))
         except InterruptedError:raise
         except Exception:
             # Durable audio success remains independent; cleanup errors stay visible.
@@ -1491,7 +1520,7 @@ class MergeService:
         try:self._after_completed_work(job_id)
         finally:posting.discard(job_id)
         with connect(self.inventory.database) as db:raw=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
-        if raw and __import__('publication_reuse').task(json.loads(raw[0])):return
+        if raw and (__import__('publication_reuse').task(json.loads(raw[0])) or json.loads(raw[0]).get('manual_conversion')):return
         # Rulings 69 and 71h: a book whose chosen folder it was not converted into (outside Sorted, chosen while it ran)
         # is moved there now, after its sources were handled; never converted again.
         try:self._move_to_chosen(job_id)
@@ -2270,16 +2299,20 @@ class MergeService:
         if jobs is not None and jobs.is_alive() and self.jobs._stop.is_set():return 'pause'
         cleanup=getattr(self.cleanup,'thread',None)
         if cleanup is not None and cleanup.is_alive() and self.cleanup.stop.is_set():return 'pause'
+        scan=getattr(getattr(self,'inventory',None),'worker',None)
+        if scan is not None and scan.is_alive():return 'scan'
         return None
 
-    def start_when_settled(self,why=None):
+    def start_when_settled(self,why=None,*,start_generation=None):
         """Ruling 35 (Sergei 2026-10-26): a start refused only because a Pause, an earlier start or a stopping worker is
         still settling ("Retry Start after it stops") is kept and made when it settles, every check again then. One waits at
         a time; a second press joins it. A Pause pressed after it, or closing, drops it (the later press wins).
-        {'state': 'waiting', 'reason': 'pause' | 'start'}."""
+        {'state': 'waiting', 'reason': 'pause' | 'start' | 'scan'}."""
         with _BULK_LOCK:
             if self.__dict__.get('_closing') or self.draining:raise StartRefused('closing','Books Arranger is closing. Resume audiobook jobs after it restarts.')
             generation=self.__dict__.get('_start_generation',0)
+            if start_generation is not None and start_generation!=generation:
+                raise StartRefused('stale','Start was superseded by Pause or closing.')
             waiting=self.__dict__.get('_start_waiting')
             if waiting is not None and waiting['generation']==generation:return {'state':'waiting','reason':waiting['reason']}
             token=object()
@@ -2316,7 +2349,7 @@ class MergeService:
                 with _BULK_LOCK:
                     if current() is None:return
                     self._start_waiting=None
-                try:self.resume()
+                try:self.resume(start_generation=waiting['generation'])
                 except StartRefused as error:
                     if error.start_state!='busy':self._record_start_failure(error);return
                     with _BULK_LOCK:
@@ -3463,6 +3496,7 @@ class MergeService:
         since it was planned (ruling 69). Each check reads only the catalog; an unreadable one never stops the queue."""
         manifest=job.get('manifest') or {}
         if isinstance(manifest,str):manifest=json.loads(manifest)
+        if manifest.get('manual_conversion'):return False
         if __import__('publication_reuse').task(manifest):return False
         for check in (self._names_changed,self._trilogy_stale,getattr(self,'_replan_needed',None),getattr(self,'_override_stale',None)):
             if check is None:continue
@@ -3526,6 +3560,7 @@ class MergeService:
         return False
 
     def _partial_folder_job(self,db,manifest):
+        if manifest.get('manual_conversion'):return False
         """True when a job's sources are only part of the audio files of their one source folder and ruling 68 makes that
         folder one book (groups.folder_verdict is not 'separate'). Whole .m4b files, named anthology volumes (the «Ужасы и
         трэшатинка» volume-1 claim), books whose files Sergei kept separate ("Keep as separate books"), library roots and
@@ -3564,6 +3599,7 @@ class MergeService:
     def _foreign_cyrillic_job(self,db,manifest):
         """Ruling 71f: the job files its author in Cyrillic while the name is a foreign one or one the app does not know,
         no Russian original is recorded, and the book was not re-checked yet (one re-check: its research then decides)."""
+        if manifest.get('manual_conversion'):return False
         import local_identity
         from public_research import RESEARCH_VERSION
         if (manifest.get('metadata_facts') or {}).get('research_version')==RESEARCH_VERSION:return False  # planned under rulings 39/59
@@ -5038,6 +5074,9 @@ class MergeService:
         try:
             self._reacquire_admission(identity=manifest['candidate_id'])
             self._no_scan()
+            if manifest.get('manual_conversion'):
+                self.manual_conversions.cleanup_output(manifest,manifest['destination'])
+                return self.manual_conversions.guard(manifest)
             import publication_reuse
             if publication_reuse.task(manifest):
                 frozen={k:v for k,v in manifest.items() if k!='attempt_id'}
@@ -5114,7 +5153,7 @@ class MergeService:
         import inplace_m4b
         try:self._require_sorted(manifest['destination']);sorted_destination=True
         except ValueError:sorted_destination=False  # the copy flow then runs, and its cleanup keeps the sources (C2)
-        session=None if manifest.get('replacement_id') or not sorted_destination else inplace_m4b.Session(self.inventory.database,manifest['job_id'],manifest['attempt_id'])
+        session=None if manifest.get('replacement_id') or manifest.get('manual_conversion') or not sorted_destination else inplace_m4b.Session(self.inventory.database,manifest['job_id'],manifest['attempt_id'])
         output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info),artifact_observer=self.working,in_place=session)
         if isinstance(output,inplace_m4b.Edited):return self._publish_in_place(manifest,output,validation,checkpoint)
         if manifest.get('replacement_id'):
@@ -5192,7 +5231,10 @@ class MergeService:
         """Full check: exact recorded bytes. A stop is raised, never reported as invalid."""
         try:
             root=ordinary(record['root']); final=ordinary(record['final_path'])
-            if os.path.normcase(str(root)) not in {os.path.normcase(str(r)) for r in (tuple(self.inventory.source_roots('Audiobooks'))+((self.inventory.output_root,) if getattr(self.inventory,'output_root',None) else ()) if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']])} and not (hasattr(self,'_chosen_root') and self._chosen_root(root,final)):return False
+            if os.path.normcase(str(root)) not in {os.path.normcase(str(r)) for r in (tuple(self.inventory.source_roots('Audiobooks'))+((self.inventory.output_root,) if getattr(self.inventory,'output_root',None) else ()) if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']])} and not (hasattr(self,'_chosen_root') and self._chosen_root(root,final)):
+                from manual_conversion import output_allowed
+                with connect(self.inventory.database) as db:
+                    if not output_allowed(db,record['job_id'],root,final):return False
             if final.suffix.lower()!='.m4b' or record['validation'].get('profile') not in {PROFILE,LEGACY_PROFILE,AUTOMATIC_PROFILE}:return False
             with DirectoryBoundary(root,final.parent) as boundary, VerifiedFile(final) as native:
                 if record.get('identity') is not None and native.facts()['identity']!=record['identity']:return False

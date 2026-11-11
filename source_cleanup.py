@@ -188,14 +188,18 @@ class CleanupJobs:
         with connect(self.database) as db:
             now=stamp();db.execute('UPDATE source_cleanup SET state=?,reason=?,updated=? WHERE id=?',(state,reason,now,id))
             if state=='completed':db.execute('INSERT OR IGNORE INTO recovery_completion SELECT id,job_id,? FROM source_cleanup WHERE id=?',(now,id))
-    def _sorted(self,path,error=ValueError):
+    def _sorted(self,path,error=ValueError,manifest=None):
         """The deletion rule (rulings 2 and 1a): the effective output is inside the configured output folder, which is
         set and outside every source. Read from the live configuration at each check."""
         from source_config import require_sorted
         output_root,sources=self.output_policy() if self.output_policy else (None,())
         # Ruling 71h: a folder Sergei chose counts as Sorted for the book filed directly in it (MergeService supplies them).
         chosen=getattr(self,'chosen_folders',None)
-        try:require_sorted(str(path),output_root,sources,chosen() if callable(chosen) else ())
+        try:
+            if manifest and manifest.get('manual_conversion'):
+                self.manual_output(manifest,path)
+            else:
+                require_sorted(str(path),output_root,sources,chosen() if callable(chosen) else ())
         except ValueError as problem:raise error(str(problem)) from None
     def enroll(self,job,binding,historical=False):
         if job['state']!='completed':raise ValueError('Only a completed validated audiobook can remove its sources')
@@ -219,7 +223,7 @@ class CleanupJobs:
             paths.append(str(path).casefold())
         with connect(self.database) as db:
             setup(db);prior=db.execute('SELECT id FROM source_cleanup WHERE job_id=?',(job['job_id'],)).fetchone()
-        if not prior:self._sorted((self.output_location(output)[0] if self.output_location else output)['final_path'])
+        if not prior:self._sorted((self.output_location(output)[0] if self.output_location else output)['final_path'],manifest=manifest)
         id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':manifest,'output':output,'binding':binding,'actor':'assistant','created':stamp(),'recovery_identity':self.root_identity,'historical':historical}
         if duplicate:intent['cleanup_mode']='duplicate_backup_removal'
         with connect(self.database) as db:
@@ -234,7 +238,8 @@ class CleanupJobs:
         v=output['validation'];meta=manifest.get('metadata',{});tags=v.get('tags',{})
         if v.get('checks')!='Output checks passed' or v.get('profile')!=manifest.get('profile') or v.get('sha256')!=output['sha256'] or v.get('size')!=output['size']:
             raise ValueError('The complete published output validation record is required')
-        if str(tags.get('media_type'))!='2' or tags.get('title')!=meta.get('title') or tags.get('artist')!=meta.get('canonical_author'):
+        artist=tags.get('artist','' if manifest.get('manual_conversion') else None)
+        if str(tags.get('media_type'))!='2' or tags.get('title')!=meta.get('title') or artist!=meta.get('canonical_author'):
             raise ValueError('Validated audiobook kind, title and author do not match the reviewed book')
         if v.get('publication_mode')=='in_place':
             # 0.21.0, no decode (Sergei, 2026-10-22): the original itself became the output; its byte proof replaces PCM frames.
@@ -472,7 +477,7 @@ class CleanupJobs:
             with connect(self.database) as db:
                 if not self.guard(db,intent):raise BoundaryError('Completed book review changed')
             if out['validation'].get('publication_mode')=='in_place' and not duplicate:return self._retire_moved(id,intent,manifest,out)
-            self._sorted(final,BoundaryError)  # before any copy or marker change; again before each disposal below
+            self._sorted(final,BoundaryError,manifest)  # before any copy or marker change; again before each disposal below
             self._set(id,'checking');held=[];self.phases[id]='Checking original files'
             required=sum(s['size'] for s in manifest['sources'])
             if shutil.disk_usage(self.root).free<required+1024*1024:raise BoundaryError('Insufficient recovery space; originals retained')
@@ -531,7 +536,7 @@ class CleanupJobs:
                 rb.revalidate();ob.revalidate()
                 # Senua 0.21.3 F2: the pure re-reads run before the removal intent is recorded too, so a refusal leaves no
                 # member in removal_intended (restore() reads that as a collision). They run again just before disposal.
-                self._sorted(final,BoundaryError);self._output_present(output,out,final)
+                self._sorted(final,BoundaryError,manifest);self._output_present(output,out,final)
                 # Ruling 27: one original's removal (intent, disposal, retirement record) finishes once begun.
                 with critical_sections.critical(critical_sections.CLEANUP),self.review_boundary(),connect(self.database) as db:
                     db.execute('BEGIN IMMEDIATE')
@@ -541,7 +546,7 @@ class CleanupJobs:
                     db.execute('BEGIN IMMEDIATE')
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
                     if self.output_location_guard and not self.output_location_guard(db,intent['output'],intent.get('_location_envelope'),require_transaction=True):raise BoundaryError('Current output location changed before source disposition')
-                    self._sorted(final,BoundaryError)
+                    self._sorted(final,BoundaryError,manifest)
                     self._output_present(output,out,final)
                     single_stream(source['path'])
                     original.dispose();marked.pop(str(ordinary(source['path'])),None)

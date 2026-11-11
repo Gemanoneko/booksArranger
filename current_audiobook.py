@@ -144,7 +144,13 @@ class CurrentAudiobooks:
     def _protected_record(self,publication,record):
         path=ordinary(record['final_path'])
         root=ordinary(record['root'])
-        if root not in self.libraries and not self._chosen(root,path) or not path.is_relative_to(root) or path.suffix.lower()!='.m4b':raise BoundaryError('Current publication is outside its library')
+        allowed=root in self.libraries or self._chosen(root,path)
+        if not allowed and publication['parent']['manifest'].get('manual_conversion'):
+            from manual_conversion import output_allowed
+            from scanner import connect
+            with connect(self.replacements.database) as db:
+                allowed=output_allowed(db,record['job_id'],root,path)
+        if not allowed or not path.is_relative_to(root) or path.suffix.lower()!='.m4b':raise BoundaryError('Current publication is outside its library')
         with contextlib.ExitStack() as stack:
             if publication.get('parent_location') is not None:
                 if self.bindings is None:raise BoundaryError('Relocated repair parent lease unavailable')

@@ -721,6 +721,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path in {'/app.js','/desktop-ui.js','/load-state.js','/style.css'}:
                 content_type = 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8'
                 self.response(200,(BASE / 'web' / path[1:]).read_bytes(),content_type)
+            elif path == '/api/manual-conversion':
+                if not self.trusted(token=True):return
+                if query:raise ValueError('Manual conversion takes no query parameters')
+                if not self.loaded('books'):
+                    self.response(503,{'error':'Your books are still loading','code':'loading'});return
+                self.response(200,self.server.merge.manual_conversions.list())
             elif path in {'/api/cover','/api/inventory'} and not self.loaded('books'):
                 # Still loading: a "still updating" answer, which the page counts as an answer (Judy 3.4).
                 if not self.trusted(token=True): return
@@ -949,6 +955,13 @@ class Handler(BaseHTTPRequestHandler):
         self.response(409,body)
 
     def merge_request(self,path,data):
+        if path.startswith('/api/manual-conversion/'):
+            action=path.rsplit('/',1)[1]
+            try:
+                self.response(200,getattr(self.server.merge.manual_conversions,action)(data))
+            except OSError as error:
+                self.fail(400,str(error))
+            return
         if path=='/api/automatic/cancel-start':
             # Cancel automatic start (O12): the pending start ends; books keep waiting for a press.
             if data:raise ValueError('Automatic controls require an empty object; scope is Audiobooks')
@@ -1424,7 +1437,9 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
                          '/api/candidate/destination',
                          '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rules','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,
-                         '/api/audiobook/resume-cancel','/api/audiobook/recovery/cancel'}
+                         '/api/audiobook/resume-cancel','/api/audiobook/recovery/cancel',
+                         '/api/manual-conversion/inspect','/api/manual-conversion/save','/api/manual-conversion/queue',
+                         '/api/manual-conversion/discard','/api/manual-conversion/retry','/api/manual-conversion/reopen'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return

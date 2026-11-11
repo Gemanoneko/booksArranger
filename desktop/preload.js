@@ -20,5 +20,10 @@ contextBridge.exposeInMainWorld('booksDesktop',Object.freeze({
  restartEngine:()=>ipcRenderer.invoke('books:restart-engine'),
  // Rulings 69 and 70: the Windows folder picker for Choose folder… (a path or null on Cancel; the engine validates it).
  chooseFolder:(request)=>{const value=request&&typeof request==='object'?request:{};const pick=key=>typeof value[key]==='string'?value[key]:undefined;
-  return ipcRenderer.invoke('books:choose-folder',{title:pick('title'),defaultPath:pick('defaultPath'),buttonLabel:pick('buttonLabel')});}
+  return ipcRenderer.invoke('books:choose-folder',{title:pick('title'),defaultPath:pick('defaultPath'),buttonLabel:pick('buttonLabel')});},
+ chooseAudioFiles:()=>ipcRenderer.invoke('books:choose-audio-files'),
+ chooseAudiobookOutput:(request)=>ipcRenderer.invoke('books:choose-audiobook-output',{
+  defaultPath:typeof request?.defaultPath==='string'?request.defaultPath:undefined,
+  suggestedName:typeof request?.suggestedName==='string'?request.suggestedName:undefined
+ })
 }));

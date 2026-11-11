@@ -165,3 +165,75 @@ button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--d
 .ask-inline-names{margin-top:6px;min-width:0}
 /* Judy 0.23.1 section 3.3: a book's source folders, in flow under its "In {n} folders" line; above six it scrolls inside itself. */
 .folder-list-box{max-height:232px;overflow-y:auto;margin:4px 0 0}
+#workspace-tabs {
+  margin-top: 16px;
+}
+
+#manual-conversion button {
+  min-height: 32px;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#manual-conversion [aria-current="true"] {
+  background: var(--row-selected);
+  color: var(--text);
+}
+
+#manual-conversion button[aria-disabled="true"] {
+  background: var(--disabled);
+  color: var(--disabled-text);
+  border-color: var(--border);
+  cursor: default;
+}
+
+#manual-conversion fieldset {
+  min-width: 0;
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+#manual-conversion legend {
+  font-weight: 600;
+}
+
+#manual-conversion input[type="radio"],
+#manual-conversion input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+#manual-conversion .review-grid input {
+  min-width: 0;
+}
+
+#manual-conversion p,
+#manual-conversion li {
+  overflow-wrap: anywhere;
+}
+
+#manual-folder-path {
+  flex: 1 1 260px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#manual-books, #manual-track-list {
+  padding-inline-start: 24px;
+}
+
+#manual-books li, #manual-track-list li {
+  margin-block: 12px;
+}
+
+#manual-track-list li .toolbar {
+  margin-top: 4px;
+}
+
+#manual-track-list .check, #manual-editable .check {
+  margin-block: 2px;
+}

@@ -20,6 +20,11 @@
       <div id="load-actions" class="toolbar" hidden><button id="load-restart" type="button" title="Stop the engine and start it again. Loading starts over. Your files are not touched." hidden>Restart engine</button><button id="load-retry" type="button" title="Start the engine again." hidden>Try again</button><button id="load-copy" type="button" class="quiet" title="Copy the technical message to the clipboard.">Copy details</button><span id="load-copy-status" role="status"></span></div>
       <details id="load-details" hidden><summary title="Show the technical message.">Technical details</summary><pre id="load-technical" tabindex="0" aria-label="Startup technical details"></pre></details>
     </section>
+    <div id="workspace-tabs" class="toolbar" role="tablist" aria-label="Books Arranger workspace" hidden>
+      <button id="library-tab" type="button" role="tab" aria-selected="true" aria-controls="library-workspace" title="Show the library and automatic processing.">Library</button>
+      <button id="manual-conversion-tab" type="button" role="tab" aria-selected="false" aria-controls="manual-conversion" tabindex="-1" class="quiet" title="Combine a folder or selected audio files into one audiobook.">Manual Conversion</button>
+    </div>
+    <div id="library-workspace" role="tabpanel" aria-labelledby="library-tab">
     <p class="notice">Discovery preserves source files. Verified audiobooks follow their saved source-cleanup policy.</p>
     <section aria-label="Library scan controls" class="panel">
       <div class="toolbar">
@@ -146,6 +151,81 @@
       <section id="audiobook-output" hidden><h2>Audiobook output</h2><p id="output-status" aria-live="polite"></p><p id="output-path" class="path"></p><pre id="output-summary"></pre><p id="output-reasons"></p><p id="output-policy-notice">Creates one new audiobook. Your source files stay in place.</p><p id="output-device">Apple Books sync not checked</p></section>
     </section>
     <footer>One discovery pass per Start. Stop saves pending work; after server restart, use the button above to continue. Discovery-only controls never start conversion. Audiobook jobs have separate pause and resume controls. A slow read may finish before stopping. Closing this tab leaves the local server running; Stop server saves pending work and stops only owned operations safely.</footer>
+    </div>
+    <section id="manual-conversion" class="panel" role="tabpanel" aria-labelledby="manual-conversion-tab" hidden>
+      <button id="manual-new" type="button" title="Start another manual audiobook draft.">New book</button>
+      <p id="manual-list-status" class="field-help" role="status"></p>
+      <ul id="manual-books" aria-label="Saved manual books"></ul>
+      <section id="manual-editor" aria-labelledby="manual-editor-title" hidden>
+        <h2 id="manual-editor-title" tabindex="-1">New book</h2>
+        <p id="manual-saved-reservation" class="field-help" hidden></p>
+        <fieldset id="manual-editable" aria-labelledby="manual-source-heading">
+          <legend id="manual-source-heading">Source</legend>
+          <div class="toolbar" role="radiogroup" aria-label="Source type">
+            <label class="check"><input id="manual-source-folder" type="radio" name="manual-source" value="folder" title="Include audio files directly inside one folder.">Folder</label>
+            <label class="check"><input id="manual-source-files" type="radio" name="manual-source" value="files" title="Join individual audio files you choose.">Files</label>
+          </div>
+          <div id="manual-folder-controls" hidden>
+            <div class="toolbar"><label for="manual-folder-path">Folder path</label><input id="manual-folder-path" type="text" maxlength="1000" aria-describedby="manual-folder-help" title="Paste the full path to the source folder."><button id="manual-folder-load" type="button" title="Load the audio files directly inside this folder.">Load folder</button><button id="manual-folder-browse" type="button" class="quiet" title="Choose the folder that contains this book’s audio files.">Browse…</button></div>
+            <p id="manual-folder-help" class="field-help">Includes audio files directly in this folder.</p>
+          </div>
+          <button id="manual-files-choose" type="button" title="Select the audio files to join into one audiobook." hidden>Choose files…</button>
+          <p id="manual-source-status" class="field-help" role="status"></p>
+          <button id="manual-source-reuse" type="button" class="quiet" title="Confirm that you want to keep using the previously loaded files." hidden>Use previously loaded files</button>
+        </fieldset>
+        <section id="manual-tracks" aria-labelledby="manual-tracks-title" hidden>
+          <h3 id="manual-tracks-title">Track order</h3>
+          <p id="manual-track-count" class="field-help"></p>
+          <ol id="manual-track-list"></ol>
+        </section>
+        <fieldset id="manual-metadata" hidden>
+          <legend>Metadata</legend>
+          <div class="review-grid">
+            <label>Title<input id="manual-meta-title" type="text" maxlength="1000" title="Enter the book title."></label>
+            <label>Author<input id="manual-meta-author" type="text" maxlength="1000" title="Enter the author’s credited name."></label>
+            <label>Series<input id="manual-meta-series" type="text" maxlength="1000" title="Enter the series or cycle name."></label>
+            <label>No.<input id="manual-meta-number" type="text" maxlength="1000" aria-label="Position in series" title="Enter the book’s position in the series."></label>
+            <label>Universe<input id="manual-meta-universe" type="text" maxlength="1000" title="Enter the shared universe."></label>
+            <label>Collection<input id="manual-meta-collection" type="text" maxlength="1000" title="Enter the collection name."></label>
+            <label>Reader / narrator<input id="manual-meta-narrator" type="text" maxlength="1000" title="Enter the reader or narrator’s credited name."></label>
+            <label>Genre<input id="manual-meta-genre" type="text" maxlength="1000" title="Enter the genre for the audiobook tag."></label>
+          </div>
+          <label class="check"><input id="manual-meta-anthology" type="checkbox" title="Mark this audiobook as a collection of short stories.">Short-story collection</label>
+          <p id="manual-match" class="field-help" role="status"></p>
+        </fieldset>
+        <section id="manual-export" aria-labelledby="manual-export-title" hidden>
+          <h3 id="manual-export-title">Export</h3>
+          <button id="manual-output-choose" type="button" class="quiet" title="Choose the finished audiobook’s folder and filename.">Save As…</button>
+          <p id="manual-output-path" class="path"></p>
+          <p id="manual-output-status" class="field-help" role="status"></p>
+        </section>
+        <div id="manual-draft-actions" hidden>
+          <p id="manual-cleanup-help" class="field-help">The app verifies the exported audiobook before removing its included originals.</p>
+          <div class="toolbar">
+            <button id="manual-save" type="button" class="quiet" title="Save these details and reserve the included files.">Save draft</button>
+            <button id="manual-discard" type="button" class="quiet" title="Discard this draft and release any reserved files.">Discard draft</button>
+            <button id="manual-queue" type="button" title="Save and queue this book with the displayed track order and export path." aria-describedby="manual-cleanup-help">Queue conversion</button>
+          </div>
+          <div id="manual-discard-question" hidden>
+            <p>Discard this draft and release its files for automatic processing?</p>
+            <div class="toolbar"><button id="manual-discard-confirm" type="button" class="quiet" title="Discard this draft and release its reserved files.">Discard draft</button><button id="manual-discard-cancel" type="button" class="quiet" title="Keep the draft and its reservations.">Keep draft</button></div>
+          </div>
+        </div>
+        <p id="manual-editor-status" role="status"></p>
+        <div id="manual-job-progress" hidden>
+          <p id="manual-job-stage" class="field-help" role="status"></p>
+          <progress id="manual-job-bar" max="100" aria-label="Audiobook job progress"></progress>
+          <p id="manual-job-measure" class="field-help"></p>
+        </div>
+        <div id="manual-job-actions" class="toolbar" hidden>
+          <button id="manual-job-pause" type="button" class="quiet" title="Pause audiobook jobs and keep their progress.">Pause audiobook jobs</button>
+          <button id="manual-job-resume" type="button" class="quiet" title="Continue pending audiobook jobs.">Resume audiobook jobs</button>
+          <button id="manual-job-retry" type="button" class="quiet" title="Ask the app to retry this saved audiobook job." hidden>Retry</button>
+          <button id="manual-job-reopen" type="button" class="quiet" title="Edit this failed job’s saved draft and keep its source files reserved." hidden>Reopen draft</button>
+          <button id="manual-job-view" type="button" class="quiet" title="Show this audiobook in the Converted list." hidden>View in Converted</button>
+        </div>
+      </section>
+    </section>
     <p id="queue-announce" class="visually-hidden" role="status" aria-live="polite"></p>
   </main>
   <dialog id="recovery-dialog" aria-labelledby="recovery-dialog-title" aria-describedby="recovery-dialog-body">

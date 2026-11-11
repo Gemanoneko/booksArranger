@@ -539,7 +539,7 @@ class AutomaticProcessing:
         page=listing('Audiobooks',limit=1000000) if callable(listing) else None
         # An inventory without a candidate listing (private test stubs) adds nothing.
         if not isinstance(page,dict) or not isinstance(page.get('rows'),list):return 0
-        current=[r['id'] for r in page['rows']]
+        current=[r['id'] for r in page['rows'] if not r.get('manual_conversion')]
         added=[identity for identity in current if identity not in seen]
         checkpoint['pending']=list(checkpoint.get('pending',[]))+added
         return len(added)
@@ -645,11 +645,11 @@ class AutomaticProcessing:
                     # Ruling 34 (Sergei 2026-10-26, option A): Start works while audiobooks convert. The books already
                     # in the catalog are researched now; the scan waits until conversion is idle (scan_after, below).
                     candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
-                    checkpoint={'pending':[r['id'] for r in candidates],'done':[],'scan_after':True};self.live_checkpoint=checkpoint
+                    checkpoint={'pending':[r['id'] for r in candidates if not r.get('manual_conversion')],'done':[],'scan_after':True};self.live_checkpoint=checkpoint
                     self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
                 else:
                     self._discover();candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
-                    checkpoint={'pending':[r['id'] for r in candidates],'done':[]};self.live_checkpoint=checkpoint
+                    checkpoint={'pending':[r['id'] for r in candidates if not r.get('manual_conversion')],'done':[]};self.live_checkpoint=checkpoint
                     self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
@@ -685,6 +685,8 @@ class AutomaticProcessing:
                   identity=checkpoint['pending'][0]
                   try:row=self.merge.reviews._row('Audiobooks',identity)
                   except ValueError:
+                      checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                  if row.get('manual_conversion'):
                       checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
                   job=self.merge.candidate_status(identity)
                   if job:
