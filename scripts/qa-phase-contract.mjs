@@ -82,7 +82,7 @@ export function validateFunctional(value,expected){
 export function readFunctionalMarker(output,plan){
  const markers=[...output.matchAll(/^# BOOKS_PA1_FUNCTIONAL (.+)\r?$/gm)];need(markers.length===1,'Exactly one original PA-1 functional marker required');
  const value=JSON.parse(markers[0][1]),root=plan.fixture_root;
- need(typeof root==='string'&&/^C:[\\/]/i.test(root)&&!/[\0\r\n]/.test(root)&&!/[. ]([\\/]|$)/.test(root)&&!root.slice(2).includes(':')&&!/[\\/]$/.test(root)&&root.replaceAll('\\','/')===path.win32.normalize(root).replaceAll('\\','/'),'Canonical planned fixture path required');
+ need(typeof root==='string'&&/^[A-Z]:[\\/]/i.test(root)&&!/[\0\r\n]/.test(root)&&!/[. ]([\\/]|$)/.test(root)&&!root.slice(2).includes(':')&&!/[\\/]$/.test(root)&&root.replaceAll('\\','/')===path.win32.normalize(root).replaceAll('\\','/'),'Canonical planned fixture path required');
  const exe=path.win32.join(root,'app','Books Arranger.exe'),slashExe=exe.replaceAll('\\','/'),doubled=text=>text.replaceAll('\\','\\\\');
  const plain=value.fixture_root===root&&(value.exe===exe||value.exe===slashExe);
  const tap=value.fixture_root===doubled(root)&&value.exe===doubled(exe);

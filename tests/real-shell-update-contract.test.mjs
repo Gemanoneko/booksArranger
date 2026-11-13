@@ -83,8 +83,9 @@ test('sampling counts require safe integers and at least one completed final obs
 });
 test('strict raw evidence accepts internally consistent original inner and outer owner records',()=>{const e=evidence();assert.equal(validateNativeEvidence(e.summary,e.records,e.b).passed,true);assert.equal(NATIVE_ROLES.length,12);});
 test('installed Node TAP diagnostics decode only the exact planned paths and preserve raw evidence',async()=>{
- for(const nativeRoot of [false,true]){
+ for(const [drive,nativeRoot] of [['C:',false],['C:',true],['I:',false],['I:',true]]){
   const b=candidate(),p=plan(b),f=functional(b);
+  p.fixture_root=drive+p.fixture_root.slice(2);
   if(nativeRoot)p.fixture_root=p.fixture_root.replaceAll('/','\\');
   f.fixture_root=p.fixture_root;f.exe=path.win32.join(p.fixture_root,'app','Books Arranger.exe');
   const plain='# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(f)+'\n';
@@ -106,6 +107,12 @@ test('functional marker rejects foreign paths, traversal, extra escaping and mix
  const nativePlan={...p,fixture_root:p.fixture_root.replaceAll('/','\\')},native={...f,fixture_root:nativePlan.fixture_root};
  for(const value of [{...native,exe:f.exe.replaceAll('\\','\\\\')},{...native,fixture_root:native.fixture_root.replaceAll('\\','\\\\')}])assert.throws(()=>readFunctionalMarker('# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(value),nativePlan),/Functional paths/);
  for(const fixture_root of [p.fixture_root+'/../escape',p.fixture_root.replaceAll('/','//'),p.fixture_root+'/'])assert.throws(()=>readFunctionalMarker('# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(f),{...p,fixture_root}),/Canonical planned fixture/);
+ const iPlan={...p,fixture_root:'I:'+p.fixture_root.slice(2)};
+ const iMarker={...f,fixture_root:iPlan.fixture_root,exe:path.win32.join(iPlan.fixture_root,'app','Books Arranger.exe')};
+ const read=(value,selected)=>readFunctionalMarker('# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(value),selected);
+ assert.throws(()=>read(f,iPlan),/Functional paths/);
+ for(const fixture_root of ['//server/share/pa1','//?/I:/private/pa1','I:relative','I:/private:stream/pa1','I:/private./pa1'])
+  assert.throws(()=>read({...iMarker,fixture_root},{...iPlan,fixture_root}),/Canonical planned fixture/);
 });
 test('decoded facts cannot retain the old doubled path or hide marker changes with rebound record hashes',()=>{
  const f=functional(candidate());f.exe=path.win32.join(f.fixture_root,'app','Books Arranger.exe');
