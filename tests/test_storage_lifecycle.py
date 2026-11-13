@@ -28,7 +28,13 @@ class LifecycleTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         self.bootstraps=[]
-        environment=patch.dict(os.environ,{'APPDATA':str(self.base/'Roaming'),'LOCALAPPDATA':str(self.base/'Local')})
+        # The snapshot's exact-file disposition lease must not overlap the
+        # worker's generic scratch disposition lease.
+        temp_parent=Path(os.environ.get('BOOKS_QA_LIFECYCLE_SNAPSHOT_TEMP',str(base.parent)))
+        temporary=tempfile.TemporaryDirectory(prefix='installer-snapshot-',dir=temp_parent)
+        self.addCleanup(temporary.cleanup)
+        environment=patch.dict(os.environ,{'APPDATA':str(self.base/'Roaming'),'LOCALAPPDATA':str(self.base/'Local'),
+            'BOOKS_WORK_TEMP':temporary.name,'TEMP':temporary.name,'TMP':temporary.name})
         environment.start();self.addCleanup(environment.stop)
         registrations=patch.object(lifecycle,'registered_bootstraps',side_effect=lambda:self.bootstraps)
         registrations.start();self.addCleanup(registrations.stop)
@@ -508,6 +514,21 @@ class LifecycleTests(unittest.TestCase):
             result=lifecycle.process_check((),process_name='Books No Such Encoder Fixture.exe')
             self.assertEqual(result['state'],'in_use');self.assertEqual(result['busy'][0]['kind'],'catalog-owner')
         self.assertEqual(lifecycle.process_check((),process_name='Books No Such Encoder Fixture.exe')['state'],'available')
+
+    def test_image_query_refusal_requires_exit_evidence_for_the_same_handle(self):
+        handle=object()
+        def exited(process,_created,exit_time,_kernel,_user):
+            self.assertIs(process,handle)
+            exit_time._obj.dwLowDateTime=1
+            return True
+        with patch.object(lifecycle.kernel,'QueryFullProcessImageNameW',return_value=False), \
+                patch.object(lifecycle.kernel,'GetProcessTimes',side_effect=exited) as times:
+            self.assertIsNone(lifecycle._process_image_or_exited(handle))
+            times.side_effect=None
+            for value in (False,True):
+                times.return_value=value
+                with self.assertRaisesRegex(lifecycle.LifecycleRefused,'process_check_unavailable'):
+                    lifecycle._process_image_or_exited(handle)
 
     def test_legacy_silent_update_keeps_exact_machine_catalog_and_profile_bytes(self):
         database=self.catalog('current-machine-data');source=Path(os.environ['APPDATA'])/'Books Arranger'

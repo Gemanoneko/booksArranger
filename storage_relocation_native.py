@@ -344,6 +344,30 @@ def configure_from_environment(environment=None):
     return configure(file, digest)
 
 
+@contextlib.contextmanager
+def selected_catalog_relocation(selection):
+    """Temporarily retain an explicit descriptor without changing work temp."""
+    global _context
+    prior=current()
+    if selection is None:
+        _need(prior is None,'An unrelated catalog relocation is already selected')
+        yield None
+        return
+    if prior is not None:
+        _need(str(prior.manifest_path)==str(Path(selection['manifest']).absolute()) and
+              prior.manifest.digest==selection['sha256'],'Storage selection differs from retained context')
+        yield prior
+        return
+    selected=configure(selection['manifest'],selection['sha256'])
+    try:
+        yield selected
+    finally:
+        with _lock:
+            _need(_context is selected,'Retained catalog relocation context changed')
+            selected.close()
+            _context=None
+
+
 def close():
     global _context,_temp_lease
     with _lock:

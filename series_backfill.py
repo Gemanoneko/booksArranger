@@ -664,10 +664,10 @@ class SeriesBackfill:
 
     def _clear_stage(self, job_id):
         """The proof tools' own output files for this book (never anything else)."""
+        from native_io import DirectoryBoundary,DirectoryDispositionUnsupported,VerifiedFile,VerifiedDirectory
         folder = self.stage / job_id
         try:
             if folder.is_dir():
-                from native_io import DirectoryBoundary,VerifiedFile,VerifiedDirectory
                 from source_cleanup import single_stream
                 with DirectoryBoundary(folder.anchor,folder):
                     for item in folder.iterdir():
@@ -679,6 +679,10 @@ class SeriesBackfill:
                 # rmdir after releasing a race-sensitive native check.
                 with DirectoryBoundary(folder.anchor,folder.parent),VerifiedDirectory(folder,delete=True) as held:
                     held.dispose_empty()
+        except DirectoryDispositionUnsupported:
+            # A safe hold on the empty work directory is not a failed retag.
+            import logging
+            logging.getLogger(__name__).info('Retained verified work directory after retag: %s',folder)
         except OSError:
             pass
 

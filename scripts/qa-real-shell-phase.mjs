@@ -5,7 +5,7 @@ import path from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {hash,NATIVE_CASE,NATIVE_ROLES,normalOwned,readFunctionalMarker,validateNativeEvidence} from './qa-phase-contract.mjs';
-import {need,readPin,ordinary,within,validatePlan,verifyInputs,verifyRecovery,freshFixture,treeFiles,sameFileTree,nativeAdapters,ownLeafDelta,cleanupOwnLeaf} from '../tests/real-shell-update-support.mjs';
+import {need,readPin,ordinary,within,validatePlan,verifyInputs,verifyLocalPaths,verifyRecovery,freshFixture,treeFiles,sameFileTree,nativeAdapters,ownLeafDelta,cleanupOwnLeaf} from '../tests/real-shell-update-support.mjs';
 const encode=value=>Buffer.from(JSON.stringify(value));
 async function freshWrite(file,bytes){await fs.writeFile(file,bytes,{flag:'wx'});return {path:file,sha256:hash(bytes),size:bytes.length};}
 // The external reviewed driver owns this controller with unchanged runOwned.
@@ -18,6 +18,7 @@ export async function runFixedPhase(planPath,planSha,deadline,adapters=null){
  const remaining=()=>{const left=deadline-Date.now();need(left>0,'Whole native phase deadline expired');return left;};remaining();
  const manifest=await verifyInputs(plan);remaining();
  need(hash(await fs.readFile(process.execPath))===plan.node.sha256,'Controller Node differs');
+ await verifyLocalPaths(plan,manifest,[planPath,...(plan.recovery?[plan.fixture_root]:[])]);
  const app=await freshFixture(plan,manifest);remaining();
  const native=adapters||nativeAdapters(plan,authority);native.monitor.checkWindows();
  const current=await native.registry.snapshot();let before=current;
@@ -61,7 +62,8 @@ export async function runNativeController(planPath,planSha,deadline){
  const raw=await fs.readFile(planPath);need(hash(raw)===planSha,'Externally pinned plan differs');const plan=JSON.parse(raw);
  const authority=JSON.parse(await readPin(plan.authority));validatePlan(plan,authority);need(within(planPath,plan.evidence_root),'Plan outside own evidence arena');
  need(Number.isSafeInteger(deadline)&&deadline>Date.now()&&deadline-Date.now()<=600000,'One original remaining deadline required');
- await verifyInputs(plan);need(hash(await fs.readFile(process.execPath))===plan.node.sha256,'Driver Node differs');
+ const manifest=await verifyInputs(plan);need(hash(await fs.readFile(process.execPath))===plan.node.sha256,'Driver Node differs');
+ await verifyLocalPaths(plan,manifest,[planPath,...(plan.recovery?[plan.fixture_root]:[])]);
  const {runOwned}=await import(pathToFileURL(plan.helper.path).href),nonce=randomBytes(32).toString('hex');
  const remaining=deadline-Date.now();need(remaining>0,'Whole native phase deadline expired');
  const result=await runOwned(plan.node.path,[path.join(plan.source_root,'scripts/qa-real-shell-phase.mjs'),'--owned-phase',planPath,planSha,nonce],{cwd:plan.source_root,env:{...plan.environment,BOOKS_PA1_CONTROLLER_NONCE:nonce,BOOKS_PA1_CONTROLLER_DEADLINE:String(deadline)},timeoutMs:remaining,koffiRoot:plan.koffi_root});

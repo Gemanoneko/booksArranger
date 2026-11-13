@@ -75,6 +75,11 @@ class Harness:
         invocation=str(uuid.uuid4());self.current_invocation=invocation
         try:
             with catalog_lock(self.database,{'Audiobooks':self.sourceroot}):
+                from runtime_disposition_owners import admit_catalog
+                from storage_relocation_native import require_normal_operation
+                require_normal_operation(self.database)
+                if not admit_catalog(self.database):
+                    raise AssertionError('The fixture did not acquire its production catalog disposition owner')
                 self.held=True
                 lock=Path(str(self.database)+'.lock')
                 with DirectoryBoundary(lock.anchor,lock.parent) as boundary:

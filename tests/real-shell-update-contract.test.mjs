@@ -18,7 +18,7 @@ for(const [object,names] of [[childProcess,['spawn','spawnSync','exec','execSync
 for(const name of ['fetch','WebSocket']){const old=globalThis[name];restore.push(()=>globalThis[name]=old);globalThis[name]=deny;}
 const originalRequire=Module.createRequire;restore.push(()=>Module.createRequire=originalRequire);Module.createRequire=(...args)=>{const require=originalRequire(...args);return spec=>{if(!String(spec).startsWith('node:'))return deny();return require(spec);};};syncBuiltinESMExports();
 after(()=>{for(const undo of restore.reverse())undo();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No actual native/child/network operation');});
-const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,membershipWitness,listenerOnlyRows,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,privateEnginePort,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
+const {validatePlan,privatePath,assertLocalPaths,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,membershipWitness,listenerOnlyRows,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,privateEnginePort,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
 const {evidenceSummary,forwardControllerStreams}=await import('../scripts/qa-real-shell-phase.mjs');
 const encoded=v=>Buffer.from(JSON.stringify(v));
 function candidate(){return {version:'0.24.2',source_head:'a'.repeat(40),product_digest:'b'.repeat(64),build_id:'e3a1de11-1811-4ef5-bf5c-586a70b7db9e',artifact_manifest_sha256:'c'.repeat(64),runtime_manifest_sha256:'d'.repeat(64),phase_contract_sha256:'e'.repeat(64)};}
@@ -46,6 +46,27 @@ test('native evidence is mandatory for 0.24.2 and every later release',()=>{for(
 test('authority absent, stale or allowing shared-list writes refuses',()=>{const b=candidate();assert.throws(()=>validateAuthority(null,b));for(const alter of [a=>a.binding.build_id='a3a1de11-1811-4ef5-bf5c-586a70b7db9e',a=>a.decision_ref='PENDING-authority',a=>a.effects.ui_order_list_write=true,a=>a.effects.leave_numeric_history_reference=false,a=>a.approved_by='agent']){const a=authority(b);a.binding=structuredClone(b);alter(a);assert.throws(()=>validateAuthority(a,b));}});
 test('each candidate binding field is checked',()=>{const expected=candidate();for(const k of Object.keys(expected)){const a=authority();a.binding[k]=k==='version'?'0.24.3':k==='build_id'?'f3a1de11-1811-4ef5-bf5c-586a70b7db9e':'f'.repeat(k==='source_head'?40:64);assert.throws(()=>validateAuthority(a,expected),k);}});
 test('fixed plan rejects wrong selector, deadline, external fixture or authority bytes',()=>{for(const alter of [p=>p.case={...NATIVE_CASE,title:'replacement'},p=>p.deadlineMs=600001,p=>p.fixture_root='Z:/library',p=>p.authority.sha256='0'.repeat(64),p=>p.environment.NODE_OPTIONS='--require bad']){const a=authority(),p=plan(candidate(),a);alter(p);assert.throws(()=>validatePlan(p,a));}});
+test('a private I: plan retains exact containment and rejects path aliases',()=>{
+ const b=candidate(),a=authority(b),p=plan(b,a);
+ for(const key of ['fixture_root','evidence_root','source_root','koffi_root'])p[key]='I'+p[key].slice(1);
+ for(const key of ['TEMP','TMP','USERPROFILE','APPDATA','LOCALAPPDATA'])p.environment[key]='I'+p.environment[key].slice(1);
+ p.payload.root='I:/built';p.authority.path='I:/private/authority.json';
+ assert.equal(validatePlan(p,a),p);
+ for(const value of [String.raw`\\server\share\x`,String.raw`\\?\I:\x`,'I:relative','I:/private/../x','I:/private//x','I:/private/x:stream','I:/private./x']){
+  assert.throws(()=>privatePath(value),/Private absolute drive path|Noncanonical/);
+ }
+ p.environment.TEMP='I:/elsewhere';assert.throws(()=>validatePlan(p,a),/escapes private fixture/);
+});
+test('PA-1 physical path check rejects mapped drives and any reparse ancestor before fixture work',()=>{
+ const visited=[];
+ const direct={driveType:()=>3,dosTarget:()=>String.raw`\Device\HarddiskVolume6`,attributes:p=>{visited.push(p);return 0x10;}};
+ assertLocalPaths(direct,['I:/private/run','C:/Program Files/nodejs']);
+ assert.ok(visited.includes('I:\\private'));assert.ok(visited.includes('I:\\'));
+ assert.throws(()=>assertLocalPaths({...direct,driveType:()=>4},['Z:/library']),/directly mounted fixed local drive/);
+ assert.throws(()=>assertLocalPaths({...direct,dosTarget:()=>String.raw`\??\C:\private`},['I:/private/run']),/directly mounted fixed local drive/);
+ assert.throws(()=>assertLocalPaths({...direct,attributes:p=>p==='I:\\private'?0x410:0x10},['I:/private/run']),/reparse PA-1 path/);
+ assert.throws(()=>assertLocalPaths({...direct,attributes:()=>0xffffffff},['I:/offline']),/Unavailable/);
+});
 test('all eight original functional assertions and extra proof are mandatory',()=>{const b=candidate(),f=functional(b);assert.equal(PA1_ASSERTIONS.length,8);validateFunctional(f,b);for(const flag of ['downloadVerified','invalidInstallerRefused','oldEngineRecovered','shellStayedRunning','healthVersionMatched','closedByQuit','payloadUnchanged','endpointsOwned','noVisibleOwnWindow'])assert.throws(()=>validateFunctional({...f,[flag]:false},b));assert.throws(()=>validateFunctional({...f,assertions:f.assertions.slice(1)},b));});
 test('original ownership rejects timeout, forced, unknown or incomplete closure',()=>{for(const alter of [r=>r.ok=false,r=>r.forced=true,r=>r.timedOut=true,r=>r.outputComplete=false,r=>r.native.zero=false,r=>r.native.complete=false,r=>r.native.sampling.incompleteQueries=r.native.sampling.queries,r=>r.native.active=1,r=>r.native.assigned=1,r=>r.native.listed=1,r=>r.native.unsignaled=1,r=>r.closureError='lost']){const r=normal();alter(r);assert.throws(()=>normalOwned(r));}});
 test('normal final zero closure retains earlier incomplete sampling diagnostics',()=>{

@@ -39,6 +39,17 @@ class MigrationOperationTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 with catalog_lock(self.database,self.roots):pass
         with catalog_lock(self.database,self.roots):pass
+    def test_reviewed_operation_refuses_if_native_disposition_owner_unavailable(self):
+        from unittest.mock import patch
+        source=Path(self.f.original['final_path'])
+        source.parent.mkdir(parents=True,exist_ok=True)
+        before=b'private original that must stay'
+        source.write_bytes(before)
+        with patch('runtime_disposition_owners.admit_catalog',return_value=False):
+            with self.assertRaisesRegex(ValueError,'requires its retained catalog disposition owner'):
+                with self.operation.operation_lease(self.pubid):self.fail('Operation lease was granted')
+        self.assertEqual(source.read_bytes(),before)
+        self.assertFalse(Path(self.f.destination).exists())
     def test_changed_plan_and_out_of_scope_publication_refused(self):
         with self.assertRaisesRegex(ValueError,'outside'):
             with self.operation.operation_lease('not-in-review'):pass

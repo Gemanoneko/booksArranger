@@ -86,10 +86,15 @@ class OperatorNativeTests(unittest.TestCase):
     def test_broad_repo_unknown_data_and_library_paths_never_gain_cleanup_ownership(self):
         (self.source/'.git').mkdir();(self.source/'.git/config').write_bytes(b'private git history')
         (self.source/'program.py').write_bytes(b'private source')
-        args=(self.source.parent,self.area.parent/('uncreated-'+uuid.uuid4().hex),[self.source.name],
-            self.source.name+'/data/inventory.sqlite3',self.work)
+        # Use the exact source's broad child as the candidate scope without
+        # nesting the target under the proposed source root.
+        broad=self.source/'broad'
+        (broad/'data').mkdir(parents=True)
+        shutil.copyfile(self.database,broad/'data/inventory.sqlite3')
+        args=(self.source,self.target,[broad.name],broad.name+'/data/inventory.sqlite3',self.work)
         with self.assertRaisesRegex(RelocationRefused,'exact selected catalog parent'):
             prepare_source(*args)
+        (broad/'data/inventory.sqlite3').unlink();(broad/'data').rmdir();broad.rmdir()
         unknown=self.source/'data/unknown-user-document.txt';unknown.write_bytes(b'not application owned')
         with self.assertRaisesRegex(RelocationRefused,'Unknown file'):
             prepare_source(*self.args())

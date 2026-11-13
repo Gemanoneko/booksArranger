@@ -166,16 +166,24 @@ const workers=batches.map((batch,i)=>{
  for(const [name,sha] of inputs){const destination=path.join(directory,name),bytes=fs.readFileSync(path.join(root,name));if(createHash('sha256').update(bytes).digest('hex')!==sha)throw Error('Python batch source changed during copy');fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,bytes,{flag:'wx'});}
  if(JSON.stringify(inventory(directory))!==JSON.stringify(inputs)){gateScratch.evidence(layout.relative,'its source copy differs from the gate inputs');throw Error('Python batch copy differs: '+layout.relative);}
  for(const relative of layout.requiredDirectories)fs.mkdirSync(path.join(directory,relative),{recursive:true});
+ if(batch.includes('test_build_current_package.py')){
+  const target=path.join(directory,'scratch','installUtil.nsh');
+  fs.copyFileSync(path.join(root,'node_modules','app-builder-lib','templates','nsis','include','installUtil.nsh'),target,fs.constants.COPYFILE_EXCL);
+ }
+ const snapshotTemp=batch.includes('test_storage_lifecycle.py')?gateScratch.claim('scratch/lifecycle-snapshot-'+i):null;
+ if(snapshotTemp)fs.mkdirSync(snapshotTemp);
  const temp=path.join(directory,'scratch','tmp');
- return {directory,temp,batch,i,relative:layout.relative};
+ return {directory,temp,snapshotTemp,batch,i,relative:layout.relative};
 });
 let outputBytes=0,overflow=false;
 const copySeconds=Math.round((Date.now()-gateStart)/100)/10;console.log('Sources copied into the '+workers.length+' Python workers by '+copySeconds+' s');
 const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
  const started=performance.now(),limit=workerDeadline(gateStart,Date.now(),deadline);
  if(limit.at<=Date.now()){resolve({status:null,error:null,timedOut:limit.kind,seconds:0,out:'',err:''});return;}
- const env={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:worker.directory,BOOKS_QA_FIXTURE_ROOT:path.join(worker.directory,'scratch','f'),BOOKS_TERMINAL_FIXTURE_ROOT:path.join(worker.directory,'scratch','terminal-chapters'),TEMP:worker.temp,TMP:worker.temp,PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
- for(const key of Object.keys(env))if(/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)$/i.test(key))delete env[key];
+ const env={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:worker.directory,BOOKS_QA_FIXTURE_ROOT:path.join(worker.directory,'scratch','f'),BOOKS_TERMINAL_FIXTURE_ROOT:path.join(worker.directory,'scratch','terminal-chapters'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
+ for(const key of Object.keys(env))if(/^(GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)|TEMP|TMP|TMPDIR|BOOKS_WORK_TEMP)$/i.test(key))delete env[key];
+ Object.assign(env,{TEMP:worker.temp,TMP:worker.temp,TMPDIR:worker.temp,BOOKS_WORK_TEMP:worker.temp});
+ if(worker.snapshotTemp)env.BOOKS_QA_LIFECYCLE_SNAPSHOT_TEMP=worker.snapshotTemp;
  const out=[],err=[];let error=null,timedOut=false;
  const child=spawn(python,['-I','-B','-c',code,worker.directory,JSON.stringify(worker.batch),JSON.stringify(fixtureRootMap),String(worker.i)],{cwd:worker.directory,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
  const timer=setTimeout(()=>{timedOut=limit.kind;child.kill();},Math.max(1,limit.at-Date.now()));

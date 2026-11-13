@@ -121,7 +121,7 @@ export function workerSecondsReport(batches,realSeconds){
 }
 export function pythonWorkerLayout(index){
   if(!Number.isInteger(index)||index<0||index>=PYTHON_WORKERS)throw Error('Unknown Python worker');
-  return {relative:'scratch/'+index,requiredDirectories:['scratch/tmp','scratch/source-fallback-2026-10-11']};
+  return {relative:'scratch/'+index,requiredDirectories:['scratch/tmp','scratch/f','scratch/source-fallback-2026-10-11']};
 }
 // A module, or one half of a split module: its classes ("test_x.py:A,B") or every other class ("test_x.py:-A,B").
 export const PATTERN=/^test_[a-z0-9_]+\.py(?::-?[A-Z][A-Za-z0-9_]*(?:,[A-Z][A-Za-z0-9_]*)*)?$/;

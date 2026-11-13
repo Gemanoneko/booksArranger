@@ -25,6 +25,40 @@ import storage_relocation_operator as operator
 
 @unittest.skipUnless(os.name == 'nt', 'Windows native relocation contract')
 class RelocatedWorkingIntegrationTests(unittest.TestCase):
+    def test_install_commit_binds_verified_relocated_catalog_and_retains_profile(self):
+        from unittest.mock import patch
+        import storage_lifecycle as lifecycle
+        self.relocate()
+        physical=self.target/'data/inventory.sqlite3'
+        roaming=Path(self.right.name)/'Roaming'
+        profile=roaming/'Books Arranger'
+        profile.mkdir(parents=True)
+        settings=profile/'desktop-settings.json'
+        settings.write_text(json.dumps({'dataDir':str(self.database.parent),'catalogMode':'existing'}),encoding='utf8')
+        outbox=profile/'fixture-outbox.json'
+        outbox.write_text('{"fixture":"pending review"}',encoding='utf8')
+        app=Path(self.right.name)/'New installation'/'Application'
+        app.mkdir(parents=True)
+        destination=app.parent/'Profile'
+        pin={'manifest':str(self.descriptor),'sha256':self.descriptor_sha}
+        with patch.dict(os.environ,{'APPDATA':str(roaming)}),patch.object(lifecycle,'registered_bootstraps',return_value=[]):
+            plan=lifecycle.selection_plan('existing',physical,application_dir=app,profile_dir=destination,
+                                          config_paths=[str(settings)])
+            self.assertTrue(plan['selection']['profile_confirmed'])
+            self.assertEqual(plan['selection']['storage_relocation'],pin)
+            plan_sha=hashlib.sha256(json.dumps(plan,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+            with self.assertRaisesRegex(lifecycle.LifecycleRefused,'invalid_relocation_selection'):
+                lifecycle.commit_selection(plan,plan_sha,storage_relocation={**pin,'sha256':'0'*64},
+                                           process_name='Books Private Relocation QA.exe')
+            self.assertFalse(destination.exists())
+            receipt=lifecycle.commit_selection(plan,plan_sha,process_name='Books Private Relocation QA.exe')
+        self.assertIsNone(native.current(),'the installer releases its temporary relocation context')
+        bootstrap=json.loads(Path(receipt['bootstrap']).read_text('utf8'))
+        self.assertEqual(bootstrap['data_dir'],str(physical.parent))
+        self.assertEqual(bootstrap['storage_relocation'],pin)
+        self.assertEqual((destination/settings.name).read_bytes(),settings.read_bytes())
+        self.assertEqual((destination/outbox.name).read_bytes(),outbox.read_bytes())
+
     def test_source_recovered_retained_intent_moves_only_with_independent_working_receipt(self):
         from runtime_disposition_owners import admit_catalog,context_for
         from runtime_file_disposition import prepare_disposition
@@ -266,7 +300,13 @@ class RelocatedWorkingIntegrationTests(unittest.TestCase):
             self.assertNotEqual(admission.returncode,0)
             self.assertEqual(json.loads(admission.stdout)['code'],'verification_required')
             self.assertIn('with the relocation tool',json.loads(admission.stdout)['error'])
-            startup=subprocess.run([sys.executable,'-I','-B',str(Path(__file__).resolve().parents[1]/'desktop_backend.py'),
+            # Copy the pinned fixture's backend code out of the catalog's
+            # ancestor, as in an installed layout. Never weaken that guard.
+            backend=self.work/'installed-backend'
+            backend.mkdir()
+            for module in Path(__file__).resolve().parents[1].glob('*.py'):
+                shutil.copyfile(module,backend/module.name)
+            startup=subprocess.run([sys.executable,'-I','-B',str(backend/'desktop_backend.py'),
                 '--database',str(self.database),'--port','5212','--catalog-mode=existing'],
                 env=environment,capture_output=True,timeout=15,creationflags=0x08000000)
             self.assertNotEqual(startup.returncode,0)

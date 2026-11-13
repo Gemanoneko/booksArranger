@@ -111,7 +111,9 @@ class BusyTests(unittest.TestCase):
             kwargs['factory']=Closing;db=original(*args,**kwargs);db.was_closed=False;connections.append(db);return db
         with patch.object(scanner.sqlite3,'connect',opened):
             with self.assertRaises(sqlite3.OperationalError):scanner.connect(self.database,timeout=.01)
-        self.assertEqual(len(connections),1);self.assertTrue(connections[0].was_closed)
+        self.assertEqual(len(connections),2)
+        self.assertTrue(all(connection.was_closed for connection in connections),
+                        'both read-only storage admission and failed initialization close')
     def test_cache_retry_never_repeats_request_or_spends_budget_twice(self):
         calls=[]
         def fetch(*_):

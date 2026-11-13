@@ -9,7 +9,7 @@ import net from 'node:net';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {hash,NATIVE_CASE,PA1_TITLE,PA1_ASSERTIONS} from '../scripts/qa-phase-contract.mjs';
-import {need,readPin,validatePlan,verifyInputs,treeFiles,nativeAdapters,privateEnginePort,createPrivateShellCommands,verifyCloseSession} from './real-shell-update-support.mjs';
+import {need,readPin,validatePlan,verifyInputs,verifyLocalPaths,treeFiles,nativeAdapters,privateEnginePort,createPrivateShellCommands,verifyCloseSession} from './real-shell-update-support.mjs';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function freePort(requested=0){return new Promise((resolve,reject)=>{const server=net.createServer(),timer=setTimeout(()=>{server.close(()=>{});reject(new Error('Private loopback port check timed out after 5 s'));},5000);server.once('error',error=>{clearTimeout(timer);reject(error);});server.listen(requested,'127.0.0.1',()=>{const port=server.address().port;server.close(error=>{clearTimeout(timer);error?reject(error):resolve(port);});});});}
 // A self-signed X.509 certificate in plain DER: the fake GitHub's, accepted only through --ignore-certificate-errors.
@@ -84,16 +84,21 @@ test(PA1_TITLE,{timeout:300000},async()=>{
  need(process.env.BOOKS_PA1_PLAN&&process.env.BOOKS_PA1_PLAN_SHA&&/^[a-f0-9]{64}$/.test(process.env.BOOKS_PA1_NONCE||''),'PA-1 default refused: exact owned phase authority absent');
  const raw=fs.readFileSync(process.env.BOOKS_PA1_PLAN);need(hash(raw)===process.env.BOOKS_PA1_PLAN_SHA,'Worker plan pin differs');const plan=JSON.parse(raw);
  const authority=JSON.parse(await readPin(plan.authority));validatePlan(plan,authority);
+ const work=plan.fixture_root,app=path.join(work,'app'),home=path.join(work,'home'),pkg={version:plan.binding.version};
+ const dirs=Object.fromEntries(['profile','data','local','roaming','temp','downloads','logs','Audiobooks','Podcasts','Books'].map(name=>[name,path.join(home,name)]));
+ const manifest=await verifyInputs(plan);
+ const copied=Object.keys(manifest.payload.files).map(name=>path.join(app,name));
+ const homeDirs=plan.recovery?[home,...Object.values(dirs)]:[];
+ await verifyLocalPaths(plan,manifest,[process.env.BOOKS_PA1_PLAN,work,app,...copied,...homeDirs]);
+ assert.deepEqual(await treeFiles(app),manifest.payload.files,'Actual built candidate payload');
+ need(process.env.BOOKS_PA1_DEADLINE&&Number(process.env.BOOKS_PA1_DEADLINE)>Date.now(),'Original remaining deadline missing');
  const trace=path.join(plan.evidence_root,'native-progress.private.jsonl');fs.writeFileSync(trace,'',{flag:'wx'});
  let lastStage='input-verification';
  const progress=(stage,detail={})=>{lastStage=stage;fs.appendFileSync(trace,JSON.stringify({stage,at:new Date().toISOString(),...detail})+'\n');};
- progress('input-verification');const manifest=await verifyInputs(plan);progress('inputs-verified');
- need(process.env.BOOKS_PA1_DEADLINE&&Number(process.env.BOOKS_PA1_DEADLINE)>Date.now(),'Original remaining deadline missing');
- const work=plan.fixture_root,app=path.join(work,'app'),home=path.join(work,'home'),pkg={version:plan.binding.version};
- assert.deepEqual(await treeFiles(app),manifest.payload.files,'Actual built candidate payload');
+ progress('inputs-verified');
  const {monitor}=nativeAdapters(plan,authority);monitor.checkWindows();progress('explicit-membership-witness-ready');let intrusion=null;
  const timer=setInterval(()=>{try{monitor.checkWindows();}catch(e){intrusion=e;}},100);
- const dirs=Object.fromEntries(['profile','data','local','roaming','temp','downloads','logs','Audiobooks','Podcasts','Books'].map(name=>[name,path.join(home,name)]));
+ if(!plan.recovery)fs.mkdirSync(home);
  for(const dir of Object.values(dirs))fs.mkdirSync(dir,{recursive:true});const roots=path.join(home,'roots.json'),rootsBytes=JSON.stringify({Audiobooks:dirs.Audiobooks,Podcasts:dirs.Podcasts,Ebooks:dirs.Books});
  if(plan.recovery)assert.equal(fs.readFileSync(roots,'utf8'),rootsBytes,'Same private recovery roots');else fs.writeFileSync(roots,rootsBytes,{flag:'wx'});
  const installationConfig=path.join(home,'books-arranger-installation.json');

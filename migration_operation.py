@@ -167,6 +167,11 @@ class MigrationOperation:
                     known={item[0] for item in db.execute('SELECT id FROM book_groups WHERE superseded=0')}
                     if set(selected)-known:raise ValueError('Reviewed verification selection contains unknown current candidates')
                 current,envelope=self._scope(db,entry);invocation=str(uuid.uuid4())
+                from storage_relocation_native import require_normal_operation
+                from runtime_disposition_owners import admit_catalog
+                require_normal_operation(self.database)
+                if not admit_catalog(self.database):
+                    raise ValueError('Reviewed migration requires its retained catalog disposition owner')
                 native={'schema':'books-migration-native-owner-v1','invocation_id':invocation,'catalog_identity':self.worker._catalog_identity(),
                     'owner_handle_proof':json.loads(json.dumps(owner))}
                 self.active=(db,publication_id,entry,current,native)

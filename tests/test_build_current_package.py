@@ -63,7 +63,8 @@ class CurrentPackageProducerTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1];sys.path.insert(0,str(root/'scripts'))
         try:
             import build_phase
-            raw=(root/'node_modules/app-builder-lib/templates/nsis/include/installUtil.nsh').read_bytes()
+            fixture=root/'scratch/installUtil.nsh'
+            raw=(fixture if fixture.is_file() else root/'node_modules/app-builder-lib/templates/nsis/include/installUtil.nsh').read_bytes()
             private=build_phase.private_install_util(raw)
             for name in (b'GetInQuotes',b'GetFileParent',b'uninstallOldVersion'):
                 self.assertNotIn(b'Function '+name+b'\n',private)

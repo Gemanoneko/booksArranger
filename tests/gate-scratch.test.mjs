@@ -4,7 +4,7 @@
 // check-desktop.mjs (e.g. the committed one, as a negative control).
 import test from 'node:test';import assert from 'node:assert/strict';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawn,spawnSync} from 'node:child_process';
-import {createHash} from 'node:crypto';import {fileURLToPath} from 'node:url';
+import {fileURLToPath} from 'node:url';
 import {trackGateScratch} from '../scripts/gate-scratch.mjs';
 import {PYTHON_WORKERS} from '../scripts/python-check-batches.mjs';
 
@@ -69,16 +69,19 @@ test('an entry still in use is reported, not hidden',{skip:!IS_WIN&&'needs a Win
  }finally{const gone=new Promise(r=>held.once('exit',r));held.kill();await gone;}
 });
 
-// The real gate in a throwaway root. Its "Python" is this Node (hash-pinned the same way), so every worker starts and fails
-// at once: a failing run after all 13 worker copies were made, with no QA runtime needed.
+// The real gate in a throwaway root. Its pinned Python executes an inert
+// containment placeholder, then each copied worker's discovery fails.
 function gateRoot(t,{preexisting}={}){
  const box=sandbox(t),root=path.join(box,'root'),ff=path.join(box,'ff');
  fs.mkdirSync(path.join(root,'scripts'),{recursive:true});fs.mkdirSync(ff);
  fs.copyFileSync(gateScript,path.join(root,'scripts','check-desktop.mjs'));
  for(const name of ['python-check-batches.mjs','gate-source-guard.mjs','gate-scratch.mjs','qa-phase-contract.mjs'])fs.copyFileSync(path.join(repo,'scripts',name),path.join(root,'scripts',name));
- const sha=createHash('sha256').update(fs.readFileSync(process.execPath)).digest('hex');
- fs.writeFileSync(path.join(root,'scripts','qa-runtime.json'),JSON.stringify({schema:1,python:{path:process.execPath,sha256:sha},ffmpeg:{root:ff,files:{}}}));
- put(path.join(root,'tests','README.txt'),'placeholder');
+ const runtime=JSON.parse(fs.readFileSync(path.join(repo,'scripts','qa-runtime.json'),'utf8'));
+ const python=path.join(process.env.BOOKS_QA_RUNTIME_ROOT,'python','python.exe');
+ fs.writeFileSync(path.join(root,'scripts','qa-runtime.json'),JSON.stringify({schema:1,python:{path:python,sha256:runtime.python.sha256},ffmpeg:{root:ff,files:{}}}));
+ put(path.join(root,'tests','test_registry_rename_containment.py'),'# Inert private fixture; no registry code.\n');
+ put(path.join(root,'tests','test_desktop_quit.py'),'raise RuntimeError("intentional private worker fixture failure")\n');
+ put(path.join(root,'node_modules','app-builder-lib','templates','nsis','include','installUtil.nsh'),'inert isolated failure fixture');
  if(preexisting)put(path.join(root,'scratch','kept-proof','proof.json'),'retained');
  return root;
 }
@@ -93,7 +96,7 @@ test('the real gate removes its worker copies and the scratch folder it made whe
  assert.match(run.stdout,new RegExp('Sources copied into the '+PYTHON_WORKERS+' Python workers'),'the workers were made');
  assert.match(run.stderr,/Python batch failed or exceeded output cap/,'the original failure is still the gate\'s error');
  assert.match(run.stderr,/Gate scratch removed: .*scratch\/0, .*scratch\/12/);
- assert.deepEqual(fs.readdirSync(root).sort(),['scripts','tests'],'no scratch left behind');
+ assert.deepEqual(fs.readdirSync(root).sort(),['node_modules','scripts','tests'],'no scratch left behind');
 });
 
 test('the real gate leaves what was in scratch before it ran',t=>{

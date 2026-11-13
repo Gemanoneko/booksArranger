@@ -118,6 +118,19 @@ class RewriteProofTests(unittest.TestCase):
 
 
 class BackfillTests(unittest.TestCase):
+    def test_stream_capable_empty_proof_folder_does_not_stop_retag(self):
+        from native_io import DirectoryDispositionUnsupported,VerifiedDirectory
+        lib=self.lib
+        backfill=lib.backfill()
+        (backfill.stage/lib.job_id).mkdir(parents=True)
+        with patch.object(VerifiedDirectory,'dispose_empty',side_effect=DirectoryDispositionUnsupported('private fixture hold')) as held:
+            backfill.apply(lib.job_id,{'name':'Нормальное аномальное','number':'10','provider':'goodreads',
+                                     'source_url':'https://www.goodreads.com/book/show/55108791'})
+        held.assert_called()
+        self.assertEqual(lib.state(backfill),('done',''))
+        self.assertTrue(lib.target.exists())
+        self.assertTrue((backfill.stage/lib.job_id).is_dir())
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup);self.lib=Library(Path(self.temp.name))
 

@@ -324,6 +324,18 @@ def _wait_uninstall_launcher(pid,application_dir):
     finally:kernel.CloseHandle(process)
 
 
+def _process_image_or_exited(process):
+    image=ctypes.create_unicode_buffer(32768)
+    size=wintypes.DWORD(len(image))
+    if kernel.QueryFullProcessImageNameW(process,0,image,ctypes.byref(size)):
+        return image.value
+    creation,exit_time,kernel_time,user_time=(wintypes.FILETIME() for _ in range(4))
+    _need(kernel.GetProcessTimes(process,ctypes.byref(creation),ctypes.byref(exit_time),
+              ctypes.byref(kernel_time),ctypes.byref(user_time)) and
+          (exit_time.dwLowDateTime or exit_time.dwHighDateTime),'process_check_unavailable')
+    return None
+
+
 def process_check(installation_dirs=(), process_name='Books Arranger.exe',*,launcher_pid=None):
     """Native inventory only: this never sends messages or terminates a PID."""
     _need(isinstance(process_name, str) and process_name and
@@ -346,6 +358,8 @@ def process_check(installation_dirs=(), process_name='Books Arranger.exe',*,laun
     kernel.OpenProcess.restype = wintypes.HANDLE
     kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
     kernel.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel.GetProcessTimes.argtypes = [wintypes.HANDLE]+[ctypes.POINTER(wintypes.FILETIME)]*4
+    kernel.GetProcessTimes.restype = wintypes.BOOL
     snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
     _need(snapshot != ctypes.c_void_p(-1).value, 'process_check_unavailable')
     busy = []
@@ -359,11 +373,13 @@ def process_check(installation_dirs=(), process_name='Books Arranger.exe',*,laun
                     busy.append({'pid': entry.pid, 'kind': 'application'})
                 elif roots and entry.image.lower() in ('python.exe', 'pythonw.exe', 'ffmpeg.exe', 'ffprobe.exe'):
                     process = kernel.OpenProcess(0x1000, False, entry.pid)
-                    _need(process, 'process_check_unavailable')
+                    if not process:
+                        _need(ctypes.get_last_error()==87,'process_check_unavailable')
+                        more = kernel.Process32NextW(snapshot, ctypes.byref(entry))
+                        continue
                     try:
-                        image = ctypes.create_unicode_buffer(32768); size = wintypes.DWORD(len(image))
-                        _need(kernel.QueryFullProcessImageNameW(process, 0, image, ctypes.byref(size)), 'process_check_unavailable')
-                        if any(_under(Path(image.value), root) for root in roots):
+                        image=_process_image_or_exited(process)
+                        if image is not None and any(_under(Path(image), root) for root in roots):
                             busy.append({'pid': entry.pid, 'kind': 'worker'})
                     finally:kernel.CloseHandle(process)
             more = kernel.Process32NextW(snapshot, ctypes.byref(entry))
@@ -470,6 +486,25 @@ def _pinned_relocation(database, activation, registration=None, selection=None):
     return dict(manifest=str(path),sha256=selection['sha256'])
 
 
+def _relocated_profile_catalog(configured, selected, facts, manifest):
+    """Match only the descriptor's exact historical catalog path and target."""
+    from storage_relocation import RelocationRefused, _key
+    try:
+        logical=manifest.logical_location(str(selected))
+        if _key(str(configured))!=_key(logical):return False
+        binding=manifest.files.get(_key(manifest.relative(logical)))
+        if not binding or 'catalog-storage' not in binding.receipt_classes:return False
+        keys=('identity','dev','ino','identity_method','identity_api_error','links')
+        if any(facts.get(key)!=(list(binding.target[key]) if key=='identity' else binding.target[key]) for key in keys):
+            return False
+        with VerifiedFile(configured) as original:
+            observed=original.facts()
+            return any(all(observed.get(key)==(list(side[key]) if key=='identity' else side[key]) for key in keys)
+                       for side in (binding.source,binding.target))
+    except (OSError, BoundaryError, RelocationRefused):
+        return False
+
+
 def inspect_existing(database, *, config_paths=()):
     """Read-only, WAL-aware recognition; aliases deduplicate by native file ID."""
     path = _absolute(str(database))
@@ -508,6 +543,9 @@ def inspect_existing(database, *, config_paths=()):
                             _need(len(rows)<=1,'relocation_configuration_required',path)
                             registration=tuple(rows[0]) if rows else None
             result['state'] = 'available'
+        if relocation and registration is not None:
+            result['storage_relocation']=_pinned_relocation(result['resolved_path'],relocation,registration)
+        profile_manifest=None
         for config in tuple(config_paths)[:MAX_CANDIDATES]:
             try:
                 settings, settings_facts, settings_hash = _json(config, 16384)
@@ -516,12 +554,22 @@ def inspect_existing(database, *, config_paths=()):
                 configured = _absolute(settings['dataDir']) / 'inventory.sqlite3'
                 with VerifiedFile(configured) as file:
                     same = file.facts()['identity'] == result['identity']
+                if not same and relocation and relocation[3]=='active' and result.get('storage_relocation'):
+                    from storage_relocation import parse_manifest
+                    if profile_manifest is None:
+                        pin=result['storage_relocation']
+                        with VerifiedFile(pin['manifest']) as descriptor:
+                            _need(descriptor.facts()['size']<=64*1024*1024,'relocation_configuration_required',pin['manifest'])
+                            profile_manifest=parse_manifest(b''.join(descriptor.chunks()),pin['sha256'])
+                    same=_relocated_profile_catalog(configured,physical,facts,profile_manifest)
                 if same:
+                    if relocation and settings.get('storage_relocation'):
+                        settings_pin=_pinned_relocation(result['resolved_path'],relocation,selection=settings['storage_relocation'])
+                        _need(result.get('storage_relocation',settings_pin)==settings_pin,'relocation_configuration_required',config)
+                        result['storage_relocation']=settings_pin
                     result.update(profile_confirmed=True, profile_dir=str(Path(config).absolute().parent),
                                   profile_settings_path=str(Path(config).absolute()),
                                   profile_settings_facts=settings_facts, profile_settings_sha256=settings_hash)
-                    if relocation and settings.get('storage_relocation'):
-                        result['storage_relocation']=_pinned_relocation(result['resolved_path'],relocation,selection=settings['storage_relocation'])
                     break
             except (OSError, ValueError, sqlite3.Error):
                 continue
@@ -852,7 +900,8 @@ def _current_user_sid():
             local=ctypes.WinDLL('kernel32');local.LocalFree.argtypes=[ctypes.c_void_p];local.LocalFree(sid)
 
 
-def _copy_profile(source,destination,settings_path,settings_facts,settings_sha256,proof_path,catalog_identity,source_authority=None):
+def _copy_profile(source,destination,settings_path,settings_facts,settings_sha256,proof_path,catalog_identity,source_authority=None,
+                  selected_catalog=None):
     source,destination=_absolute(str(source)),_absolute(str(destination))
     if source_authority is None:_need(_profile_source_allowed(source),'profile_account_not_confirmed',source)
     else:_validate_profile_source_authority(source,source_authority)
@@ -866,7 +915,9 @@ def _copy_profile(source,destination,settings_path,settings_facts,settings_sha25
         with DirectoryBoundary(destination.anchor,destination) as held:target_identity=list(held.identities[-1][1:])
         catalog_path=_absolute(value['dataDir'])/'inventory.sqlite3'
         catalog=stack.enter_context(VerifiedFile(catalog_path))
-        _need(catalog.facts()['identity']==catalog_identity,'settings_changed',settings_path)
+        _need(catalog.facts()['identity']==catalog_identity or
+              selected_catalog and _selected_profile_affinity(catalog_path,*selected_catalog),
+              'settings_changed',settings_path)
         for folder,dirs,names in os.walk(source,followlinks=False):
             _need(len(source_members)+len(dirs)+len(names)<=MAX_OWNED_FILES,'profile_copy_bound_exceeded',source)
             parent=Path(folder)
@@ -889,10 +940,35 @@ def _copy_profile(source,destination,settings_path,settings_facts,settings_sha25
             source_profile=str(source),source_identity=original_identity,source_files=source_files,
             target_profile=str(destination),target_identity=target_identity,target_files=result,
             settings=dict(relative=str(Path(settings_path).relative_to(source)),facts=settings_facts,sha256=settings_sha256),
-            catalog=dict(path=str(catalog_path),identity=catalog_identity))
+            catalog=dict(path=str(catalog_path),identity=catalog.facts()['identity']))
         saved=_write_new(proof_path,json.dumps(proof,sort_keys=True).encode('utf8'))
     return result,dict(manifest=str(proof_path),sha256=saved['sha256']),dict(path=str(source),identity=original_identity,
         role='profile',provenance='retained-profile-v1',files=source_files)
+
+
+@contextlib.contextmanager
+def _selection_catalog(chosen, relocation):
+    from catalog_owner import catalog_lock
+    from storage_relocation_native import logical_catalog_location, selected_catalog_relocation
+    _need(relocation==chosen.get('storage_relocation'),'invalid_relocation_selection')
+    _need(not chosen.get('verification_required'),'relocation_verification_required',chosen['database'])
+    with selected_catalog_relocation(relocation) as context:
+        database=logical_catalog_location(chosen['resolved_database'])
+        with catalog_lock(database,{}):
+            if context is not None:context.require_normal_operation()
+            with VerifiedFile(chosen['resolved_database']) as held:
+                _need(held.facts()==chosen['database_facts'],'selection_changed',chosen['database'])
+                _need(os.path.normcase(_resolved(held.handle))==os.path.normcase(chosen['resolved_database']),
+                      'selection_changed',chosen['database'])
+                yield
+
+
+def _selected_profile_affinity(configured, selected, facts):
+    from storage_relocation_native import current
+    context=current()
+    if context is None:return False
+    context.require_normal_operation()
+    return _relocated_profile_catalog(configured,selected,facts,context.manifest)
 
 
 def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storage_relocation=None,
@@ -909,8 +985,8 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
     _need(status['state']=='available','in_use')
     chosen=plan['selection'];mode=chosen['mode']
     discovered=chosen.get('storage_relocation')
-    _need(storage_relocation is None or discovered is None or storage_relocation==discovered,'invalid_relocation_selection')
-    storage_relocation=storage_relocation or discovered
+    _need(storage_relocation is None or storage_relocation==discovered,'invalid_relocation_selection')
+    storage_relocation=discovered
     previous=plan.get('previous_bootstrap')
     maintenance_review=_maintenance_selection(app,profile,_absolute(chosen['data_dir']),
         previous['value'] if previous else None)
@@ -926,12 +1002,9 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
         if (existing.get('data_dir')==chosen['data_dir'] and existing.get('profile_dir')==str(profile) and mode=='existing'):
             check=inspect_existing(chosen['database'])
             _need(check['state']=='available' and check['facts']==chosen['database_facts'],'selection_changed',chosen['database'])
-            if existing.get('storage_relocation')==storage_relocation and not require_package and existing.get('maintenance_temp_dir'):
-                return {'ok':True,'bootstrap':str(bootstrap),'result':'existing_selection_kept','database':chosen['database']}
-            from catalog_owner import catalog_lock
-            with catalog_lock(chosen['database'],{}):
-                with VerifiedFile(chosen['database']) as held:
-                    _need(held.facts()==chosen['database_facts'],'selection_changed',chosen['database'])
+            with _selection_catalog(chosen,storage_relocation):
+                if existing.get('storage_relocation')==storage_relocation and not require_package and existing.get('maintenance_temp_dir'):
+                    return {'ok':True,'bootstrap':str(bootstrap),'result':'existing_selection_kept','database':chosen['database']}
                 changed=dict(existing)
                 changed['maintenance_temp_dir'],changed['maintenance_temp_identity']=_commit_maintenance(plan['maintenance_selection'])
                 if require_package:changed['package_ownership']=capture_current_package(str(app),existing['installation_id'])
@@ -974,12 +1047,9 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
             _need(list(held.identities[-1][1:])==chosen['ancestor_identity'],'selection_changed',old_ancestor)
         again=inspect_new(chosen['data_dir'])
         _need(again['existing']==chosen['existing'],'selection_changed',chosen['data_dir'])
-    from catalog_owner import catalog_lock
     with contextlib.ExitStack() as stack:
         if mode=='existing':
-            stack.enter_context(catalog_lock(chosen['database'],{}))
-            with VerifiedFile(chosen['database']) as selected:
-                _need(selected.facts()==chosen['database_facts'],'selection_changed',chosen['database'])
+            stack.enter_context(_selection_catalog(chosen,storage_relocation))
         else:
             data=_absolute(chosen['data_dir'])
             with DirectoryBoundary(data.anchor,data,create=True):pass
@@ -994,7 +1064,8 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
         if chosen.get('profile_confirmed'):
             copied,retained_profile,retained_profile_root=_copy_profile(chosen['associated_profile'],profile,chosen['profile_settings_path'],
                 chosen['profile_settings_facts'],chosen['profile_settings_sha256'],root/('books-retained-profile-'+str(uuid.uuid4())+'.json'),
-                chosen['database_facts']['identity'],chosen.get('profile_source_authority'))
+                chosen['database_facts']['identity'],chosen.get('profile_source_authority'),
+                (chosen['resolved_database'],chosen['database_facts']))
         # Selected DB is explicit, so preserved old profile cannot silently point
         # a new installation at a different catalog. If old settings differ, stop.
         settings=profile/'desktop-settings.json'
@@ -1002,7 +1073,9 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
             old,_,_=_json(settings,16384)
             if _absolute(old.get('dataDir',''))!=_absolute(chosen['data_dir']):
                 with VerifiedFile(_absolute(old.get('dataDir',''))/'inventory.sqlite3') as kept,VerifiedFile(chosen['database']) as selected:
-                    _need(kept.facts()['identity']==selected.facts()['identity'],'copied_settings_selection_differs',settings)
+                    _need(kept.facts()['identity']==selected.facts()['identity'] or
+                          _selected_profile_affinity(kept.path,chosen['resolved_database'],selected.facts()),
+                          'copied_settings_selection_differs',settings)
         elif mode=='existing':
             item=_write_new(settings,json.dumps({'dataDir':chosen['data_dir'],'catalogMode':mode}).encode('utf8'))
             copied.append(dict(relative=settings.name,**item))

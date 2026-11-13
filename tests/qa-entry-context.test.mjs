@@ -83,7 +83,7 @@ const quiet={log(){}};
 const absent=async file=>{await assert.rejects(fs.lstat(file),{code:'ENOENT'});};
 
 test('arguments: every path and the expected HEAD are required, absolute and exact (E5)',()=>{
-  const ok=['--worktree','C:\\w','--run','C:\\r','--head','a'.repeat(40),'--runtime','C:\\q','--fixture','C:\\f.mp3','--git-root','C:\\Git','--powershell-root','C:\\Windows\\System32\\WindowsPowerShell\\v1.0'];
+  const ok=['--worktree','C:\\w','--run','C:\\r','--head','a'.repeat(40),'--runtime','C:\\q','--fixture','C:\\f.mp3','--git-root','C:\\Git','--powershell-root','C:\\Windows\\System32\\WindowsPowerShell\\v1.0','--checker','C:\\checker'];
   assert.equal(parseArgs(ok).port,5212);
   for(const key of ['--git-root','--powershell-root']){const i=ok.indexOf(key);assert.throws(()=>parseArgs(ok.slice(0,i).concat(ok.slice(i+2))),new RegExp(key+' is required'));assert.throws(()=>parseArgs(ok.map((v,j)=>j===i+1?'relative':v)),/absolute/);}
   assert.throws(()=>parseArgs(ok.slice(0,4).concat(ok.slice(6))),/--head is required/);

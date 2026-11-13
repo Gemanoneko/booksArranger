@@ -5,7 +5,7 @@ const patterns=['test_desktop_host.py','test_alpha.py','test_beta.py','test_web.
 const reports=()=>pythonBatches(patterns).map((p,batch)=>({batch,patterns:p,ids:p.map(x=>'case.'+x),discovered:p.length,completed:p.length,skipped:0,failures:0,errors:0,success:true}));
 test('all short worker layouts retain the original fallback prerequisite',()=>{
  assert.equal(PYTHON_WORKERS,13);  // Proposed 0.23.0 capacity change; every deadline and case stays intact.
- for(let i=0;i<PYTHON_WORKERS;i++){const layout=pythonWorkerLayout(i);assert.equal(layout.relative,'scratch/'+i);assert.deepEqual(layout.requiredDirectories,['scratch/tmp','scratch/source-fallback-2026-10-11']);}
+ for(let i=0;i<PYTHON_WORKERS;i++){const layout=pythonWorkerLayout(i);assert.equal(layout.relative,'scratch/'+i);assert.deepEqual(layout.requiredDirectories,['scratch/tmp','scratch/f','scratch/source-fallback-2026-10-11']);}
  assert.throws(()=>pythonWorkerLayout(PYTHON_WORKERS));assert.throws(()=>pythonWorkerLayout(-1));assert.throws(()=>pythonWorkerLayout(1.5));assert.throws(()=>pythonWorkerLayout('../escape'));
 });
 test('fixed short fixture bounds leave the existing 240-character output guard intact',()=>{

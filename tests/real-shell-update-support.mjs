@@ -11,7 +11,54 @@ const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 export const sameFileTree=(a,b)=>isDeepStrictEqual(a,b);
 const norm=p=>path.win32.resolve(p).replaceAll('\\','/').toLowerCase();
 export const within=(p,root)=>norm(p).startsWith(norm(root)+'/');
-export function privatePath(p){need(typeof p==='string'&&/^C:[\\/]/i.test(p)&&!p.includes('\0'),'Private local C: path required');need(!/[. ]([\\/]|$)/.test(p)&&!p.slice(2).includes(':'),'Noncanonical private path');return p;}
+export function privatePath(p){
+ need(typeof p==='string'&&/^[A-Z]:[\\/]/i.test(p),'Private absolute drive path required');
+ const tail=p.slice(3),parts=tail.split(/[\\/]/);
+ need(!tail||parts.every(part=>part&&!/[. ]$|[:*?"<>|\x00-\x1f]/.test(part)),'Noncanonical private path');
+ return p;
+}
+
+export function assertLocalPaths(api,paths){
+ const checkedDrives=new Set(),checkedPaths=new Set();
+ for(const candidate of paths){
+  const target=path.win32.normalize(privatePath(candidate)),root=path.win32.parse(target).root;
+  const drive=root.slice(0,2).toUpperCase();
+  if(!checkedDrives.has(drive)){
+   need(api.driveType(root)===3&&/^\\Device\\HarddiskVolume\d+$/i.test(api.dosTarget(drive)),
+    'Private PA-1 paths require a directly mounted fixed local drive: '+drive);
+   checkedDrives.add(drive);
+  }
+  for(let member=target;;member=path.win32.dirname(member)){
+   const key=member.toLowerCase();
+   if(!checkedPaths.has(key)){
+    const attributes=api.attributes(member);
+    need(Number.isInteger(attributes)&&attributes>=0&&attributes<0xffffffff&&!(attributes&0x400),
+     'Unavailable or reparse PA-1 path: '+member);
+    checkedPaths.add(key);
+   }
+   if(member===root)break;
+  }
+ }
+}
+
+// Invoke only after the existing source, DLL and Koffi input pins pass.
+export async function verifyLocalPaths(plan,manifest,existing=[]){
+ need(process.platform==='win32'&&process.arch==='x64','Native PA-1 requires reviewed Windows x64 ABI');
+ const require=createRequire(import.meta.url),K=require(plan.koffi_root).load('C:/Windows/System32/kernel32.dll');
+ const driveType=K.func('uint32_t __stdcall GetDriveTypeW(str16)');
+ const queryDos=K.func('uint32_t __stdcall QueryDosDeviceW(str16,void *,uint32_t)');
+ const attributes=K.func('uint32_t __stdcall GetFileAttributesW(str16)');
+ function dosTarget(drive){
+  const buffer=Buffer.alloc(65536),count=queryDos(drive,buffer,buffer.length/2);
+  need(count>0&&count<=buffer.length/2,'PA-1 drive mapping unavailable: '+drive);
+  return buffer.subarray(0,count*2).toString('utf16le').split('\0',1)[0];
+ }
+ const roots=[plan.evidence_root,plan.source_root,plan.koffi_root,plan.payload.root,path.win32.dirname(plan.fixture_root),...existing];
+ const payload=Object.keys(manifest.payload.files).map(name=>path.win32.join(plan.payload.root,name));
+ assertLocalPaths({driveType,dosTarget,attributes:p=>attributes(path.win32.toNamespacedPath(p))},
+  [...roots,plan.authority.path,plan.payload.manifest.path,...plan.inputs.map(ref=>ref.path),...plan.trees.map(tree=>tree.root),...payload]);
+ for(const root of roots)need(norm(await fs.realpath(root))===norm(root),'PA-1 path resolves through an alias: '+root);
+}
 export function validatePlan(plan,authority){
  need(plan?.schema==='books-real-shell-plan-v1','Fixed real-shell plan absent');binding(plan.binding);validateAuthority(authority,plan.binding);
  need(equal(plan.case,NATIVE_CASE)&&plan.deadlineMs===600000&&plan.phase_contract_sha256===plan.binding.phase_contract_sha256,'Fixed phase/deadline differs');
@@ -39,8 +86,8 @@ export function validatePlan(plan,authority){
  const allowed=['SystemRoot','WINDIR','PATH','TEMP','TMP','USERPROFILE','APPDATA','LOCALAPPDATA'];
  need(plan.environment&&equal(Object.keys(plan.environment).sort(),allowed.sort())&&Object.values(plan.environment).every(v=>typeof v==='string'),'Exact private environment required');
  need(plan.environment.SystemRoot==='C:/Windows'&&plan.environment.WINDIR==='C:/Windows'&&plan.environment.PATH==='C:/Program Files/nodejs;C:/Windows/System32','Fixed Windows/Node environment required');
- for(const key of ['TEMP','TMP','USERPROFILE','APPDATA','LOCALAPPDATA'])need(within(plan.environment[key],plan.fixture_root),'Profile/cache/TEMP escapes private fixture');
- need(within(plan.authority.path,plan.evidence_root),'Authority must be an exact private input');
+ for(const key of ['TEMP','TMP','USERPROFILE','APPDATA','LOCALAPPDATA'])need(within(privatePath(plan.environment[key]),plan.fixture_root),'Profile/cache/TEMP escapes private fixture');
+ need(within(privatePath(plan.authority.path),plan.evidence_root),'Authority must be an exact private input');
  need(plan.expected_tray_types?.ExecutablePath===1&&Object.values(plan.expected_tray_types).every(t=>[1,2,3,4,11].includes(t)),'Reviewed exact own-leaf value schema required');
  return plan;
 }
