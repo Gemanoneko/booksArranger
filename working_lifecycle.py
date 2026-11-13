@@ -18,6 +18,7 @@ from sqlite_retry import transaction
 from native_io import BoundaryError, DirectoryBoundary as NativeBoundary, VerifiedFile as NativeFile, ordinary, kernel
 from source_cleanup import packed, stamp, single_stream
 from audio_jobs import JobWorkingHold
+from storage_relocation_native import facts_match
 
 
 class ProducerNotClosed(BoundaryError, JobWorkingHold):
@@ -126,20 +127,18 @@ def reference_candidates(db, table, wanted, limit=64):
 class DirectoryBoundary(NativeBoundary):
     def __exit__(self, *unused):
         failures = []
-        for handle in reversed(self.handles):
+        for handle in reversed(self.handles+getattr(self,'alias_handles',[])):
             if not kernel.CloseHandle(handle):
                 failures.append(handle)
         self.handles = []
+        self.alias_handles=[];self.alias_contexts=[]
         if failures:
             raise RuntimeError('Working ancestry native close failed')
 
 
 class VerifiedFile(NativeFile):
     def __exit__(self, *unused):
-        if self.handle is not None:
-            if not kernel.CloseHandle(self.handle):
-                raise RuntimeError('Working file native close failed')
-            self.handle = None
+        return super().__exit__(*unused)
 
 
 class WorkingLifecycle:
@@ -489,7 +488,7 @@ class WorkingLifecycle:
                 handle = stack.enter_context(VerifiedFile(path, delete=True))
                 facts = handle.facts()
                 single_stream(path)
-                if facts['links'] != 1 or facts != json.loads(entry['facts']) or facts['size'] != entry['size'] or self._hash(handle) != entry['sha256']:
+                if facts['links'] != 1 or not facts_match(path,facts,json.loads(entry['facts']),receipt_class='working-file') or facts['size'] != entry['size'] or self._hash(handle) != entry['sha256']:
                     raise BoundaryError('Closed working-file native identity or bytes changed')
                 prepared.append((entry, path, handle))
             diagnostic_held = False
@@ -581,7 +580,7 @@ class WorkingLifecycle:
                     handle = stack.enter_context(NativeFile(path, delete=not dry_run))
                     facts = handle.facts()
                     single_stream(path)
-                    if facts['links'] != 1 or facts != json.loads(entry['facts']) or facts['size'] != entry['size']:
+                    if facts['links'] != 1 or not facts_match(path,facts,json.loads(entry['facts']),receipt_class='working-file') or facts['size'] != entry['size']:
                         raise BoundaryError('Closed working-file native identity or size changed')
                     prepared.append((entry, path, handle))
                 if dry_run:
@@ -736,7 +735,7 @@ class WorkingLifecycle:
                     continue
                 handle=stack.enter_context(VerifiedFile(path,delete=True))
                 facts=handle.facts();single_stream(path)
-                if facts!=json.loads(entry['facts']) or facts['links']!=1 or facts['size']!=entry['size'] or self._hash(handle)!=entry['sha256']:
+                if not facts_match(path,facts,json.loads(entry['facts']),receipt_class='working-file') or facts['links']!=1 or facts['size']!=entry['size'] or self._hash(handle)!=entry['sha256']:
                     raise BoundaryError('Published snapshot native identity or bytes changed')
                 prepared.append((entry,path,handle))
             for entry,path,handle in prepared:

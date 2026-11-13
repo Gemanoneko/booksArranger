@@ -1630,7 +1630,9 @@ def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create
     if source_config.audiobook_output_root:guard_roots['Audiobooks output']=source_config.audiobook_output_root
     from scanner import inside
     from native_io import DirectoryBoundary
-    database_path = Path(args.database).absolute()
+    from storage_relocation_native import logical_catalog_location
+    database_path = Path(logical_catalog_location(args.database)).absolute()
+    args.database=str(database_path)
     if any(inside(database_path, root) for root in guard_roots.values()):
         raise ValueError('Keep the inventory database outside source libraries')
     # Existing mode cannot create missing ancestry. Explicit new mode alone may
@@ -1638,6 +1640,10 @@ def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create
     with DirectoryBoundary(database_path.anchor, database_path.parent, create=create_data):
         if startup_guard is not None:startup_guard(database_path, guard_roots, port)
         with catalog_lock(args.database,guard_roots):
+            from storage_relocation_native import require_normal_operation
+            require_normal_operation(database_path)
+            from runtime_disposition_owners import admit_catalog
+            admit_catalog(database_path)
             if before_start is not None:before_start(database_path, guard_roots, port)
             return serve_owned(args, roots, port, ready)
 

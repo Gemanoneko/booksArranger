@@ -64,6 +64,7 @@ def prepare(tree,proof):
     for source in ROOT.glob('*.py'):
         if source.name not in {'app.py','install_app_entries.py'}:tree.copy(source,backend/source.name)
     for name in ['public_source_leads.json','replacement_eye_plan.json']:tree.copy(ROOT/name,backend/name)
+    tree.copy(ROOT/'desktop'/'legacy-package-0.27.0.json',backend/'legacy-package-0.27.0.json')
     for source in (ROOT/'web').iterdir():tree.copy(source,backend/'web'/source.name)
     tree.write(backend/'VERSION',[(pkg['version']+'\n').encode()])
     python=runtime/'python'/'python.exe'
@@ -77,6 +78,10 @@ def stage_app_package(tree,shell,pkg):
     # Two-package layout: build/lifecycle tooling belongs to the project only.
     metadata={key:value for key,value in pkg.items()
               if key not in {'build','devDependencies','scripts','allowScripts','directories'}}
+    # Immutable packaged-shell contract distinguishes an unconfigured legacy
+    # development launch from a broken configured installation, including a
+    # double-click with no shortcut arguments after its bootstrap disappeared.
+    metadata['booksInstallationBootstrapRequired']=True
     content=(json.dumps(metadata,sort_keys=True,indent=2)+'\n').encode('utf8')
     return tree.write(shell/'package.json',[content])
 
@@ -119,13 +124,29 @@ def directory_identity(tree,folder):
         raise RuntimeError('Fresh output identity unavailable')
     return [int(info.volume),int(info.index_high),int(info.index_low)]
 
-def private_nsis_include(folder):
+def private_nsis_include(folder,payload=None,files=None):
     # NSIS parser escaping is separate from shell escaping; this is an absolute
     # private constant in a compile-time-only BUILD_UNINSTALLER customHeader.
     value=str(folder)
     if any(c in value for c in '\0\r\n'):raise RuntimeError('Unsafe NSIS private path')
     value=value.replace('$','$$').replace('"','$\\"')
-    return ('!macro customHeader\n  !ifdef BUILD_UNINSTALLER\n    InstallDir "'+value+'"\n  !endif\n!macroend\n').encode()
+    header='!macro customHeader\n  !ifdef BUILD_UNINSTALLER\n    InstallDir "'+value+'"\n  !endif\n!macroend\n'
+    if payload is not None:
+        def nsis(value):
+            value=str(value)
+            if any(c in value for c in '\0\r\n'):raise RuntimeError('Unsafe NSIS payload path')
+            return value.replace('$','$$').replace('"','$\\"')
+        header+='!define BOOKS_LIFECYCLE_PAYLOAD "'+nsis(payload)+'"\n'
+        header+='!define BOOKS_CURRENT_PACKAGE_INCLUDE "'+nsis(folder.parent/'lifecycle-main-provenance'/'current-package.nsh')+'"\n'
+        header+='!macro BooksLifecycleVerifyPayload ROOT\n  Push $R8\n'
+        for relative,facts in sorted(files.items()):
+            location=relative.replace('/','\\')
+            if any(c in location for c in '\0\r\n"$'):raise RuntimeError('Unsafe lifecycle payload entry')
+            header+='  ${StdUtils.HashFile} $R8 "SHA2-256" "${ROOT}\\'+location+'"\n'
+            header+='  ${If} $R8 != "'+facts['sha256']+'"\n    Pop $R8\n    SetErrorLevel 21\n    Quit\n  ${EndIf}\n'
+        header+='  Pop $R8\n!macroend\n'
+        header+='!include "'+nsis(ROOT/'desktop'/'installer.nsh')+'"\n'
+    return header.encode()
 
 
 def build(tree,proof,runtime,backend,pins,pkg,prior):
@@ -135,10 +156,19 @@ def build(tree,proof,runtime,backend,pins,pkg,prior):
     shell,shell_manifest,icon,pack_inputs,seed=stage_shell(tree,proof,pkg)
     owned=Path(proof['ownedRoot'])
     generator_cwd=tree.directory(owned/'nsis-generator',create=True)
-    include=owned/'nsis-private.nsh';tree.write(include,[private_nsis_include(generator_cwd)])
+    # Database/uninstall consent happens before InstFiles. Its own exact fresh
+    # Python/helper bytes must be embedded, not borrowed from a live old install.
+    lifecycle=tree.directory(owned/'lifecycle-payload',create=True)
+    for source,destination in ((runtime/'python',lifecycle/'python'),(backend,lifecycle/'backend')):
+        for relative in tree.tree_manifest(source):tree.copy(source/relative,destination/relative)
+    lifecycle_files=tree.tree_manifest(lifecycle)
+    include=owned/'nsis-private.nsh';tree.write(include,[private_nsis_include(generator_cwd,lifecycle,lifecycle_files)])
     image=output/('Books-Arranger-Setup-'+pkg['version']+'.exe')
     generator_request=owned/'nsis-generator-request.json'
-    generator_request_pin=tree.write(generator_request,[json.dumps({'lease':proof,'output':str(output),'output_identity':directory_identity(tree,output),'image':str(image),'cwd':str(generator_cwd)},sort_keys=True).encode()])
+    source_head=run(['C:/Program Files/Git/cmd/git.exe','rev-parse','HEAD'],proof).strip()
+    generator_request_pin=tree.write(generator_request,[json.dumps({'lease':proof,'output':str(output),
+        'output_identity':directory_identity(tree,output),'image':str(image),'cwd':str(generator_cwd),
+        'icon':str(icon),'source_head':source_head},sort_keys=True).encode()])
     # Every explicit FileSet preserves its approved full package membership.
     # The first FileSet is outside appDir, so builder's default file exclusions
     # do not silently discard declared production members.

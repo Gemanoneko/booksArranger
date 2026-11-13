@@ -1,7 +1,7 @@
 {
   "name": "books-arranger",
   "productName": "Books Arranger",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "private": true,
   "description": "Inventory and arrange audiobook, podcast and ebook libraries",
   "main": "desktop/main.js",
@@ -60,7 +60,8 @@
       "oneClick": false,
       "perMachine": false,
       "allowElevation": false,
-      "allowToChangeInstallationDirectory": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "desktop/installer.nsh",
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "runAfterFinish": false,

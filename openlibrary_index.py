@@ -162,7 +162,11 @@ def _owned_sqlite(path,binding,boundary):
             single_stream(leaf);held_files.append(held)
         identities=[held.facts()['identity'] for held in held_files]
         if previous:
-            if previous.get('identities')!=identities:raise ValueError('SQLite retained identities differ from producer receipt')
+            from storage_relocation_native import identity_match
+            old=previous.get('identities')
+            if not isinstance(old,list) or len(old)!=len(held_files) or any(not identity_match(
+                    held.path,held.facts(),identity,receipt_class='index-leaf' if index==0 else 'index-journal')
+                    for index,(held,identity) in enumerate(zip(held_files,old))):raise ValueError('SQLite retained identities differ from producer receipt')
         else:
             _publish_json(owner,{'binding':binding,'identities':identities},boundary)
             protected=stack.enter_context(VerifiedFile(owner))
@@ -188,11 +192,12 @@ def _read_sqlite(path):
         with VerifiedFile(path.with_name(owner_name+'.owner.json')) as owner:
             if owner.facts()['links']!=1 or owner.facts()['size']>65536:raise ValueError('Read-only index ownership receipt invalid')
             single_stream(owner.path);receipt=json.loads(b''.join(owner.chunks()))
-            if receipt.get('identities',[None])[0]!=held.facts()['identity']:raise ValueError('Read-only index identity differs from producer receipt')
+            from storage_relocation_native import identity_match
+            if not identity_match(path,held.facts(),receipt.get('identities',[None])[0],receipt_class='index-leaf'):raise ValueError('Read-only index identity differs from producer receipt')
         immutable=path.name.startswith('index-')
         if not immutable:
             journal=stack.enter_context(VerifiedFile(path.with_name(path.name+'-journal')))
-            if journal.facts()['links']!=1 or journal.facts()['identity']!=receipt['identities'][1]:raise ValueError('Read-only registry journal differs from producer receipt')
+            if journal.facts()['links']!=1 or not identity_match(journal.path,journal.facts(),receipt['identities'][1],receipt_class='index-journal'):raise ValueError('Read-only registry journal differs from producer receipt')
             single_stream(journal.path)
         with contextlib.closing(sqlite3.connect('file:'+path.as_posix()+'?mode=ro'+('&immutable=1' if immutable else ''),uri=True,timeout=.1)) as db:
             yield db,held
@@ -361,7 +366,8 @@ def _activate(directory,ready,identity,token):
             from source_cleanup import single_stream
             single_stream(completed.path);proof=json.loads(b''.join(completed.chunks()))
             digest=held.sha256();facts=held.facts()
-            if proof!={'token':token,'sha256':digest,'size':facts['size'],'identity':facts['identity']}:raise ValueError('Completed index differs from immutable completion receipt')
+            from storage_relocation_native import identity_match
+            if not isinstance(proof,dict) or set(proof)!={'token','sha256','size','identity'} or proof['token']!=token or proof['sha256']!=digest or proof['size']!=facts['size'] or not identity_match(ready,facts,proof['identity'],receipt_class='index-leaf'):raise ValueError('Completed index differs from immutable completion receipt')
         compressed={kind:db.execute('SELECT value FROM state WHERE key=?',(kind+'-compressed-sha256',)).fetchone()[0] for kind in identity['manifest']['sources']}
         streams={kind:json.loads(db.execute('SELECT value FROM state WHERE key=?',(kind+'-source-streams',)).fetchone()[0]) for kind in identity['manifest']['sources']}
         held_titles=[key for (key,) in db.execute('SELECT title_key FROM identity_holds ORDER BY title_key')]

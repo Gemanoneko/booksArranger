@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.28.0] - 2026-11-13
+
+### Added
+
+- Configure portable application, catalog, profile, work, download and cache locations. The installer can discover or browse to an existing catalog and preserve its associated profile, or create a separate empty catalog and profile.
+- Relocate storage through consistent snapshots, explicit verification and enablement, and historical native-identity bindings. Keep original data and packages until the migrated copy is independently verified.
+- Keep saved data by default during uninstall, or review exact app-owned locations for removal. Libraries, source checkouts, unrelated files and locations used by another installation remain protected.
+
+### Changed
+
+- Use configured paths for workers, conversion staging, temporary files and maintenance. An unavailable selected location fails safely without falling back to personal folders.
+- Retain NAS originals and hold unsafe cleanup or replacement while new conversions and no-replace publication can continue.
+- Use a separate configured maintenance-temp location for installation and uninstall. Report retained maintenance payloads and shared metadata explicitly; no automatic or reboot cleanup is promised.
+
+### Fixed
+
+- Preserve settings and pending decision bytes across upgrades and installation-folder changes.
+- Protect file removal against arriving named streams with durable recovery records and verified native-handle closure.
+
 ## [v0.27.0] - 2026-11-11
 
 ### Added

@@ -667,10 +667,18 @@ class SeriesBackfill:
         folder = self.stage / job_id
         try:
             if folder.is_dir():
-                for item in folder.iterdir():
-                    if item.is_file() and item.suffix in ('.stdout', '.stderr'):
-                        item.unlink()
-                folder.rmdir()
+                from native_io import DirectoryBoundary,VerifiedFile,VerifiedDirectory
+                from source_cleanup import single_stream
+                with DirectoryBoundary(folder.anchor,folder):
+                    for item in folder.iterdir():
+                        if item.is_file() and item.suffix in ('.stdout', '.stderr'):
+                            with VerifiedFile(item,delete=True) as held:
+                                single_stream(item);held.dispose()
+                # Stream-capable directory providers retain the empty folder
+                # for the finite data-cleanup workflow rather than pathname
+                # rmdir after releasing a race-sensitive native check.
+                with DirectoryBoundary(folder.anchor,folder.parent),VerifiedDirectory(folder,delete=True) as held:
+                    held.dispose_empty()
         except OSError:
             pass
 

@@ -169,9 +169,9 @@ class RenameWorker(MigrationWorker):
                         old_boundary.revalidate();target.revalidate()
                         need(self.lease['generation_guard'](self.publication_id,self.current['generation']) is True,'relocation_generation_changed','Duplicate cleanup generation changed before disposition')
                         old.dispose();self._fault('duplicate_disposition_before_close')
-                        handle=old.handle
-                        need(bool(kernel.CloseHandle(handle)),'duplicate_close_unproven','Exact duplicate disposition checked-close failed')
-                        old.handle=None;self._fault('after_duplicate_disposition')
+                        old.__exit__(None,None,None)
+                        need(old.handle is None,'duplicate_close_unproven','Exact duplicate disposition checked-close failed')
+                        self._fault('after_duplicate_disposition')
                         need(not os.path.lexists(self.old),'duplicate_removal_unproven','Exact old duplicate pathname did not disappear')
                         proof=dict(self._claim('books-output-duplicate-removed-v1'),intent_sha256=digest(intent),old_absent=True,
                             destination_location=intent['destination_location'],basis='exact_handle_disposition_closed')

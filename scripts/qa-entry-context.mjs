@@ -20,10 +20,10 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {phaseAccounting} from './qa-phase-contract.mjs';
+import {studioRoot} from './studio-location.mjs';
 
 export const CORE=['run_entry_checks.mjs','entry-main.mjs','entry-identity.mjs','bounded-check.mjs','bounded-child.mjs'];
 export const CHECK_NAMES=['pre-qa','post-build','check-electron','check','test:smoke'];
-const DEFAULT_CHECKER='C:\\Antigravity Projects\\Studio Illuminati\\.claude\\skills\\qa-handoff\\scripts';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fileSha=async file=>sha(await fs.readFile(file));
 
@@ -35,7 +35,7 @@ export function parseArgs(argv){
   }
   for(const name of ['worktree','run','head','runtime','fixture','git-root','powershell-root'])if(!out[name])throw Error('--'+name+' is required');
   if(!/^[0-9a-f]{40}$/.test(out.head))throw Error('--head must be the full expected commit (40 hex digits)');
-  out.checker??=DEFAULT_CHECKER;
+  out.checker??=path.join(studioRoot(fileURLToPath(import.meta.url)),'.claude','skills','qa-handoff','scripts');
   for(const name of ['worktree','run','runtime','fixture','checker','git-root','powershell-root'])if(!path.isAbsolute(out[name]))throw Error('--'+name+' must be an absolute path');
   out.port=Number(out.port??5212);
   if(!Number.isInteger(out.port)||out.port<1024||out.port>65535)throw Error('--port must be a port number');

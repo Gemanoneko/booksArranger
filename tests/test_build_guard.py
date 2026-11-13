@@ -15,6 +15,8 @@ ROOT=Path(__file__).absolute().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 from build_fs_guard import BuildTree,remove_manifest_files,_native_receipt,capture_metadata,archive_metadata,publish_metadata,PriorBuild,producer_receipt,disposable_stage_receipts,retire_disposable_stage
 from native_io import BoundaryError,OwnedProcessJob,VerifiedFile,publish_no_replace
+if os.environ.get('BOOKS_QA_FIXTURE_ROOT'):
+    ROOT=Path(os.environ['BOOKS_QA_FIXTURE_ROOT'])/'build-guard-tool'
 BASE=ROOT.parent/'build-guard-probes'
 
 def _remove_tree(path):

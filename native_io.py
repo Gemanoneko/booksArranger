@@ -10,6 +10,13 @@ from pathlib import Path
 
 class BoundaryError(ValueError):pass
 
+class FileRemovalRetained(BoundaryError):
+    """Pre-disposition refusal with positive exact remaining-file evidence."""
+    def __init__(self,path,facts,sha256,diagnostic):
+        self.path=str(path);self.retention_proof={'path':str(path),'facts':facts,'sha256':sha256}
+        self.native_reason=str(diagnostic)
+        super().__init__('Safe removal of “'+str(path)+'” could not be verified. The file was kept.')
+
 def identity_diagnostic(path,code,api):
     return {'path':str(path),'windows_error':code,'windows_message':ctypes.FormatError(code).strip() if code else '', 'api':api}
 
@@ -99,6 +106,7 @@ class DirectoryBoundary:
         self.writable_parent=writable_parent;self.rename_destination=rename_destination
         self.root=ordinary(root);self.parent=ordinary(parent);self.create=create
         self.handles=[];self.identities=[]
+        self.alias_handles=[];self.alias_contexts=[]
         try:self.parent.relative_to(self.root)
         except ValueError:raise BoundaryError('Destination is outside the configured library')
 
@@ -113,7 +121,10 @@ class DirectoryBoundary:
                     if not self.create or not current.is_relative_to(self.root):
                         raise AncestorUnavailable('An inspected destination ancestor is unavailable')
                     current.mkdir()
-                if current.is_symlink() or os.path.isjunction(current):
+                from storage_relocation_native import current as relocation_context
+                relocation=relocation_context()
+                selected_alias=bool(relocation and relocation.is_alias(current,self.parent))
+                if (current.is_symlink() or os.path.isjunction(current)) and not selected_alias:
                     raise BoundaryError('Destination ancestor is a symlink or junction')
                 # OPEN_REPARSE_POINT prevents transparently following a swapped reparse entry.
                 # READ_ATTRIBUTES alone does not participate in Windows sharing
@@ -130,6 +141,17 @@ class DirectoryBoundary:
                 info=FileInfo()
                 if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)):
                     raise BoundaryError('Cannot inspect destination directory identity')
+                if selected_alias and not info.attributes&0x400:
+                    raise BoundaryError('Selected storage alias is not its required junction; no source fallback')
+                if info.attributes&0x400 and selected_alias:
+                    # The exact mountpoint itself remains deny-write/delete held.
+                    # The exported directory identity is the ACTUAL separately
+                    # retained ordinary target handle, never a historic/fake ID.
+                    target,target_info=relocation.alias_handle(current,self.parent,handle)
+                    self.handles[-1]=target
+                    self.alias_handles.append(handle)
+                    self.alias_contexts.append((handle,relocation))
+                    info=target_info
                 if info.attributes&0x400 or not info.attributes&0x10:
                     raise BoundaryError('Destination ancestry contains an unexpected reparse entry or non-directory')
                 self.identities.append((str(current),info.volume,info.index_high,info.index_low))
@@ -139,6 +161,7 @@ class DirectoryBoundary:
             raise
 
     def revalidate(self):
+        for handle,relocation in self.alias_contexts:relocation.revalidate_alias(handle)
         for handle,identity in zip(self.handles,self.identities):
             info=FileInfo()
             if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) or info.attributes&0x400:
@@ -149,6 +172,8 @@ class DirectoryBoundary:
     def __exit__(self,*_):
         for handle in reversed(self.handles):kernel.CloseHandle(handle)
         self.handles=[]
+        for handle in reversed(self.alias_handles):kernel.CloseHandle(handle)
+        self.alias_handles=[];self.alias_contexts=[]
 
 def publish_no_replace(temporary,destination,boundary,expected_sha256=None,expected_size=None,before_rename=None):
     temporary=ordinary(temporary);destination=ordinary(destination)
@@ -402,15 +427,50 @@ class VerifiedFile:
         kernel.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD];kernel.SetFileInformationByHandle.restype=wintypes.BOOL
         if not kernel.SetFileInformationByHandle(self.handle,0,ctypes.byref(value),ctypes.sizeof(value)):raise BoundaryError('Cannot preserve recovery timestamps/attributes')
         if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(self.info)):raise BoundaryError('Cannot verify restored filesystem metadata')
-    def dispose(self):
+    def dispose(self,*,fence=None):
         if not self.delete:raise BoundaryError('File was not opened for exact-handle removal')
+        if getattr(self,'_disposition',None):raise BoundaryError('File disposition was already prepared')
+        if fence is not None:
+            from fenced_file_disposition import FencedFileDisposition
+            if type(fence) is not FencedFileDisposition:raise BoundaryError('Invalid finite disposition capability')
+            guard=fence
+        else:
+            from runtime_disposition_owners import context_for
+            from runtime_file_disposition import prepare_disposition
+            try:guard=prepare_disposition(self,context_for(self.path))
+            except Exception as error:
+                self._raise_retained(error)
+            self._disposition=guard
         kernel.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
         kernel.SetFileInformationByHandle.restype=wintypes.BOOL
         value=wintypes.BOOL(True)
-        if not kernel.SetFileInformationByHandle(self.handle,4,ctypes.byref(value),ctypes.sizeof(value)):
-            raise BoundaryError(f'Exact-handle removal is unsupported or denied: {ctypes.WinError(ctypes.get_last_error())}')
+        try:
+            guard.authorize(self)
+            if not kernel.SetFileInformationByHandle(self.handle,4,ctypes.byref(value),ctypes.sizeof(value)):
+                raise BoundaryError(f'Exact-handle removal is unsupported or denied: {ctypes.WinError(ctypes.get_last_error())}')
+            guard.mark_pending()
+        except BaseException as error:
+            if fence is None:guard.abort(error)
+            if isinstance(error,Exception) and not isinstance(error,BoundaryError):
+                if not guard.kernel_success:self._raise_retained(error)
+                raise BoundaryError('Removal could not be confirmed for “'+str(self.path)+'”. Keep this operation on hold and review its recovery record.') from error
+            raise
+    def _raise_retained(self,error):
+        try:
+            facts=self.refresh()
+            if facts['links']!=1 or facts['attributes']&(0x400|0x10):raise BoundaryError('Remaining identity is not unique/ordinary')
+            sha=self.sha256()
+        except Exception:
+            raise BoundaryError('Removal could not be confirmed for “'+str(self.path)+'”. Keep this operation on hold and review its recovery record.') from error
+        raise FileRemovalRetained(self.path,facts,sha,error) from error
     def __exit__(self,*_):
-        if self.handle is not None:kernel.CloseHandle(self.handle);self.handle=None
+        guard=getattr(self,'_disposition',None)
+        if guard is not None:
+            try:guard.close()
+            except Exception as error:raise BoundaryError('Removal could not be confirmed for “'+str(self.path)+'”. Keep this operation on hold and review its recovery record.') from error
+        if self.handle is not None:
+            if not kernel.CloseHandle(self.handle):raise BoundaryError('Exact file native close failed')
+            self.handle=None
 
 class DirectoryNotEmptyError(BoundaryError):pass
 class DirectoryDispositionUnsupported(BoundaryError):pass

@@ -119,7 +119,7 @@ class ProducerRecovery:
         if any(not isinstance(platform.get(key),str) or not platform[key] for key in ('machine_guid','computer','windows_directory','system_volume_serial')):raise ValueError('Trusted machine identity is incomplete')
         return {key:value for key,value in platform.items() if key!='uptime_ms'}
     @contextlib.contextmanager
-    def _native(self,scope,*,hash_files=False):
+    def _native(self,scope,*,hash_files=False,relocated_expected=None):
         from ctypes import wintypes
         kernel.GetDriveTypeW.argtypes=[wintypes.LPCWSTR];kernel.GetDriveTypeW.restype=wintypes.UINT
         stage=self.stage_root/scope['job']['job_id']/scope['attempt']['attempt_id']
@@ -150,7 +150,12 @@ class ProducerRecovery:
                         full.update(block)
                     item['sha256']=full.hexdigest()
                 files.append(item)
-            yield {'schema':'books-unadopted-attempt-fence-v1','ownership_authority':False,'catalog':catalog,'stage':str(stage),'ancestry':boundary.identities,'marker_sha256':hashlib.sha256(raw).hexdigest(),'files':files}
+            observed={'schema':'books-unadopted-attempt-fence-v1','ownership_authority':False,'catalog':catalog,'stage':str(stage),'ancestry':boundary.identities,'marker_sha256':hashlib.sha256(raw).hexdigest(),'files':files}
+            if relocated_expected is not None:
+                from storage_relocation_native import retained_observation_match
+                if not retained_observation_match(copied(observed),relocated_expected,boundary,operation_path=stage):
+                    raise ValueError('Retained attempt contents or native fence changed')
+            yield observed
             boundary.revalidate()
     def record_origin(self,job_id,evidence):
         """Explicit trusted user fact entry only; never called by automatic startup/Prepare."""
@@ -319,7 +324,8 @@ class ProducerRecovery:
                         if saved['state']!='disposing':raise ValueError('An old working file is missing; the rest are kept')
                         continue  # removed after the durable intent, before an interruption
                     file=held.enter_context(VerifiedFile(path,delete=True));single_stream(path);facts=file.facts()
-                    if facts!=item['facts'] or facts['links']!=1 or file.sha256()!=item['sha256']:raise ValueError('An old working file changed since it was checked; kept')
+                    from storage_relocation_native import facts_match
+                    if not facts_match(path,facts,item['facts'],receipt_class='retained-source') or facts['links']!=1 or file.sha256()!=item['sha256']:raise ValueError('An old working file changed since it was checked; kept')
                     prepared.append((path,file))
                 boundary.revalidate()
                 if saved['state']=='isolated_retained':
@@ -341,8 +347,7 @@ class ProducerRecovery:
             saved=db.execute("SELECT attempt_id FROM producer_recovery_checkpoints WHERE job_id=? AND state='isolated_retained' ORDER BY rowid DESC LIMIT 1",(job_id,)).fetchone()
             if not saved:raise ValueError('Bound retained attempt is unavailable')
             record=verify_retained(db,job_id,saved['attempt_id'])
-            with self._native(record['scope'],hash_files=True) as native:
-                if copied(native)!=record['native']:raise ValueError('Retained attempt contents or native fence changed')
+            with self._native(record['scope'],hash_files=True,relocated_expected=record['native']) as native:
                 yield record
                 verify_retained(db,job_id,saved['attempt_id'])
 

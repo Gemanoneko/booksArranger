@@ -26,8 +26,13 @@ const fixtureRootMap = {"test_automatic_processing.AREA":"scratch/a","test_local
 // gate, but only after every Python worker and the chain have finished.
 const sideEnv={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
 function runAsync(exe,args){return new Promise(resolve=>{if(deadline<=Date.now()){resolve({status:null,error:null,timedOut:true,stdout:'',stderr:''});return;}const out=[],err=[];let error=null,timedOut=false;const child=spawn(exe,args,{cwd:root,env:sideEnv,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));child.stdout.on('data',d=>out.push(d));child.stderr.on('data',d=>err.push(d));child.on('error',e=>{error=e.message;});child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});});}
+// Containment is a prerequisite, not a test racing the workers it protects.
+// This script only parses source and inert controls; no native key rename runs.
+const containment=await runAsync(python,['-I','-B',path.join(root,'tests','test_registry_rename_containment.py')]);
+if(containment.error||containment.timedOut||containment.status!==0)throw Error('Registry rename containment refused before worker startup: '+(containment.error||containment.stderr||containment.status));
+console.log('Registry rename containment preflight passed before aggregate worker startup');
 const syntaxFiles=['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js','desktop/startup.js','web/load-state.js','desktop/folder-picker.js'],nodeTests=[...CANONICAL_NODE_ENTRIES];
-const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)).sort();
+const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)||name==='uninstall-launch-contract.test.mjs').sort();
 function sideChecks(){return (async()=>{const log=[];let failure=null,nodeOutput='';
  const step=async(exe,args)=>{if(failure)return null;const r=await runAsync(exe,args);log.push(r.stdout,r.stderr);if(r.error||r.timedOut||r.status!==0)failure=(r.error||(r.timedOut?'deadline':'exit '+r.status))+': '+args.join(' ');return r;};
  for(const name of syntaxFiles)await step(process.execPath,['--check',name]);
@@ -37,6 +42,9 @@ function sideChecks(){return (async()=>{const log=[];let failure=null,nodeOutput
 // Extend the original desktop/media graph with every integrated maintenance and
 // automatic/status boundary. Report discovery rather than a stale literal count.
 const patterns=['test_desktop_quit.py','test_desktop_catalog.py','test_desktop_host.py','test_build_guard.py','test_working_cleanup.py','test_working_precision.py','test_working_lifecycle.py','test_storage_cleanup.py','test_automatic_media_policy.py','test_automatic_media.py','test_standing_admission.py','test_attempt_working_lifecycle.py','test_published_snapshot_lifecycle.py','test_attention_failure_policy.py','test_automatic_record_retry.py','test_web.py','test_sqlite_busy.py','test_automatic_processing.py','test_status_read_contention.py'];
+patterns.push('test_storage_relocation.py','test_storage_relocation_native.py','test_storage_relocation_operator.py','test_storage_relocation_integration.py','test_storage_source_finalization.py','test_storage_lifecycle.py','test_build_current_package.py','test_directory_retention.py');
+patterns.push('test_lifecycle_file_cleanup.py','test_lifecycle_directory_cleanup.py','test_application_publication.py','test_runtime_file_disposition.py','test_runtime_disposition_owners.py','test_terminal_cleanup_journal.py');
+patterns.push('test_desktop_uninstall_launcher.py','test_storage_lifecycle_controls.py','test_storage_readiness.py','test_support_disposition_recovery.py');
 patterns.push('test_destination_admission.py');
 patterns.push('test_groups_filters.py','test_candidate_source_refresh.py','test_local_identity_fixes.py');
 patterns.push('test_desktop_owner_recovery.py','test_failed_m4b_retry.py');
@@ -121,7 +129,11 @@ class Timed(unittest.TextTestResult):
  def startTestRun(self):super().startTestRun();Timed.last=time.perf_counter()
  def stopTest(self,test):
   super().stopTest(test);now=time.perf_counter();name=owner.get((type(test).__module__,type(test).__name__)) or type(test).__module__.split('.')[0]+'.py';Timed.seconds[name]=Timed.seconds.get(name,0)+now-Timed.last;Timed.last=now
-r=unittest.TextTestRunner(verbosity=2,resultclass=Timed).run(s)
+from runtime_disposition_owners import support_dispositions
+# Explicit support owner exists only in this isolated, pinned QA worker. It
+# grants no production fallback and cannot cross its private scratch boundary.
+with support_dispositions(runroot/'scratch',[runroot/'scratch']):
+ r=unittest.TextTestRunner(verbosity=2,resultclass=Timed).run(s)
 report={'batch':int(sys.argv[4]),'patterns':patterns,'ids':inventory,'discovered':len(inventory),'completed':r.testsRun,'skipped':len(r.skipped),'failures':len(r.failures),'errors':len(r.errors),'success':r.wasSuccessful(),
  'module_seconds':{k:round(v,1) for k,v in sorted(Timed.seconds.items(),key=lambda item:-item[1])}}
 print('BOOKS_PYTHON_BATCH_RESULT '+json.dumps(report),flush=True)

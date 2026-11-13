@@ -59,6 +59,10 @@ def _catalog_identity(database):
     except (OSError,TypeError,ValueError):return None
 
 def connect(database, timeout=10):
+    from storage_relocation_native import require_normal_operation
+    require_normal_operation(database)
+    from runtime_disposition_owners import admit_catalog
+    admit_catalog(database)
     connection = sqlite3.connect(database, timeout=timeout, factory=ClosingConnection)
     connection.row_factory = sqlite3.Row
     # The book list and status open hundreds of connections per read; WAL mode and the base tables are
@@ -89,6 +93,8 @@ def connect(database, timeout=10):
         PRIMARY KEY(root,generation,path));
     ''')
         connection.commit()
+        from runtime_disposition_owners import catalog_created
+        catalog_created(database)
     except BaseException:
         connection.close()
         raise

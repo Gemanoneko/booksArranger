@@ -172,11 +172,13 @@ export async function freshFixture(plan,manifest){
 }
 
 // Only the two documented commands for this already-bound private shell/profile.
-export function createPrivateShellCommands({spawn,exe,profile,env,timeoutMs=60000}){
+export function createPrivateShellCommands({spawn,exe,profile,installationConfig=null,env,timeoutMs=60000}){
  privatePath(exe);privatePath(profile);
+ if(installationConfig)privatePath(installationConfig);
  need(Number.isSafeInteger(timeoutMs)&&timeoutMs>0&&timeoutMs<=60000,'Bounded private shell command timeout required');
  const command=flag=>new Promise((resolve,reject)=>{
-  const child=spawn(exe,[flag,'--shell-profile='+profile,'--start-hidden','--quiet-errors'],{env,windowsHide:true,stdio:'ignore'});
+  const selection=installationConfig?'--installation-config='+installationConfig:'--shell-profile='+profile;
+  const child=spawn(exe,[flag,selection,'--start-hidden','--quiet-errors'],{env,windowsHide:true,stdio:'ignore'});
   const timer=setTimeout(()=>reject(Error('Private shell command timed out: '+flag)),timeoutMs);
   child.once('error',error=>{clearTimeout(timer);reject(error);});child.once('exit',(code,signal)=>{clearTimeout(timer);code===0&&signal===null?resolve():reject(Error('Private shell command failed: '+flag));});
  });

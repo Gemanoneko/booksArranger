@@ -198,6 +198,16 @@ test('close-session proof requires the live primary, unchanged healthy engine an
  }
 });
 
+test('configured private shell commands retain the exact bootstrap selection without conflicting profile args',async()=>{
+ const calls=[],installationConfig='C:/private/home/books-arranger-installation.json';
+ const fake=(file,args)=>{calls.push(args);const listeners={};queueMicrotask(()=>listeners.exit(0,null));return {once(name,fn){listeners[name]=fn;return this;}};};
+ const fixture=createPrivateShellCommands({spawn:fake,exe:'C:/private/app/Books Arranger.exe',
+  profile:'C:/private/home/profile',installationConfig,env:{}});
+ await fixture.closeWindow();await fixture.quit();
+ assert.deepEqual(calls.map(args=>args[1]),['--installation-config='+installationConfig,'--installation-config='+installationConfig]);
+ assert(calls.every(args=>args.every(arg=>!arg.startsWith('--shell-profile='))));
+});
+
 // The recovery fixtures remain inert bytes under the suite's process/network/native deny guards.
 async function failedAttemptFixture(t,caches=false){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'books-pa1-recovery-'));t.after(()=>fs.rm(root,{recursive:true}));

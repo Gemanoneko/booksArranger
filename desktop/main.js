@@ -5,7 +5,7 @@
 // finishes, nothing new starts, the backend exits, then the shell exits.
 
 const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell, ipcMain, clipboard } = require('electron');
-const { spawn } = require('node:child_process');
+const { spawn,spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -14,7 +14,7 @@ const path = require('node:path');
 const PRODUCTION_PORT = 5210; // studio assignment; strict, no fallback
 const DEV_PORT = 5212; // desktop dev/test instances (5211 is bound by the unit tests)
 const isDev = !app.isPackaged;
-const repoRoot = path.resolve(__dirname, '..');
+const repoRoot = fs.realpathSync.native(path.resolve(__dirname, '..'));
 const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
 
 // ── Command line ────────────────────────────────────────────────────────────
@@ -50,7 +50,31 @@ function absoluteOption(name) {
   return value ? path.resolve(value) : null;
 }
 
-const profileDir = absoluteOption('shell-profile') || (isDev ? path.join(repoRoot, 'scratch', 'desktop-dev', 'electron-profile') : null);
+const installationKit=require('./installation-paths');
+let installation=null;
+try{
+  installation=installationKit.load({argv,executable:process.execPath,packaged:app.isPackaged,
+    requireConfiguration:app.isPackaged&&require('../package.json').booksInstallationBootstrapRequired===true});
+  if(installation&&option(argv,'shell-profile')!==null)throw Error('An installation configuration already selects its retained profile.');
+  if(flag(argv,'run-uninstaller')){
+    if(!installation||!app.isPackaged)throw Error('A verified installed application is required to launch this uninstaller.');
+    if(!installation.maintenance_temp_dir)throw Error('Required installation maintenance settings are missing. Repair the installation before uninstalling Books Arranger.');
+    const python=path.join(installation.application_dir,'resources','python','python.exe');
+    const helper=path.join(installation.application_dir,'resources','backend','desktop_uninstall_launcher.py');
+    const digest=crypto.createHash('sha256').update(fs.readFileSync(installation.filename)).digest('hex');
+    const args=['-I','-B',helper,'--installation-config',installation.filename,'--sha256',digest,
+      '--application-dir',installation.application_dir,'--parent-pid',String(process.pid)];
+    if(flag(argv,'uninstall-silent'))args.push('--silent');
+    const launched=spawnSync(python,args,{cwd:path.dirname(helper),env:installationKit.childEnvironment(process.env,
+      installation.storage_relocation,installation.maintenance_temp_dir),windowsHide:true,encoding:'utf8',timeout:15000,maxBuffer:65536,stdio:['ignore','pipe','pipe']});
+    let response;try{response=JSON.parse(launched.stdout);}catch{}
+    if(launched.error||launched.signal||launched.status!==0||response?.started!==true)
+      throw Error(response?.error||'The configured uninstaller could not be started. No alternate storage was opened.');
+    app.exit(0);return;
+  }
+  installationKit.apply(app,installation);
+}catch(error){reportError('Books Arranger cannot start',error.message);app.exit(2);return;}
+const profileDir = absoluteOption('shell-profile') || (isDev&&!installation ? path.join(repoRoot, 'scratch', 'desktop-dev', 'electron-profile') : null);
 if (profileDir) app.setPath('userData', profileDir);
 
 const state = {
@@ -115,6 +139,8 @@ function configuration() {
   const settings = readSettings();
   const installDir = path.dirname(process.execPath);
   let dataDir = absoluteOption('data-dir');
+  if(installation&&dataDir&&dataDir.toLowerCase()!==installation.data_dir.toLowerCase())throw Error('The selected data folder conflicts with this installation configuration.');
+  if(!dataDir&&installation)dataDir=installation.data_dir;
   if (!dataDir && typeof settings.dataDir === 'string' && path.isAbsolute(settings.dataDir)) dataDir = path.resolve(settings.dataDir);
   const requiresSetup = !dataDir;
   if (!dataDir) {
@@ -143,10 +169,11 @@ function configuration() {
     const pointerPath=path.join(repoRoot,'build-cache','runtime-pointer.json');
     const info=fs.lstatSync(pointerPath);if(!info.isFile()||info.isSymbolicLink()||info.size>1024*1024)throw new Error('Runtime pointer is not an ordinary bounded file');
     const pointer=JSON.parse(fs.readFileSync(pointerPath,'utf8'));
-    if(pointer.schema!=='books-runtime-pointer-v1'||!path.isAbsolute(pointer.root)||!inside(pointer.root,path.join(repoRoot,'build-cache','builds'))||!pointer.files)throw new Error('Runtime pointer differs from the owned build layout');
+    const physicalRuntime=typeof pointer.root==='string'&&path.isAbsolute(pointer.root)?fs.realpathSync.native(pointer.root):null;
+    if(pointer.schema!=='books-runtime-pointer-v1'||!physicalRuntime||!inside(physicalRuntime,path.join(repoRoot,'build-cache','builds'))||!pointer.files)throw new Error('Runtime pointer differs from the owned build layout');
     const digest=crypto.createHash('sha256').update(JSON.stringify(pointer.files)).digest('hex');
     if(digest!==pointer.manifest_sha256)throw new Error('Runtime pointer manifest differs');
-    runtime=pointer.root;
+    runtime=physicalRuntime;
     for(const [name,expected] of Object.entries(pointer.files)){
       const candidate=path.resolve(runtime,name);if(!inside(candidate,runtime))throw new Error('Runtime file escapes owned layout');
       const stat=fs.lstatSync(candidate);if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==expected.size||crypto.createHash('sha256').update(fs.readFileSync(candidate)).digest('hex')!==expected.sha256)throw new Error('Runtime file differs from pinned build');
@@ -158,7 +185,11 @@ function configuration() {
     throw new Error(isDev ? 'The bundled runtime is missing. Run: npm run fetch-runtime' : 'The installation is incomplete. Reinstall Books Arranger.');
   }
   const backendDir = isDev ? repoRoot : path.join(process.resourcesPath, 'backend');
-  return { dataDir, requiresSetup, catalogMode: settings.catalogMode || (option(argv,'catalog-mode') || 'existing'), port, rootsJson, audiobookSources, audiobookOutputRoot, python, backendDir, ffmpegDir };
+  const storageRelocation=installation?.storage_relocation||settings.storage_relocation||null;
+  if(storageRelocation&&(!storageRelocation.manifest||!path.isAbsolute(storageRelocation.manifest)||!/^[a-f0-9]{64}$/.test(storageRelocation.sha256||'')||Object.keys(storageRelocation).sort().join(',')!=='manifest,sha256'))throw Error('Selected storage relocation needs its exact descriptor and SHA-256.');
+  let catalogMode=installation?.catalog_mode || settings.catalogMode || (option(argv,'catalog-mode') || 'existing');
+  if(installation&&catalogMode==='new'&&settings.catalogMode==='existing'&&typeof settings.dataDir==='string'&&path.resolve(settings.dataDir).toLowerCase()===dataDir.toLowerCase())catalogMode='existing';
+  return { dataDir, requiresSetup, catalogMode, storageRelocation, workTemp:installation?.temp_dir||null, port, rootsJson, audiobookSources, audiobookOutputRoot, python, backendDir, ffmpegDir };
 }
 
 // Dev runs never touch the real libraries unless --roots-json says so.
@@ -191,7 +222,7 @@ function startBackend(config) {
   state.baseUrl = `http://127.0.0.1:${config.port}`;
   // The detached native host retains the engine's Job and process HANDLE.
   // Shell-pipe loss requests checkpoint shutdown; HTTP failures never kill it.
-  const child = spawn(config.python, args, { cwd: config.backendDir, env, windowsHide: true, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(config.python, args, { cwd: config.backendDir, env:installationKit.childEnvironment(env,config.storageRelocation,config.workTemp), windowsHide: true, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdout.on('data', (chunk) => {
     remember(chunk);
     state.hostOutput += chunk.toString('utf8');
@@ -601,12 +632,12 @@ function trustedSender(event){
   throw new Error('Unknown desktop control sender');
 }
 function runReadOnlyPython(config,script,args){return new Promise((resolve,reject)=>{
-  const child=spawn(config.python,['-I','-B',path.join(config.backendDir,script),...args],{cwd:config.backendDir,windowsHide:true,stdio:['ignore','pipe','pipe']});
+  const child=spawn(config.python,['-I','-B',path.join(config.backendDir,script),...args],{cwd:config.backendDir,env:installationKit.childEnvironment(process.env,config.storageRelocation,config.workTemp),windowsHide:true,stdio:['ignore','pipe','pipe']});
   let output='',error='';const timer=setTimeout(()=>{child.kill();reject(new Error('Data folder check timed out'));},15000);
   child.stdout.on('data',b=>{output+=b.toString('utf8');if(output.length>16384)child.kill();});
   child.stderr.on('data',b=>{error=(error+b.toString('utf8')).slice(-4096);});
   child.on('error',e=>{clearTimeout(timer);reject(e);});
-  child.on('exit',code=>{clearTimeout(timer);try{const result=JSON.parse(output);if(code||!result.ok)reject(new Error(result.error||error||'Data folder check failed'));else resolve(result);}catch(e){reject(new Error(error||e.message));}});
+  child.on('exit',code=>{clearTimeout(timer);try{const result=JSON.parse(output);if(code||!result.ok)reject(Object.assign(new Error(result.error||error||'Data folder check failed'),{code:result.code}));else resolve(result);}catch(e){reject(new Error(error||e.message));}});
 });}
 function broadcastStatus(){
   const value={engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null};
@@ -629,7 +660,7 @@ function logUpdate(line){
   if(flag(argv,'quiet-errors'))process.stderr.write('[update] '+line+'\n');
 }
 function acquireUpdateArtifact(config,artifact){return new Promise((resolve,reject)=>{
-  const child=spawn(config.python,['-I','-B',path.join(config.backendDir,'desktop_update_lease.py'),artifact.path,artifact.sha512],{cwd:config.backendDir,windowsHide:true,detached:true,stdio:['pipe','pipe','pipe']});
+  const child=spawn(config.python,['-I','-B',path.join(config.backendDir,'desktop_update_lease.py'),artifact.path,artifact.sha512],{cwd:config.backendDir,env:installationKit.childEnvironment(process.env,config.storageRelocation,config.workTemp),windowsHide:true,detached:true,stdio:['pipe','pipe','pipe']});
   let output='',error='',settled=false;const timer=setTimeout(()=>{child.stdin.end();reject(new Error('Installer integrity check timed out'));},30000);
   child.stdin.on('error',()=>{});
   child.stderr.on('data',b=>error=(error+b.toString('utf8')).slice(-4096));
@@ -642,6 +673,7 @@ function acquireUpdateArtifact(config,artifact){return new Promise((resolve,reje
 });}
 function configureUpdater(config){
   const {autoUpdater}=require('electron-updater');
+  installationKit.configureUpdater(autoUpdater,installation);
   const {UpdateController}=require('./update-controller');
   if(app.isPackaged)autoUpdater.setFeedURL({provider:'github',owner:'Gemanoneko',repo:'booksArranger',private:false});
   // Futaba's 0.22.1 QA, M-1: electron-updater 6.8.9's quitAndInstall() queues app.quit() with setImmediate whatever the
@@ -702,6 +734,10 @@ ipcMain.handle('books:update-show-installer',async event=>{if(trustedSender(even
 // shows its load (ruling 28). Returns the launch: it resolves when the engine answers, rejects if it stops first.
 function startConfigured(config){
   currentConfig=config;
+  if(installation&&config.catalogMode==='new'&&!fs.existsSync(path.join(app.getPath('userData'),'desktop-settings.json'))&&!pendingSettings){
+    const file=path.join(app.getPath('userData'),'desktop-settings.json');
+    pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[file,config.dataDir]);
+  }
   loadState=require(path.join(config.backendDir,'web','load-state.js'));
   state.firstFrame=require('node:url').pathToFileURL(path.join(config.backendDir,'web','index.html')).href;
   state.baseUrl=`http://127.0.0.1:${config.port}`;
@@ -785,6 +821,7 @@ if (!app.requestSingleInstanceLock()) {
     try {
       config = configuration();
       currentConfig=config;
+      if(config.storageRelocation)await runReadOnlyPython(config,'desktop_storage_admission.py',['--database',path.join(config.dataDir,'inventory.sqlite3')]);
       if(config.requiresSetup)await chooseCatalog();
       else startConfigured(config); // the engine's own failures show in the window's load strip (Stopped)
     } catch (error) {
@@ -792,7 +829,7 @@ if (!app.requestSingleInstanceLock()) {
       // Close the private host pipe only on startup failure. Its retained native
       // job requests checkpoint shutdown; no numeric-PID kill or port assumption.
       if (state.backend && !state.backendExited) state.backend.stdin.end();
-      reportError('Books Arranger could not start', error.message);
+      reportError(error.code==='verification_required'?'Books Arranger needs verification':'Books Arranger could not start', error.message);
       finishExit(1);
     }
   });

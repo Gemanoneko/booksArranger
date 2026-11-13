@@ -192,7 +192,9 @@ def remove_manifest_files(root, folder, manifest):
     """
     with BuildTree(root) as tree:
         folder = tree.directory(folder)
-        with contextlib.ExitStack() as deletes:
+        from runtime_disposition_owners import support_dispositions
+        control_parent=tree.directory(Path(root)/'build-cache',create=True)
+        with support_dispositions(control_parent,[folder]),contextlib.ExitStack() as deletes:
             held = []
             for relative, expected in manifest.items():
                 if not isinstance(relative,str) or Path(relative).is_absolute(): raise BoundaryError('Cleanup requires relative manifest paths')

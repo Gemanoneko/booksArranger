@@ -46,6 +46,8 @@ def shell_pipe(process,lost):
     except (OSError,ValueError):pass
 
 def main(argv=None):
+    from storage_relocation_native import configure_work_temp
+    configure_work_temp()
     argv=list(sys.argv[1:] if argv is None else argv)
     if os.name!='nt':raise RuntimeError('Desktop process ownership requires Windows')
     backend=Path(__file__).resolve().with_name('desktop_backend.py')

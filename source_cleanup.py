@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 from scanner import connect
 from sqlite_retry import transaction
-from native_io import DirectoryBoundary, VerifiedFile, BoundaryError, ordinary, publish_no_replace
+from native_io import DirectoryBoundary, VerifiedFile, BoundaryError, FileRemovalRetained, ordinary, publish_no_replace
 
 # SQLite's fixed text for SQLITE_BUSY. Before v0.16.5 a cleanup that hit a busy catalog stored it as
 # its reason; startup turns exactly that legacy shape into a paused cleanup (CleanupJobs.__init__).
@@ -137,6 +137,9 @@ class CleanupJobs:
         busy=catalog_busy(error)
         state,reason=('paused','') if busy else ('needs_attention',str(error) or type(error).__name__)
         cause=busy_cause(error,attempt) if busy and record else packed({'kind':'output_identity_unavailable','reason':reason,'diagnostic':error.diagnostic}) if isinstance(error,OutputIdentityUnavailable) else None
+        if isinstance(error,FileRemovalRetained) and getattr(error,'retained_members',None):
+            cause=packed({'kind':'originals_positively_retained','members':error.retained_members,'diagnostic':error.native_reason})
+            reason='The audiobook is verified, but safe removal of the remaining originals could not be verified. The remaining originals were kept.'
         def write(db):
             prior=db.execute('SELECT state,reason FROM source_cleanup WHERE id=?',(id,)).fetchone()
             if prior is None:return
@@ -316,6 +319,18 @@ class CleanupJobs:
             texts={'waiting':'Waiting for output checks','checking':'Checking temporary recovery copies','removing':f'Removing originals: {len(removed)} of {total}',
                 'pausing':'Pausing source cleanup','paused':f'Source cleanup paused: {len(removed)} of {total} removed','completed':success,
                 'needs_attention':'Source cleanup needs attention: '+reason+'. Remaining originals and temporary files are preserved for recovery.'}
+            retained=False
+            if state=='needs_attention':
+                last=self._rows('SELECT cause FROM source_cleanup_holds WHERE cleanup_id=? AND at=?',(row['id'],row['updated']))
+                if last:
+                    try:
+                        proof=json.loads(last[-1]['cause']);observed={m['path']:m for m in proof.get('members',[])}
+                        remaining={m['path']:m for m in members if m['state']!='removed'}
+                        sources={s['path']:s for s in intent['manifest']['sources']}
+                        retained=proof.get('kind')=='originals_positively_retained' and bool(remaining) and set(observed)==set(remaining) and all(
+                            observed[path]['facts']==json.loads(member['facts']) and observed[path]['sha256']==sources[path]['sha256'] for path,member in remaining.items())
+                    except (ValueError,TypeError,KeyError):retained=False
+                texts['needs_attention']=('Held — originals kept' if not removed else 'Held — some originals remain') if retained else 'Source cleanup needs attention: '+reason
             result.append({'id':row['id'],'job_id':row['job_id'],'state':state,'status':texts[state],'removed':len(removed),'total':total,'remaining':total-len(removed),
                 'checked':self.checked.get(row['id'],0) if state=='checking' else None,'updated':row['updated'],
                 'bytes_removed':sum(json.loads(m['facts'])['size'] for m in removed),'recovery_bytes':current_bytes,
@@ -466,7 +481,8 @@ class CleanupJobs:
         with contextlib.ExitStack() as stack:
             rb=stack.enter_context(DirectoryBoundary(self.root.anchor,recovery,create=True))
             if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery root identity changed')
-            if [list(v) for v in self.root_identity]!=[list(v) for v in intent['recovery_identity']]:raise BoundaryError('Persisted recovery ancestry changed')
+            from storage_relocation_native import ancestry_match
+            if not ancestry_match(rb,intent['recovery_identity'],operation_path=recovery,prefix=True):raise BoundaryError('Persisted recovery ancestry changed')
             self.phases[id]='Checking audiobook';self._set(id,'checking')
             ob=stack.enter_context(DirectoryBoundary(root,final.parent));output=stack.enter_context(self._open_output(final))
             if out.get('identity') is not None and output.facts()['identity']!=out['identity']:raise BoundaryError('Relocated output native identity changed; originals retained')
@@ -549,7 +565,19 @@ class CleanupJobs:
                     self._sorted(final,BoundaryError,manifest)
                     self._output_present(output,out,final)
                     single_stream(source['path'])
-                    original.dispose();marked.pop(str(ordinary(source['path'])),None)
+                    try:original.dispose()
+                    except FileRemovalRetained as error:
+                        retained=[]
+                        try:
+                            for remaining_source,remaining_handle,remaining_facts in held:
+                                if remaining_handle.handle is None:continue
+                                if remaining_handle.refresh()!=remaining_facts or remaining_handle.sha256()!=remaining_source['sha256']:
+                                    raise BoundaryError('Remaining original evidence changed')
+                                retained.append({'path':remaining_source['path'],'facts':remaining_facts,'sha256':remaining_source['sha256']})
+                        except Exception:retained=[]
+                        if retained:error.retained_members=retained
+                        raise
+                    marked.pop(str(ordinary(source['path'])),None)
                     db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))
                     original.__exit__(None,None,None)
                     if Path(source['path']).exists():raise BoundaryError('Disposition did not remove the verified name; no weaker deletion attempted')
@@ -614,7 +642,8 @@ class CleanupJobs:
                 source=next(s for s in intent['manifest']['sources'] if s['path']==member['path']);path=ordinary(source['path']);backup=ordinary(member['backup'])
                 if backup.parent!=self.root/id or not path.is_relative_to(root):raise BoundaryError('Recovery mapping is outside its owned boundary')
                 with DirectoryBoundary(self.root.anchor,backup.parent) as rb,VerifiedFile(backup) as held,DirectoryBoundary(root,path.parent) as boundary:
-                    if [list(v) for v in self.root_identity]!=[list(v) for v in intent['recovery_identity']]:raise BoundaryError('Persisted recovery ancestry changed')
+                    from storage_relocation_native import ancestry_match
+                    if not ancestry_match(rb,intent['recovery_identity'],operation_path=backup,prefix=True):raise BoundaryError('Persisted recovery ancestry changed')
                     if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery ancestor identity drifted before restoration')
                     if held.facts()['size']!=source['size'] or held.sha256()!=source['sha256']:raise BoundaryError('Recovery copy changed')
                     if path.exists():

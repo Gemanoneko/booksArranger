@@ -82,6 +82,8 @@ def main():
   # A paused GUI still owns this lock. Apply waits for a supported idle shutdown;
   # no process termination, Stop/Start, HTTP POST or lock bypass is performed.
   with catalog_lock(database,DEFAULT_ROOTS):
+   from runtime_disposition_owners import admit_catalog
+   admit_catalog(database)
    current=records(database)
    if hashlib.sha256(json.dumps(current,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()!=expected['records_sha256']:
     raise BoundaryError('Published catalog proof changed; preserved')

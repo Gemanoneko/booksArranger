@@ -6,6 +6,9 @@ from native_io import DirectoryBoundary,VerifiedFile
 from source_cleanup import single_stream
 
 def main(argv=None):
+    from storage_relocation_native import configure_from_environment,configure_work_temp
+    configure_work_temp()
+    configure_from_environment()
     path,expected=list(sys.argv[1:] if argv is None else argv)
     path=Path(path).absolute()
     if path.suffix.lower()!='.exe':raise ValueError('Update artifact must be the installer executable')

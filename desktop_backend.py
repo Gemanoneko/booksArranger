@@ -732,6 +732,9 @@ def main(argv=None):
     database = database_argument(argv)
     if not database:
         raise SystemExit('Books Arranger desktop backend needs --database.')
+    from storage_relocation_native import configure_from_environment,configure_work_temp
+    configure_work_temp()
+    configure_from_environment()
     import web_server
 
     def ready(server):

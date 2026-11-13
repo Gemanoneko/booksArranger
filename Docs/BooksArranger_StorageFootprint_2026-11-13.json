@@ -1,0 +1,142 @@
+{
+  "started_epoch": 1794553588.432345,
+  "ended_epoch": 1794553595.8395584,
+  "method": "os.walk, no reparse traversal; logical st_size; unique dedup by st_dev+st_ino across all roots, allocated bytes not measured; excludes alternate streams",
+  "summary": {
+    "installed": {
+      "logical": 588086478,
+      "files": 336,
+      "unique": 588086478
+    },
+    "worktree-candidate": {
+      "logical": 984369547,
+      "files": 2015,
+      "unique": 984369547
+    },
+    "worktree-approve": {
+      "logical": 66917145,
+      "files": 2013,
+      "unique": 66917145
+    },
+    "checkout": {
+      "logical": 22934661148,
+      "files": 31667,
+      "unique": 22934661148
+    },
+    "updater": {
+      "logical": 350051555,
+      "files": 5,
+      "unique": 350051555
+    },
+    "profile": {
+      "logical": 10882584,
+      "files": 118,
+      "unique": 10882584
+    }
+  },
+  "total_unique": 24934968457,
+  "largest": [
+    {
+      "category": "checkout/data/merge-cache/audio-staging",
+      "bytes": 15129271963
+    },
+    {
+      "category": "checkout/data/source-recovery/bc5f1302-fdee-4621-9823-522a0a9ad2a1",
+      "bytes": 2102929304
+    },
+    {
+      "category": "checkout/data/merge-cache/covers",
+      "bytes": 1638048714
+    },
+    {
+      "category": "checkout/build-cache/builds",
+      "bytes": 1393245414
+    },
+    {
+      "category": "checkout/data",
+      "bytes": 998850309
+    },
+    {
+      "category": "checkout/dist/builds",
+      "bytes": 762934327
+    },
+    {
+      "category": "worktree-candidate/dist",
+      "bytes": 762296115
+    },
+    {
+      "category": "installed/[root-files]",
+      "bytes": 334675447
+    },
+    {
+      "category": "worktree-candidate/build-cache",
+      "bytes": 194867043
+    },
+    {
+      "category": "checkout/build-cache/qa-runtime",
+      "bytes": 191705545
+    },
+    {
+      "category": "checkout/build-cache/pack-inputs",
+      "bytes": 190397122
+    },
+    {
+      "category": "updater/pending",
+      "bytes": 175025866
+    },
+    {
+      "category": "updater/[root-files]",
+      "bytes": 175025689
+    },
+    {
+      "category": "installed/resources/ffmpeg",
+      "bytes": 167303316
+    },
+    {
+      "category": "checkout/Docs/Evidence",
+      "bytes": 93891378
+    },
+    {
+      "category": "checkout/build-cache/downloads",
+      "bytes": 93335041
+    },
+    {
+      "category": "worktree-approve/Docs",
+      "bytes": 57615403
+    },
+    {
+      "category": "checkout/scratch/r56-ender",
+      "bytes": 55446211
+    },
+    {
+      "category": "installed/locales",
+      "bytes": 50643495
+    },
+    {
+      "category": "checkout/scratch/0245-release-20261104",
+      "bytes": 39370694
+    },
+    {
+      "category": "checkout/build-cache/qa-fixtures",
+      "bytes": 35053612
+    },
+    {
+      "category": "checkout/private-fixtures/ba-mp3-fixture",
+      "bytes": 35053612
+    },
+    {
+      "category": "checkout/.git/objects",
+      "bytes": 33954135
+    },
+    {
+      "category": "checkout/node_modules/electron-winstaller",
+      "bytes": 30133817
+    },
+    {
+      "category": "installed/resources/python",
+      "bytes": 24405990
+    }
+  ],
+  "errors": [],
+  "links": []
+}

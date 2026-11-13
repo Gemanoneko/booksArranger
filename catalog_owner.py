@@ -3,7 +3,7 @@
 Kept free of GUI imports so the browser backend also runs on the Windows
 embeddable Python bundled with the desktop app, which has no Tkinter.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager,nullcontext
 from contextvars import ContextVar
 import os
 from pathlib import Path
@@ -18,6 +18,8 @@ def catalog_lock(database, roots):
     """Prevent a second application resetting the first application's live queue."""
     if any(inside(database, root) for root in roots.values()):
         raise ValueError('Keep the inventory database outside source libraries')
+    from storage_relocation_native import current,assert_legacy_catalog
+    if current() is None:assert_legacy_catalog(database)
     lock_path = Path(str(database) + '.lock')
     if os.name == 'nt':
         import ctypes
@@ -37,7 +39,21 @@ def catalog_lock(database, roots):
                 # Deny-write/delete sharing conflicts with both other native owners
                 # and the legacy msvcrt open+write lock; no PID liveness inference.
                 marker = ACTIVE_CATALOG.set(str(Path(database).absolute()))
-                try:yield {'schema':'books-catalog-owner-v1','lock_path':str(lock_path),'lock_identity':held.facts()['identity'],'lock_facts':held.facts(),'lock_ancestry':held_boundary.identities,'held':True}
+                owner={'schema':'books-catalog-owner-v1','lock_path':str(lock_path),'lock_identity':held.facts()['identity'],'lock_facts':held.facts(),'lock_ancestry':held_boundary.identities,'held':True}
+                try:
+                    from storage_relocation_native import current
+                    relocation=current()
+                    activation=nullcontext()
+                    if relocation and not relocation.manifest.permitted(str(database)):
+                        raise RuntimeError('Selected storage relocation does not authorize this catalog location')
+                    if relocation and relocation.manifest.permitted(str(database)):
+                        if relocation.database is None:
+                            if Path(database).name!='inventory.sqlite3':
+                                raise RuntimeError('Relocated index work requires its owned main catalog')
+                            activation=relocation.catalog_lease(database,owner,held)
+                        else:relocation._activation()
+                    from runtime_disposition_owners import registered_catalog
+                    with activation, registered_catalog(database,roots,held):yield owner
                 finally:ACTIVE_CATALOG.reset(marker)
         return
     lock_path.parent.mkdir(parents=True, exist_ok=True)

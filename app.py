@@ -278,6 +278,10 @@ def main():
         if set(roots) != set(DEFAULT_ROOTS):
             parser.error('Root configuration must contain exactly Audiobooks, Podcasts, Ebooks')
     with catalog_lock(args.database, roots):
+        from storage_relocation_native import require_normal_operation
+        from runtime_disposition_owners import admit_catalog
+        require_normal_operation(args.database)
+        admit_catalog(args.database)
         inventory = Inventory(args.database, roots)
         window = tk.Tk()
         App(window, inventory)

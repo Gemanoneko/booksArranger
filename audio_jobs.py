@@ -428,6 +428,8 @@ class AudioJobs:
     """
 
     def __init__(self, database, runner, revision_guard, output_validator, historical_retirement=None):
+        from storage_relocation_native import require_normal_operation
+        require_normal_operation(database)
         self.database = str(database)
         self.runner = runner
         self.revision_guard = revision_guard

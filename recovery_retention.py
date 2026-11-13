@@ -17,6 +17,7 @@ from pathlib import Path
 from scanner import connect
 from source_cleanup import packed
 from native_io import BoundaryError, DirectoryBoundary, ordinary
+from storage_relocation_native import facts_match
 
 HOURS=0         # deadline for new sets: purged as soon as the output is verified
 LEGACY_HOURS=24 # deadline recorded by 0.16.7 and earlier; still a valid immutable deadline
@@ -172,7 +173,7 @@ class RecoveryRetention:
                     # removal; the recorded native identity, when there is one, must still match.
                     item=self.storage._prepare(stack,job_id,'recovery',path,self.storage.recovery_root,expected)
                     if item:
-                        if member['backup_facts'] and item[1].facts()!=json.loads(member['backup_facts']):raise BoundaryError('Recovery native identity changed; replacement preserved')
+                        if member['backup_facts'] and not facts_match(item[0],item[1].facts(),json.loads(member['backup_facts']),receipt_class='recovery-copy'):raise BoundaryError('Recovery native identity changed; replacement preserved')
                         prepared.append(item)
                 self._set(job_id,'deleting',actor=row['actor'] or actor)
                 self.storage._dispose(prepared,guard=self.guard)

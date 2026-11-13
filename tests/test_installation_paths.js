@@ -1,0 +1,58 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const kit=require('../desktop/installation-paths');
+const scratch=path.resolve(process.env.BOOKS_QA_FIXTURE_ROOT||path.join(__dirname,'..','scratch'));fs.mkdirSync(scratch,{recursive:true});
+const root=fs.mkdtempSync(path.join(scratch,'installation-paths-'));
+try{
+ const app=path.join(root,'Application'),profile=path.join(root,'Profile'),temp=path.join(root,'Temp'),downloads=path.join(root,'Downloads'),logs=path.join(root,'Logs'),data=path.join(root,'Data');
+ for(const p of [app,profile,temp,downloads,logs,data])fs.mkdirSync(p);
+ const exe=path.join(app,'Books Arranger.exe'),file=path.join(root,'books-arranger-installation.json');
+ const input={schema:'books-arranger-installation-v1',installation_id:'20c8cc08-fcde-4a16-b222-71ad11d5c19b',application_dir:app,data_dir:data,catalog_mode:'existing',profile_dir:profile,temp_dir:temp,downloads_dir:downloads,logs_dir:logs,ownership_manifest:path.join(root,'ownership.json')};
+ const maintenance=path.join(root,'MaintenanceTemp');fs.mkdirSync(maintenance);
+ assert.equal(kit.load({argv:[],executable:exe,packaged:true}),null,'absent optional bootstrap preserves legacy');
+ assert.throws(()=>kit.load({argv:[],executable:exe,packaged:true,requireConfiguration:true}),/Required installation settings are missing/,'new packaged contract refuses missing bootstrap even without shortcut arguments');
+ assert.throws(()=>kit.load({argv:['--installation-config='+file],executable:exe,packaged:true}),/Required installation settings are missing/,'explicit unavailable config never falls back');
+ fs.writeFileSync(file,JSON.stringify(input));
+ const config=kit.load({argv:[],executable:exe,packaged:true});
+ assert.equal(config.profile_dir,profile);assert.equal(config.data_dir,data);
+ assert.equal(config.maintenance_temp_dir,undefined,'older bootstrap normal startup remains compatible');
+ const maintenanceFields={maintenance_temp_dir:maintenance,maintenance_temp_identity:[1,2,3]};
+ fs.writeFileSync(file,JSON.stringify({...input,...maintenanceFields}));
+ assert.equal(kit.load({executable:exe}).maintenance_temp_dir,maintenance);
+ fs.writeFileSync(file,JSON.stringify({...input,maintenance_temp_dir:maintenance}));
+ assert.throws(()=>kit.load({executable:exe}),/maintenance settings are incomplete/);
+ fs.writeFileSync(file,JSON.stringify({...input,...maintenanceFields,maintenance_temp_identity:[1,2]}));
+ assert.throws(()=>kit.load({executable:exe}),/maintenance identity is invalid/);
+ fs.writeFileSync(file,JSON.stringify({...input,...maintenanceFields,maintenance_temp_dir:temp}));
+ assert.throws(()=>kit.load({executable:exe}),/Maintenance and retained storage folders overlap/);
+ const packageReceipt=path.join(root,'package-owned.json');fs.writeFileSync(packageReceipt,'{"kind":"private package receipt"}');
+ const packagePin={manifest:packageReceipt,sha256:require('node:crypto').createHash('sha256').update(fs.readFileSync(packageReceipt)).digest('hex')};
+ fs.writeFileSync(file,JSON.stringify({...input,package_ownership:packagePin}));
+ assert.deepEqual(kit.load({executable:exe}).package_ownership,packagePin);
+ fs.writeFileSync(packageReceipt,'changed');assert.throws(()=>kit.load({executable:exe}),/ownership receipt changed/);
+ fs.writeFileSync(file,JSON.stringify(input));
+ const writes=[],environment={TEMP:'old',TMP:'old'};
+ kit.apply({setPath:(k,v)=>writes.push([k,v]),setAppLogsPath:v=>writes.push(['logs',v])},config,environment);
+ assert.equal(environment.TEMP,temp);assert.equal(environment.TMP,temp);
+ assert.deepEqual(writes.filter(([k])=>['userData','sessionData'].includes(k)),[['userData',profile],['sessionData',profile]]);
+ assert.ok(writes.every(([,v])=>v.startsWith(root+path.sep)),'every application path remains inside the selected owned root');
+ const adapter={get baseCachePath(){return 'old-cache';},get version(){return '1.2.3';}};
+ kit.configureUpdater({app:adapter},config);assert.equal(adapter.baseCachePath,downloads);assert.equal(adapter.version,'1.2.3');
+ assert.throws(()=>kit.configureUpdater({app:adapter,downloadedUpdateHelper:{}},config),/before downloading/);
+ const inherited={KEEP:'yes',BOOKS_STORAGE_RELOCATION_MANIFEST:'untrusted',BOOKS_STORAGE_RELOCATION_SHA256:'untrusted'};
+ assert.deepEqual(kit.childEnvironment(inherited,null),{KEEP:'yes'});
+ assert.equal(inherited.BOOKS_STORAGE_RELOCATION_MANIFEST,'untrusted','parent input is not mutated');
+ const selection={manifest:'explicit-descriptor',sha256:'a'.repeat(64)};
+ assert.deepEqual(kit.childEnvironment(inherited,selection),{KEEP:'yes',BOOKS_STORAGE_RELOCATION_MANIFEST:selection.manifest,BOOKS_STORAGE_RELOCATION_SHA256:selection.sha256});
+ fs.writeFileSync(file,JSON.stringify({...input,profile_dir:path.join(root,'missing')}));
+ assert.throws(()=>kit.load({executable:exe}),/No alternate storage/);
+ fs.writeFileSync(file,JSON.stringify({...input,temp_dir:profile}));assert.throws(()=>kit.load({executable:exe}),/overlap/);
+ fs.writeFileSync(file,JSON.stringify({...input,application_dir:root}));assert.throws(()=>kit.load({executable:exe}),/different application/);
+ fs.writeFileSync(file,JSON.stringify({...input,storage_relocation:{manifest:path.join(root,'missing.json'),sha256:'a'.repeat(64)}}));
+ assert.throws(()=>kit.load({executable:exe}));
+ fs.writeFileSync(file,'malformed');assert.throws(()=>kit.load({executable:exe}),/installation settings.*invalid/);
+ console.log('installation paths: legacy, early configured storage, updater cache, trusted child selection and failure controls passed');
+}finally{
+ // The one freshly created fixture is wholly owned and contains no links/user inputs.
+ assert.ok(root.startsWith(scratch+path.sep));fs.rmSync(root,{recursive:true});
+}

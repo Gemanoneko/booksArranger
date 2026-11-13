@@ -17,6 +17,7 @@ from pathlib import Path
 from scanner import connect
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, VerifiedDirectory, DirectoryNotEmptyError, DirectoryDispositionUnsupported, ordinary
 from source_cleanup import packed, stamp, single_stream
+from storage_relocation_native import facts_match
 # The MP3 trailing-tag repair's private copy and proof (audio_pipeline._mp3_tag_copy); exact producer receipts decide their bytes.
 TAG_REPAIR=re.compile(r'tag-repair-[0-9a-f]{32}\.(?:mp3|json)')
 
@@ -296,7 +297,7 @@ class StorageCleanup:
         if expected and len(expected)>2 and str(facts['modified'])!=str(expected[2]):
             raise BoundaryError('Recovery-copy timestamp changed')
         if old:
-            if old['job_id'] != job_id or old['kind'] != kind or (old['sha256'], old['size']) != (sha, facts['size']) or json.loads(old['facts']) != facts:
+            if old['job_id'] != job_id or old['kind'] != kind or (old['sha256'], old['size']) != (sha, facts['size']) or not facts_match(path,facts,json.loads(old['facts']),receipt_class='cleanup-file'):
                 raise BoundaryError('Copy identity changed after cleanup intent; preserved')
         else:
             target={'path':str(path),'job_id':job_id,'kind':kind,'sha256':sha,'size':facts['size'],'facts':packed(facts),'state':'verified','updated':stamp()}
@@ -467,7 +468,7 @@ class StorageCleanup:
                 if receipt and receipt['state'] in TERMINAL | {'removal_intended','disposition_set'}:
                     raise BoundaryError('Recovery disposal has not reached a terminal outcome')
                 handle=stack.enter_context(VerifiedFile(backup))
-                if handle.facts()!=facts or facts['links']!=1 or facts['size']!=source['size'] or str(facts['modified'])!=str(source['modified']) or sha(handle)!=source['sha256']:
+                if not facts_match(backup,handle.facts(),facts,receipt_class='recovery-copy') or facts['links']!=1 or facts['size']!=source['size'] or str(facts['modified'])!=str(source['modified']) or sha(handle)!=source['sha256']:
                     raise BoundaryError('Registered recovery source changed')
         def revalidate():
             guard()
@@ -639,7 +640,7 @@ class StorageCleanup:
                         facts=handle.facts();single_stream(path)
                         if facts['links']!=1 or (handle.sha256(),facts['size'])!=expected:
                             raise BoundaryError('Working file differs from its producer receipt')
-                        if old and (old['job_id']!=job_id or old['kind']!='staging' or old['state'] in TERMINAL or json.loads(old['facts'])!=facts):
+                        if old and (old['job_id']!=job_id or old['kind']!='staging' or old['state'] in TERMINAL or not facts_match(path,facts,json.loads(old['facts']),receipt_class='cleanup-file')):
                             raise BoundaryError('Working file cleanup identity changed')
                     else:
                         item=self._prepare(stack,job_id,'staging',path,self.stage_root,expected)

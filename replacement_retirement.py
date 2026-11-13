@@ -15,7 +15,7 @@ import ctypes
 from ctypes import wintypes
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
-from native_io import DirectoryBoundary,VerifiedFile,ordinary,BoundaryError,kernel,FileInfo
+from native_io import DirectoryBoundary,VerifiedFile,ordinary,BoundaryError,FileRemovalRetained,kernel,FileInfo
 from source_cleanup import single_stream
 from replacement_jobs import digest,now
 
@@ -79,7 +79,8 @@ class ReplacementRetirement:
                 path!=expected_path or recovery.get('sha256')!=proof['sha256'] or recovery.get('size')!=proof['size'] or
                 recovery.get('copy_pending') is True or recovery.get('facts',{}).get('size')!=proof['size']):raise BoundaryError('Former-output recovery correspondence changed')
         with DirectoryBoundary(self.root,expected) as boundary,VerifiedFile(path,writable=not historical) as file:
-            if boundary.identities!=[tuple(v) for v in recovery['ancestry']] or file.facts()!=recovery['facts'] or file.facts()['links']!=1 or self._hash(file,stop if historical else self.stop)!=recovery['sha256']:
+            from storage_relocation_native import ancestry_match,facts_match
+            if not ancestry_match(boundary,recovery['ancestry'],operation_path=path) or not facts_match(path,file.facts(),recovery['facts'],receipt_class='recovery-copy') or file.facts()['links']!=1 or self._hash(file,stop if historical else self.stop)!=recovery['sha256']:
                 raise BoundaryError('Former-output recovery changed; no old output disposition allowed')
             if not historical:file.flush()
             single_stream(path)
@@ -203,7 +204,10 @@ class ReplacementRetirement:
                                 phase='recording native disposition';row=self.store.file_transition(row,'removed',recovery,db=db)
                     return self.store.transition(relation,'completed')
             except BaseException as error:
+                if isinstance(error,FileRemovalRetained) and phase=='native former-output disposition':
+                    error.args=('Safe replacement of the existing audiobook at “'+error.path+'” could not be verified. The existing audiobook was kept.',)
                 diagnostic={'type':type(error).__name__,'message':str(error),'phase':phase,'secondary':[],'at':now()}
+                if getattr(error,'native_reason',None):diagnostic['native_reason']=error.native_reason
                 self.last_errors[relation['id']]=diagnostic
                 try:self.store.failure(relation,error,phase)
                 except Exception as secondary:diagnostic['secondary'].append({'type':type(secondary).__name__,'message':str(secondary)})
@@ -226,7 +230,8 @@ class ReplacementRetirement:
                 except FileNotFoundError:present=False
                 if present:
                     with DirectoryBoundary(self.root,expected),VerifiedFile(path,delete=True) as file:
-                        if file.facts()!=recovery['facts'] or file.facts()['links']!=1 or self._hash(file,self.stop)!=recovery['sha256']:
+                        from storage_relocation_native import facts_match
+                        if not facts_match(path,file.facts(),recovery['facts'],receipt_class='recovery-copy') or file.facts()['links']!=1 or self._hash(file,self.stop)!=recovery['sha256']:
                             raise BoundaryError('Former-output recovery changed; preserved')
                         with self._publication_transaction(relation,successor,historical=True) as db:
                             file.dispose();file.__exit__(None,None,None)

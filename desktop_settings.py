@@ -22,7 +22,11 @@ def _create(path,value,name):
    if not kernel.WriteFile(held.handle,buffer,len(raw),ctypes.byref(count),None) or count.value!=len(raw):raise RuntimeError('Settings write failed')
    held.flush();complete=True
   finally:
-   if not complete:held.dispose()
+   if not complete:
+    from runtime_disposition_owners import support_dispositions
+    import os
+    parent=Path(os.environ['BOOKS_WORK_TEMP']) if os.environ.get('BOOKS_WORK_TEMP') else path.parent
+    with support_dispositions(parent,[path]):held.dispose();held.__exit__(None,None,None)
    held.__exit__(None,None,None)
  return {'ok':True}
 def save(path,folder):
@@ -34,6 +38,8 @@ def configure_sources(path,roots,sources,output_root=None):
  return _create(path,config.to_fields(),'audiobook-sources.json')
 
 def main():
+ from storage_relocation_native import configure_work_temp
+ configure_work_temp()
  try:
   if sys.argv[1:2]==['--configure-sources']:
    if len(sys.argv)!=4:raise ValueError('Expected new source settings path and bounded plan JSON path')

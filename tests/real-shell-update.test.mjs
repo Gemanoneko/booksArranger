@@ -93,9 +93,15 @@ test(PA1_TITLE,{timeout:300000},async()=>{
  assert.deepEqual(await treeFiles(app),manifest.payload.files,'Actual built candidate payload');
  const {monitor}=nativeAdapters(plan,authority);monitor.checkWindows();progress('explicit-membership-witness-ready');let intrusion=null;
  const timer=setInterval(()=>{try{monitor.checkWindows();}catch(e){intrusion=e;}},100);
- const dirs=Object.fromEntries(['profile','data','local','roaming','temp','Audiobooks','Podcasts','Books'].map(name=>[name,path.join(home,name)]));
+ const dirs=Object.fromEntries(['profile','data','local','roaming','temp','downloads','logs','Audiobooks','Podcasts','Books'].map(name=>[name,path.join(home,name)]));
  for(const dir of Object.values(dirs))fs.mkdirSync(dir,{recursive:true});const roots=path.join(home,'roots.json'),rootsBytes=JSON.stringify({Audiobooks:dirs.Audiobooks,Podcasts:dirs.Podcasts,Ebooks:dirs.Books});
  if(plan.recovery)assert.equal(fs.readFileSync(roots,'utf8'),rootsBytes,'Same private recovery roots');else fs.writeFileSync(roots,rootsBytes,{flag:'wx'});
+ const installationConfig=path.join(home,'books-arranger-installation.json');
+ if(!plan.recovery)fs.writeFileSync(installationConfig,JSON.stringify({schema:'books-arranger-installation-v1',
+  installation_id:crypto.randomUUID(),application_dir:app,data_dir:dirs.data,catalog_mode:'new',
+  profile_dir:dirs.profile,temp_dir:dirs.temp,downloads_dir:dirs.downloads,logs_dir:dirs.logs,
+  ownership_manifest:path.join(home,'ownership.json')}),{flag:'wx'});
+ else assert.equal(JSON.parse(fs.readFileSync(installationConfig,'utf8')).application_dir,app,'Same private installation selection');
  let shell=null,cdp=null,github=null,output='',originalError=null,quitRequested=false,privateQuitOnFailure=null,privateStillRunning=()=>false;const requests=[];
  try{
   // The fake GitHub: a release one patch above this version whose "installer" Windows will not start.
@@ -119,7 +125,7 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   const env = { ...process.env, LOCALAPPDATA: dirs.local, APPDATA: dirs.roaming, TEMP: dirs.temp, TMP: dirs.temp, USERPROFILE: home };
   for (const name of Object.keys(env)) if (/^(ELECTRON_|NODE_OPTIONS$)/i.test(name)) delete env[name];  // ELECTRON_RUN_AS_NODE, even empty, turns the shell into Node
   const exe = path.join(app, 'Books Arranger.exe');
-  const args = ['--start-hidden', '--quiet-errors', '--data-dir=' + dirs.data, '--catalog-mode='+(plan.recovery?'existing':'new'), '--port=' + enginePort, '--roots-json=' + roots, '--shell-profile=' + dirs.profile,
+  const args = ['--start-hidden', '--quiet-errors', '--installation-config='+installationConfig, '--port=' + enginePort, '--roots-json=' + roots,
    '--remote-debugging-port=' + debugPort, '--ignore-certificate-errors',
    '--host-resolver-rules=MAP github.com 127.0.0.1:' + githubPort + ',MAP api.github.com 127.0.0.1:' + githubPort + ',MAP objects.githubusercontent.com 127.0.0.1:' + githubPort+',MAP * ~NOTFOUND,EXCLUDE 127.0.0.1,EXCLUDE localhost'];
   progress('app-starting');
@@ -128,7 +134,7 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   shell.stdout.on('data', (chunk) => { output += chunk; }); shell.stderr.on('data', (chunk) => { output += chunk; });
   let exitedAt = null; shell.on('exit', () => { exitedAt = Date.now(); });
   privateStillRunning=()=>exitedAt===null&&shell.exitCode===null;
-  privateQuitOnFailure=()=>createPrivateShellCommands({spawn,exe,profile:dirs.profile,env,timeoutMs:10000}).quit();
+  privateQuitOnFailure=()=>createPrivateShellCommands({spawn,exe,profile:dirs.profile,installationConfig,env,timeoutMs:10000}).quit();
   cdp = await devtools(debugPort,monitor,shell.pid);
   const status = () => cdp.evaluate('window.booksDesktop.status()');
   const until = async (check, ms, what) => { const end = Date.now() + ms; while (Date.now() < end) { monitor.checkWindows();if(intrusion)throw intrusion; if (exitedAt) throw new Error('the shell exited while waiting for ' + what + '\n' + output.slice(-3000)); try { const value = await check(); if (value) return value; } catch { /* the page is changing */ } await sleep(500); } throw new Error('timed out waiting for ' + what + '\n' + output.slice(-3000)); };
@@ -155,7 +161,7 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   assert.equal(health.version, pkg.version, 'the old engine answers again');
   // The documented command reaches the same close callback as the window button.
   // The primary stays hidden; this does not claim a physical click or visible-to-hidden transition.
-  const fixture=createPrivateShellCommands({spawn,exe,profile:dirs.profile,env});
+  const fixture=createPrivateShellCommands({spawn,exe,profile:dirs.profile,installationConfig,env});
   monitor.endpoint(debugPort,shell.pid);assert.equal(exitedAt,null);assert.equal(shell.exitCode,null);
   progress('closing-window');await fixture.closeWindow();progress('window-close-command-finished');
   const closeStatus=await status();

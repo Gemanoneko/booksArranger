@@ -28,6 +28,16 @@ The intended ACL is computed from captured original security before intent publi
 
 ## Core integration and acceptance
 
+### Implementation addendum after prerequisite commit 036773a
+
+Every writer checks the same 256 KiB limit as recovery BEFORE publishing a context, intent or phase; oversized intent refuses before ACL mutation. Actual native tests preserve the original ACL and bytes on this refusal.
+
+Closed records certify only the original exact native identity, content and successful native close. Recovery validates their immutable chain without reopening an old pathname or retired staging ancestor; it never grants authority over a reused name. Historical generation records stay byte-identical, with an explicit descriptor/active-owner marker bridge. Unresolved records never receive this treatment.
+
+A distinct `retained` terminal phase can be published only by SOURCE-side recovery of a remaining exact native ID/full hash with independently verified original ACL. It is forbidden if a pending/native-success or `restore_forbidden` record exists. It grants no deletion, producer closure or boot authority. Migration retains that proof unchanged and still requires the existing artifact's independent catalog ownership; the ledger cannot declare arbitrary referenced files application-owned. Missing-name/unknown outcomes remain held.
+
+The current NAS provider/session cannot enforce the tested Windows write/ADS fence. Sergei explicitly selected conversion/new no-replace publication with NAS originals retained and unsafe cleanup/replacement held. A private owned NAS assessment proved original/default/named-stream bytes and native facts unchanged after refusal, successful new no-replace publication, and existing-destination collision preservation. No SQLite runtime or live library is moved to NAS.
+
 Actual catalog ownership is process-visible across worker threads, using retained `.lock` and catalog native identity leases rather than inherited ContextVar/PID alone. Verification-only relocation admission does not initialize journals or run recovery. Configured/offline roots fail closed. Runtime root/control records become a finite typed app-state class for migration and uninstall; outstanding intents are held until verified recovery, never silently copied into new authority.
 
 Core audits post-dispose callers (`book_move`, working/storage/source/recovery cleanup, replacement/producer retirement, output migration/rename, series operations) to preserve native handle lifetime and CAS. Explicit settings/new-file cleanup, build and canonical QA workers receive their own proven bounded journal contexts. No hidden fixture bypass disables actual fence/stream checks.

@@ -46,6 +46,9 @@ def inspect_folder(folder,mode,roots,install_roots=(),allow_lock=False):
         return {'mode':'existing','folder':str(folder)}
 
 def main(argv=None):
+    from storage_relocation_native import configure_from_environment,configure_work_temp
+    configure_work_temp()
+    configure_from_environment()
     parser=argparse.ArgumentParser();parser.add_argument('--folder',required=True);parser.add_argument('--mode',choices=['existing','new'],required=True)
     parser.add_argument('--roots-json');parser.add_argument('--install-root',action='append',default=[])
     args=parser.parse_args(argv)
