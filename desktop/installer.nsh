@@ -73,6 +73,7 @@ Var BooksControlNamespaceSha
 Var BooksReviewedCommand
 Var BooksReviewedOldVersion
 Var BooksReviewedOldApplication
+Var BooksReviewedPerUser
 !endif
 
 !macro BooksTip CONTROL TEXT
@@ -197,6 +198,11 @@ FunctionEnd
 
 !ifndef BUILD_UNINSTALLER
 !macro customInit
+  StrCpy $BooksReviewedPerUser "0"
+  ${If} $installMode == "CurrentUser"
+  ${AndIf} $hasPerMachineInstallation != "1"
+    StrCpy $BooksReviewedPerUser "1"
+  ${EndIf}
   Call BooksApplyReviewedSelection
 !macroend
 !endif
@@ -266,8 +272,7 @@ Function BooksApplyReviewedSelection
   ${EndIf}
   ${IfNot} ${Silent}
   ${OrIf} ${isUpdated}
-  ${OrIf} $installMode != "CurrentUser"
-  ${OrIf} $hasPerMachineInstallation == "1"
+  ${OrIf} $BooksReviewedPerUser != "1"
     Call BooksRefuse
   ${EndIf}
   System::Call 'kernel32::GetCommandLineW() p .r0'
