@@ -84,7 +84,10 @@ export function createChildPolicy(context,{now=()=>Date.now(),inspectFile=fileFa
       const defines=new Set(['APP_ID','APP_GUID','UNINSTALL_APP_KEY','PRODUCT_NAME','PRODUCT_FILENAME','APP_FILENAME','APP_DESCRIPTION','VERSION','PROJECT_DIR','BUILD_RESOURCES_DIR','APP_PACKAGE_NAME','COMPANY_NAME','APP_PRODUCT_FILENAME','APP_INSTALLER_STORE_FILE','MUI_ICON','MUI_UNICON','APP_64','APP_64_NAME','APP_64_HASH','APP_64_UNPACKED_SIZE','HIDE_RUN_AFTER_FINISH','MUI_WELCOMEFINISHPAGE_BITMAP','MUI_UNWELCOMEFINISHPAGE_BITMAP','INSTALL_MODE_PER_ALL_USERS_REQUIRED','SHORTCUT_NAME','UNINSTALLER_ICON','UNINSTALL_DISPLAY_NAME','DO_NOT_CREATE_DESKTOP_SHORTCUT','ESTIMATED_SIZE','COMPRESS','COMPRESSION_METHOD','BUILD_UNINSTALLER','UNINSTALLER_OUT_FILE']);
       for(const arg of args.slice(3,-1)) {
         if(arg.startsWith('-D')) {
-          check(/^-D[A-Z_0-9]+(?:=[^\r\n\0]*)?$/.test(arg)&&defines.has(arg.slice(2).split('=')[0]),'unsafe/unlisted NSIS define');
+          // Pinned electron-builder emits this exact valueless mixed-case flag
+          // for the reviewed directory chooser. No other mixed-case form wins.
+          check(arg==='-DallowToChangeInstallationDirectory'||
+            /^-D[A-Z_0-9]+(?:=[^\r\n\0]*)?$/.test(arg)&&defines.has(arg.slice(2).split('=')[0]),'unsafe/unlisted NSIS define');
         } else if(arg.startsWith('-XOutFile ')) {
           check(samePath(arg.slice(10).replace(/^"|"$/g,''),context.generator.image),'NSIS output escape');
           outFile=true;

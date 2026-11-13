@@ -113,6 +113,21 @@ test('makensis binds stdin compiler shape, templates cwd and generator output',(
   assert.equal(result.options.windowsHide,true);assert.equal(f.policy.launches[0].kind,'makensis');
 });
 
+test('makensis permits only the pinned valueless installation-directory chooser flag',()=>{
+  const f=fixture(),args=['-WX','-INPUTCHARSET','UTF8','-DallowToChangeInstallationDirectory',
+    '-XOutFile "'+f.context.generator.image+'"','-'];
+  assert.deepEqual(f.policy.prepare(f.context.nsis,args,{cwd:f.context.nsisTemplates}).args,args);
+  assert.equal(f.policy.launches[0].kind,'makensis');
+  for(const flag of ['-DallowToChangeInstallationDirectory=1','-DallowToChangeInstallationDirectory=',
+    '-DallowToChangeInstallationDirectory=C:/outside','-DallowToChangeInstallationDirectoryExtra',
+    '-DAllowToChangeInstallationDirectory','-DunknownMixedCase','-DUNKNOWN_DEFINE=1']){
+    const bad=fixture();denied(bad,()=>bad.policy.prepare(bad.context.nsis,
+      ['-WX','-INPUTCHARSET','UTF8',flag,'-XOutFile "'+bad.context.generator.image+'"','-'],
+      {cwd:bad.context.nsisTemplates}));
+    assert.equal(bad.policy.launches.length,0);
+  }
+});
+
 test('generated helper maps to fixed bootstrap bridge and exact retained request hash',()=>{
   const f=fixture(),result=f.policy.prepare(f.context.generator.image,[],{env:{__COMPAT_LAYER:'RunAsInvoker'}},'execFile');
   assert.equal(result.file,f.context.bootstrap);
