@@ -44,16 +44,47 @@ export function createBuildTrace(file) {
   };
 }
 
-export function watchBuildCompletion(work,{isVerified,subscribeBeforeExit,fail,enqueue=queueMicrotask}) {
-  let settled=false;
-  const result=Promise.resolve(work).then(()=>{settled=true;},error=>{settled=true;fail(error);});
+export function watchBuildCompletion(work,{isVerified,subscribeBeforeExit,subscribeExit=()=>{},fail,enqueue=queueMicrotask}) {
+  let settled=false,failed=false;
+  const result=Promise.resolve(work).then(()=>{settled=true;},error=>{settled=true;failed=true;fail(error);});
   // Icon proof runs synchronously in the same beforeExit emission. No timer
   // keeps an unfinished await alive or extends the native build deadline.
-  subscribeBeforeExit(()=>enqueue(()=>{if(!settled||!isVerified())fail(Error('Build exited before verified async completion'));}));
+  const check=()=>{if(failed||!settled||!isVerified())fail(Error('Build exited before verified async completion'));};
+  subscribeBeforeExit(()=>enqueue(check));
+  // Explicit process.exit skips beforeExit. This check must be synchronous.
+  subscribeExit(check);
   return result;
 }
 
-export function observeNsisAwait({fsApi,windows,util,output,nsis,onPhase}) {
+export function compilerErrorRecord(error,environment={}) {
+  const secrets=Object.entries(environment).filter(([key,value])=>/TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|PRIVATE_KEY|AUTHORIZATION|COOKIE/i.test(key)&&typeof value==='string'&&value.length>=4).map(([,value])=>value);
+  function text(value,limit){
+    let s=Buffer.isBuffer(value)?value.toString('utf8'):typeof value==='string'?value:'';
+    for(const secret of secrets)s=s.split(secret).join('[redacted]');
+    s=s.replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi,'$1[redacted]@')
+      .replace(/((?:password|token|secret|authorization|api_key)\s*[:=]\s*)[^\s;]+/gi,'$1[redacted]')
+      .replace(/\bBearer\s+[^\s;]+/gi,'Bearer [redacted]');
+    const b=Buffer.from(s);return b.length<=limit?s:b.subarray(0,limit/2).toString('utf8')+'\n[bounded middle omitted]\n'+b.subarray(-limit/2).toString('utf8');
+  }
+  return {schema:'books-compiler-error-v1',diagnostic_only:true,compiler:'makensis',
+    exit_code:Number.isInteger(error?.exitCode)?error.exitCode:null,
+    message:text(error?.message,24000),stdout:text(error?.stdout,12000),stderr:text(error?.stderr,12000)};
+}
+
+export function orderPrivateCompilerInput(script,{privateInclude,pluginDirectory}) {
+  if(typeof script!=='string'||Buffer.byteLength(script)>4*1024*1024)throw Error('Bounded compiler input required');
+  const newline=script.includes('\r\n')?'\r\n':'\n',lines=script.split(newline);
+  const include='!include "'+privateInclude+'"',plugin='!addplugindir /x86-unicode "'+pluginDirectory+'"';
+  const includes=lines.map((line,index)=>line===include?index:-1).filter(index=>index>=0);
+  const plugins=lines.map((line,index)=>/^\s*!addplugindir\b/i.test(line)?index:-1).filter(index=>index>=0);
+  if(includes.length!==1||plugins.length!==1||lines[plugins[0]]!==plugin)throw Error('Expected single exact private include and pinned plugin directive');
+  const ordered=[...lines];if(plugins[0]>includes[0]){ordered.splice(plugins[0],1);ordered.splice(includes[0],0,plugin);}
+  const result=ordered.join(newline);
+  return {script:result,original_sha256:digest(Buffer.from(script)),final_sha256:digest(Buffer.from(result)),
+    private_include:privateInclude,pinned_plugin_directory:pluginDirectory,method:'Only the single expected plugin directive is moved before the exact private include'};
+}
+
+export function observeNsisAwait({fsApi,windows,util,output,nsis,onPhase,onCompilerFailure=()=>{},onCompilerInput=null}) {
   const original={open:fsApi.open,close:fsApi.close,path:windows.getMakeNsisPath,compiler:util.spawnAndWriteWithOutput};
   const fds=new Set(),same=(a,b)=>typeof a==='string'&&path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
   fsApi.open=function(...args){
@@ -69,7 +100,7 @@ export function observeNsisAwait({fsApi,windows,util,output,nsis,onPhase}) {
   windows.getMakeNsisPath=async function(...args){onPhase('nsis-path-enter');try{const value=await original.path.apply(this,args);onPhase('nsis-path-returned');return value;}catch(error){onPhase('nsis-path-rejected');throw error;}};
   util.spawnAndWriteWithOutput=async function(...args){
     if(!same(args[0],nsis))return original.compiler.apply(this,args);
-    onPhase('compiler-util-enter');try{const value=await original.compiler.apply(this,args);onPhase('compiler-util-returned');return value;}catch(error){onPhase('compiler-util-rejected');throw error;}
+    onPhase('compiler-util-enter');try{if(onCompilerInput)args[2]=onCompilerInput(args[2]);const value=await original.compiler.apply(this,args);onPhase('compiler-util-returned');return value;}catch(error){onPhase('compiler-util-rejected');onCompilerFailure(error);throw error;}
   };
   return ()=>{fsApi.open=original.open;fsApi.close=original.close;windows.getMakeNsisPath=original.path;util.spawnAndWriteWithOutput=original.compiler;};
 }
@@ -161,8 +192,17 @@ async function main(verified=()=>{}) {
     const util=require('builder-util'); // imports capture the already-installed child boundary
     policy.wrapBuilderUtilities(util); // before cross-spawn resolves bare npm
     const builder=require('electron-builder');
+    let compilerInputCount=0;
     observeNsisAwait({fsApi:require('node:fs'),windows:require('app-builder-lib/out/toolsets/windows'),util,
-      output:request.generator.image,nsis:tools.nsis,onPhase:name=>trace.phase(name)});
+      output:request.generator.image,nsis:tools.nsis,onPhase:name=>trace.phase(name),
+      onCompilerInput:script=>{if(compilerInputCount>=2)throw Error('Expected at most two compiler inputs');
+        const ordered=orderPrivateCompilerInput(script,{privateInclude:path.join(owned,'nsis-private.nsh'),pluginDirectory:path.join(tools.nsisResources,'plugins','x86-unicode')});
+        const prefix=path.join(owned,'compiler-input-'+compilerInputCount++);
+        for(const [suffix,bytes] of [['.nsi',ordered.script],['.json',JSON.stringify({...ordered,script:undefined})]]){
+          const fd=fs.openSync(prefix+suffix,'wx');try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}
+        return ordered.script;},
+      onCompilerFailure:error=>{const bytes=Buffer.from(JSON.stringify(compilerErrorRecord(error,context.baseEnv)));if(bytes.length>65536)throw Error('Compiler diagnostic byte bound');
+        const fd=fs.openSync(path.join(owned,'compiler-error.json'),'wx');try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}});
     trace.phase('dependencies-loaded');
     let hookCount=0;
     config.beforeBuild=async context=>{
@@ -187,5 +227,6 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   let verified=false;
   watchBuildCompletion(main(()=>{verified=true;}),{isVerified:()=>verified,
     subscribeBeforeExit:listener=>process.once('beforeExit',listener),
-    fail:error=>{console.error('Guarded builder: '+error.message);process.exitCode=1;}});
+    subscribeExit:listener=>process.once('exit',listener),
+    fail:error=>{process.exitCode=1;console.error('Guarded builder: '+compilerErrorRecord(error,process.env).message);}});
 }

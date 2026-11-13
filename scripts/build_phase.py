@@ -136,6 +136,15 @@ def private_nsis_include(folder,payload=None,files=None):
             value=str(value)
             if any(c in value for c in '\0\r\n'):raise RuntimeError('Unsafe NSIS payload path')
             return value.replace('$','$$').replace('"','$\\"')
+        # The builder adapter orders the single pinned plugin registration
+        # before this include. Registering it twice conflicts after first use.
+        # Stock common.nsh defines APP_EXECUTABLE_FILENAME after this include.
+        # PRODUCT_FILENAME is already supplied by the pinned builder's CLI.
+        header+='!define BOOKS_LIFECYCLE_PROCESS_NAME "${PRODUCT_FILENAME}.exe"\n'
+        # The custom include also precedes MUI2 and multiUser. MUI2 has its
+        # own include guard; this registry constant matches multiUser exactly.
+        header+='!include MUI2.nsh\n'
+        header+=r'!define /ifndef UNINSTALL_REGISTRY_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}"'+'\n'
         header+='!define BOOKS_LIFECYCLE_PAYLOAD "'+nsis(payload)+'"\n'
         header+='!define BOOKS_CURRENT_PACKAGE_INCLUDE "'+nsis(folder.parent/'lifecycle-main-provenance'/'current-package.nsh')+'"\n'
         header+='!macro BooksLifecycleVerifyPayload ROOT\n  Push $R8\n'
@@ -186,6 +195,12 @@ def build(tree,proof,runtime,backend,pins,pkg,prior):
     config_path=Path(proof['ownedRoot'])/'builder-config.json'
     tree.write(config_path,[json.dumps(config,indent=2).encode()])
     run([proof['node'],str(ROOT/'scripts/build-builder.mjs')],proof,input=json.dumps(proof).encode())
+    compiler_error=owned/'compiler-error.json'
+    if compiler_error.exists():
+        tree.protect(compiler_error)
+        if compiler_error.stat().st_size>65536:raise RuntimeError('Compiler diagnostic exceeds its byte bound')
+        error=json.loads(compiler_error.read_text('utf8'))
+        raise RuntimeError('NSIS compiler rejected: '+error['message']+'\n'+error.get('stdout','')+'\n'+error.get('stderr',''))
     policy_result=json.loads((owned/'builder-policy-result.json').read_text('utf8'))
     generator_result=json.loads((owned/'nsis-generator-result.json').read_text('utf8'))
     tree.protect(owned/'builder-policy-result.json');tree.protect(owned/'nsis-generator-result.json')

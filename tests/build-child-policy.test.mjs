@@ -31,7 +31,7 @@ guard(dgram,'createSocket');guard(globalThis,'fetch');guard(process,'dlopen');
 syncBuiltinESMExports();
 after(()=>{for(const restore of restores.reverse())restore();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No real process/network/native call was attempted');});
 const {createChildPolicy,fileFacts}=await import('../scripts/build-child-policy.mjs');
-const {verifyAppStage,packageArchivePath,createBuildTrace,watchBuildCompletion,observeNsisAwait}=await import('../scripts/build-builder.mjs');
+const {verifyAppStage,packageArchivePath,createBuildTrace,watchBuildCompletion,observeNsisAwait,compilerErrorRecord,orderPrivateCompilerInput}=await import('../scripts/build-builder.mjs');
 const {readAsarFiles}=await import('../scripts/build-manifest.mjs');
 const asar=await import('@electron/asar');
 const require=createRequire(import.meta.url);
@@ -99,6 +99,24 @@ test('build diagnostic persists bounded phases and child states without environm
     assert.ok(fs.statSync(file).size<=65536);
   }finally{trace.close();}
   assert.throws(()=>createBuildTrace(file),/EEXIST/);
+});
+
+test('compiler error keeps bounded fatal context and redacts credentials',()=>{
+  const record=compilerErrorRecord({exitCode:1,message:'token=private-value https://user:pass@host/ '+('x'.repeat(30000))+'\nPlugin not found StdUtils::HashFile\ninstaller.nsh line233\nMY_SECRET_VALUE',stdout:Buffer.from('password=example'),stderr:'Bearer hidden-value'}, {API_TOKEN:'MY_SECRET_VALUE'});
+  assert.equal(record.exit_code,1);assert.ok(record.message.includes('installer.nsh line233'));
+  const text=JSON.stringify(record);for(const secret of ['private-value','user:pass','MY_SECRET_VALUE','example','hidden-value'])assert.equal(text.includes(secret),false);
+  assert.ok(Buffer.byteLength(text)<65536);assert.ok(record.message.includes('[bounded middle omitted]'));
+});
+
+test('compiler input orders only one exact pinned plugin directive and refuses mismatches',()=>{
+  const privateInclude=path.resolve('owned/nsis-private.nsh'),pluginDirectory=path.resolve('pinned/plugins/x86-unicode');
+  const include='!include "'+privateInclude+'"',plugin='!addplugindir /x86-unicode "'+pluginDirectory+'"';
+  const source=['; unchanged before',include,plugin,'; unchanged after',''].join('\n');
+  const ordered=orderPrivateCompilerInput(source,{privateInclude,pluginDirectory});
+  assert.equal(ordered.script,['; unchanged before',plugin,include,'; unchanged after',''].join('\n'));
+  assert.equal(orderPrivateCompilerInput(ordered.script,{privateInclude,pluginDirectory}).script,ordered.script);
+  for(const wrong of [source+plugin,source+include,source.replace(plugin,'!addplugindir /x86-unicode "outside"'),source.replace(include,'!include "outside"')])
+    assert.throws(()=>orderPrivateCompilerInput(wrong,{privateInclude,pluginDirectory}),/single exact/);
 });
 
 test('build diagnostic observes prepared spawned and closed fake children without native calls',async()=>{

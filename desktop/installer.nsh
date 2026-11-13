@@ -11,7 +11,9 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include FileFunc.nsh
+!ifndef BUILD_UNINSTALLER
 !include StrContains.nsh
+!endif
 !ifdef DELETE_APP_DATA_ON_UNINSTALL
   !undef DELETE_APP_DATA_ON_UNINSTALL
 !endif
@@ -30,22 +32,13 @@ Var BooksPayloadReady
 Var BooksRequestId
 Var BooksRequest
 Var BooksResponse
-Var BooksMode
-Var BooksDatabase
-Var BooksExistingDatabase
-Var BooksProfile
-Var BooksPlan
-Var BooksPlanSha
-Var BooksDiscoveryResponse
 Var BooksExistingRadio
 Var BooksNewRadio
-Var BooksDatabaseList
-Var BooksNewFolder
-Var BooksNewFolderValue
-Var BooksDetails
-Var BooksBrowse
-Var BooksRefresh
 Var BooksDialog
+Var BooksTipWindow
+Var BooksMaintenanceParent
+
+!ifdef BUILD_UNINSTALLER
 Var BooksCleanupMode
 Var BooksCleanupList
 Var BooksCleanupReview
@@ -53,12 +46,25 @@ Var BooksCleanupPlan
 Var BooksCleanupSha
 Var BooksCleanupBytes
 Var BooksConfirm
-Var BooksTipWindow
 Var BooksCleanupDetails
 Var BooksCleanupWarning
 Var BooksCleanupLocations
 Var BooksCleanupResult
 Var BooksCleanupSelection
+!else
+Var BooksMode
+Var BooksDatabase
+Var BooksExistingDatabase
+Var BooksProfile
+Var BooksPlan
+Var BooksPlanSha
+Var BooksDiscoveryResponse
+Var BooksDatabaseList
+Var BooksNewFolder
+Var BooksNewFolderValue
+Var BooksDetails
+Var BooksBrowse
+Var BooksRefresh
 Var BooksRetainedPackage
 Var BooksRetainedPackageSha
 Var BooksFinalInstallDir
@@ -67,7 +73,7 @@ Var BooksApplicationStagePlan
 Var BooksApplicationStageSha
 Var BooksControlNamespace
 Var BooksControlNamespaceSha
-Var BooksMaintenanceParent
+!endif
 
 !macro BooksTip CONTROL TEXT
   ${If} $BooksTipWindow == ""
