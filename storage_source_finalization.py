@@ -157,6 +157,10 @@ def _active(manifest_path,manifest_sha256):
         plan = stack.enter_context(pinned_receipt(seal['source_plan'],seal['source_plan_sha256']))
         from storage_state_ownership import require_plan_membership
         require_plan_membership(plan)
+        need('preservation_selection' not in plan and not plan['owned_state'].get('copy_only'),
+             'Copy-only files cannot authorize source retirement')
+        need(not any(row['kind']=='historical-staging-retained' for row in plan['owned_state']['files']),
+             'Historical staging evidence is retained for relocation only; old-data retirement requires separate review')
         need(base['source_plan_sha256']==seal['source_plan_sha256'] and
             plan['catalog_id']==manifest.catalog_id and plan['generation']==manifest.generation and
             plan['source_root']==manifest.source_root and plan['target_root']==manifest.target_root,

@@ -284,7 +284,8 @@ class MergeService:
         self.cleanup.on_completed=lambda job_id:self._prune_completed(job_id,source_completed=True)
         # Rulings 69 and 71h: folders Sergei chose hold books directly; they count as Sorted for those books.
         self.publications.chosen_roots=self._chosen_folders;self.cleanup.chosen_folders=self._chosen_folders
-        self._start_move_recovery()
+        from storage_relocation_native import retained_runtime
+        if not retained_runtime(inventory.database):self._start_move_recovery()
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
@@ -1031,6 +1032,8 @@ class MergeService:
 
     def _cleanup_guard(self,db,intent):
         try:
+            from storage_relocation_native import retained_job
+            if retained_job(self.inventory.database,intent['job_id']):return False
             self._no_scan();manifest=intent['manifest']
             if intent.get('blocked_verification'):return False
             from producer_recovery import protected_dependency
@@ -1345,6 +1348,7 @@ class MergeService:
         """Right after a book's source cleanup: its recovery copies go at once (the purge verifies the output in
         full first; anything else keeps them, flagged). Runs on the converter thread between books."""
         from recovery_retention import kept_reason
+        if self._retained_cleanup_job(job_id):return
         try:
             self.recovery.sync()
             if not self.recovery._rows("SELECT 1 FROM recovery_retention WHERE job_id=? AND state IN ('retained','deleting','needs_attention')",(job_id,)):return
@@ -1360,13 +1364,15 @@ class MergeService:
     def _purge_replacement_recoveries(self):
         """Recovery copies of retired former outputs, once the replacement is verified (same rule)."""
         if not hasattr(self,'replacements'):return
-        relations=[relation for relation in self.replacements.rows() if relation['state']=='completed' and self._cleanup_due(relation['id'])]
+        relations=[relation for relation in self.replacements.rows() if relation['state']=='completed' and
+                   not self._retained_relation(relation) and self._cleanup_due(relation['id'])]
         try:kept=self._kept_by_choice([relation['replacement_job_id'] for relation in relations]) if relations else set()
         except (sqlite3.Error,AttributeError):return  # the Keep files record is unreadable: nothing is purged this pass
         for relation in relations:
             if relation['replacement_job_id'] in kept:continue  # Keep files: kept until Sergei acts again
             try:
-                with self.operation_lock:self.retirement.purge_recoveries(relation)
+                with self.operation_lock:
+                    if not self._retained_relation(relation):self.retirement.purge_recoveries(relation)
             except InterruptedError:return
             except Exception as error:self._cleanup_failed(relation['id'],error)  # the durable records retain the reason
 
@@ -1485,6 +1491,7 @@ class MergeService:
         finally:self._post_current=None
 
     def _prune_completed(self,job_id,source_completed=False,stop=None):
+        if self._retained_cleanup_job(job_id):return
         with connect(self.inventory.database) as db:raw=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
         manual=bool(raw and json.loads(raw[0]).get('manual_conversion'))
         if manual and hasattr(self,'manual_conversions'):self.manual_conversions.release_cleaned(job_id)
@@ -1555,12 +1562,27 @@ class MergeService:
         if hasattr(self,'replacements') and self.replacements.get(new_job=job_id):self._finish_replacement(job_id)
 
     def _replacement_guard(self,relation,historical=False):
+        if not historical and self._retained_relation(relation):return False
         return self.replacements.structural_guard(relation,historical=historical,queued=True)
+
+    def _retained_relation(self,relation):
+        from storage_relocation_native import retained_job
+        return any(retained_job(self.inventory.database,relation[field])
+                   for field in ('parent_job_id','replacement_job_id'))
+
+    def _retained_cleanup_job(self,job_id):
+        from storage_relocation_native import retained_job,retained_runtime
+        if not retained_runtime(self.inventory.database):return False
+        if retained_job(self.inventory.database,job_id):return True
+        if not hasattr(self,'replacements'):return False
+        return any(relation and self._retained_relation(relation) for relation in
+                   (self.replacements.get(parent=job_id),self.replacements.get(new_job=job_id)))
 
     def _pending_replacement_postprocessing(self):
         pending=[]
         with connect(self.inventory.database) as db:
             for relation in self.replacements.rows():
+                if self._retained_relation(relation):continue
                 failure=json.loads(relation['failure_json'] or '{}')
                 if failure and failure.get('type')!='InterruptedError':continue
                 row=self.replacements.raw_job(db,relation['replacement_job_id'])
@@ -1569,7 +1591,7 @@ class MergeService:
 
     def _finish_replacement(self,job_id):
         relation=self.replacements.get(new_job=job_id)
-        if not relation or relation['state']=='completed':return
+        if not relation or relation['state']=='completed' or self._retained_relation(relation):return
         try:
             self._post_current=(job_id,'verifying replacement')
             self._prune_completed(job_id)
@@ -4489,6 +4511,9 @@ class MergeService:
 
     def retry_automatic_job(self,job_id,now,resume=True):
         """resume=False: Retry all admits every book first and starts the queue once, after its loop."""
+        from storage_relocation_native import retained_job
+        if retained_job(self.inventory.database,job_id):
+            return {'retryable':False,'requeued':False,'accepted':False}
         self._reacquire_admission(job_id=job_id)
         self._no_scan()
         from failed_m4b_retry import eligible
@@ -4801,6 +4826,7 @@ class MergeService:
     def _admit_new_retry(self,parent,recovery=False):
         """Worker-only normal approval/source checks, then a distinct immutable child."""
         try:
+            self.working._require_unheld_job(parent['job_id'])
             retained=None;dispose=False
             if recovery:
                 capability=self.producer_recovery.status(parent['job_id'])

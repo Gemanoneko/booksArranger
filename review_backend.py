@@ -784,7 +784,14 @@ class CandidateReviewService:
                 if path.is_file():
                     with ProtectedFiles([path]):
                         if path.stat().st_size>MAX_COVER:raise ValueError('Cached cover exceeds bound')
-                        image_kind(path.read_bytes());return path
+                        data=path.read_bytes()
+                        image_kind(data)
+                        from storage_relocation_native import retained_path
+                        if retained_path(path):
+                            from native_io import VerifiedFile
+                            from storage_relocation_native import verify_retained_read
+                            with VerifiedFile(path) as held:verify_retained_read(path,held.facts(),hashlib.sha256(data).hexdigest())
+                        return path
         raise ValueError('Cached cover unavailable')
 
     def cover_bytes(self,id):
@@ -794,6 +801,11 @@ class CandidateReviewService:
             with ProtectedFiles([path]):
                 data=path.read_bytes()
                 if len(data)>MAX_COVER:raise ValueError('Cached cover exceeds bound')
+                from storage_relocation_native import retained_path
+                if retained_path(path):
+                    from native_io import VerifiedFile
+                    from storage_relocation_native import verify_retained_read
+                    with VerifiedFile(path) as held:verify_retained_read(path,held.facts(),hashlib.sha256(data).hexdigest())
                 image_kind(data);return data
 
     def source_cover(self,path,metadata):

@@ -86,6 +86,12 @@ class NativeContext:
         self.pending_verification = None
         self.finalization_record = None
         self.pending_finalization = None
+        self.retention_record = None
+        self.pending_retention = None
+        self.retained = None
+        self.retained_members = {}
+        self.retained_jobs = frozenset()
+        self.retained_items = {}
         self.manifest_path = Path(manifest_path).absolute()
         self._closed = False
         try:
@@ -168,6 +174,9 @@ class NativeContext:
             finalization=db.execute('SELECT catalog_id,generation,base_fence_sha256,verification_sha256,'
                 'receipt_path,receipt_sha256,state,revision FROM storage_relocation_source_finalization').fetchall() \
                 if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_relocation_source_finalization'").fetchone() else []
+            retention=db.execute('SELECT catalog_id,generation,manifest_sha256,verification_sha256,receipt_path,receipt_sha256 '
+                'FROM storage_relocation_retention').fetchall() if db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_relocation_retention'").fetchone() else []
         _need(len(rows) == 1, 'Exactly one active catalog storage generation is required')
         row = rows[0]
         _need(row[:4] == (self.manifest.catalog_id, self.manifest.generation, self.manifest.digest,
@@ -194,6 +203,13 @@ class NativeContext:
                   'Source finalization does not belong to this independently verified catalog')
         if initializing:self.pending_finalization=finalized
         else:_need(self.finalization_record==finalized,'Source finalization changed during catalog ownership')
+        _need(len(retention)<=1, 'Multiple retained runtime generations are unsupported')
+        retained=tuple(retention[0]) if retention else None
+        if retained:
+            _need(row[4]=='active' and finalized is None and retained[:4]==(*verification[0][:3],verification[0][4]),
+                  'Retained runtime registration belongs to a different generation')
+        if initializing:self.pending_retention=retained
+        else:_need(self.retention_record==retained,'Retained runtime registration changed during catalog ownership')
         return row
 
     def require_normal_operation(self):
@@ -247,9 +263,37 @@ class NativeContext:
                           proof.get('source_fence_sha256')==row[6] and
                           proof.get('verified_state_sha256')==registration[5] and
                           proof.get('target_root_identity')==list(self.manifest.directories[''].target) and
-                          proof.get('source_root_identity')==list(self.manifest.directories[''].source) and
-                          proof.get('complete') is True and not proof.get('held_classes'),
+                          proof.get('source_root_identity')==list(self.manifest.directories[''].source),
                           'Independent storage verification does not authorize this catalog generation')
+                    retention=self.pending_retention
+                    if retention:
+                        from storage_retained_runtime import SCHEMA,index_members,retained_target_lease
+                        _need(proof.get('complete') is False and proof.get('preservation_copy_verified') is True
+                              and len(proof.get('held_classes') or ())==1 and
+                              proof['held_classes'][0].get('class')=='preservation-only',
+                              'Retained runtime requires the exact copy verification hold')
+                        record=evidence.enter_context(pinned_receipt(retention[4],retention[5]))
+                        _need(record.get('schema')==SCHEMA and retention[:4]==tuple(
+                            record.get(name) for name in ('catalog_id','generation','manifest_sha256','verification_sha256'))
+                            and record.get('scope') in self.manifest.scopes,
+                            'Retained runtime receipt belongs to a different verification')
+                        members=index_members(record.get('members'),record['scope'])
+                        historical=record.get('historical_members')
+                        _need(isinstance(historical,list) and set(historical)<=set(members) and
+                              len(set(historical))==len(historical) and
+                              set(members)==set(record.get('target_members',{})) and
+                              len(members)-len(historical)==record.get('reviewed_copy_members')==
+                              proof['held_classes'][0].get('entries'),
+                              'Retained runtime member count or namespace differs')
+                        self.retained_items=evidence.enter_context(
+                            retained_target_lease(self.manifest.target_root,record['target_members']))
+                        self.retained=record
+                        self.retained_members=members
+                        self.retained_jobs=frozenset(member['job_id'] for member in members.values() if 'job_id' in member)
+                        self.retention_record=retention
+                    else:
+                        _need(proof.get('complete') is True and not proof.get('held_classes'),
+                              'Independent storage verification has unresolved obligations')
                     self.verification_record=registration
                 self._activation()
                 yield self
@@ -261,6 +305,10 @@ class NativeContext:
             self.owner = self.database = self.owner_file = self.source_fence = self.activation_row = None
             self.verification_record=self.pending_verification=None
             self.finalization_record=self.pending_finalization=None
+            self.retention_record=self.pending_retention=self.retained=None
+            self.retained_members={}
+            self.retained_jobs=frozenset()
+            self.retained_items={}
 
     def facts_match(self, logical_path, actual, expected, receipt_class):
         self.require_normal_operation()
@@ -329,6 +377,44 @@ def configure(manifest_path, expected_sha256):
         result = NativeContext(manifest_path, expected_sha256)
         _context = result
         return result
+
+
+def retained_runtime(database):
+    context = current()
+    if not context or not context.retained:return False
+    try:
+        logical=context.manifest.logical_location(str(Path(database).absolute()))
+    except RelocationRefused:return False
+    return _key(context.database)==_key(logical)
+
+
+def retained_job(database, job_id):
+    return retained_runtime(database) and job_id in current().retained_jobs
+
+
+def retained_path(path, *, parent=False):
+    context=current()
+    if not context or not context.retained:return None
+    try:
+        absolute=str(Path(path).absolute())
+        key=_key(context.manifest.relative(context.manifest.logical_location(absolute)))
+    except RelocationRefused:return None
+    if parent:
+        from storage_relocation import _inside
+        if any(_inside(item,key) for item in context.retained_members):return True
+    return context.retained['target_members'].get(key)
+
+
+def verify_retained_read(path, facts, sha):
+    record=retained_path(path)
+    if record:
+        from storage_relocation_operator import Security
+        context=current()
+        item=context.retained_items[_key(record['native']['relative'])]
+        item.revalidate()
+        if (record['native'].get('facts')!=facts or record['native'].get('sha256')!=sha or
+                Security().capture(item)['sha256']!=record['security_sha256']):
+            raise RelocationRefused('Retained storage read differs from its verified copied bytes, identity or permissions')
 
 
 def configure_from_environment(environment=None):

@@ -32,6 +32,8 @@ class CurrentAudiobooks:
             if facts['links']!=1 or facts['size']>2*1024*1024:raise BoundaryError('Chapter publication receipt is not a bounded ordinary file')
             data=b''.join(file.chunks())
             if not data.endswith(b'\n'):raise BoundaryError('Chapter publication receipt is incomplete')
+            from storage_relocation_native import verify_retained_read
+            verify_retained_read(path,facts,hashlib.sha256(data).hexdigest())
             rows=[json.loads(line) for line in data.decode('utf-8').splitlines()]
             return rows,hashlib.sha256(data).hexdigest(),facts,boundary.identities
 

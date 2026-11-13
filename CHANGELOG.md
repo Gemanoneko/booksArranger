@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.2] - 2026-11-14
+
+### Fixed
+
+- Preserve verified historical staging membership during local storage migration and keep retained copies protected.
+
 ## [v0.28.1] - 2026-11-13
 
 ### Fixed

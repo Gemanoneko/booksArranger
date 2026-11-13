@@ -316,6 +316,8 @@ class BrowserServer(ThreadingHTTPServer):
         return merge
 
     def _start_background(self):
+        from storage_relocation_native import retained_runtime
+        if retained_runtime(self.inventory.database):return
         if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
         # Published-book hashing reads every finished book from the library share; it must not delay health.
         if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()

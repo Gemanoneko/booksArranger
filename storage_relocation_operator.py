@@ -411,6 +411,8 @@ def classify_historical_files(database, *, managed_root=None,logical_catalog=Non
             if pathcolumn not in columns:
                 held.append({'class': table, 'reason': 'Unrecognized path schema'}); continue
             for row in db.execute('SELECT * FROM "' + table + '"'):
+                if table=='working_files' and row['state']=='creation_intended':
+                    continue  # An intent cannot provide native history for a produced file.
                 add(row[pathcolumn], *classes)
                 if table == 'storage_cleanup_files' and row['kind'] == 'recovery':
                     add(row[pathcolumn], 'recovery-copy')
@@ -864,7 +866,7 @@ def source_plan_consent_sha256(plan):
 @bounded_operation
 def prepare_source(source_root, target_root, scopes, catalog_relative, workspace, *,
                    receipt_classes=None, apply=False, catalog_id=None, generation=None,
-                   expected_plan_sha256=None):
+                   expected_plan_sha256=None, preservation_selection=None):
     """Plan by default; apply creates immutable evidence then fences only source scopes.
 
     Source bytes are never removed or copied by this API. A failed/partial fence
@@ -876,12 +878,21 @@ def prepare_source(source_root, target_root, scopes, catalog_relative, workspace
     need(str(uuid.UUID(catalog_id)) == catalog_id and str(uuid.UUID(generation)) == generation,
          'Canonical transaction identities required')
     database = source / catalog
+    selected={}
+    if preservation_selection is not None:
+        from storage_preservation_selection import approved_members
+        need(isinstance(preservation_selection,dict) and set(preservation_selection)=={'path','sha256'},
+             'Exact preservation selection path and SHA-256 required')
+        selection_path=Path(preservation_selection['path']).absolute()
+        need(selection_path.is_relative_to(work), 'Preservation receipt must be in the transaction workspace')
+        preservation_selection=dict(path=str(selection_path),sha256=preservation_selection['sha256'])
+        selected=approved_members(preservation_selection,source,target,scopes[0])
     with contextlib.ExitStack() as stack:
         stack.enter_context(_catalog_owner(database))
         states = _closed_state(database)
         inferred, held = classify_historical_files(database, managed_root=str(source))
         from storage_state_ownership import catalog_state_membership,validate_census_ownership
-        membership=catalog_state_membership(database)
+        membership=catalog_state_membership(database,relocation_history=True)
         classes = inferred if receipt_classes is None else receipt_classes
         need(isinstance(classes, dict), 'Explicit typed historical path registry required')
         normalized_classes = {}
@@ -899,7 +910,17 @@ def prepare_source(source_root, target_root, scopes, catalog_relative, workspace
         # Every SQLite connection is closed before collecting the final held
         # native facts: no later read can dirty SHM timestamps after this census.
         dirs, files, handles = _scan(source, scopes, stack, security_access=apply)
-        owned_state=validate_census_ownership(source,scopes,catalog,files,dirs,membership,normalized_classes)
+        copy_only={key:row['kind'] for key,row in selected.items()}
+        owned_state=validate_census_ownership(source,scopes,catalog,files,dirs,membership,normalized_classes,copy_only=copy_only)
+        if selected:
+            from storage_preservation_selection import HOLD, compare_member
+            security=Security()
+            for key,row in selected.items():
+                item=handles[key]
+                directory=row['kind']=='directory'
+                compare_member(row,(dirs if directory else files)[key],row['kind'],security.capture(item),
+                               item.facts if directory else None)
+            held=[*held,{'class':'preservation-only','entries':len(selected),'reason':HOLD}]
         missing = sorted(key for key in normalized_classes if key not in files)
         # Terminal historic paths may already be absent; no mapping/authority is
         # created for them. Their immutable terminal history remains in catalog.
@@ -918,6 +939,9 @@ def prepare_source(source_root, target_root, scopes, catalog_relative, workspace
                 'directories': list(dirs.values()), 'files': list(files.values()), 'security': records,
                 'logical_catalog_sha256': logical_sha,
                 'consent_policy': 'Only exact catalog SHM.modified is volatile; full native facts retained in source plan'}
+        if selected:
+            plan['preservation_selection']=preservation_selection
+            plan['preservation_facts']={key:handles[key].facts for key in selected if key in dirs}
         plan['consent_sha256'] = source_plan_consent_sha256(plan)
         if not apply:return plan
         plan_raw = packed(plan); plan_path = work / ('source-plan-' + generation + '.json')
@@ -993,7 +1017,7 @@ def _same_copy_inventory(plan, dirs, files):
 
 @bounded_operation
 def seal_target(source_plan, source_plan_sha256, source_fence, source_fence_sha256,
-                source_original, manifest_path):
+                source_original, manifest_path, *, target_copy=None):
     """Verify an independently copied target; no shared-folder copy/move here."""
     manifest_path = Path(manifest_path).absolute()
     with contextlib.ExitStack() as held:
@@ -1003,9 +1027,10 @@ def seal_target(source_plan, source_plan_sha256, source_fence, source_fence_sha2
              initial_fence['source_plan_sha256'] == source_plan_sha256 and
              plan['catalog_id'] == initial_fence['catalog_id'] and
              plan['generation'] == initial_fence['generation'], 'Source phase receipts do not agree')
-        need(set(plan) == {'schema','generation','catalog_id','source_root','target_root','scopes',
+        required={'schema','generation','catalog_id','source_root','target_root','scopes',
                           'catalog_relative','states','held_classes','historical_absent_paths','receipt_classes',
-                          'directories','files','security','logical_catalog_sha256','consent_sha256','consent_policy','owned_state','snapshot_path'},
+                          'directories','files','security','logical_catalog_sha256','consent_sha256','consent_policy','owned_state','snapshot_path'}
+        need(set(plan) in (required, required | {'preservation_selection','preservation_facts'}),
              'Unsupported or incomplete source plan; source remains held')
         from storage_state_ownership import require_plan_membership
         require_plan_membership(plan)
@@ -1033,6 +1058,29 @@ def seal_target(source_plan, source_plan_sha256, source_fence, source_fence_sha2
         # target .lock owner (not the source copy's lock) excludes old writers.
         with contextlib.ExitStack() as target_handles:
             dirs, files, handles = _scan(target, tuple(plan['scopes']), target_handles, security_access=True)
+            if target_copy is not None:
+                from native_io import DirectoryBoundary
+                need(isinstance(target_copy,dict) and set(target_copy)=={'path','sha256'},
+                     'Exact target copy receipt pin required')
+                copied=held.enter_context(pinned_receipt(target_copy['path'],target_copy['sha256']))
+                need(copied.get('schema')=='books-held-target-copy-v1' and
+                     copied.get('phase')=='copied-not-sealed' and copied.get('target_root')==str(target) and
+                     copied.get('target_scope')==str(target/plan['scopes'][0]) and
+                     copied.get('generation')==plan['generation'] and copied.get('catalog_id')==plan['catalog_id'] and
+                     copied.get('source_plan_sha256')==source_plan_sha256 and
+                     copied.get('source_fence_sha256')==source_fence_sha256 and
+                     isinstance(copied.get('readiness_sha256'),str) and
+                     re.fullmatch('[a-f0-9]{64}',copied['readiness_sha256']) and
+                     copied.get('directories')==dirs and copied.get('files')==files,
+                     'Target seal does not match its reviewed copier receipt or native creator identities')
+                target_parent=(target/plan['scopes'][0]).parent
+                ancestry=held.enter_context(DirectoryBoundary(target.anchor,target_parent))
+                need(copied.get('target_parent_ancestry')==[list(identity) for identity in ancestry.identities],
+                     'Target parent ancestry changed after the creator receipt')
+                applied_copy=copied.get('security',{})
+                need(set(applied_copy)=={key for key in handles if _inside(key,plan['scopes'][0])} and
+                     all(security.capture(handles[key])['sha256']==sha for key,sha in applied_copy.items()),
+                     'Target copied permissions changed before seal')
             # Validate the complete current generation BEFORE the first DACL
             # mutation. A retained handle pins an object, not its ownership.
             manifest = None
@@ -1042,6 +1090,8 @@ def seal_target(source_plan, source_plan_sha256, source_fence, source_fence_sha2
                      manifest.source_snapshot_sha256 == initial_fence['source_snapshot_sha256'] and
                      manifest.source_root == plan['source_root'] and manifest.target_root == plan['target_root'] and
                      tuple(manifest.scopes) == tuple(plan['scopes']), 'Existing sealed generation differs')
+                need('preservation_selection' not in plan,
+                     'An existing preservation seal requires verification or reviewed rollback; no reseal')
                 need(set(dirs) == set(manifest.directories) and set(files) == set(manifest.files),
                      'Previously sealed target membership changed')
                 for key, row in dirs.items():
@@ -1113,7 +1163,8 @@ def seal_target(source_plan, source_plan_sha256, source_fence, source_fence_sha2
                         'source_plan_sha256': source_plan_sha256, 'source_plan': str(Path(source_plan).absolute()),
                         'target_database': str(database),
                         'target_root_identity': target_root_identity,
-                        'logical_catalog_sha256': plan['logical_catalog_sha256'], 'held_classes': plan['held_classes']}
+                        'logical_catalog_sha256': plan['logical_catalog_sha256'], 'held_classes': plan['held_classes'],
+                        **({'target_copy_sha256':target_copy['sha256']} if target_copy else {})}
         seal_path = Path(str(manifest_path) + '.sealed.json')
         if seal_path.exists():
             with pinned_receipt(seal_path, digest(packed(verification))) as previous:
@@ -1178,6 +1229,11 @@ def _verification_operation(manifest_path, manifest_sha256):
         need(seal['manifest_sha256'] == manifest_sha256 and seal['catalog_id'] == manifest.catalog_id and
              seal['generation'] == manifest.generation, 'Verification seal and manifest disagree')
         plan = held.enter_context(pinned_receipt(seal['source_plan'], seal['source_plan_sha256']))
+        need(plan['held_classes']==seal['held_classes'], 'Verification seal holds differ from the source plan')
+        if 'preservation_selection' in plan:
+            from storage_preservation_selection import HOLD
+            need({'class':'preservation-only','entries':len(plan['owned_state']['copy_only']),'reason':HOLD}
+                 in plan['held_classes'], 'Copy-only runtime hold is missing')
         fence = held.enter_context(verify_source_fence(str(manifest_path) + '.source-fence.json',
                                                      seal['source_fence_sha256']))
         database = Path(seal['target_database'])
@@ -1196,10 +1252,18 @@ def _activation_record(manifest, seal, phase, revision):
             json.dumps(seal['target_root_identity']))
 
 
+def _preservation_family_sha(files, handles, catalog_relative):
+    catalog = _key(catalog_relative)
+    family = {catalog + suffix for suffix in ('', '-wal', '-shm', '-journal')}
+    security = Security()
+    return digest(packed({key: {'file': files[key], 'security': security.capture(handles[key])}
+                          for key in files.keys() & family}))
+
+
 @contextlib.contextmanager
-def _capture_verification(operation):
+def _capture_verification(operation, *, previously_verified_logical=None):
     manifest_path, manifest, seal, plan, fence, database, owner = operation
-    logical = logical_catalog_digest(database)
+    logical = previously_verified_logical if previously_verified_logical is not None else logical_catalog_digest(database)
     need(logical == plan['logical_catalog_sha256'], 'Target original catalog schema/history changed before verification')
     with contextlib.ExitStack() as handles:
         source_dirs, source_files, _ = _scan(fence.root, tuple(plan['scopes']), handles)
@@ -1212,7 +1276,7 @@ def _capture_verification(operation):
         for key, row in source_files.items():
             need(row['facts'] == expected_files[key]['facts'] and row['sha256'] == expected_files[key]['sha256'],
                  'Original source native facts/bytes changed after fence')
-        target_dirs, target_files, _ = _scan(Path(manifest.target_root), tuple(plan['scopes']), handles)
+        target_dirs, target_files, target_handles = _scan(Path(manifest.target_root), tuple(plan['scopes']), handles)
         need(set(target_dirs) == set(manifest.directories), 'Target directory membership changed')
         for key, row in target_dirs.items():
             need(row['identity'] == list(manifest.directories[key].target), 'Target directory native identity changed')
@@ -1244,6 +1308,11 @@ def _capture_verification(operation):
                  'catalog_identity': {key: native_catalog[key] for key in
                       ('identity','dev','ino','identity_method','identity_api_error','links')},
                  'source_plan_sha256': seal['source_plan_sha256'], 'source_fence_sha256': seal['source_fence_sha256']}
+        if 'preservation_selection' in plan:
+            security = Security()
+            state['target_security'] = {key:security.capture(target_handles[key]) for key in target_dirs.keys() | ordinary
+                                        if any(_inside(key, scope) for scope in plan['scopes'])}
+            state['target_sqlite_family_sha256'] = _preservation_family_sha(target_files,target_handles,plan['catalog_relative'])
         fence.revalidate(); owner.revalidate()
         yield state, len(target_files), len(target_dirs)
 
@@ -1271,6 +1340,9 @@ def verify_target(manifest_path, manifest_sha256, verification_path=None):
                        'target_root_identity': state['target_root_identity'],
                        'files_verified': file_count, 'directories_verified': directory_count,
                        'held_classes': plan['held_classes'], 'complete': not plan['held_classes']}
+            if 'preservation_selection' in plan:
+                receipt['preservation_copy_verified']=True
+                receipt['target_sqlite_family_sha256']=state['target_sqlite_family_sha256']
             output = Path(verification_path).absolute() if verification_path else Path(str(path) + '.verified.json')
             need(not _inside(str(output), manifest.source_root) and not _inside(str(output), manifest.target_root) and
                  not _inside(str(output), str(fence.root)), 'Verification receipt must be outside both data trees')
@@ -1280,7 +1352,8 @@ def verify_target(manifest_path, manifest_sha256, verification_path=None):
             else:create_new(output, raw)
             return {'phase': 'verified-not-enabled', 'verification_path': str(output),
                     'verification_sha256': sha, 'verified_state_sha256': receipt['verified_state_sha256'],
-                    'held_classes': plan['held_classes'], 'complete': not plan['held_classes']}
+                    'held_classes': plan['held_classes'], 'complete': not plan['held_classes'],
+                    **({'preservation_copy_verified':True} if 'preservation_selection' in plan else {})}
 
 
 @bounded_operation
@@ -1288,6 +1361,7 @@ def enable_target(manifest_path, manifest_sha256, verification_path, verificatio
     """Enable normal admission only after pinned independent proof+fresh recheck."""
     with _verification_operation(manifest_path, manifest_sha256) as operation:
         path, manifest, seal, plan, fence, database, owner = operation
+        need('preservation_selection' not in plan, 'Copy-only generation does not authorize normal application work')
         with pinned_receipt(verification_path, verification_sha256) as proof:
             need(proof.get('schema') == 'books-storage-target-verification-v1' and
                  proof['generation'] == manifest.generation and proof['catalog_id'] == manifest.catalog_id and
@@ -1329,7 +1403,85 @@ def enable_target(manifest_path, manifest_sha256, verification_path, verificatio
 
 
 @bounded_operation
-def rollback_unwritten(manifest_path, manifest_sha256):
+def enable_retained_target(manifest_path, manifest_sha256, verification_sha256, review_path, review_sha256):
+    """Explicit admission under a reviewed no-resume/no-disposal retention policy."""
+    from storage_retained_runtime import SCHEMA, historical_members, index_members, retained_target_lease, reviewed_members
+    with _verification_operation(manifest_path, manifest_sha256) as operation, contextlib.ExitStack() as held:
+        path, manifest, seal, plan, fence, database, owner = operation
+        need('preservation_selection' in plan and len(plan['held_classes']) == 1 and
+             plan['held_classes'][0]['class'] == 'preservation-only',
+             'Retained runtime cannot authorize any other held obligation')
+        need(isinstance(seal.get('target_copy_sha256'),str),'Retained runtime requires the reviewed creator copy seal')
+        verification_path = Path(str(path)+'.verified.json')
+        proof = held.enter_context(pinned_receipt(verification_path, verification_sha256))
+        need(proof.get('schema')=='books-storage-target-verification-v1' and proof.get('manifest_path')==str(path)
+             and proof.get('manifest_sha256')==manifest.digest and proof.get('generation')==manifest.generation
+             and proof.get('catalog_id')==manifest.catalog_id and proof.get('source_plan_sha256')==seal['source_plan_sha256']
+             and proof.get('source_fence_sha256')==seal['source_fence_sha256']
+             and proof.get('preservation_copy_verified') is True and proof.get('complete') is False
+             and proof.get('held_classes')==plan['held_classes'] and
+             proof.get('logical_catalog_sha256')==seal['logical_catalog_sha256'],
+             'Retained runtime requires the exact independent verification receipt')
+        review_path = Path(review_path).absolute()
+        need(not any(_inside(str(review_path), root) for root in
+                     (manifest.source_root, manifest.target_root, str(fence.root))),
+             'Retention review receipt must remain outside all moved trees')
+        review = held.enter_context(pinned_receipt(review_path, review_sha256))
+        members = reviewed_members(review, plan)
+        original_count=len(members)
+        historical=index_members(historical_members(plan),plan['scopes'][0],allow_empty=True)
+        need(not set(historical)&set(members),'Historical and reviewed retention sets overlap')
+        members.update(historical)
+        with _capture_verification(operation, previously_verified_logical=proof['logical_catalog_sha256']) as (state,_,_):
+            need(digest(packed(state))==proof['verified_state_sha256'],
+                 'Retained runtime target drifted after independent verification')
+            files={_key(row['relative']):row for row in state['files']}
+            directories={_key(row['relative']):row for row in state['directories']}
+            records={}
+            for key in members:
+                item=files.get(key) or directories.get(key)
+                need(item is not None and key in state['target_security'], 'Retained target member missing')
+                records[key]={'native':item,'security_sha256':state['target_security'][key]['sha256']}
+        registration={'schema':SCHEMA,'catalog_id':manifest.catalog_id,'generation':manifest.generation,
+                      'manifest_sha256':manifest.digest,'verification_sha256':verification_sha256,
+                      'review_sha256':review_sha256,'scope':plan['scopes'][0],
+                      'reviewed_copy_members':original_count,'historical_members':list(historical),
+                      'members':list(members.values()),'target_members':records}
+        member_lease=held.enter_context(retained_target_lease(manifest.target_root,records))
+        registration_path=Path(str(path)+'.retained-runtime.json')
+        registration_sha=create_new(registration_path,packed(registration))
+        expected_verification=(manifest.catalog_id,manifest.generation,manifest.digest,str(verification_path),
+                               verification_sha256,proof['verified_state_sha256'])
+        with contextlib.closing(sqlite3.connect(database,timeout=2)) as db:
+            db.execute('PRAGMA synchronous=FULL'); db.execute('BEGIN IMMEDIATE')
+            need(db.execute('SELECT * FROM storage_relocation_activation').fetchall()==
+                 [_activation_record(manifest,seal,'verifying',2)], 'Retained runtime generation changed')
+            db.execute(VERIFICATION_SQL)
+            need(not db.execute('SELECT * FROM storage_relocation_verification').fetchall(),
+                 'Unexpected independent verification registration')
+            db.execute('INSERT INTO storage_relocation_verification VALUES(?,?,?,?,?,?)',expected_verification)
+            db.execute('''CREATE TABLE storage_relocation_retention (
+                       catalog_id TEXT NOT NULL,generation TEXT NOT NULL,manifest_sha256 TEXT NOT NULL,
+                       verification_sha256 TEXT NOT NULL,receipt_path TEXT NOT NULL,receipt_sha256 TEXT NOT NULL)''')
+            db.execute('INSERT INTO storage_relocation_retention VALUES(?,?,?,?,?,?)',
+                       (*expected_verification[:3],verification_sha256,str(registration_path),registration_sha))
+            changed=db.execute("UPDATE storage_relocation_activation SET phase='active',revision=3 WHERE phase='verifying' AND revision=2")
+            need(changed.rowcount==1,'Retained runtime admission compare-and-set failed')
+            fence.revalidate();owner.revalidate()
+            security=Security()
+            for key,item in member_lease.items():
+                checkpoint()
+                item.revalidate()
+                need(security.capture(item)['sha256']==records[key]['security_sha256'],
+                     'Retained target permissions changed before activation commit')
+            db.commit()
+        return {'phase':'active-retained','generation':manifest.generation,'manifest_sha256':manifest.digest,
+                'retention_path':str(registration_path),'retention_sha256':registration_sha,
+                'retained_members':len(members),'source_retirement_authorized':False}
+
+
+@bounded_operation
+def rollback_unwritten(manifest_path, manifest_sha256, *, verification_sha256=None):
     """Fence target first, restore original source only with no unreconciled writes.
 
     A new decision/job/book/cache write refuses rollback. Both copies remain;
@@ -1350,9 +1502,14 @@ def rollback_unwritten(manifest_path, manifest_sha256):
         source_fence_path = Path(str(manifest_path) + '.source-fence.json')
         source_receipt = held.enter_context(pinned_receipt(source_fence_path, seal['source_fence_sha256']))
         database = Path(seal['target_database']); target = local_root(manifest.target_root)
+        preservation = 'preservation_selection' in plan
+        if preservation:
+            need(not Path(str(manifest_path)+'.retained-runtime.json').exists(),
+                 'Rollback following retained runtime admission requires explicit reconciliation')
         owner = held.enter_context(_catalog_owner(database))
         resumed_target = None
         if target_fence_path.exists():
+            need(not preservation, 'Copy-only rollback replay requires independent review of the retained target fence')
             raw = target_fence_path.read_bytes(); target_fence_sha = digest(raw)
             resumed_target = held.enter_context(verify_source_fence(target_fence_path, target_fence_sha))
             need(resumed_target.receipt['catalog_id'] == manifest.catalog_id and
@@ -1361,39 +1518,80 @@ def rollback_unwritten(manifest_path, manifest_sha256):
                  'Rollback target fence belongs to another operation')
         source_lease = held.enter_context(SourceFenceLease(source_fence_path, seal['source_fence_sha256'],
                                                           allow_restored=bool(resumed_target)))
-        need(logical_catalog_digest(database) == seal['logical_catalog_sha256'],
-             'Rollback refused: new target catalog writes require explicit reconciliation')
+        if not preservation:
+            need(logical_catalog_digest(database) == seal['logical_catalog_sha256'],
+                 'Rollback refused: new target catalog writes require explicit reconciliation')
         expected_files = {_key(row['relative']): row for row in plan['files']}
         catalog_key = _key(plan['catalog_relative'])
         sidecars = {catalog_key + ending for ending in ('', '-wal', '-shm', '-journal')}
         if resumed_target is None:
+            verified_state = None
+            if preservation:
+                # Verify against the initial independent readback, rather than
+                # granting authority from whatever occupies the names now.
+                verification_path = Path(str(manifest_path)+'.verified.json')
+                need(verification_path.is_file(), 'Copy-only rollback requires its default independent verification receipt')
+                need(verification_sha256, 'Copy-only rollback requires a durable reviewed verification pin')
+                with pinned_receipt(verification_path,verification_sha256) as proof:
+                    need(proof.get('preservation_copy_verified') is True and proof['manifest_sha256']==manifest_sha256
+                         and proof['source_plan_sha256']==seal['source_plan_sha256']
+                         and proof['logical_catalog_sha256']==seal['logical_catalog_sha256']
+                         and isinstance(proof.get('target_sqlite_family_sha256'),str),
+                         'Copy-only rollback verification belongs to another generation')
+                    operation=(manifest_path,manifest,seal,plan,source_lease,database,owner)
+                    with _capture_verification(operation,previously_verified_logical=proof['logical_catalog_sha256']) as (state,_,_):
+                        need(state['target_sqlite_family_sha256']==proof['target_sqlite_family_sha256'],
+                             'Rollback refused: verified SQLite-family membership, identity, bytes or permissions changed')
+                        need(digest(packed(state))==proof['verified_state_sha256'],
+                             'Rollback refused: verified copy identity or permissions changed')
+                        verified_state=state
             security = Security()
             with contextlib.ExitStack() as target_handles:
                 dirs, files, handles = _scan(target, tuple(plan['scopes']), target_handles, security_access=True)
+                need(set(dirs)==set(manifest.directories) and (set(files)-sidecars)==(set(expected_files)-sidecars),
+                     'Rollback target namespace changed before fencing')
+                need(set(dirs)==set(manifest.directories) and all(
+                    item['identity']==list(manifest.directories[key].target) for key,item in dirs.items()),
+                     'Rollback refused: sealed directory identities changed')
+                for key,binding in manifest.files.items():
+                    need(key in files and files[key]['facts']['identity']==list(binding.target['identity']),
+                         'Rollback refused: sealed file identity changed')
                 need((set(files) - sidecars) == (set(expected_files) - sidecars),
                      'Rollback refused: new/missing target work requires explicit reconciliation')
                 for key in set(files) - sidecars:
                     need(files[key]['sha256'] == expected_files[key]['sha256'],
                          'Rollback refused: changed target work requires explicit reconciliation')
+                if verified_state:
+                    need({_key(row['relative']):row for row in verified_state['files']}==
+                         {key:files[key] for key in set(files)-sidecars},
+                         'Rollback refused: verified target file changed')
+                    need(_preservation_family_sha(files,handles,plan['catalog_relative'])==
+                         verified_state['target_sqlite_family_sha256'],
+                         'Rollback refused: verified SQLite-family changed before fencing')
                 target_security = []
                 for key, item in handles.items():
                     if not any(_inside(key, scope) for scope in plan['scopes']):continue
+                    current_security=security.capture(item)
+                    if verified_state and key in verified_state['target_security']:
+                        need(current_security==verified_state['target_security'][key],
+                             'Rollback refused: verified target permissions changed')
                     target_security.append({'relative': dirs[key]['relative'] if key in dirs else files[key]['relative'],
                                             'kind': 'directory' if key in dirs else 'file',
                                             'identity': item.facts['identity'],
-                                            'original_security': security.capture(item)})
+                                            'original_security': current_security})
             # Enter rollback state while target owner and original source fence
             # remain held. After target DACL fencing the DB is intentionally RO.
-            with contextlib.closing(sqlite3.connect(database, timeout=2)) as db:
-                db.execute('PRAGMA synchronous=FULL'); db.execute('BEGIN IMMEDIATE')
-                rows = db.execute('SELECT * FROM storage_relocation_activation').fetchall()
-                need(len(rows) == 1 and rows[0][:4] == (manifest.catalog_id, manifest.generation,
-                     manifest_sha256, manifest.source_snapshot_sha256) and rows[0][4] in ('sealed', 'verifying', 'active', 'rolling-back'),
-                     'Rollback generation/phase changed')
-                db.execute('UPDATE storage_relocation_activation SET phase=?,revision=? WHERE catalog_id=? '
-                           'AND generation=? AND manifest_sha256=?',
-                           ('rolling-back', 3, manifest.catalog_id, manifest.generation, manifest_sha256))
-                source_lease.revalidate(); owner.revalidate(); db.commit()
+            if not preservation:
+                with contextlib.closing(sqlite3.connect(database, timeout=2)) as db:
+                    db.execute('PRAGMA synchronous=FULL'); db.execute('BEGIN IMMEDIATE')
+                    rows = db.execute('SELECT * FROM storage_relocation_activation').fetchall()
+                    need(len(rows) == 1 and rows[0][:4] == (manifest.catalog_id, manifest.generation,
+                         manifest_sha256, manifest.source_snapshot_sha256) and rows[0][4] in ('sealed', 'verifying', 'active', 'rolling-back'),
+                         'Rollback generation/phase changed')
+                    db.execute('UPDATE storage_relocation_activation SET phase=?,revision=? WHERE catalog_id=? '
+                               'AND generation=? AND manifest_sha256=?',
+                               ('rolling-back', 3, manifest.catalog_id, manifest.generation, manifest_sha256))
+                    source_lease.revalidate(); owner.revalidate(); db.commit()
             intent = {'schema': 'books-storage-rollback-intent-v1', 'generation': manifest.generation,
                       'catalog_id': manifest.catalog_id, 'manifest_sha256': manifest_sha256,
                       'target_security': target_security}
@@ -1404,6 +1602,21 @@ def rollback_unwritten(manifest_path, manifest_sha256):
             applied = []
             with contextlib.ExitStack() as target_handles:
                 dirs, files, handles = _scan(target, tuple(plan['scopes']), target_handles, security_access=True)
+                need(set(dirs)==set(manifest.directories) and (set(files)-sidecars)==(set(expected_files)-sidecars) and all(
+                    dirs[key]['identity']==list(binding.target) for key,binding in manifest.directories.items()),
+                     'Rollback target namespace changed before fencing')
+                if verified_state:
+                    need({_key(row['relative']):row for row in verified_state['files']}==
+                         {key:files[key] for key in set(files)-sidecars},
+                         'Rollback target verified file changed before fencing')
+                    need(_preservation_family_sha(files,handles,plan['catalog_relative'])==
+                         verified_state['target_sqlite_family_sha256'],
+                         'Rollback SQLite-family changed before fencing')
+                for record in target_security:
+                    item=handles[_key(record['relative'])]
+                    need(item.facts['identity']==record['identity'] and
+                         security_equivalent(security.capture(item),record['original_security']),
+                         'Target native identity or security changed during rollback')
                 for index, record in enumerate(sorted(target_security, key=lambda r: (r['relative'].count('\\'), r['relative']))):
                     checkpoint()
                     item = handles[_key(record['relative'])]

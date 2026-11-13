@@ -344,6 +344,9 @@ class VerifiedFile:
         self.path=ordinary(path);self.delete=delete;self.writable=writable;self.handle=None
     def __enter__(self):
         if os.name!='nt':raise BoundaryError('Verified file disposition requires Windows')
+        if self.delete or self.writable:
+            from storage_relocation_native import retained_path
+            if retained_path(self.path):raise BoundaryError('This migrated file is retained')
         self.handle=kernel.CreateFileW(str(self.path),0x81|(0x10000 if self.delete else 0)|(0x40000000 if self.writable else 0),1,None,3,0x00200000,None)
         if self.handle==ctypes.c_void_p(-1).value:
             code=ctypes.get_last_error();self.handle=None
@@ -485,6 +488,9 @@ class VerifiedDirectory(VerifiedFile):
     """
     def __enter__(self):
         if os.name!='nt':raise BoundaryError('Verified empty-directory disposition requires Windows')
+        if self.delete:
+            from storage_relocation_native import retained_path
+            if retained_path(self.path,parent=True):raise BoundaryError('This migrated directory contains retained data')
         self.handle=kernel.CreateFileW(str(self.path),0x81|(0x10000 if self.delete else 0),1,None,3,0x02000000|0x00200000,None)
         if self.handle==ctypes.c_void_p(-1).value:
             error=ctypes.get_last_error();self.handle=None

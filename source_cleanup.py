@@ -205,6 +205,7 @@ class CleanupJobs:
                 require_sorted(str(path),output_root,sources,chosen() if callable(chosen) else ())
         except ValueError as problem:raise error(str(problem)) from None
     def enroll(self,job,binding,historical=False):
+        self._require_unheld_job(job['job_id'])
         if job['state']!='completed':raise ValueError('Only a completed validated audiobook can remove its sources')
         manifest=job['manifest'];output=job['output']
         import publication_reuse
@@ -270,8 +271,10 @@ class CleanupJobs:
         return result
 
     def identity_retry(self,id):
-        rows=self._rows('SELECT state,reason,intent FROM source_cleanup WHERE id=?',(id,))
+        rows=self._rows('SELECT state,reason,intent,job_id FROM source_cleanup WHERE id=?',(id,))
         if not rows:return None
+        from storage_relocation_native import retained_job
+        if retained_job(self.database,rows[0]['job_id']):return None
         row=rows[0];diagnostic=None;eligible=row['reason']==LEGACY_IDENTITY_HOLD
         if row['state']=='needs_attention' and not eligible:
             for held in self._rows('SELECT cause FROM source_cleanup_holds WHERE cleanup_id=? ORDER BY at DESC LIMIT 1',(id,)):
@@ -395,6 +398,8 @@ class CleanupJobs:
         for row in rows:
             if selected is not None and row['id'] not in selected:continue
             if self.stop.is_set():break
+            from storage_relocation_native import retained_job
+            if retained_job(self.database,row['job_id']):continue
             self.current=row['id']
             try:
                 self.run_with_retry(row['id'])
@@ -413,6 +418,7 @@ class CleanupJobs:
         if handle.sha256()!=source['sha256']:raise BoundaryError('Original bytes differ from reviewed sources')
         return facts
     def run(self,id):
+        self._require_unheld_cleanup(id)
         # Audit m3: a download marker this run removed from an original that is still in place when the run stops or
         # holds is put back from its receipt; only a removed original loses its marker.
         # Senua 0.21.3 F4: so is one an earlier run removed before it was killed (crash, power loss): its receipt stays
@@ -424,6 +430,15 @@ class CleanupJobs:
             self._put_back_markers(id,marked);raise
         self._put_back_markers(id,marked)
         return result
+
+    def _require_unheld_job(self, job_id):
+        from storage_relocation_native import retained_job
+        if retained_job(self.database,job_id):
+            raise BoundaryError('Originals are retained for this migrated historical job')
+
+    def _require_unheld_cleanup(self, cleanup_id):
+        for row in self._rows('SELECT job_id FROM source_cleanup WHERE id=?',(cleanup_id,)):
+            self._require_unheld_job(row['job_id'])
     def _stale_markers(self,id):
         """{path: (receipt, facts, root)} for every marker receipt of this cleanup; _put_back_markers restores only those
         whose original is still in place, unchanged and without its marker."""
@@ -460,6 +475,9 @@ class CleanupJobs:
             except (BoundaryError,OSError,ValueError,KeyError):pass
     def _run(self,id,marked):
         row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))[0];intent=json.loads(row['intent']);manifest=intent['manifest'];out=intent['output']
+        self._require_unheld_job(row['job_id'])
+        if intent.get('job_id')!=row['job_id']:
+            raise BoundaryError('Cleanup intent differs from the recorded job')
         import publication_reuse
         duplicate=publication_reuse.task(manifest);publication_manifest=manifest
         if duplicate:
@@ -620,6 +638,7 @@ class CleanupJobs:
         db.execute('INSERT OR REPLACE INTO source_retirements VALUES(?,?,?,?,?,?,?,?)',(intent['manifest']['root'],source['path'],intent['id'],intent['job_id'],source['sha256'],source['size'],source['modified'],'removed'))
         db.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(intent['manifest']['root'],source['path']))
     def restore(self,id):
+        self._require_unheld_cleanup(id)
         row=self._rows('SELECT intent FROM source_cleanup WHERE id=?',(id,))
         intent=json.loads(row[0]['intent']) if row else {}
         if __import__('publication_reuse').task(intent.get('manifest')):

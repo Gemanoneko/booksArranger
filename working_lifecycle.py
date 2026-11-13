@@ -18,7 +18,7 @@ from sqlite_retry import transaction
 from native_io import BoundaryError, DirectoryBoundary as NativeBoundary, VerifiedFile as NativeFile, ordinary, kernel
 from source_cleanup import packed, stamp, single_stream
 from audio_jobs import JobWorkingHold
-from storage_relocation_native import facts_match
+from storage_relocation_native import facts_match, retained_job
 
 
 class ProducerNotClosed(BoundaryError, JobWorkingHold):
@@ -170,6 +170,10 @@ class WorkingLifecycle:
         with connect(self.database) as db:
             return [dict(r) for r in db.execute(sql, params)]
 
+    def _require_unheld_job(self, job_id):
+        if retained_job(self.database,job_id):
+            raise RestagingHeld('Archived staging is retained for this job; retry and cleanup are unavailable')
+
     def _attempt(self, job_id, attempt_id):
         rows = self._rows('SELECT * FROM working_attempts WHERE job_id=? AND attempt_id=?', (job_id, attempt_id))
         if len(rows) != 1:
@@ -215,6 +219,7 @@ class WorkingLifecycle:
 
     def begin(self, manifest):
         job_id, attempt_id = manifest['job_id'], manifest['attempt_id']
+        self._require_unheld_job(job_id)
         if any(str(uuid.UUID(value)) != value for value in (job_id, attempt_id)):
             raise BoundaryError('Invalid working-attempt identity')
         frozen = {key: value for key, value in manifest.items() if key != 'attempt_id'}
@@ -401,6 +406,7 @@ class WorkingLifecycle:
         return transaction(self.database,save)
 
     def retire(self, job_id, attempt_id):
+        self._require_unheld_job(job_id)
         with self._locks_guard:
             lock = self._locks.setdefault(job_id, threading.RLock())
         with lock:
@@ -521,6 +527,7 @@ class WorkingLifecycle:
                               reason='Uncaptured producer file preserved; explicit review required' if uncertain else 'Unknown attempt member preserved; explicit review required' if unknown else 'Compact diagnostic capture limit reached; exact scratch evidence retained' if diagnostic_held else 'Frozen originals/artwork unavailable; source snapshots retained' if remaining else '')
 
     def discard(self, job_id, attempt_id, dry_run=False):
+        self._require_unheld_job(job_id)
         """Delete book (Sergei's rulings 23 and 26, 2026-10-25): remove every recorded working file of one closed,
         unpublished attempt of a stopped job, the copies of its originals included even when the originals are gone (the
         last copy of the book's audio: this explicit action only, never retire() or a background pass).
@@ -611,6 +618,7 @@ class WorkingLifecycle:
                 return removed
 
     def terminal(self, job_id, attempt_id):
+        self._require_unheld_job(job_id)
         attempts = self._rows('SELECT * FROM working_attempts WHERE job_id=? AND attempt_id=?', (job_id, attempt_id))
         if not attempts:
             return  # Revision/stop failure before the media runner created no working producer.
@@ -776,6 +784,7 @@ class WorkingLifecycle:
         return prior_id
 
     def admission_clear(self, row):
+        self._require_unheld_job(row['job_id'])
         """Read-only Retry pre-check of what admit() requires; it retires and writes nothing.
 
         Raises when a legacy prior folder still holds files or any receipt-owned attempt of the
@@ -787,6 +796,7 @@ class WorkingLifecycle:
 
     def admit(self, row):
         """No new source/derived copy until registered prior cleanup debt clears."""
+        self._require_unheld_job(row['job_id'])
         prior_id=self._legacy_prior(row)
         for attempt in self._rows("SELECT * FROM working_attempts WHERE job_id=? AND (state!='retired' OR attempt_id=?) ORDER BY updated", (row['job_id'],prior_id)):
             self.retire(attempt['job_id'], attempt['attempt_id'])
@@ -813,6 +823,8 @@ class WorkingLifecycle:
         try:
             states=('closed','published') if storage is not None else ('closed',)
             for attempt in self._rows("SELECT * FROM working_attempts WHERE state IN ("+','.join('?' for _ in states)+") ORDER BY updated LIMIT ?", (*states,limit)):
+                if retained_job(self.database,attempt['job_id']):
+                    continue
                 try:
                     if attempt['state']=='published':self.discharge_published(attempt['job_id'],storage)
                     else:self.terminal(attempt['job_id'], attempt['attempt_id'])
