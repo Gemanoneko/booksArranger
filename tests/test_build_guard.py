@@ -15,9 +15,24 @@ ROOT=Path(__file__).absolute().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 from build_fs_guard import BuildTree,remove_manifest_files,_native_receipt,capture_metadata,archive_metadata,publish_metadata,PriorBuild,producer_receipt,disposable_stage_receipts,retire_disposable_stage
 from native_io import BoundaryError,OwnedProcessJob,VerifiedFile,publish_no_replace
-if os.environ.get('BOOKS_QA_FIXTURE_ROOT'):
-    ROOT=Path(os.environ['BOOKS_QA_FIXTURE_ROOT'])/'build-guard-tool'
+fixture_root=os.environ.get('BOOKS_QA_BUILD_GUARD_ROOT') or os.environ.get('BOOKS_QA_FIXTURE_ROOT')
+if fixture_root:
+    ROOT=Path(fixture_root)/'build-guard-tool'
 BASE=ROOT.parent/'build-guard-probes'
+
+def assert_held_mismatch(test,root,folder,manifest):
+    with test.assertRaisesRegex(RuntimeError,'Support cleanup is held at ') as caught:
+        remove_manifest_files(root,folder,manifest)
+    failure=caught.exception
+    test.assertIsInstance(failure.__cause__,BoundaryError)
+    test.assertIn('Original native identity/content receipt differs',str(failure.__cause__))
+    path,_,digest=str(failure).removeprefix('Support cleanup is held at ').partition('; original marker SHA-256 ')
+    recovery=Path(path)
+    test.assertEqual(recovery.parent,root/'build-cache')
+    test.assertTrue(recovery.name.startswith('file-disposition-'))
+    test.assertTrue((recovery/'owner.lock').is_file())
+    marker=(recovery/'ledger/context.json').read_bytes()
+    test.assertEqual(hashlib.sha256(marker).hexdigest(),digest.split('. ',1)[0])
 
 def _remove_tree(path):
     """Removes a probe folder this run made. A junction or link inside it is removed as a link and never followed, so
@@ -75,7 +90,7 @@ class GuardTests(unittest.TestCase):
             fresh=guard.fresh(root/'builds');guard.write(fresh/'owned',[b'known']);manifest={'owned':_native_receipt(guard,fresh/'owned')}
         (fresh/'unknown').write_bytes(b'private')
         bad={'owned':{**manifest['owned'],'sha256':'0'*64}}
-        with self.assertRaises(BoundaryError):remove_manifest_files(root,fresh,bad)
+        assert_held_mismatch(self,root,fresh,bad)
         self.assertEqual((fresh/'owned').read_bytes(),b'known')
         self.assertEqual(remove_manifest_files(root,fresh,manifest),1)
         self.assertEqual((fresh/'unknown').read_bytes(),b'private')
@@ -155,7 +170,7 @@ class MetadataTests(unittest.TestCase):
         with BuildTree(root) as guard:
             folder=guard.fresh(root/'builds');guard.write(folder/'owned',[b'known']);receipt=_native_receipt(guard,folder/'owned')
         replacement=folder/'replacement';replacement.write_bytes(b'known');os.replace(replacement,folder/'owned')
-        with self.assertRaises(BoundaryError):remove_manifest_files(root,folder,{'owned':receipt})
+        assert_held_mismatch(self,root,folder,{'owned':receipt})
         self.assertEqual((folder/'owned').read_bytes(),b'known')
 
 class PriorBundleTests(unittest.TestCase):

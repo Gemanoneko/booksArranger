@@ -172,8 +172,10 @@ const workers=batches.map((batch,i)=>{
  }
  const snapshotTemp=batch.includes('test_storage_lifecycle.py')?gateScratch.claim('scratch/lifecycle-snapshot-'+i):null;
  if(snapshotTemp)fs.mkdirSync(snapshotTemp);
+ const buildGuardRoot=batch.includes('test_build_guard.py')?gateScratch.claim('scratch/build-guard-'+i):null;
+ if(buildGuardRoot)fs.mkdirSync(buildGuardRoot);
  const temp=path.join(directory,'scratch','tmp');
- return {directory,temp,snapshotTemp,batch,i,relative:layout.relative};
+ return {directory,temp,snapshotTemp,buildGuardRoot,batch,i,relative:layout.relative};
 });
 let outputBytes=0,overflow=false;
 const copySeconds=Math.round((Date.now()-gateStart)/100)/10;console.log('Sources copied into the '+workers.length+' Python workers by '+copySeconds+' s');
@@ -184,6 +186,7 @@ const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
  for(const key of Object.keys(env))if(/^(GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)|TEMP|TMP|TMPDIR|BOOKS_WORK_TEMP)$/i.test(key))delete env[key];
  Object.assign(env,{TEMP:worker.temp,TMP:worker.temp,TMPDIR:worker.temp,BOOKS_WORK_TEMP:worker.temp});
  if(worker.snapshotTemp)env.BOOKS_QA_LIFECYCLE_SNAPSHOT_TEMP=worker.snapshotTemp;
+ if(worker.buildGuardRoot)env.BOOKS_QA_BUILD_GUARD_ROOT=worker.buildGuardRoot;
  const out=[],err=[];let error=null,timedOut=false;
  const child=spawn(python,['-I','-B','-c',code,worker.directory,JSON.stringify(worker.batch),JSON.stringify(fixtureRootMap),String(worker.i)],{cwd:worker.directory,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
  const timer=setTimeout(()=>{timedOut=limit.kind;child.kill();},Math.max(1,limit.at-Date.now()));
