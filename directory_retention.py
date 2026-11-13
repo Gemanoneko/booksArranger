@@ -88,14 +88,15 @@ def retain_directory_no_replace(source,retained,expected_identity):
             # FILE_RENAME_INFO's union is DWORD-sized. This Win32 API uses an
             # absolute destination; every ordinary ancestor and the SAME parent
             # remain held. Flags zero never replaces an existing name.
-            filename=str(retained)
+            encoded=str(retained).encode('utf-16-le')
             class Rename(ctypes.Structure):
                 _fields_=[('flags',wintypes.DWORD),('root',wintypes.HANDLE),
-                    ('length',wintypes.DWORD),('name',wintypes.WCHAR*len(filename))]
+                    ('length',wintypes.DWORD),('name',wintypes.WCHAR*(len(encoded)//2+1))]
             rename=Rename();rename.flags=0;rename.root=None
-            rename.length=len(filename.encode('utf-16-le'));rename.name=filename
+            rename.length=len(encoded)
+            ctypes.memmove(ctypes.addressof(rename)+Rename.name.offset,encoded,len(encoded))
             parent.revalidate()
-            if not kernel.SetFileInformationByHandle(handle,3,ctypes.byref(rename),Rename.name.offset+rename.length):
+            if not kernel.SetFileInformationByHandle(handle,3,ctypes.byref(rename),ctypes.sizeof(rename)):
                 raise DirectoryRetentionRefused('Original application native rename refused: '+str(ctypes.WinError(ctypes.get_last_error())))
             _need(kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) and
                 [info.volume,info.index_high,info.index_low]==list(expected_identity),
