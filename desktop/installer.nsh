@@ -71,6 +71,8 @@ Var BooksApplicationStageSha
 Var BooksControlNamespace
 Var BooksControlNamespaceSha
 Var BooksReviewedCommand
+Var BooksReviewedOldVersion
+Var BooksReviewedOldApplication
 !endif
 
 !macro BooksTip CONTROL TEXT
@@ -284,8 +286,12 @@ Function BooksValidateReviewedSelection
   WriteINIStr "$BooksRequest" "request" "command_line" "$BooksReviewedCommand"
   ReadRegStr $R1 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" "InstallLocation"
   ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  ReadRegStr $R3 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayName"
+  ReadRegStr $R4 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
   WriteINIStr "$BooksRequest" "request" "registered_application_dir" "$R1"
   WriteINIStr "$BooksRequest" "request" "registered_version" "$R2"
+  WriteINIStr "$BooksRequest" "request" "registered_display_name" "$R3"
+  WriteINIStr "$BooksRequest" "request" "registered_uninstall_string" "$R4"
   WriteINIStr "$BooksRequest" "request" "process_name" "${BOOKS_LIFECYCLE_PROCESS_NAME}"
   Call BooksRunHelper
   ${If} $2 != "1"
@@ -295,9 +301,13 @@ Function BooksValidateReviewedSelection
   ReadINIStr $BooksPlanSha "$BooksResponse" "result" "plan_sha256"
   ReadINIStr $INSTDIR "$BooksResponse" "result" "application_dir"
   ReadINIStr $BooksProfile "$BooksResponse" "result" "profile_dir"
+  ReadINIStr $BooksReviewedOldVersion "$BooksResponse" "result" "old_package_version"
+  ReadINIStr $BooksReviewedOldApplication "$BooksResponse" "result" "old_application"
   ${If} $BooksPlan == ""
   ${OrIf} $BooksPlanSha == ""
   ${OrIf} $INSTDIR == ""
+  ${OrIf} $BooksReviewedOldVersion != "0.28.1"
+  ${OrIf} $BooksReviewedOldApplication == ""
     Call BooksRefuse
   ${EndIf}
 FunctionEnd
