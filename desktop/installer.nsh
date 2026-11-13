@@ -217,8 +217,8 @@ FunctionEnd
       WriteINIStr "$BooksRequest" "request" "action" "admit-application-target"
       WriteINIStr "$BooksRequest" "request" "process_name" "${BOOKS_LIFECYCLE_PROCESS_NAME}"
       WriteINIStr "$BooksRequest" "request" "application_dir" "$INSTDIR"
-      ReadRegStr $R1 HKCU "${UNINSTALL_REGISTRY_KEY}" "InstallLocation"
-      ReadRegStr $R2 HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+      ReadRegStr $R1 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+      ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
       WriteINIStr "$BooksRequest" "request" "registered_application_dir" "$R1"
       WriteINIStr "$BooksRequest" "request" "registered_version" "$R2"
       Call BooksRunHelper
@@ -269,7 +269,7 @@ Function BooksPrepareLegacyUpdate
   Call BooksNewRequest
   WriteINIStr "$BooksRequest" "request" "action" "legacy-update-plan"
   WriteINIStr "$BooksRequest" "request" "application_dir" "$INSTDIR"
-  ReadRegStr $R2 HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
   WriteINIStr "$BooksRequest" "request" "version" "$R2"
   WriteINIStr "$BooksRequest" "request" "process_name" "${BOOKS_LIFECYCLE_PROCESS_NAME}"
   Call BooksRunHelper

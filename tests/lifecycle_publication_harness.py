@@ -47,6 +47,7 @@ def run_publication_harness(root,out,payload,verify,environment):
         '!macro BooksCurrentPackageVerify ROOT\n${StdUtils.HashFile} $R8 "SHA2-256" "${ROOT}\\current-package.json"\n'
         'StrCmp $R8 "'+package_sha+'" +3\nSetErrorLevel 21\nQuit\n!macroend\n',encoding='utf8')
     registry='Software\\BooksLifecyclePrivateHarness\\'+str(uuid.uuid4())
+    install_registry=registry+'-install'
     def compile_case(label,target,data,*,mode='new',updated=False,config_paths=(),registrations=()):
         plan_path='';plan_sha=''
         if not updated:
@@ -71,6 +72,7 @@ InstallDir "@TARGET@"
 !define UNINSTALLER_OUT_FILE "@UNINSTALLER@"
 !define UNINSTALL_FILENAME "Uninstall Books Arranger.exe"
 !define UNINSTALL_REGISTRY_KEY "@REGISTRY@"
+!define INSTALL_REGISTRY_KEY "@INSTALL_REGISTRY@"
 !define UNINSTALLER_ICON "@ICON@"
 !define BOOKS_LIFECYCLE_PROCESS_NAME "Books Lifecycle Busy Fixture.exe"
 !define BOOKS_LIFECYCLE_PAYLOAD "@PAYLOAD@"
@@ -105,7 +107,7 @@ Section
 SetOutPath $INSTDIR
 !insertmacro installApplicationFiles
 ; Exact downstream stock responsibilities occur only after publication.
-WriteRegStr HKCU "@REGISTRY@" "InstallLocation" "$INSTDIR"
+WriteRegStr HKCU "@INSTALL_REGISTRY@" "InstallLocation" "$INSTDIR"
 WriteRegStr HKCU "@REGISTRY@" "DisplayVersion" "0.28.0"
 !insertmacro customInstall
 FileOpen $0 "@MARKER@" w
@@ -114,7 +116,7 @@ FileClose $0
 SectionEnd
 '''
         values=dict(EXE=work/(label+'.exe'),TARGET=target,TEMPLATES=root/'node_modules/app-builder-lib/templates/nsis/include',
-            RESOURCES=root/'build-cache/pack-inputs/nsis-resources',NORMAL=normal,UNINSTALLER=uninstaller,REGISTRY=registry,
+            RESOURCES=root/'build-cache/pack-inputs/nsis-resources',NORMAL=normal,UNINSTALLER=uninstaller,REGISTRY=registry,INSTALL_REGISTRY=install_registry,
             ICON=icon,PAYLOAD=payload,PACKAGE_INCLUDE=generated,VERIFY=verify,INCLUDE=root/'desktop/installer.nsh',
             PLAN=plan_path,PLAN_SHA=plan_sha,POISON=work/'unsafe-execution.txt',MARKER=marker,UPDATED='1 == 1' if updated else '0 == 1')
         for name,value in values.items():source=source.replace('@'+name+'@',str(value))
@@ -140,7 +142,7 @@ SectionEnd
         repo=work/'PersonalRepository';(repo/'.git').mkdir(parents=True);source=repo/'program.py';source.write_bytes(b'personal source remains')
         before=source.read_bytes();refused,marker=compile_case('unknown',repo,work/'NeverCreatedData')
         assert refused==20 and not marker.exists() and source.read_bytes()==before and not (work/'NeverCreatedData').exists()
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,registry) as key:assert winreg.QueryValueEx(key,'InstallLocation')[0]==str(target)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,install_registry) as key:assert winreg.QueryValueEx(key,'InstallLocation')[0]==str(target)
         # Exercise the REAL accepted 0.27 payload with a never-executed old
         # uninstaller. Its native original identities survive directory retention.
         legacy=work/'LegacyMachine'/'Application';legacy.mkdir(parents=True)
@@ -166,8 +168,10 @@ SectionEnd
         old_profile=Path(environment['APPDATA'])/'Books Arranger';(old_profile/'Local Storage/leveldb').mkdir(parents=True)
         settings=old_profile/'desktop-settings.json';settings.write_text(json.dumps(dict(dataDir=str(catalog.parent),catalogMode='existing')))
         decisions=old_profile/'Local Storage/leveldb/000001.log';decisions.write_bytes(b'legacy pending decisions and credential fixture bytes')
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER,install_registry) as key:
+            winreg.SetValueEx(key,'InstallLocation',0,winreg.REG_SZ,str(legacy))
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER,registry) as key:
-            winreg.SetValueEx(key,'InstallLocation',0,winreg.REG_SZ,str(legacy));winreg.SetValueEx(key,'DisplayVersion',0,winreg.REG_SZ,'0.27.0')
+            winreg.SetValueEx(key,'DisplayVersion',0,winreg.REG_SZ,'0.27.0')
         legacy_exit,legacy_marker=compile_case('legacy-silent',legacy,catalog,updated=True)
         assert legacy_exit==0 and legacy_marker.read_text()==str(legacy),('Actual legacy silent update failed',legacy_exit)
         legacy_bootstrap=legacy.parent/lifecycle.BOOTSTRAP;upgraded=json.loads(legacy_bootstrap.read_text())
@@ -330,8 +334,9 @@ SectionEnd
             late_include_sha256=hashlib.sha256((root/'desktop/installer-safe-upgrade.nsh').read_bytes()).hexdigest())
         (work/'evidence.json').write_text(json.dumps(evidence,indent=2),encoding='utf8');return evidence
     finally:
-        try:winreg.DeleteKey(winreg.HKEY_CURRENT_USER,registry)
-        except FileNotFoundError:pass
+        for key in (install_registry,registry):
+            try:winreg.DeleteKey(winreg.HKEY_CURRENT_USER,key)
+            except FileNotFoundError:pass
         parent=registry.rsplit('\\',1)[0]
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER,parent) as key:empty=winreg.QueryInfoKey(key)[:2]==(0,0)

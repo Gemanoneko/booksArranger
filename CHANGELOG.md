@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.1] - 2026-11-13
+
+### Fixed
+
+- Find the existing installation from its registered install location during setup so an upgrade can reuse the current catalog.
+
 ## [v0.28.0] - 2026-11-13
 
 ### Added

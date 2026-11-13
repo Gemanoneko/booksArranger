@@ -92,6 +92,7 @@ InstallDir "@OUT@\\Application"
 !define APP_EXECUTABLE_FILENAME "Books Lifecycle Private Harness.exe"
 !define APP_FILENAME "Application"
 !define UNINSTALL_REGISTRY_KEY "Software\\BooksLifecyclePrivateHarnessNeverProduct"
+!define INSTALL_REGISTRY_KEY "Software\\BooksLifecyclePrivateHarnessNeverProductInstall"
 !define BOOKS_LIFECYCLE_PROCESS_NAME "@BUSY@"
 !define BOOKS_LIFECYCLE_PAYLOAD "@PAYLOAD@"
 !define isUpdated '0 == 1'

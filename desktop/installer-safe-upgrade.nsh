@@ -3,7 +3,7 @@
 !define BOOKS_SAFE_LEGACY_OVERRIDE
 !macroundef uninstallOldVersion
 !macro uninstallOldVersion ROOT_KEY
-  ReadRegStr $R1 ${ROOT_KEY} "${UNINSTALL_REGISTRY_KEY}" "InstallLocation"
+  ReadRegStr $R1 ${ROOT_KEY} "${INSTALL_REGISTRY_KEY}" "InstallLocation"
   ${If} $R1 != ""
     ReadRegStr $R2 ${ROOT_KEY} "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
     Call BooksNewRequest
