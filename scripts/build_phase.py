@@ -4,11 +4,13 @@ import hashlib
 import json
 import os
 import re
+import struct
 from pathlib import Path
 import subprocess
 import sys
 import time
 import urllib.request
+import zlib
 
 ROOT=Path(__file__).absolute().parent.parent
 INSTALL_UTIL_SHA256='97bd546b5cd2aaf16b77bc9e2be8a18962dd74ab5c4d23b35b163ca89bf4dd2a'
@@ -22,6 +24,106 @@ def run(argv, proof, cwd=ROOT, input=None):
     # Separate bounded tails: a long stdout can never push stderr out of the message.
     if result.returncode:raise RuntimeError('Build command failed '+str(argv[:2])+'\nstderr tail: '+result.stderr.decode(errors='replace')[-4000:]+'\nstdout tail: '+result.stdout.decode(errors='replace')[-4000:])
     return result.stdout.decode('utf8',errors='strict').replace('\r\n','\n')
+
+SEVEN_SIGNATURE=b"7z\xbc\xaf'\x1c"
+NSIS_SIGNATURE=b'\xef\xbe\xad\xdeNullsoftInst'
+
+def held_range(installer, offset, size):
+    end=offset+size
+    while offset<end:
+        length=min(1024*1024,end-offset)
+        block=installer.read_at(offset,length)
+        if len(block)!=length:raise RuntimeError('Truncated held NSIS installer')
+        yield block
+        offset+=length
+
+def nsis_app_archive(installer, size):
+    """Return the sole raw 7z block in the pinned non-solid NSIS format."""
+    def read(offset,length):
+        data=installer.read_at(offset,length)
+        if len(data)!=length:raise RuntimeError('Truncated NSIS framing')
+        return data
+
+    if size<1024 or read(0,2)!=b'MZ':raise RuntimeError('Expected NSIS installer executable')
+    # NSIS checks the firstheader at sector boundaries. Bound the stub probe
+    # independently of the application archive or the generated uninstaller.
+    stub=read(0,min(size,1024*1024))
+    headers=[offset for offset in range(512,len(stub)-27,512)
+             if stub[offset+4:offset+20]==NSIS_SIGNATURE]
+    if len(headers)!=1:raise RuntimeError('Expected one aligned NSIS firstheader')
+    header=headers[0]
+    flags,header_size,nsis_size=struct.unpack('<I16xII',stub[header:header+28])
+    data_end=size-4
+    if flags!=0 or not 0<header_size<=size or header+nsis_size!=size:
+        raise RuntimeError('Unexpected NSIS installer framing')
+    crc=0
+    for block in held_range(installer,512,data_end-512):crc=zlib.crc32(block,crc)
+    if crc!=struct.unpack('<I',read(data_end,4))[0]:raise RuntimeError('NSIS installer CRC differs')
+
+    position=header+28
+    archive=None
+    for index in range(65536):
+        if position==data_end:
+            if archive is None:raise RuntimeError('Expected one raw NSIS app 7z block')
+            return archive
+        if position+4>data_end:raise RuntimeError('Truncated NSIS block length')
+        word=struct.unpack('<I',read(position,4))[0]
+        offset=position+4
+        length=word&0x7fffffff
+        position=offset+length
+        if not length or position>data_end:raise RuntimeError('Invalid NSIS block extent')
+        compressed=bool(word&0x80000000)
+        if index==0:
+            if not compressed and length!=header_size:raise RuntimeError('Unexpected NSIS header block')
+            continue
+        if compressed or length<6 or read(offset,6)!=SEVEN_SIGNATURE:continue
+        if archive is not None:raise RuntimeError('Multiple raw NSIS app 7z blocks')
+        if length<32:raise RuntimeError('Truncated NSIS app 7z header')
+        signature=read(offset,32)
+        start_crc,next_offset,next_size,next_crc=struct.unpack('<IQQI',signature[8:])
+        if (signature[6]!=0 or zlib.crc32(signature[12:])!=start_crc or not next_size
+                or 32+next_offset+next_size!=length):
+            raise RuntimeError('Invalid NSIS app 7z header or extent')
+        crc=0
+        for block in held_range(installer,offset+32+next_offset,next_size):crc=zlib.crc32(block,crc)
+        if crc!=next_crc:raise RuntimeError('NSIS app 7z next-header CRC differs')
+        archive=(offset,length)
+    raise RuntimeError('NSIS installer exceeds the data-block bound')
+
+def verify_nsis_payload(tree,proof,installer,seven):
+    tree.protect(seven)
+    installer_size=tree.protect(installer)['size']
+    def entries(text):
+        result=[]
+        for block in text.split('----------')[-1].split('\n\n'):
+            properties=dict(line.split(' = ',1) for line in block.splitlines() if ' = ' in line)
+            if 'Path' in properties:result.append(properties)
+        return result
+    # Standalone 7za does not parse NSIS and limits its self-extracting archive
+    # probe. Derive the payload from NSIS block boundaries in the held setup.
+    held_installer=tree.files[str(tree.child(installer)).casefold()]
+    offset,physical=nsis_app_archive(held_installer,installer_size)
+    embedded=tree.fresh(Path(proof['ownedRoot'])/'nsis-archive')
+    app_archive=embedded/'app-64.7z'
+    if tree.write(app_archive,held_range(held_installer,offset,physical))['size']!=physical:raise RuntimeError('Embedded NSIS app archive carve incomplete')
+    payload=tree.fresh(Path(proof['ownedRoot'])/'nsis-payload')
+    app_listing=run([str(seven),'l','-slt',str(app_archive)],proof)
+    sections=app_listing.split('\n--\n')
+    header=dict(line.split(' = ',1) for line in sections[-1].split('\n----------\n')[0].splitlines() if ' = ' in line) if len(sections)==2 else {}
+    if (header.get('Type')!='7z' or header.get('Physical Size')!=str(physical)
+            or header.get('Offset','0')!='0' or header.get('Tail Size','0')!='0'):
+        raise RuntimeError('Expected a complete standalone NSIS app 7z archive')
+    names=set()
+    for properties in entries(app_listing):
+        relative=properties['Path']
+        canonical=relative.replace('\\','/')
+        if not canonical or canonical.startswith('/') or ':' in canonical or any(p in ('.','..') for p in canonical.split('/')) or canonical.casefold() in names or properties.get('Symbolic Link') or properties.get('Hard Link'):raise RuntimeError('NSIS app payload member refused')
+        names.add(canonical.casefold())
+        destination=tree.child(payload/canonical)
+        tree.directory(destination if properties.get('Folder')=='+' else destination.parent,create=True)
+    run([str(seven),'x',str(app_archive),'-o'+str(payload),'-y'],proof)
+    tree.tree_manifest(payload)
+    return payload
 
 def prepare(tree,proof):
     owned=tree.directory(proof['ownedRoot']);tree.created[str(owned).casefold()]=owned
@@ -234,49 +336,9 @@ def build(tree,proof,runtime,backend,pins,pkg,prior):
     request={**proof,'build_id':build_id,'output':str(output),'runtime':str(runtime),'backend':str(backend),'pins':pins,'version':pkg['version'],'shell':str(shell),'shell_manifest':str(owned/'shell-manifest.json'),'pack_inputs_sha256':proof['pack_inputs']['config_sha256']}
     tree.write(Path(proof['ownedRoot'])/'build-result.json',[json.dumps(request).encode()])
     seven=ROOT/'node_modules'/'7zip-bin'/'win'/'x64'/'7za.exe'
-    tree.protect(seven)
     installer=output/('Books-Arranger-Setup-'+pkg['version']+'.exe')
-    installer_size=tree.protect(installer)['size']
-    listing=run([str(seven),'l','-slt',str(installer)],proof)
-    def entries(text):
-        result=[]
-        for block in text.split('----------')[-1].split('\n\n'):
-            properties=dict(line.split(' = ',1) for line in block.splitlines() if ' = ' in line)
-            if 'Path' in properties:result.append(properties)
-        return result
-    # 7zip-bin's reduced 7za has no NSIS handler: it opens the installer AS the one
-    # embedded app 7z it finds at an offset (NSIS stub before it, NSIS data after it).
-    # Require exactly that shape, then carve those exact bytes from the held installer
-    # handle. Member checks and the payload-equality verifier below are unchanged.
-    sections=listing.split('\n--\n')
-    header=dict(line.split(' = ',1) for line in sections[-1].split('\n----------\n')[0].splitlines() if ' = ' in line) if len(sections)==2 else {}
-    try:offset,physical,tail=int(header['Offset']),int(header['Physical Size']),int(header.get('Tail Size','0'))
-    except (KeyError,ValueError):raise RuntimeError('Expected exactly one embedded NSIS app 7z archive')
-    if header.get('Type')!='7z' or offset<=0 or physical<=0 or tail<0 or offset+physical+tail!=installer_size:raise RuntimeError('Expected exactly one embedded NSIS app 7z archive')
-    held_installer=tree.files[str(tree.child(installer)).casefold()]
-    def carve():
-        position=0
-        for block in held_installer.chunks():
-            start=max(offset-position,0);end=min(offset+physical-position,len(block));position+=len(block)
-            if start<end:yield block[start:end]
-            if position>=offset+physical:return
-    embedded=tree.fresh(Path(proof['ownedRoot'])/'nsis-archive')
-    app_archive=embedded/'app-64.7z'
-    if tree.write(app_archive,carve())['size']!=physical:raise RuntimeError('Embedded NSIS app archive carve incomplete')
-    if next(tree.files[str(tree.child(app_archive)).casefold()].chunks(),b'')[:6]!=b"7z\xbc\xaf'\x1c":raise RuntimeError('Carved NSIS app archive signature refused')
-    payload=tree.fresh(Path(proof['ownedRoot'])/'nsis-payload')
-    app_listing=run([str(seven),'l','-slt',str(app_archive)],proof)
-    if sorted(e['Path'] for e in entries(app_listing))!=sorted(e['Path'] for e in entries(listing)):raise RuntimeError('Carved NSIS app archive members differ from installer listing')
-    names=set()
-    for properties in entries(app_listing):
-        relative=properties['Path']
-        canonical=relative.replace('\\','/')
-        if not canonical or canonical.startswith('/') or ':' in canonical or any(p in ('.','..') for p in canonical.split('/')) or canonical.casefold() in names or properties.get('Symbolic Link') or properties.get('Hard Link'):raise RuntimeError('NSIS app payload member refused')
-        names.add(canonical.casefold())
-        destination=tree.child(payload/canonical)
-        tree.directory(destination if properties.get('Folder')=='+' else destination.parent,create=True)
-    run([str(seven),'x',str(app_archive),'-o'+str(payload),'-y'],proof)
-    tree.tree_manifest(payload);tree.tree_manifest(output/'win-unpacked')
+    payload=verify_nsis_payload(tree,proof,installer,seven)
+    tree.tree_manifest(output/'win-unpacked')
     request['nsis_payload']=str(payload)
     remaining=max(1,(proof['deadline']-time.time()*1000)/1000)
     verifier=subprocess.run([proof['node'],str(ROOT/'scripts'/'build-manifest.mjs')],cwd=ROOT,input=json.dumps(request).encode(),capture_output=True,timeout=remaining,creationflags=0x08000000,env=os.environ.copy())

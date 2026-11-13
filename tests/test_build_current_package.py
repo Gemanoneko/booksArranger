@@ -7,10 +7,57 @@ from pathlib import Path
 import tempfile
 import unittest
 import re
+import struct
+import zlib
 
 
 @unittest.skipUnless(os.name=='nt','Native build provenance')
 class CurrentPackageProducerTests(unittest.TestCase):
+    def test_nsis_app_archive_is_selected_only_from_one_valid_raw_data_block(self):
+        import sys
+        scripts=Path(__file__).resolve().parents[1]/'scripts'
+        sys.path.insert(0,str(scripts))
+        try:
+            from build_phase import NSIS_SIGNATURE,SEVEN_SIGNATURE,nsis_app_archive
+        finally:
+            sys.path.remove(str(scripts))
+
+        class HeldBytes:
+            def __init__(self,data):self.data=data
+            def read_at(self,offset,size):return self.data[offset:offset+size]
+
+        def raw(data):return struct.pack('<I',len(data))+data
+
+        def setup(*blocks):
+            stub=b'MZ'+bytes(1022)
+            data=raw(b'hdr')+b''.join(blocks)
+            header=struct.pack('<I',0)+NSIS_SIGNATURE+struct.pack('<II',3,28+len(data)+4)
+            installer=stub+header+data
+            return installer+struct.pack('<I',zlib.crc32(installer[512:]))
+
+        packed=b'packed bytes'
+        next_header=b'next header'
+        start=struct.pack('<QQI',len(packed),len(next_header),zlib.crc32(next_header))
+        archive=SEVEN_SIGNATURE+b'\0\4'+struct.pack('<I',zlib.crc32(start))+start+packed+next_header
+        prefix=raw(bytes(9*1024*1024))
+        installer=setup(prefix,raw(archive),raw(b'NSIS tail'))
+        self.assertEqual(nsis_app_archive(HeldBytes(installer),len(installer)),
+                         (1024+28+7+len(prefix)+4,len(archive)))
+        for label,damaged,pattern in (
+            ('duplicate',setup(raw(archive),raw(archive)),'Multiple raw'),
+            ('nested',setup(raw(b'prefix'+archive)),'Expected one raw'),
+            ('compressed',setup(struct.pack('<I',0x80000000|len(archive))+archive),'Expected one raw'),
+            ('truncated',installer[:-1],'installer framing'),
+            ('partial length',setup(raw(archive),b'\x04'),'Truncated NSIS block length'),
+            ('out-of-frame size',setup(struct.pack('<I',len(archive)+1)+archive),'Invalid NSIS block extent'),
+            ('archive trailer',setup(raw(archive+b'x')),'header or extent'),
+            ('bad start CRC',setup(raw(archive[:8]+bytes(4)+archive[12:])),'header or extent'),
+            ('bad next CRC',setup(raw(archive[:-1]+b'x')),'next-header CRC'),
+            ('bad NSIS CRC',installer[:-4]+bytes(4),'installer CRC'),
+        ):
+            with self.subTest(label=label),self.assertRaisesRegex(RuntimeError,pattern):
+                nsis_app_archive(HeldBytes(damaged),len(damaged))
+
     def test_only_pinned_dead_legacy_helpers_are_excluded_from_private_template(self):
         import sys
         root=Path(__file__).resolve().parents[1];sys.path.insert(0,str(root/'scripts'))
