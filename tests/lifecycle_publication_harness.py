@@ -78,6 +78,8 @@ InstallDir "@TARGET@"
 !define BOOKS_LIFECYCLE_PAYLOAD "@PAYLOAD@"
 !define BOOKS_CURRENT_PACKAGE_INCLUDE "@PACKAGE_INCLUDE@"
 !define isUpdated '@UPDATED@'
+Var installMode
+Var hasPerMachineInstallation
 !macro BooksLifecycleVerifyPayload ROOT
 @VERIFY@
 !macroend

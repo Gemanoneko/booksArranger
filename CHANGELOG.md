@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.3] - 2026-11-14
+
+### Fixed
+
+- Allow unattended setup to select an explicitly verified existing catalog during local storage migration.
+
 ## [v0.28.2] - 2026-11-14
 
 ### Fixed

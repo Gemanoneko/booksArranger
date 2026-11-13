@@ -70,6 +70,7 @@ Var BooksApplicationStagePlan
 Var BooksApplicationStageSha
 Var BooksControlNamespace
 Var BooksControlNamespaceSha
+Var BooksReviewedCommand
 !endif
 
 !macro BooksTip CONTROL TEXT
@@ -192,6 +193,12 @@ Function ${PREFIX}BooksCheckRunning
 FunctionEnd
 !macroend
 
+!ifndef BUILD_UNINSTALLER
+!macro customInit
+  Call BooksApplyReviewedSelection
+!macroend
+!endif
+
 ; This supported hook is checked BEFORE electron-builder's default FIND/KILL
 ; implementation, including early silent un.onInit. customUnInit is too late.
 !macro customCheckAppRunning
@@ -225,6 +232,9 @@ FunctionEnd
       ${If} $2 != "1"
         Call BooksRefuse
       ${EndIf}
+      ${If} $BooksReviewedCommand != ""
+        Call BooksValidateReviewedSelection
+      ${EndIf}
       ${If} ${isUpdated}
         Call BooksPrepareLegacyUpdate
       ${EndIf}
@@ -236,6 +246,61 @@ FunctionEnd
   !insertmacro BooksCommon "un."
 !else
   !insertmacro BooksCommon ""
+
+Function BooksApplyReviewedSelection
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "--books-reviewed-plan" $1
+  ${If} ${Errors}
+    ClearErrors
+    ${GetOptions} $0 "--books-reviewed-sha256" $1
+    ${If} ${Errors}
+      ${If} ${Silent}
+      ${AndIfNot} ${isUpdated}
+        Call BooksRefuse
+      ${EndIf}
+      Return
+    ${EndIf}
+  ${EndIf}
+  ${IfNot} ${Silent}
+  ${OrIf} ${isUpdated}
+  ${OrIf} $installMode != "CurrentUser"
+  ${OrIf} $hasPerMachineInstallation == "1"
+    Call BooksRefuse
+  ${EndIf}
+  System::Call 'kernel32::GetCommandLineW() p .r0'
+  System::Call 'kernel32::lstrlenW(p r0) i .r2'
+  ${If} $2 >= ${NSIS_MAX_STRLEN}
+    Call BooksRefuse
+  ${EndIf}
+  System::Call '*$0(&w${NSIS_MAX_STRLEN} .r1)'
+  StrCpy $BooksReviewedCommand $1
+  Call BooksValidateReviewedSelection
+FunctionEnd
+
+Function BooksValidateReviewedSelection
+  Call BooksNewRequest
+  WriteINIStr "$BooksRequest" "request" "action" "unattended-selection"
+  WriteINIStr "$BooksRequest" "request" "command_line" "$BooksReviewedCommand"
+  ReadRegStr $R1 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  WriteINIStr "$BooksRequest" "request" "registered_application_dir" "$R1"
+  WriteINIStr "$BooksRequest" "request" "registered_version" "$R2"
+  WriteINIStr "$BooksRequest" "request" "process_name" "${BOOKS_LIFECYCLE_PROCESS_NAME}"
+  Call BooksRunHelper
+  ${If} $2 != "1"
+    Call BooksRefuse
+  ${EndIf}
+  ReadINIStr $BooksPlan "$BooksResponse" "result" "plan_path"
+  ReadINIStr $BooksPlanSha "$BooksResponse" "result" "plan_sha256"
+  ReadINIStr $INSTDIR "$BooksResponse" "result" "application_dir"
+  ReadINIStr $BooksProfile "$BooksResponse" "result" "profile_dir"
+  ${If} $BooksPlan == ""
+  ${OrIf} $BooksPlanSha == ""
+  ${OrIf} $INSTDIR == ""
+    Call BooksRefuse
+  ${EndIf}
+FunctionEnd
 
 Function BooksNormalizeDirectory
   ; Same substring search as the pinned stock StrContains helper, without

@@ -971,6 +971,69 @@ def _selected_profile_affinity(configured, selected, facts):
     return _relocated_profile_catalog(configured,selected,facts,context.manifest)
 
 
+def unattended_arguments(command_line):
+    shell=ctypes.WinDLL('shell32',use_last_error=True)
+    parse=shell.CommandLineToArgvW
+    parse.argtypes=[wintypes.LPCWSTR,ctypes.POINTER(ctypes.c_int)]
+    parse.restype=ctypes.POINTER(wintypes.LPWSTR)
+    size=ctypes.c_int()
+    argv=parse(command_line,ctypes.byref(size))
+    _need(bool(argv),'invalid_request')
+    try:
+        _need(size.value==4 and argv[1]=='/S' and argv[2].startswith('--books-reviewed-plan=') and
+              argv[3].startswith('--books-reviewed-sha256='),'invalid_request')
+        plan=argv[2].split('=',1)[1]
+        sha=argv[3].split('=',1)[1]
+        _need(bool(plan) and re.fullmatch('[a-f0-9]{64}',sha),'invalid_request')
+        return plan,sha
+    finally:
+        local=ctypes.WinDLL('kernel32')
+        local.LocalFree.argtypes=[ctypes.c_void_p]
+        local.LocalFree(argv)
+
+
+def unattended_selection(plan_path, plan_sha256, registered_application, registered_version, process_name):
+    """Admit an explicit fresh, same-account migration before package retirement."""
+    path=_absolute(plan_path)
+    _local(path)
+    request,_,sha=_json(path)
+    _need(sha==plan_sha256 and set(request)=={'schema','registered_application','registered_version','selection_plan'} and
+          request['schema']=='books-unattended-existing-install-v1' and
+          request['registered_application']==registered_application and request['registered_version']==registered_version,
+          'selection_changed',path)
+    plan=request['selection_plan']
+    chosen=plan['selection']
+    app,profile,db=(_absolute(plan['application_dir']),_absolute(plan['profile_dir']),_absolute(chosen['database']))
+    old=_absolute(registered_application)
+    _need(registered_version=='0.28.1' and chosen['mode']=='existing' and chosen.get('profile_confirmed') is True and
+          not chosen.get('verification_required') and chosen.get('storage_relocation') and
+          all(item.drive.upper()=='I:' for item in (path,app,profile,db)) and old.drive.upper()=='C:' and
+          app.name=='Books Arranger' and profile==app.parent/'Profile' and
+          chosen['resolved_database']==str(db) and db.name=='inventory.sqlite3' and
+          not _under(path,app.parent) and not _under(path,db.parent),
+          'invalid_relocation_selection',path)
+    _need(not any(os.path.lexists(item) for item in (app,profile,app.parent/BOOTSTRAP,
+          app.parent/'books-arranger-selection-in-progress.json')), 'new_managed_folder_not_empty',app)
+    for name in ('Temp','Downloads','Logs','MaintenanceTemp'):
+        item=app.parent/name
+        _need(not os.path.lexists(item),'new_managed_folder_not_empty',item)
+    authority=chosen.get('profile_source_authority') or {}
+    _need(authority.get('kind')=='registered-installation' and
+          authority.get('bootstrap')==str(old.parent/BOOTSTRAP),
+          'profile_producer_not_confirmed',path)
+    _validate_profile_source_authority(_absolute(chosen['associated_profile']),authority)
+    _need(process_check([str(old),str(app)],process_name)['state']=='available','in_use',old)
+    fresh=selection_plan('existing',db,application_dir=app,profile_dir=profile,
+                         config_paths=[chosen['profile_settings_path']])
+    _need(fresh==plan,'selection_changed',path)
+    admit_application_target(str(app),registered_application,registered_version,process_name)
+    retire_owned_package(registered_application,registered_version,process_name=process_name,_inspect=True)
+    with _selection_catalog(chosen,chosen['storage_relocation']) as _:
+        from storage_relocation_native import retained_runtime
+        _need(retained_runtime(db),'relocation_verification_required',db)
+    return plan
+
+
 def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storage_relocation=None,
                      process_name='Books Arranger.exe',require_package=False,retained_package=None,control_namespace=None):
     """Final install commit only. No catalog migration or schema initialization."""
@@ -1882,6 +1945,15 @@ def wizard(request_path,response_path):
             response['result'].update(plan_path=str(plan),plan_sha256=hashlib.sha256(raw).hexdigest(),
                 data_dir=result['selection']['data_dir'],database=result['selection']['database'],
                 profile_dir=result['profile_dir'],profile_confirmed=str(result['selection'].get('profile_confirmed',False)))
+        elif action=='unattended-selection':
+            plan_path,plan_sha=unattended_arguments(req['command_line'])
+            result=unattended_selection(plan_path,plan_sha,req['registered_application_dir'],
+                                        req['registered_version'],req['process_name'])
+            raw=json.dumps(result,sort_keys=True,separators=(',', ':')).encode('utf8')
+            plan=Path(response_path).absolute().parent/('unattended-selection-'+str(uuid.uuid4())+'.json')
+            _write_new(plan,raw)
+            response['result'].update(plan_path=str(plan),plan_sha256=hashlib.sha256(raw).hexdigest(),
+                application_dir=result['application_dir'],profile_dir=result['profile_dir'])
         elif action=='commit-selection':
             plan,_,digest=_json(req['plan_path'])
             _need(digest==req['plan_sha256'],'selection_changed')
