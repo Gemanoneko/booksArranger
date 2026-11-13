@@ -197,6 +197,13 @@ FunctionEnd
 !macroend
 
 !ifndef BUILD_UNINSTALLER
+!macro BooksReadReviewedRegistration ROOT
+  ReadRegStr $R1 ${ROOT} "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ReadRegStr $R2 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  ReadRegStr $R3 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" "DisplayName"
+  ReadRegStr $R4 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+!macroend
+
 !macro customInit
   StrCpy $BooksReviewedPerUser "0"
   ${If} $installMode == "CurrentUser"
@@ -204,6 +211,10 @@ FunctionEnd
     StrCpy $BooksReviewedPerUser "1"
   ${EndIf}
   Call BooksApplyReviewedSelection
+  ${If} $BooksReviewedCommand != ""
+    !insertmacro BooksReadReviewedRegistration SHELL_CONTEXT
+    Call BooksValidateReviewedSelection
+  ${EndIf}
 !macroend
 !endif
 
@@ -241,9 +252,11 @@ FunctionEnd
         Call BooksRefuse
       ${EndIf}
       ${If} $BooksReviewedCommand != ""
+        !insertmacro BooksReadReviewedRegistration SHELL_CONTEXT
         Call BooksValidateReviewedSelection
       ${EndIf}
       ${If} ${isUpdated}
+        ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
         Call BooksPrepareLegacyUpdate
       ${EndIf}
     !endif
@@ -282,17 +295,21 @@ Function BooksApplyReviewedSelection
   ${EndIf}
   System::Call '*$0(&w${NSIS_MAX_STRLEN} .r1)'
   StrCpy $BooksReviewedCommand $1
-  Call BooksValidateReviewedSelection
 FunctionEnd
 
 Function BooksValidateReviewedSelection
+  ; The late stock hook has already captured the current registration tuple.
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
   Call BooksNewRequest
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
   WriteINIStr "$BooksRequest" "request" "action" "unattended-selection"
   WriteINIStr "$BooksRequest" "request" "command_line" "$BooksReviewedCommand"
-  ReadRegStr $R1 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" "InstallLocation"
-  ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
-  ReadRegStr $R3 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayName"
-  ReadRegStr $R4 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
   WriteINIStr "$BooksRequest" "request" "registered_application_dir" "$R1"
   WriteINIStr "$BooksRequest" "request" "registered_version" "$R2"
   WriteINIStr "$BooksRequest" "request" "registered_display_name" "$R3"
@@ -346,10 +363,11 @@ Function BooksPrepareLegacyUpdate
   ${If} $BooksPlan != ""
     Return
   ${EndIf}
+  Push $R2
   Call BooksNewRequest
+  Pop $R2
   WriteINIStr "$BooksRequest" "request" "action" "legacy-update-plan"
   WriteINIStr "$BooksRequest" "request" "application_dir" "$INSTDIR"
-  ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
   WriteINIStr "$BooksRequest" "request" "version" "$R2"
   WriteINIStr "$BooksRequest" "request" "process_name" "${BOOKS_LIFECYCLE_PROCESS_NAME}"
   Call BooksRunHelper
