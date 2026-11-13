@@ -21,9 +21,10 @@ export function fileFacts(file) {
   return {size:bytes.length,sha256:hash(bytes)};
 }
 
-export function createChildPolicy(context,{now=()=>Date.now(),inspectFile=fileFacts}={}) {
+export function createChildPolicy(context,{now=()=>Date.now(),inspectFile=fileFacts,onChildEvent=()=>{}}={}) {
   let refusal=null;
   const launches=[];
+  const authorized=new WeakMap();
   function deny(reason) { refusal ||= Error('Pack child refused: '+reason); throw refusal; }
   function check(ok,reason) {if(!ok)deny(reason);}
   function assertClean() {
@@ -112,16 +113,25 @@ export function createChildPolicy(context,{now=()=>Date.now(),inspectFile=fileFa
     if(options.timeout!==undefined)check(Number.isFinite(options.timeout)&&options.timeout>0,'invalid child timeout');
     const prepared={file:mapped,args:mappedArgs,options:{...options,cwd,env:environment(options.env),shell:false,windowsHide:true,detached:false,timeout:Math.min(remaining,options.timeout??remaining),maxBuffer:Math.min(options.maxBuffer??16*1024*1024,16*1024*1024)}};
     launches.push({kind,file:mapped,args:mappedArgs,cwd,windowsHide:true});
+    authorized.set(prepared,launches.length-1);
+    onChildEvent('prepared',{index:launches.length-1,kind,file:mapped,cwd});
     return prepared;
+  }
+  function observe(prepared,child) {
+    const index=authorized.get(prepared);
+    onChildEvent('spawned',{index,pid:Number.isInteger(child.pid)?child.pid:null});
+    child.once('error',error=>onChildEvent('error',{index,code:typeof error.code==='string'?error.code:'UNKNOWN'}));
+    child.once('close',(code,signal)=>onChildEvent('closed',{index,code,signal}));
+    return child;
   }
   function install(target=cp) {
     const originals={};
     for(const name of ['spawn','execFile','fork','exec','spawnSync','execFileSync','execSync']) originals[name]=target[name];
-    target.spawn=function(file,args,options){const p=prepare(file,args,options,'spawn');return originals.spawn.call(this,p.file,p.args,p.options);};
+    target.spawn=function(file,args,options){const p=prepare(file,args,options,'spawn');try{return observe(p,originals.spawn.call(this,p.file,p.args,p.options));}catch(error){onChildEvent('error',{index:authorized.get(p),code:typeof error.code==='string'?error.code:'UNKNOWN'});throw error;}};
     target.execFile=function(file,args,options,callback){
       if(typeof options==='function'){callback=options;options={};}
       const p=prepare(file,args,options,'execFile');
-      return originals.execFile.call(this,p.file,p.args,p.options,callback);
+      try{return observe(p,originals.execFile.call(this,p.file,p.args,p.options,callback));}catch(error){onChildEvent('error',{index:authorized.get(p),code:typeof error.code==='string'?error.code:'UNKNOWN'});throw error;}
     };
     for(const name of ['fork','exec','spawnSync','execFileSync','execSync'])target[name]=()=>deny('unsupported process API '+name);
     if(target===cp)syncBuiltinESMExports();

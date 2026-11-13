@@ -31,7 +31,7 @@ guard(dgram,'createSocket');guard(globalThis,'fetch');guard(process,'dlopen');
 syncBuiltinESMExports();
 after(()=>{for(const restore of restores.reverse())restore();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No real process/network/native call was attempted');});
 const {createChildPolicy,fileFacts}=await import('../scripts/build-child-policy.mjs');
-const {verifyAppStage,packageArchivePath}=await import('../scripts/build-builder.mjs');
+const {verifyAppStage,packageArchivePath,createBuildTrace,watchBuildCompletion,observeNsisAwait}=await import('../scripts/build-builder.mjs');
 const {readAsarFiles}=await import('../scripts/build-manifest.mjs');
 const asar=await import('@electron/asar');
 const require=createRequire(import.meta.url);
@@ -69,6 +69,73 @@ function fakeProcess(output='fixture output\n'){
   queueMicrotask(()=>{child.stdout.emit('data',Buffer.from(output));child.emit('close',0);});
   return child;
 }
+
+test('build completion refuses pending or unverified promises and propagates rejection',async()=>{
+  for(const [work,verified,expected] of [[new Promise(()=>{}),false,'async completion'],
+    [Promise.resolve(),false,'async completion'],[Promise.reject(Error('fixture rejection')),true,'fixture rejection']]){
+    const events=new EventEmitter(),failures=[];
+    watchBuildCompletion(work,{isVerified:()=>verified,subscribeBeforeExit:f=>events.once('beforeExit',f),fail:e=>failures.push(e.message)});
+    await Promise.resolve();events.emit('beforeExit');await Promise.resolve();
+    assert.ok(failures.some(value=>value.includes(expected)));
+  }
+  const events=new EventEmitter(),failures=[];let verified=false;
+  await watchBuildCompletion(Promise.resolve(),{isVerified:()=>verified,subscribeBeforeExit:f=>events.once('beforeExit',f),fail:e=>failures.push(e.message)});
+  events.once('beforeExit',()=>{verified=true;});events.emit('beforeExit');await Promise.resolve();
+  assert.deepEqual(failures,[],'synchronous final icon proof participates in this emission');
+});
+
+test('build diagnostic persists bounded phases and child states without environment or arguments',t=>{
+  const folder=fs.mkdtempSync(path.join(os.tmpdir(),'books-build-trace-'));t.after(()=>fs.rmSync(folder,{recursive:true}));
+  const file=path.join(folder,'trace.json'),trace=createBuildTrace(file);
+  try{
+    trace.phase('builder-await');trace.child('prepared',{index:0,kind:'makensis',file:path.join(folder,'makensis.exe'),cwd:folder,env:{SECRET:'never-record'},args:['never-record']});
+    trace.child('spawned',{index:0,pid:123});trace.child('closed',{index:0,code:0,signal:null});
+    const raw=fs.readFileSync(file,'utf8'),state=JSON.parse(raw);
+    assert.equal(state.diagnostic_only,true);assert.equal(state.children[0].state,'closed');assert.equal(state.children[0].exit_code,0);
+    assert.equal(raw.includes('never-record'),false);assert.equal(raw.includes('SECRET'),false);
+    assert.throws(()=>trace.phase('unreviewed phase'),/phase bound/);
+    for(let i=1;i<64;i++)trace.phase('builder-await');
+    assert.throws(()=>trace.phase('builder-await'),/phase bound/);
+    assert.ok(fs.statSync(file).size<=65536);
+  }finally{trace.close();}
+  assert.throws(()=>createBuildTrace(file),/EEXIST/);
+});
+
+test('build diagnostic observes prepared spawned and closed fake children without native calls',async()=>{
+  const f=fixture(),events=[],policy=createChildPolicy(f.context,{now:()=>1000,
+    inspectFile:file=>f.context.executablePins[file],onChildEvent:(event,data)=>events.push({event,...data})});
+  const adapter={spawn:()=>fakeProcess()},restore=policy.install(adapter);
+  try{adapter.spawn(f.context.node,f.npm);await Promise.resolve();}finally{restore();}
+  assert.deepEqual(events.map(e=>e.event),['prepared','spawned','closed']);
+  assert.equal(events[1].pid,424242);assert.equal(events[2].code,0);
+});
+
+test('NSIS await observation preserves callbacks results errors and unresolved boundaries',async()=>{
+  const phases=[],calls=[],output=path.resolve('private-output.exe'),nsis=path.resolve('makensis.exe');
+  const fsApi={open(...args){calls.push(args.slice(0,-1));args.at(-1)(null,7);},close(fd,cb){calls.push([fd]);cb(null);}};
+  const windows={getMakeNsisPath:async value=>({path:value})},pending=new Promise(()=>{});
+  const util={spawnAndWriteWithOutput:(file,args)=>args[0]==='pending'?pending:Promise.resolve({stdout:'exact',stderr:''})};
+  const originals={...fsApi},pathOriginal=windows.getMakeNsisPath,compilerOriginal=util.spawnAndWriteWithOutput;
+  const restore=observeNsisAwait({fsApi,windows,util,output,nsis,onPhase:p=>phases.push(p)});
+  try{
+    fsApi.open(output,'r+',(error,fd)=>{assert.equal(error,null);assert.equal(fd,7);fsApi.close(fd,e=>assert.equal(e,null));});
+    assert.deepEqual(await windows.getMakeNsisPath(nsis),{path:nsis});
+    assert.deepEqual(await util.spawnAndWriteWithOutput(nsis,[]),{stdout:'exact',stderr:''});
+    util.spawnAndWriteWithOutput(nsis,['pending']);await Promise.resolve();
+    assert.equal(phases.at(-1),'compiler-util-enter');
+    assert.deepEqual(calls,[[output,'r+'],[7]]);
+    assert.deepEqual(phases.slice(0,8),['out-open-enter','out-open-returned','out-close-enter','out-close-returned','nsis-path-enter','nsis-path-returned','compiler-util-enter','compiler-util-returned']);
+  }finally{restore();}
+  assert.deepEqual(fsApi,originals);assert.equal(windows.getMakeNsisPath,pathOriginal);assert.equal(util.spawnAndWriteWithOutput,compilerOriginal);
+  const marker=Error('fixture failure');windows.getMakeNsisPath=()=>Promise.reject(marker);
+  util.spawnAndWriteWithOutput=()=>Promise.reject(marker);
+  const undo=observeNsisAwait({fsApi,windows,util,output,nsis,onPhase:p=>phases.push(p)});
+  try{
+    await assert.rejects(windows.getMakeNsisPath(nsis),error=>error===marker);
+    await assert.rejects(util.spawnAndWriteWithOutput(nsis,[]),error=>error===marker);
+    assert.deepEqual(phases.slice(-4),['nsis-path-enter','nsis-path-rejected','compiler-util-enter','compiler-util-rejected']);
+  }finally{undo();}
+});
 
 test('fixed npm prefix becomes a hidden, private, lease-bounded Node launch',()=>{
   const f=fixture(),options={cwd:f.context.appDir,timeout:4000};
@@ -200,7 +267,7 @@ test('invalid timeouts and unsupported process methods are sticky refusals',()=>
 });
 
 test('install wraps asynchronous originals and restores the original adapter exactly',()=>{
-  const f=fixture(),calls=[],token={};
+  const f=fixture(),calls=[],token=new EventEmitter();
   const original=(...args)=>{calls.push(args);return token;};
   const adapter=Object.fromEntries(['spawn','execFile','fork','exec','spawnSync','execFileSync','execSync'].map(k=>[k,original]));
   const before={...adapter},restore=f.policy.install(adapter);

@@ -12,6 +12,67 @@ const require=createRequire(import.meta.url);
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const same=isDeepStrictEqual; // JSON object property order does not change membership or file facts.
+
+// Diagnostic evidence only: never substitutes for the final package proofs.
+export function createBuildTrace(file) {
+  const fd=fs.openSync(file,'wx');
+  const state={schema:'books-builder-progress-v1',diagnostic_only:true,phases:[],children:[]};
+  const phases=new Set(['lease-validated','policy-installed','dependencies-loaded','before-build',
+    'builder-await','builder-returned','stage-verified','complete','icons-await','icons-verified',
+    'out-open-enter','out-open-returned','out-close-enter','out-close-returned',
+    'nsis-path-enter','nsis-path-returned','nsis-path-rejected',
+    'compiler-util-enter','compiler-util-returned','compiler-util-rejected']);
+  function flush(){const bytes=Buffer.from(JSON.stringify(state));if(bytes.length>65536)throw Error('Build diagnostic byte bound');fs.ftruncateSync(fd,0);fs.writeSync(fd,bytes,0,bytes.length,0);fs.fsyncSync(fd);}
+  flush();
+  return {
+    phase(name){if(!phases.has(name)||state.phases.length>=64)throw Error('Build diagnostic phase bound');state.phases.push(name);flush();},
+    child(event,data){
+      if(event==='prepared'){
+        if(data.index!==state.children.length||data.index>=128||!['npm-prefix','nsis-archive','makensis','nsis-generator'].includes(data.kind)||
+           ![data.file,data.cwd].every(v=>typeof v==='string'&&v.length<=4096&&!/[\0\r\n]/.test(v)))throw Error('Build diagnostic child bound');
+        state.children.push({kind:data.kind,file:data.file,cwd:data.cwd,state:'prepared'});
+      }else{
+        const item=state.children[data.index];if(!item)throw Error('Unknown diagnostic child');
+        if(event==='spawned'){if(data.pid!==null&&(!Number.isInteger(data.pid)||data.pid<=0))throw Error('Invalid diagnostic PID');item.pid=data.pid;item.state='spawned';}
+        else if(event==='error'){item.error_code=/^[A-Z_0-9]{1,64}$/.test(data.code)?data.code:'UNKNOWN';item.state='error';}
+        else if(event==='closed'){if(data.code!==null&&!Number.isInteger(data.code))throw Error('Invalid diagnostic exit');item.exit_code=data.code;item.signal=typeof data.signal==='string'&&/^SIG[A-Z0-9]{1,16}$/.test(data.signal)?data.signal:null;item.state='closed';}
+        else throw Error('Unknown diagnostic event');
+      }
+      flush();
+    },
+    close(){fs.closeSync(fd);}
+  };
+}
+
+export function watchBuildCompletion(work,{isVerified,subscribeBeforeExit,fail,enqueue=queueMicrotask}) {
+  let settled=false;
+  const result=Promise.resolve(work).then(()=>{settled=true;},error=>{settled=true;fail(error);});
+  // Icon proof runs synchronously in the same beforeExit emission. No timer
+  // keeps an unfinished await alive or extends the native build deadline.
+  subscribeBeforeExit(()=>enqueue(()=>{if(!settled||!isVerified())fail(Error('Build exited before verified async completion'));}));
+  return result;
+}
+
+export function observeNsisAwait({fsApi,windows,util,output,nsis,onPhase}) {
+  const original={open:fsApi.open,close:fsApi.close,path:windows.getMakeNsisPath,compiler:util.spawnAndWriteWithOutput};
+  const fds=new Set(),same=(a,b)=>typeof a==='string'&&path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
+  fsApi.open=function(...args){
+    if(!same(args[0],output)||typeof args.at(-1)!=='function')return original.open.apply(this,args);
+    onPhase('out-open-enter');const callback=args.at(-1);
+    args[args.length-1]=function(error,fd){onPhase('out-open-returned');if(Number.isInteger(fd))fds.add(fd);return callback.apply(this,arguments);};
+    return original.open.apply(this,args);
+  };
+  fsApi.close=function(fd,callback){
+    if(!fds.has(fd)||typeof callback!=='function')return original.close.apply(this,arguments);
+    onPhase('out-close-enter');return original.close.call(this,fd,function(){fds.delete(fd);onPhase('out-close-returned');return callback.apply(this,arguments);});
+  };
+  windows.getMakeNsisPath=async function(...args){onPhase('nsis-path-enter');try{const value=await original.path.apply(this,args);onPhase('nsis-path-returned');return value;}catch(error){onPhase('nsis-path-rejected');throw error;}};
+  util.spawnAndWriteWithOutput=async function(...args){
+    if(!same(args[0],nsis))return original.compiler.apply(this,args);
+    onPhase('compiler-util-enter');try{const value=await original.compiler.apply(this,args);onPhase('compiler-util-returned');return value;}catch(error){onPhase('compiler-util-rejected');throw error;}
+  };
+  return ()=>{fsApi.open=original.open;fsApi.close=original.close;windows.getMakeNsisPath=original.path;util.spawnAndWriteWithOutput=original.compiler;};
+}
 function ordinaryMap(folder) {
   const values={};
   function walk(current) {
@@ -45,11 +106,13 @@ function installNetworkBoundary(policy) {
   syncBuiltinESMExports();
   return ()=>{for(const restore of restorers.reverse())restore();globalThis.fetch=originalFetch;syncBuiltinESMExports();};
 }
-async function main() {
+async function main(verified=()=>{}) {
   if(process.argv.length!==2&&!(process.argv.length===3&&process.argv[2]==='--icons'))throw Error('Unsupported builder invocation');
   const iconOnly=process.argv[2]==='--icons';
   const lease=validateChildLease({mode:'build',root});delete lease.manifestPath;
   const owned=lease.ownedRoot;
+  const trace=createBuildTrace(path.join(owned,process.argv[2]==='--icons'?'icons-progress.json':'builder-progress.json'));
+  trace.phase('lease-validated');
   const inputPath=path.join(root,'scripts/build-inputs.json');
   if(digest(fs.readFileSync(inputPath))!==lease.pack_inputs?.config_sha256)throw Error('Pack input capability changed');
   const pins=JSON.parse(fs.readFileSync(inputPath,'utf8'));
@@ -69,9 +132,10 @@ async function main() {
     npmCli:tools.npm,nsis:tools.nsis,seven:tools.seven,nsisTemplates:path.join(root,'node_modules/app-builder-lib/templates/nsis'),
     generator:request.generator||{},executablePins,baseEnv,iconOnly,
     ...(!iconOnly?{archivePath:packageArchivePath(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')),request.output,root)}:{})};
-  const policy=createChildPolicy(context);
+  const policy=createChildPolicy(context,{onChildEvent:(event,data)=>trace.child(event,data)});
   policy.install();
   installNetworkBoundary(policy);
+  trace.phase('policy-installed');
   process.once('beforeExit',()=>policy.assertClean());
   if(iconOnly) {
     // CLI is pinned explicitly at1.2.3; no default1.1.0 builder tool substitution.
@@ -81,7 +145,9 @@ async function main() {
       policy.assertClean();
       const ico=fileFacts(path.join(request.output,'icon.ico'));
       if(ico.size<22)throw Error('Icon conversion produced no valid output');
+      trace.phase('icons-verified');verified();
     });
+    trace.phase('icons-await');
     require(tools.icons);
     return; // Keep process/network boundary active until converter event loop drains.
   }
@@ -95,21 +161,31 @@ async function main() {
     const util=require('builder-util'); // imports capture the already-installed child boundary
     policy.wrapBuilderUtilities(util); // before cross-spawn resolves bare npm
     const builder=require('electron-builder');
+    observeNsisAwait({fsApi:require('node:fs'),windows:require('app-builder-lib/out/toolsets/windows'),util,
+      output:request.generator.image,nsis:tools.nsis,onPhase:name=>trace.phase(name)});
+    trace.phase('dependencies-loaded');
     let hookCount=0;
     config.beforeBuild=async context=>{
       if(path.resolve(context.appDir)!==request.app||context.arch!=='x64'||context.electronVersion!==pins.electronVersion)throw Error('Unexpected external dependency hook');
-      verifyAppStage(request.app,manifest);hookCount++;return false;
+      verifyAppStage(request.app,manifest);hookCount++;trace.phase('before-build');return false;
     };
+    trace.phase('builder-await');
     await builder.build({projectDir:root,targets:builder.Platform.WINDOWS.createTarget(['nsis'],builder.Arch.x64),publish:'never',config});
+    trace.phase('builder-returned');
     policy.assertClean();
     if(hookCount!==1)throw Error('External production dependency hook did not run exactly once');
     verifyAppStage(request.app,manifest);
+    trace.phase('stage-verified');
     fs.writeFileSync(path.join(owned,'builder-policy-result.json'),JSON.stringify({schema:'books-builder-policy-v1',passed:true,beforeBuildCalls:hookCount,launches:policy.launches},null,2)+'\n',{flag:'wx'});
+    trace.phase('complete');verified();
   } finally {
     // One-use controller: late dependency work stays guarded through process exit.
     policy.assertClean(); // A dependency cannot turn a caught refusal into success.
   }
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
-  main().catch(error=>{console.error('Guarded builder: '+error.message);process.exitCode=1;});
+  let verified=false;
+  watchBuildCompletion(main(()=>{verified=true;}),{isVerified:()=>verified,
+    subscribeBeforeExit:listener=>process.once('beforeExit',listener),
+    fail:error=>{console.error('Guarded builder: '+error.message);process.exitCode=1;}});
 }
