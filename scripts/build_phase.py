@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import time
 import urllib.request
 
 ROOT=Path(__file__).absolute().parent.parent
+INSTALL_UTIL_SHA256='97bd546b5cd2aaf16b77bc9e2be8a18962dd74ab5c4d23b35b163ca89bf4dd2a'
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 from build_native import bootstrap,lease_check,load_pack_inputs
 
@@ -158,12 +160,32 @@ def private_nsis_include(folder,payload=None,files=None):
     return header.encode()
 
 
+def private_install_util(raw):
+    """Exclude only the pinned dead legacy-uninstaller function dependency set."""
+    if hashlib.sha256(raw).hexdigest()!=INSTALL_UTIL_SHA256:
+        raise RuntimeError('Pinned installUtil template differs; no private rewrite allowed')
+    result=raw
+    for name in (b'GetInQuotes',b'GetFileParent',b'uninstallOldVersion'):
+        result,count=re.subn(rb'^Function '+name+rb'\r?\n.*?^FunctionEnd\r?\n',b'',result,flags=re.M|re.S)
+        if count!=1:raise RuntimeError('Expected single dead stock function')
+    result,count=re.subn(rb'^!macro GetInQuotes Var Str\r?\n.*?^!macroend\r?\n',b'',result,flags=re.M|re.S)
+    if count!=1:raise RuntimeError('Expected single dead quote macro')
+    return result
+
+
 def build(tree,proof,runtime,backend,pins,pkg,prior):
     # electron-builder extracts Electron to win-unpacked.tmp then renames it to
     # win-unpacked inside this directory; that rename needs WRITE (not DELETE) sharing.
     output=tree.fresh(ROOT/'dist'/'builds',allow_child_rename=True);build_id=output.name
     shell,shell_manifest,icon,pack_inputs,seed=stage_shell(tree,proof,pkg)
     owned=Path(proof['ownedRoot'])
+    stock_util=ROOT/'node_modules/app-builder-lib/templates/nsis/include/installUtil.nsh'
+    stock_pin=tree.protect(stock_util)
+    safe_util=owned/'books-installUtil.nsh'
+    safe_pin=tree.write(safe_util,[private_install_util(stock_util.read_bytes())])
+    util_proof={'path':str(safe_util),'sha256':safe_pin['sha256'],'source_sha256':stock_pin['sha256'],
+                'removed_functions':['GetInQuotes','GetFileParent','uninstallOldVersion'],'removed_macro':'GetInQuotes'}
+    tree.write(owned/'books-installUtil.json',[json.dumps(util_proof,sort_keys=True).encode()])
     generator_cwd=tree.directory(owned/'nsis-generator',create=True)
     # Database/uninstall consent happens before InstFiles. Its own exact fresh
     # Python/helper bytes must be embedded, not borrowed from a live old install.
@@ -190,7 +212,7 @@ def build(tree,proof,runtime,backend,pins,pkg,prior):
             'nodeGypRebuild':False,'npmRebuild':True,'icon':str(icon),'win':{**pkg['build']['win'],'icon':str(icon)},
             'nsis':{**pkg['build']['nsis'],'include':str(include),'installerIcon':str(icon),'uninstallerIcon':str(icon),'preCompressedFileExtensions':[]},
             'artifactName':'Books-Arranger-Setup-'+pkg['version']+'.exe'}
-    tree.write(owned/'builder-request.json',[json.dumps({'lease_nonce':proof['nonce'],'app':str(shell),'output':str(output),'generator':{'image':str(image),'script':str(ROOT/'scripts/build-nsis-generator.py'),'requestPath':str(generator_request),'requestSha256':generator_request_pin['sha256']}},sort_keys=True).encode()])
+    tree.write(owned/'builder-request.json',[json.dumps({'lease_nonce':proof['nonce'],'app':str(shell),'output':str(output),'private_install_util':util_proof,'generator':{'image':str(image),'script':str(ROOT/'scripts/build-nsis-generator.py'),'requestPath':str(generator_request),'requestSha256':generator_request_pin['sha256']}},sort_keys=True).encode()])
 
     config_path=Path(proof['ownedRoot'])/'builder-config.json'
     tree.write(config_path,[json.dumps(config,indent=2).encode()])

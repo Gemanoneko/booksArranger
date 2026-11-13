@@ -11,9 +11,6 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include FileFunc.nsh
-!ifndef BUILD_UNINSTALLER
-!include StrContains.nsh
-!endif
 !ifdef DELETE_APP_DATA_ON_UNINSTALL
   !undef DELETE_APP_DATA_ON_UNINSTALL
 !endif
@@ -241,10 +238,26 @@ FunctionEnd
   !insertmacro BooksCommon ""
 
 Function BooksNormalizeDirectory
-  ${StrContains} $0 "${APP_FILENAME}" $INSTDIR
-  ${If} $0 == ""
-    StrCpy $INSTDIR "$INSTDIR\${APP_FILENAME}"
-  ${EndIf}
+  ; Same substring search as the pinned stock StrContains helper, without
+  ; owning its globals/function before assistedInstaller includes it.
+  Push $1
+  Push $2
+  Push $3
+  StrLen $1 "${APP_FILENAME}"
+  StrLen $2 $INSTDIR
+  StrCpy $3 -1
+books_name_scan:
+  IntOp $3 $3 + 1
+  StrCpy $0 $INSTDIR $1 $3
+  StrCmp $0 "${APP_FILENAME}" books_name_found
+  StrCmp $3 $2 books_name_append
+  Goto books_name_scan
+books_name_append:
+  StrCpy $INSTDIR "$INSTDIR\${APP_FILENAME}"
+books_name_found:
+  Pop $3
+  Pop $2
+  Pop $1
   ${GetParent} "$INSTDIR" $0
   StrCpy $BooksProfile "$0\Profile"
 FunctionEnd

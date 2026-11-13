@@ -84,6 +84,14 @@ export function orderPrivateCompilerInput(script,{privateInclude,pluginDirectory
     private_include:privateInclude,pinned_plugin_directory:pluginDirectory,method:'Only the single expected plugin directive is moved before the exact private include'};
 }
 
+export function redirectPrivateInstallUtil(script,privatePath) {
+  const newline=script.includes('\r\n')?'\r\n':'\n',lines=script.split(newline);
+  const matches=lines.map((line,index)=>line.trim()==='!include "installUtil.nsh"'?index:-1).filter(index=>index>=0);
+  if(matches.length!==1||typeof privatePath!=='string'||/[\r\n\0"$]/.test(privatePath)||!path.isAbsolute(privatePath))throw Error('Expected single stock installUtil include and exact private path');
+  const index=matches[0],indent=lines[index].slice(0,lines[index].indexOf('!'));
+  lines[index]=indent+'!include "'+privatePath+'"';return lines.join(newline);
+}
+
 export function observeNsisAwait({fsApi,windows,util,output,nsis,onPhase,onCompilerFailure=()=>{},onCompilerInput=null}) {
   const original={open:fsApi.open,close:fsApi.close,path:windows.getMakeNsisPath,compiler:util.spawnAndWriteWithOutput};
   const fds=new Set(),same=(a,b)=>typeof a==='string'&&path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
@@ -192,11 +200,17 @@ async function main(verified=()=>{}) {
     const util=require('builder-util'); // imports capture the already-installed child boundary
     policy.wrapBuilderUtilities(util); // before cross-spawn resolves bare npm
     const builder=require('electron-builder');
+    const privateUtil=request.private_install_util;
+    if(!privateUtil||privateUtil.path!==path.join(owned,'books-installUtil.nsh')||
+       privateUtil.source_sha256!=='97bd546b5cd2aaf16b77bc9e2be8a18962dd74ab5c4d23b35b163ca89bf4dd2a'||
+       fileFacts(privateUtil.path).sha256!==privateUtil.sha256)throw Error('Native-held private installUtil proof differs');
     let compilerInputCount=0;
     observeNsisAwait({fsApi:require('node:fs'),windows:require('app-builder-lib/out/toolsets/windows'),util,
       output:request.generator.image,nsis:tools.nsis,onPhase:name=>trace.phase(name),
       onCompilerInput:script=>{if(compilerInputCount>=2)throw Error('Expected at most two compiler inputs');
         const ordered=orderPrivateCompilerInput(script,{privateInclude:path.join(owned,'nsis-private.nsh'),pluginDirectory:path.join(tools.nsisResources,'plugins','x86-unicode')});
+        const redirected=redirectPrivateInstallUtil(ordered.script,privateUtil.path);
+        ordered.plugin_ordered_sha256=ordered.final_sha256;ordered.script=redirected;ordered.final_sha256=digest(Buffer.from(redirected));ordered.private_install_util=privateUtil;
         const prefix=path.join(owned,'compiler-input-'+compilerInputCount++);
         for(const [suffix,bytes] of [['.nsi',ordered.script],['.json',JSON.stringify({...ordered,script:undefined})]]){
           const fd=fs.openSync(prefix+suffix,'wx');try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}

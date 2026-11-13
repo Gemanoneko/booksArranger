@@ -31,7 +31,7 @@ guard(dgram,'createSocket');guard(globalThis,'fetch');guard(process,'dlopen');
 syncBuiltinESMExports();
 after(()=>{for(const restore of restores.reverse())restore();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No real process/network/native call was attempted');});
 const {createChildPolicy,fileFacts}=await import('../scripts/build-child-policy.mjs');
-const {verifyAppStage,packageArchivePath,createBuildTrace,watchBuildCompletion,observeNsisAwait,compilerErrorRecord,orderPrivateCompilerInput}=await import('../scripts/build-builder.mjs');
+const {verifyAppStage,packageArchivePath,createBuildTrace,watchBuildCompletion,observeNsisAwait,compilerErrorRecord,orderPrivateCompilerInput,redirectPrivateInstallUtil}=await import('../scripts/build-builder.mjs');
 const {readAsarFiles}=await import('../scripts/build-manifest.mjs');
 const asar=await import('@electron/asar');
 const require=createRequire(import.meta.url);
@@ -117,6 +117,13 @@ test('compiler input orders only one exact pinned plugin directive and refuses m
   assert.equal(orderPrivateCompilerInput(ordered.script,{privateInclude,pluginDirectory}).script,ordered.script);
   for(const wrong of [source+plugin,source+include,source.replace(plugin,'!addplugindir /x86-unicode "outside"'),source.replace(include,'!include "outside"')])
     assert.throws(()=>orderPrivateCompilerInput(wrong,{privateInclude,pluginDirectory}),/single exact/);
+});
+
+test('private installUtil redirect requires one exact stock include and local fixed path',()=>{
+  const target=path.resolve('owned/books-installUtil.nsh'),source='!ifndef BUILD_UNINSTALLER\n  !include "installUtil.nsh"\n!endif\n';
+  assert.equal(redirectPrivateInstallUtil(source,target),'!ifndef BUILD_UNINSTALLER\n  !include "'+target+'"\n!endif\n');
+  for(const bad of ['',source+source,source.replace('installUtil.nsh','other.nsh')])assert.throws(()=>redirectPrivateInstallUtil(bad,target),/single stock/);
+  for(const bad of ['relative.nsh',target+'"',target+'\n',target+'$ENV'])assert.throws(()=>redirectPrivateInstallUtil(source,bad),/single stock/);
 });
 
 test('build diagnostic observes prepared spawned and closed fake children without native calls',async()=>{

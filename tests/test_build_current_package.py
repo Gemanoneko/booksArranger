@@ -11,6 +11,21 @@ import re
 
 @unittest.skipUnless(os.name=='nt','Native build provenance')
 class CurrentPackageProducerTests(unittest.TestCase):
+    def test_only_pinned_dead_legacy_helpers_are_excluded_from_private_template(self):
+        import sys
+        root=Path(__file__).resolve().parents[1];sys.path.insert(0,str(root/'scripts'))
+        try:
+            import build_phase
+            raw=(root/'node_modules/app-builder-lib/templates/nsis/include/installUtil.nsh').read_bytes()
+            private=build_phase.private_install_util(raw)
+            for name in (b'GetInQuotes',b'GetFileParent',b'uninstallOldVersion'):
+                self.assertNotIn(b'Function '+name+b'\n',private)
+            self.assertIn(b'Function handleUninstallResult',private)
+            self.assertIn(b'!macro uninstallOldVersion ROOT_KEY',private,'replacement hook remains fail-closed')
+            self.assertEqual(hashlib.sha256(raw).hexdigest(),build_phase.INSTALL_UTIL_SHA256)
+            with self.assertRaisesRegex(RuntimeError,'template differs'):build_phase.private_install_util(raw+b'; changed')
+        finally:sys.path.remove(str(root/'scripts'))
+
     def test_every_live_wizard_variable_has_a_declaration_in_each_build_branch(self):
         desktop=Path(__file__).resolve().parents[1]/'desktop'
         lines=(desktop/'installer.nsh').read_text('utf8').splitlines()
@@ -37,10 +52,11 @@ class CurrentPackageProducerTests(unittest.TestCase):
 
     def test_installer_only_helper_is_excluded_from_uninstaller(self):
         text=(Path(__file__).resolve().parents[1]/'desktop/installer.nsh').read_text('utf8')
-        self.assertIn('!ifndef BUILD_UNINSTALLER\n!include StrContains.nsh\n!endif',text)
-        self.assertEqual(text.count('${StrContains}'),1)
-        installer_branch=text.index('Function BooksNormalizeDirectory')
-        self.assertGreater(text.index('${StrContains}'),installer_branch)
+        self.assertNotIn('!include StrContains.nsh',text)
+        self.assertNotIn('${StrContains}',text)
+        function=text.split('Function BooksNormalizeDirectory\n',1)[1].split('FunctionEnd',1)[0]
+        self.assertEqual(re.findall(r'^\s*Push (\$[123])$',function,re.M),['$1','$2','$3'])
+        self.assertEqual(re.findall(r'^\s*Pop (\$[123])$',function,re.M),['$3','$2','$1'])
 
     def test_private_include_supplies_early_symbols_without_duplicate_plugins(self):
         import sys
