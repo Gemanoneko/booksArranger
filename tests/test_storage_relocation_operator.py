@@ -1,5 +1,7 @@
 """Private native transaction/fencing controls; no installed app or user catalog."""
 import contextlib
+import ctypes
+from ctypes import wintypes
 import json
 import os
 from pathlib import Path
@@ -148,9 +150,104 @@ class OperatorNativeTests(unittest.TestCase):
         self.receipts.append(prepared['source_fence'])
         return prepared
 
+    @contextlib.contextmanager
+    def foreign_acl(self, path):
+        """Change only an exact newly-created fixture object's DACL."""
+        security = Security()
+        with NativeItem(path, writable_security=True) as item:
+            original = security.capture(item)
+            descriptor = ctypes.c_void_p(); size = wintypes.DWORD()
+            convert = security.api.ConvertStringSecurityDescriptorToSecurityDescriptorW
+            convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                                ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.DWORD)]
+            convert.restype = wintypes.BOOL
+            self.assertTrue(convert(original['sddl'] + '(A;;0x00000008;;;WD)', 1,
+                                    ctypes.byref(descriptor), ctypes.byref(size)))
+            try:
+                present = wintypes.BOOL(); defaulted = wintypes.BOOL(); acl = ctypes.c_void_p()
+                self.assertTrue(security.api.GetSecurityDescriptorDacl(descriptor, ctypes.byref(present),
+                    ctypes.byref(acl), ctypes.byref(defaulted)))
+                self.assertEqual(security.api.SetSecurityInfo(item.handle, 1, 4 | 0x80000000,
+                    None, None, acl, None), 0)
+                changed = security.capture(item)
+            finally:security.local.LocalFree(descriptor)
+        try:yield changed
+        finally:
+            # Explicit fixture cleanup, outside each zero-production-restore spy.
+            with NativeItem(path, writable_security=True) as item:security.restore(item, original)
+
+    def pending_copy(self):
+        prepared = self.prepare(); shutil.copytree(self.source, self.target)
+        self.copy_source_security(prepared)
+        self.backup = self.source.with_name(self.source.name + '-original'); self.source.rename(self.backup)
+        self.receipts.append(str(self.manifest) + '.source-fence.json')
+        return (prepared['source_plan'], prepared['source_plan_sha256'], prepared['source_fence'],
+                prepared['source_fence_sha256'], self.backup, self.manifest)
+
+    def copy_source_security(self, prepared):
+        # shutil.copy2 omits Windows ACLs. A cross-volume migration must copy
+        # the reviewed fence too, rather than authorize arbitrary inherited ACLs.
+        fence = json.loads(Path(prepared['source_fence']).read_text('utf8'))
+        for entry in fence['items']:
+            with NativeItem(self.target/entry['relative'], directory=entry['kind']=='directory',
+                            writable_security=True) as item:
+                Security().restore(item, entry['applied_security'])
+
+    def test_initial_seal_foreign_acl_refuses_before_any_restore(self):
+        args = self.pending_copy()
+        with self.foreign_acl(self.target/'data/owned.bin'):
+            with patch.object(Security, 'restore', autospec=True) as restore:
+                with self.assertRaisesRegex(RelocationRefused, 'security changed'):seal_target(*args)
+                restore.assert_not_called()
+
+    def test_cross_drive_content_only_copy_refuses_without_acl_mutation(self):
+        if self.source.drive.casefold()==self.target.drive.casefold():
+            self.skipTest('Requires explicit C: source / I: target fixture roots')
+        prepared=self.prepare();shutil.copytree(self.source,self.target)
+        self.backup=self.source.with_name(self.source.name+'-original');self.source.rename(self.backup)
+        self.receipts.append(str(self.manifest)+'.source-fence.json')
+        path=self.target/'data/owned.bin'
+        with NativeItem(path,writable_security=True) as item:before=Security().capture(item)
+        args=(prepared['source_plan'],prepared['source_plan_sha256'],prepared['source_fence'],
+              prepared['source_fence_sha256'],self.backup,self.manifest)
+        with patch.object(Security,'restore',autospec=True) as restore:
+            with self.assertRaisesRegex(RelocationRefused,'Copied target security changed'):seal_target(*args)
+            restore.assert_not_called()
+        with NativeItem(path,writable_security=True) as item:self.assertEqual(Security().capture(item),before)
+
+    def test_replayed_seal_foreign_acl_refuses_before_any_restore(self):
+        args = self.pending_copy(); seal_target(*args)
+        with self.foreign_acl(self.target/'data/owned.bin'):
+            with patch.object(Security, 'restore', autospec=True) as restore:
+                with self.assertRaisesRegex(RelocationRefused, 'security changed'):seal_target(*args)
+                restore.assert_not_called()
+
+    def test_replayed_seal_replacement_refuses_before_any_restore(self):
+        args = self.pending_copy(); seal_target(*args)
+        path = self.target/'data/owned.bin'; retained = self.area/'original-target.bin'
+        path.rename(retained); shutil.copy2(retained, path)
+        with patch.object(Security, 'restore', autospec=True) as restore:
+            with self.assertRaisesRegex(RelocationRefused, 'historical copy changed'):seal_target(*args)
+            restore.assert_not_called()
+
+    def test_source_recovery_foreign_acl_refuses_before_any_restore(self):
+        import storage_relocation_operator as operator
+        preview = prepare_source(*self.args())
+        with patch.object(Security, 'deny_writes', side_effect=RuntimeError('before any fence')):
+            with self.assertRaisesRegex(RuntimeError, 'before any fence'):
+                prepare_source(*self.args(), apply=True, catalog_id=preview['catalog_id'],
+                    generation=preview['generation'], expected_plan_sha256=preview['consent_sha256'])
+        plan = self.work/('source-plan-' + preview['generation'] + '.json')
+        with self.foreign_acl(self.original):
+            with patch.object(Security, 'restore', autospec=True) as restore:
+                with self.assertRaisesRegex(RelocationRefused, 'Recovery security changed'):
+                    recover_unactivated_source(plan, digest(plan.read_bytes()))
+                restore.assert_not_called()
+
     def copied(self):
         prepared = self.prepare()
         shutil.copytree(self.source, self.target, copy_function=shutil.copy2)
+        self.copy_source_security(prepared)
         self.backup = self.source.with_name(self.source.name + '-original')
         self.source.rename(self.backup)
         sealed = seal_target(prepared['source_plan'], prepared['source_plan_sha256'],
@@ -287,6 +384,7 @@ class OperatorNativeTests(unittest.TestCase):
     def test_target_seal_interruption_after_sql_commit_replays_exact_generation(self):
         import storage_relocation_operator as operator
         prepared = self.prepare(); shutil.copytree(self.source, self.target)
+        self.copy_source_security(prepared)
         self.backup = self.source.with_name(self.source.name + '-original'); self.source.rename(self.backup)
         self.receipts.append(str(self.manifest) + '.source-fence.json')
         original = operator.create_new

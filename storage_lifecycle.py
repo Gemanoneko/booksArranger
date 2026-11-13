@@ -1376,87 +1376,65 @@ def _runtime_directory(provenance,relative):
 
 
 def _catalog_ownership(root, catalog_identity=None):
-    """Read-only typed ownership graph; unrelated catalog siblings stay unknown."""
-    database=root/'inventory.sqlite3';owned={};unhashed=set();directories={
-        'merge-cache','merge-cache/covers','merge-cache/audio-staging','source-recovery','replacement-recovery','chapter-repairs','openlibrary-index'}
-    with VerifiedFile(database) as held:
-        if catalog_identity is not None:
-            _need(held.facts()['identity']==catalog_identity,'ownership_not_confirmed',database)
-        from storage_lifecycle_snapshot import frozen_connection
-        with frozen_connection(database) as db:
-            db.row_factory=sqlite3.Row;db.execute('PRAGMA query_only=ON');db.execute('PRAGMA temp_store=MEMORY')
-            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            _need({'jobs','queue','files'}<=tables,'unsupported_database',database)
-            for table,where in (('audio_jobs',"state='running'"),('working_attempts',"COALESCE(producer,'')!='closed' AND state NOT IN ('retired')"),
-                                ('inplace_edits',"state NOT IN ('published','rolled_back')")):
-                if table in tables:
-                    _need(not db.execute('SELECT 1 FROM '+table+' WHERE '+where+' LIMIT 1').fetchone(),'work_closure_unconfirmed',database)
-            def pin(path,sha,size=None):
-                if not isinstance(path,str) or not path:return
-                candidate=Path(path)
-                # Physical resolution is exclusion/matching only. The content
-                # SHA from a typed catalog owner remains mandatory below.
-                try:candidate=Path(_physical(candidate))
-                except FileNotFoundError:return
-                if not _under(candidate,root) or candidate==root:return
-                _need(isinstance(sha,str) and re.fullmatch('[a-f0-9]{64}',sha),'ownership_not_confirmed',candidate)
-                prior=owned.get(str(candidate))
-                value=(sha,size)
-                _need(prior is None or prior[0]==sha and (prior[1] is None or size is None or prior[1]==size),'ownership_not_confirmed',candidate)
-                if prior is not None and size is None:value=(sha,prior[1])
-                owned[str(candidate)]=value
-            for table,pathcol,hashcol,sizecol,where in (
-                ('working_files','path','sha256','size',"state NOT IN ('removed','absent_after_intent','not_created','creation_intended')"),
-                ('storage_cleanup_files','path','sha256','size',"state NOT IN ('removed','absent_after_intent')"),
-                ('owned_artifacts','path','sha256','size',"kind!='output'")):
-                if table in tables:
-                    for row in db.execute('SELECT '+','.join((pathcol,hashcol,sizecol))+' FROM '+table+' WHERE '+where):pin(*row)
-            if 'working_attempts' in tables:
-                for row in db.execute('SELECT job_id,attempt_id FROM working_attempts'):
-                    if all(isinstance(v,str) and re.fullmatch(_UUID,v) for v in row):
-                        directories.add('merge-cache/audio-staging/'+row[0]);directories.add('merge-cache/audio-staging/'+row[0]+'/'+row[1])
-            if 'source_cleanup' in tables:
-                for row in db.execute('SELECT id FROM source_cleanup'):
-                    if isinstance(row[0],str) and re.fullmatch(_UUID,row[0]):directories.add('source-recovery/'+row[0])
-            if 'cleanup_members' in tables:
-                for row in db.execute('SELECT backup,backup_facts FROM cleanup_members WHERE backup_facts!=?',('',)):
-                    path,facts=row
-                    try:details=json.loads(facts)
-                    except (ValueError,TypeError):continue
-                    if not path:continue
-                    # Native facts alone do not contain content authority; a
-                    # corresponding owned_artifacts row supplies the SHA.
-                    try:physical=_physical(path)
-                    except FileNotFoundError:continue
-                    if _under(Path(physical),root):_need(physical in owned,'ownership_not_confirmed',path)
-            if 'audio_jobs' in tables:
-                for row in db.execute('SELECT job_id,manifest,output FROM audio_jobs'):
-                    _need(isinstance(row['job_id'],str) and re.fullmatch(_UUID,row['job_id']),'ownership_not_confirmed')
-                    directories.add('merge-cache/audio-staging/'+row['job_id'])
-                    _need(len(row['manifest'].encode('utf8'))<=16*1024*1024,'ownership_graph_bound_exceeded')
-                    manifest=json.loads(row['manifest']);cover=manifest.get('cover')
-                    if isinstance(cover,dict):pin(cover.get('path'),cover.get('sha256'),cover.get('size'))
-                    marker=root/'merge-cache'/'audio-staging'/row['job_id']/'ownership.json'
-                    if marker.exists():
-                        value,_,_= _json(marker,16*1024*1024)
-                        _need(value=={'job_id':row['job_id'],'manifest':manifest},'ownership_not_confirmed',marker)
-                        unhashed.add(str(marker))
-                    if row['output']:
-                        output=json.loads(row['output']);artifacts=output.get('validation',{}).get('staging_artifacts',{})
-                        attempt=artifacts.get('attempt_id')
-                        if isinstance(attempt,str) and re.fullmatch(_UUID,attempt):
-                            for name,facts in artifacts.get('files',{}).items():
-                                _need(isinstance(name,str) and Path(name).name==name,'ownership_not_confirmed')
-                                pin(str(marker.parent/attempt/name),facts.get('sha256'),facts.get('size'))
-            if 'candidate_context' in tables:
-                for row in db.execute('SELECT data FROM candidate_context'):
-                    _need(len(row[0].encode('utf8'))<=16*1024*1024,'ownership_graph_bound_exceeded')
-                    ctx=json.loads(row[0])
-                    for cover in ctx.get('cover_choices',[]):
-                        identifier=cover.get('id');sha=cover.get('sha256')
-                        if isinstance(identifier,str) and re.fullmatch(_UUID,identifier) and isinstance(sha,str):
-                            for suffix in ('.png','.jpg'):pin(str(root/'merge-cache'/'covers'/(identifier+suffix)),sha)
-    return owned,unhashed,directories
+    """Use the same typed catalog graph as relocation and cleanup admission."""
+    from storage_lifecycle_snapshot import frozen_catalog
+    from storage_state_ownership import catalog_state_membership
+    from storage_relocation_operator import classify_historical_files
+    from storage_relocation import _key
+    database=root/'inventory.sqlite3'
+    try:
+        with VerifiedFile(database) as held:
+            if catalog_identity is not None:
+                _need(held.facts()['identity']==catalog_identity,'ownership_not_confirmed',database)
+            with frozen_catalog(database) as snapshot:
+                with contextlib.closing(sqlite3.connect(snapshot.as_uri()+'?mode=ro&immutable=1',uri=True)) as db:
+                    tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    _need({'jobs','queue','files'}<=tables,'unsupported_database',database)
+                    for table,where in (('audio_jobs',"state='running'"),
+                                        ('working_attempts',"COALESCE(producer,'')!='closed' AND state NOT IN ('retired')"),
+                                        ('inplace_edits',"state NOT IN ('published','rolled_back')")):
+                        if table in tables:
+                            _need(not db.execute('SELECT 1 FROM '+table+' WHERE '+where+' LIMIT 1').fetchone(),
+                                  'work_closure_unconfirmed',database)
+                membership=catalog_state_membership(snapshot,logical_root=root,physical_root=root,immutable=True)
+                classes,holds=classify_historical_files(snapshot,managed_root=str(root.parent),
+                    logical_catalog=database,index_root=root/'openlibrary-index',immutable=True)
+                _need(not holds,'work_closure_unconfirmed',database)
+    except RuntimeError as error:
+        # The support-disposition context annotates failures with its recovery
+        # location. Translate only an underlying typed refusal into a UI hold;
+        # unrelated native/snapshot errors are never treated as owned content.
+        from storage_relocation import RelocationRefused
+        cause=error.__cause__
+        while cause is not None:
+            if isinstance(cause,LifecycleRefused):raise cause from error
+            if isinstance(cause,RelocationRefused):
+                raise LifecycleRefused('work_closure_unconfirmed',str(database)) from error
+            cause=cause.__cause__
+        raise
+    # Membership keys are normalized for Windows identity matching. Return actual
+    # spellings from this finite physical census, never an extension allowlist.
+    owned={};markers=set();index=set()
+    for path,kinds in classes.items():
+        if not set(kinds)&{'index-leaf','index-journal'}:continue
+        index.add(_key(path))
+        if 'index-leaf' in kinds:
+            leaf=Path(path);owner=leaf.name.replace('index-','pending-',1) if leaf.name.startswith('index-') else leaf.name
+            index.add(_key(str(leaf.with_name(owner+'.owner.json'))))
+            if leaf.name.startswith('index-'):index.add(_key(path+'.complete.json'))
+    for folder,_,names in os.walk(root,followlinks=False):
+        for name in names:
+            path=Path(folder)/name;key=_key(str(path))
+            if key in membership['owned']:owned[str(path)]=membership['owned'][key]
+            elif key in membership['markers'] or key in index:markers.add(str(path))
+            elif path==root/'openlibrary-index/import-lock.sqlite3.lock':
+                with VerifiedFile(path) as held:
+                    single_stream(path)
+                    _need(held.facts()['links']==1 and held.facts()['size'] in (0,1) and
+                        held.sha256() in {hashlib.sha256(b'').hexdigest(),hashlib.sha256(b'0').hexdigest()},
+                        'ownership_not_confirmed',path)
+                markers.add(str(path))
+    return owned,markers,membership['directories']
 
 
 def refresh_ownership(ownership_path, expected_sha256, *, output_path,bootstrap_path=None):

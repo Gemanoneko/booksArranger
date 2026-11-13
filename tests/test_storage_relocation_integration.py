@@ -105,6 +105,13 @@ class RelocatedWorkingIntegrationTests(unittest.TestCase):
         prepared=operator.prepare_source(*args,apply=True,catalog_id=preview['catalog_id'],generation=preview['generation'],expected_plan_sha256=preview['consent_sha256'])
         self.plan=prepared['source_plan']
         shutil.copytree(self.source,self.target,copy_function=shutil.copy2)
+        # Fresh private copy: preserve its reviewed source fence as a real
+        # migration copier must; copy2 alone omits Windows security descriptors.
+        fence=json.loads(Path(prepared['source_fence']).read_text('utf8'))
+        for record in fence['items']:
+            with operator.NativeItem(self.target/record['relative'],directory=record['kind']=='directory',
+                                     writable_security=True) as item:
+                operator.Security().restore(item,record['applied_security'])
         self.source.rename(self.backup)
         self.descriptor=self.work/'relocation.json'
         sealed=operator.seal_target(prepared['source_plan'],prepared['source_plan_sha256'],

@@ -1,5 +1,15 @@
 # Storage operator checkpoint — 2026-11-13
 
+## Candidate 0.28.0 corrected ACL authority
+
+The first candidate was held before packaging. Target seal now validates the full census, replay directory/file native bindings and logical catalog history before any ACL restoration. Every target security descriptor must match the reviewed original or copied fence transition; an arbitrary inherited destination ACL is not adopted. Cross-volume copies must preserve the reviewed security transition as well as content. Source preparation recovery validates all retained original handles and original/planned-fence security before its first restore. Failed source retirement restores a fence only for unchanged original bytes/native facts and the exact full or DELETE-relaxed operation-owned descriptor; foreign ACLs remain held.
+
+The focused C: source / I: target native controls passed nine cases in 1.429 seconds under the canonical supervisor (closed/native-zero). They include zero-restore-call refusal for initial/replayed foreign ACLs, replay replacement identity and source-recovery foreign ACL, plus initial copied-fence, interrupted seal/recovery and exact full/relaxed finalization positives. Static registry containment passed three cases first. The fixtures explicitly copy source fence ACLs because Python copy2 alone does not preserve Windows ACLs. These are bounded repair proofs, not final candidate QA; native registry rename is never invoked.
+
+After adding the exception path's unchanged-content check, three finalization controls passed in 0.676 seconds, including actual selected-data retirement. Three copy-protocol controls passed in 1.254 seconds: a real C:/I: content-only copy refused with zero restore calls and unchanged target SD; pending work and a closed runtime ledger migrated with the explicit copied-fence fixture, preserved historical receipts and restarted. All supervisors closed with native-zero. Receipts are under `I:/Books Arranger/Engineering/release-0.28.0/repair-A2/core-a1`. These are not an execution approval for any live Robocopy command.
+
+Advisory M2 remains for a later cycle: sufficiently large unbounded disposition-ledger history can exceed the bounded membership census and safely refuse startup. No compaction or new retention framework was added in this candidate repair.
+
 Builder checkpoint only; **not release clearance or permission for a live switch**. Ender operator owns the six new files below. Core runtime, installer/lifecycle, source comparisons and final directory-retirement work have separate owners. No installed application, live catalog, user library, running batch, shortcut or live ACL was changed by this work. No commit, version bump, push, installer build or release command was run by this operator agent.
 
 ## Exact files

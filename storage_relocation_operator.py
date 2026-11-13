@@ -1033,26 +1033,44 @@ def seal_target(source_plan, source_plan_sha256, source_fence, source_fence_sha2
         # target .lock owner (not the source copy's lock) excludes old writers.
         with contextlib.ExitStack() as target_handles:
             dirs, files, handles = _scan(target, tuple(plan['scopes']), target_handles, security_access=True)
-            if not manifest_path.exists():_same_copy_inventory(plan, dirs, files)
-            originals = {_key(record['relative']): record for record in plan['security']}
-            for key in sorted(originals, key=lambda key: (key.count('\\'), key)):
-                security.restore(handles[key], originals[key]['original_security'], copied_target=True)
-            need(logical_catalog_digest(database) == plan['logical_catalog_sha256'],
-                 'Target catalog metadata/history differs from consistent source snapshot')
+            # Validate the complete current generation BEFORE the first DACL
+            # mutation. A retained handle pins an object, not its ownership.
+            manifest = None
             if manifest_path.exists():
                 raw = manifest_path.read_bytes(); manifest = parse_manifest(raw, digest(raw))
                 need(manifest.generation == plan['generation'] and manifest.catalog_id == plan['catalog_id'] and
-                     manifest.source_snapshot_sha256 == initial_fence['source_snapshot_sha256'],
-                     'Existing sealed generation differs')
-                for binding in manifest.files.values():
-                    current = files.get(_key(binding.relative))
+                     manifest.source_snapshot_sha256 == initial_fence['source_snapshot_sha256'] and
+                     manifest.source_root == plan['source_root'] and manifest.target_root == plan['target_root'] and
+                     tuple(manifest.scopes) == tuple(plan['scopes']), 'Existing sealed generation differs')
+                need(set(dirs) == set(manifest.directories) and set(files) == set(manifest.files),
+                     'Previously sealed target membership changed')
+                for key, row in dirs.items():
+                    need(row['identity'] == list(manifest.directories[key].target),
+                         'Previously sealed directory native identity changed')
+                for key, binding in manifest.files.items():
+                    current = files[key]
                     if 'catalog-storage' in binding.receipt_classes:
-                        need(current and current['facts']['identity'] == list(binding.target['identity']),
+                        need(current['facts']['identity'] == list(binding.target['identity']),
                              'Previously sealed catalog native identity changed')
                     else:
-                        need(current and current['facts'] == dict(binding.target, identity=list(binding.target['identity'])) and
+                        need(current['facts'] == dict(binding.target, identity=list(binding.target['identity'])) and
                              current['sha256'] == binding.sha256, 'Previously sealed historical copy changed')
-                manifest_sha = manifest.digest
+            else:_same_copy_inventory(plan, dirs, files)
+            originals = {_key(record['relative']): record for record in plan['security']}
+            applied = {_key(record['relative']): record for record in initial_fence['items']}
+            need(set(originals) == set(applied) and set(originals).issubset(handles),
+                 'Copied security membership differs')
+            for key, record in originals.items():
+                current = security.capture(handles[key])
+                need(security_equivalent(current, record['original_security']) or
+                     security_equivalent(current, record['original_security'], copied_target=True) or
+                     security_equivalent(current, applied[key]['applied_security'], copied_target=True),
+                     'Copied target security changed; foreign permissions retained')
+            need(logical_catalog_digest(database) == plan['logical_catalog_sha256'],
+                 'Target catalog metadata/history differs from consistent source snapshot')
+            for key in sorted(originals, key=lambda key: (key.count('\\'), key)):
+                security.restore(handles[key], originals[key]['original_security'], copied_target=True)
+            if manifest:manifest_sha = manifest.digest
             else:
                 source_dirs = {_key(record['relative']): record for record in plan['directories']}
                 source_files = {_key(record['relative']): record for record in plan['files']}
@@ -1446,12 +1464,25 @@ def recover_unactivated_source(source_plan, source_plan_sha256):
             original = next(row for row in plan['directories'] if row['relative'] == '')
             need(root.facts['identity'] == original['identity'], 'Original source root identity changed')
             security = Security()
-            for record in sorted(plan['security'], key=lambda row: (row['relative'].count('\\'), row['relative'])):
-                checkpoint()
-                relative = _relative(record['relative'])
-                need(any(_inside(relative, scope) for scope in plan['scopes']), 'Recovery entry escapes managed scope')
-                with NativeItem(source / relative, directory=record['kind'] == 'directory', writable_security=True) as item:
+            with contextlib.ExitStack() as recovery_handles:
+                ready = []
+                for record in sorted(plan['security'], key=lambda row: (row['relative'].count('\\'), row['relative'])):
+                    checkpoint()
+                    relative = _relative(record['relative'])
+                    need(any(_inside(relative, scope) for scope in plan['scopes']), 'Recovery entry escapes managed scope')
+                    item = recovery_handles.enter_context(NativeItem(source / relative,
+                        directory=record['kind'] == 'directory', writable_security=True))
                     need(item.facts['identity'] == record['identity'], 'Recovery item was replaced; retained')
+                    current = security.capture(item)
+                    known = security_equivalent(current, record['original_security'])
+                    if not known:
+                        known = (current['protected'] and
+                            current['sddl'].partition('D:')[0] == record['original_security']['sddl'].partition('D:')[0] and
+                            security.captured_acl(current) == security.planned_write_fence_acl(
+                                record['original_security'], item.directory))
+                    need(known, 'Recovery security changed; foreign permissions retained')
+                    ready.append((item, record))
+                for item, record in ready:
                     security.restore(item, record['original_security'])
             result = {'schema': 'books-storage-source-recovery-v1', 'generation': plan['generation'],
                       'catalog_id': plan['catalog_id'], 'source_plan_sha256': source_plan_sha256,

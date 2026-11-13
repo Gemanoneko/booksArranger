@@ -60,6 +60,88 @@ class LifecycleTests(unittest.TestCase):
             output_path=self.base/'ownership-review.json',bootstrap_path=str(bootstrap))
         return Path(result['ownership_path']),result['ownership_sha256']
 
+    def used_catalog(self,*,pending=False):
+        """Normally generated native ledger plus typed recovery/index state."""
+        from runtime_disposition_owners import registered_catalog,admit_catalog
+        path=self.catalog();root=path.parent;lock=Path(str(path)+'.lock');lock.write_bytes(b'')
+        discarded=root/'retired.tmp';discarded.write_bytes(b'ordinary retired runtime work')
+        with VerifiedFile(lock,writable=True) as owner,registered_catalog(path,{},owner):
+            admit_catalog(path)
+            with VerifiedFile(discarded,delete=True) as held:
+                if pending:
+                    from runtime_disposition_owners import context_for
+                    from runtime_file_disposition import prepare_disposition
+                    guard=prepare_disposition(held,context_for(discarded));guard.abort('fixture retained before native success')
+                else:held.dispose()
+        identifier=str(uuid.uuid4());original=str(self.base/'Library'/'old.m4b')
+        recovery=root/'replacement-recovery'/identifier/(hashlib.sha256(original.encode()).hexdigest()+'.m4b')
+        recovery.parent.mkdir(parents=True);recovery.write_bytes(b'original replacement recovery audio')
+        with VerifiedFile(recovery) as held:
+            details=dict(path=str(recovery),facts=held.facts(),size=held.facts()['size'],sha256=held.sha256())
+        with contextlib.closing(sqlite3.connect(path)) as db,db:
+            db.execute('CREATE TABLE audiobook_replacement_retirements(replacement_id TEXT,original_path TEXT,recovery_json TEXT,state TEXT)')
+            db.execute('INSERT INTO audiobook_replacement_retirements VALUES (?,?,?,?)',(identifier,original,json.dumps(details),'retained'))
+        index=root/'openlibrary-index';index.mkdir();leaf=index/'active.sqlite3';journal=index/'active.sqlite3-journal'
+        leaf.write_bytes(b'typed private OpenLibrary index');journal.write_bytes(b'typed private index journal')
+        with VerifiedFile(leaf) as a,VerifiedFile(journal) as b:
+            (index/'active.sqlite3.owner.json').write_text(json.dumps(dict(binding='openlibrary-active-v1',identities=[a.facts()['identity'],b.facts()['identity']])))
+        return path
+
+    def test_used_catalog_refresh_cleanup_accepts_closed_ledger_recovery_and_typed_index(self):
+        path=self.used_catalog();root=path.parent
+        # A genuine uncheckpointed source tuple must stay byte/fact identical.
+        writer=('import os,sqlite3,sys;c=sqlite3.connect(sys.argv[1]);c.execute("PRAGMA journal_mode=WAL");'
+                'c.execute("PRAGMA wal_autocheckpoint=0");c.execute("INSERT INTO jobs(root) VALUES (?)",(sys.argv[2],));c.commit();os._exit(0)')
+        result=subprocess.run([sys.executable,'-I','-B','-c',writer,str(path),str(self.base/'Library')],capture_output=True,timeout=15,creationflags=0x08000000)
+        self.assertEqual(result.returncode,0,result.stderr)
+        def tuple_facts():
+            result={}
+            for suffix in ('','-wal','-shm'):
+                with VerifiedFile(str(path)+suffix) as held:result[suffix]=(held.facts(),held.sha256())
+            return result
+        before=tuple_facts();graph,markers,dirs=lifecycle._catalog_ownership(root)
+        self.assertEqual(tuple_facts(),before)
+        self.assertTrue(any('/file-disposition-ledger/' in p.replace('\\','/') for p in graph))
+        self.assertTrue(any('/replacement-recovery/' in p.replace('\\','/') for p in graph))
+        self.assertIn(str(root/'openlibrary-index/active.sqlite3'),markers)
+        manifest,digest=self.manifest(root,[],role='database')
+        plan=lifecycle.plan_cleanup(manifest,digest,selected_roots=[str(root)],bootstrap_paths=self.bootstraps)
+        self.assertTrue(any('file-disposition-ledger' in row['path'] for row in plan['targets'][0]['files']))
+        sha=hashlib.sha256(json.dumps(plan,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        result=lifecycle.execute_cleanup(plan,sha)
+        self.assertTrue(result['ok'],result);self.assertFalse(root.exists())
+
+    def test_used_catalog_refresh_unknown_index_member_remains_held(self):
+        path=self.used_catalog();unknown=path.parent/'openlibrary-index/personal.sqlite3';unknown.write_bytes(b'never adopt by extension')
+        manifest,digest=self.manifest(path.parent,[],role='database')
+        with self.assertRaises(lifecycle.LifecycleRefused):
+            lifecycle.plan_cleanup(manifest,digest,selected_roots=[str(path.parent)],bootstrap_paths=self.bootstraps)
+        self.assertEqual(unknown.read_bytes(),b'never adopt by extension')
+
+    def test_used_catalog_pending_disposition_stays_held(self):
+        path=self.used_catalog(pending=True)
+        with self.assertRaises(ValueError):lifecycle._catalog_ownership(path.parent)
+        self.assertTrue((path.parent/'retired.tmp').exists());self.assertTrue(path.exists())
+
+    def test_used_catalog_orphan_disposition_record_stays_held(self):
+        path=self.used_catalog();ledger=path.parent/'file-disposition-ledger'
+        next(ledger.glob('*.intent.json')).unlink()
+        with self.assertRaises(lifecycle.LifecycleRefused):lifecycle._catalog_ownership(path.parent)
+        self.assertTrue(path.exists())
+
+    def test_used_catalog_retained_disposition_requires_typed_target_ownership(self):
+        from runtime_disposition_owners import registered_catalog,admit_catalog
+        path=self.used_catalog(pending=True);target=path.parent/'retired.tmp'
+        # Supported owner recovery positively records restored retained bytes.
+        with VerifiedFile(str(path)+'.lock',writable=True) as owner,registered_catalog(path,{},owner):admit_catalog(path)
+        self.assertTrue(list((path.parent/'file-disposition-ledger').glob('*.retained.json')))
+        with VerifiedFile(target) as held:sha=held.sha256();size=held.facts()['size']
+        with contextlib.closing(sqlite3.connect(path)) as db,db:
+            db.execute('CREATE TABLE owned_artifacts(path TEXT,sha256 TEXT,size INTEGER,kind TEXT)')
+            db.execute('INSERT INTO owned_artifacts VALUES (?,?,?,?)',(str(target),sha,size,'recovery'))
+        graph,_,_=lifecycle._catalog_ownership(path.parent)
+        self.assertEqual(graph[str(target)],(sha,size));self.assertTrue(target.exists())
+
     def test_existing_recognition_is_read_only_and_profile_association_is_explicit(self):
         path = self.catalog(); before = path.read_bytes(); profile = self.base / 'profile'; profile.mkdir()
         settings = profile / 'desktop-settings.json'; settings.write_text(json.dumps({'dataDir':str(path.parent)}))

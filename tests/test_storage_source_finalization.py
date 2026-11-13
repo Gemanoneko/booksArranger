@@ -15,6 +15,37 @@ from storage_source_finalization import (plan_source_finalization, apply_source_
 
 
 class SourceFinalizationTests(OperatorNativeTests):
+    def test_cleanup_exception_foreign_acl_refuses_before_restore(self):
+        from storage_relocation_operator import NativeItem,Security
+        from storage_source_finalization import _restore_delete_fence
+        path=self.area/'exact-private-fence.bin';path.write_bytes(b'private fence control')
+        security=Security()
+        with NativeItem(path,writable_security=True) as item:
+            original,base=security.deny_writes(item)
+        try:
+            with self.foreign_acl(path):
+                with NativeItem(path,writable_security=True) as item:
+                    with patch.object(Security,'restore',autospec=True) as restore:
+                        with self.assertRaisesRegex(RelocationRefused,'foreign permissions retained'):
+                            _restore_delete_fence(security,item,base)
+                        restore.assert_not_called()
+        finally:
+            with NativeItem(path,writable_security=True) as item:security.restore(item,original)
+
+    def test_cleanup_exception_restores_only_known_full_or_relaxed_fence(self):
+        from storage_relocation_operator import NativeItem,Security,security_equivalent
+        from storage_source_finalization import _restore_delete_fence,_relax_delete
+        path=self.area/'exact-private-positive.bin';path.write_bytes(b'private fence control')
+        security=Security()
+        with NativeItem(path,writable_security=True) as item:
+            original,base=security.deny_writes(item)
+            try:
+                _restore_delete_fence(security,item,base)
+                _relax_delete(security,item,base)
+                _restore_delete_fence(security,item,base)
+                self.assertTrue(security_equivalent(security.capture(item),base))
+            finally:security.restore(item,original)
+
     # Inherit fixture helpers only; inherited test methods are removed below so
     # this module does not duplicate the operator suite.
     def test_forged_source_plan_members_cannot_authorize_source_git_or_unknown_data_removal(self):

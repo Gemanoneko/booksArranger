@@ -137,6 +137,14 @@ def _relax_delete(security, item, base):
     need(_delete_fenced(security,item,base), 'DELETE-only relaxation changed source write protection')
 
 
+def _restore_delete_fence(security, item, base):
+    """Restore only this operation's exact full or relaxed DACL transition."""
+    current=security.capture(item)
+    need(security_equivalent(current,base) or _delete_fenced(security,item,base,current),
+         'Old cleanup security changed; foreign permissions retained')
+    security.restore(item,base)
+
+
 @contextlib.contextmanager
 def _active(manifest_path,manifest_sha256):
     manifest_path = Path(manifest_path).absolute()
@@ -451,7 +459,9 @@ def apply_source_finalization(manifest_path,manifest_sha256,expected_plan_sha256
                     if file.exists():
                         with NativeItem(file,writable_security=True) as remaining:
                             need(remaining.facts['identity']==record['facts']['identity'],'Old cleanup name was replaced; held')
-                            security.restore(remaining,record['applied_security'])
+                            need(remaining.facts==record['facts'] and remaining.sha256()==record['sha256'],
+                                 'Old cleanup file changed; permissions retained')
+                            _restore_delete_fence(security,remaining,record['applied_security'])
                     raise
         finally:
             if old_owner:old_owner.__exit__(None,None,None)
