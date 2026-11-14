@@ -674,6 +674,21 @@ def retained_location_match(current, historical, *, directory=False):
         return False
 
 
+def disposed_history_location_match(current, historical):
+    """Ledger-only location equivalence after independently proved disposal.
+
+    Deleted members cannot belong to the current physical census. This grants
+    no native read, recreation, reuse or deletion authority.
+    """
+    if current==historical:return True
+    if not _context or not _context.namespace:return False
+    try:
+        _context.require_normal_operation()
+        return _key(str(current))==_key(_context.namespace.current_path(historical))
+    except RelocationRefused:
+        return False
+
+
 def retained_observation_match(actual,expected,boundary,*,operation_path):
     """Typed location bridge for an ALREADY validated retained-proof record.
 

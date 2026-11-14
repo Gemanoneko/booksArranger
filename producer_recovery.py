@@ -388,10 +388,36 @@ def verify_retained(db,job_id,attempt_id,states=('isolated_retained',)):
     expected_files=scope['files']
     if files!=expected_files:
         from storage_relocation_native import retained_location_match
+        location_match=retained_location_match
+        if saved['state']=='disposed':
+            # A closed ledger legitimately names files absent from the physical
+            # migration census. Authenticate the existing disposal, never infer
+            # it from absence or create new cleanup authority.
+            disposal=proof.get('disposal') or {}
+            child_id=disposal.get('child_job_id')
+            child=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(child_id,)).fetchone()
+            relation=db.execute('SELECT binding FROM audio_retry_intents WHERE parent_job_id=? AND child_job_id=?',(job_id,child_id)).fetchone()
+            output=json.loads(child['output'] or 'null') if child else None
+            binding=(json.loads(child['manifest']).get('retry_intent') or {}) if child else {}
+            if (proof.get('basis')!='boot_after_attempt' or
+                set(disposal)!={'child_job_id','intended','removed','files'} or
+                not all(isinstance(disposal.get(k),str) and disposal[k] for k in ('intended','removed')) or
+                _milliseconds(disposal['removed'])<_milliseconds(disposal['intended']) or
+                disposal.get('files')!=[{k:item[k] for k in ('name','sha256')} for item in native['files']] or
+                child is None or child['state']!='completed' or
+                not isinstance(output,dict) or output.get('job_id')!=child_id or
+                (output.get('validation') or {}).get('passed') is not True or
+                relation is None or json.loads(relation[0])!=binding or
+                binding.get('parent_job_id')!=job_id or binding.get('retained_checkpoint_id')!=saved['id'] or
+                binding.get('retained_disposal') is not True or
+                any(ordinary(old['path'])!=ordinary(native['stage'])/old['name'] for old in expected_files)):
+                raise ValueError('Disposed retained history has no exact completed-child proof')
+            from storage_relocation_native import disposed_history_location_match
+            location_match=disposed_history_location_match
         if len(files)!=len(expected_files) or any(
             {k:v for k,v in now.items() if k!='path'}!={k:v for k,v in old.items() if k!='path'} or
             not isinstance(now.get('path'),str) or not isinstance(old.get('path'),str) or
-            not retained_location_match(now['path'],old['path'])
+            not location_match(now['path'],old['path'])
             for now,old in zip(files,expected_files)):
             raise ValueError('Retained history changed; no cleanup or reuse permitted')
     return {'checkpoint_id':saved['id'],'scope':scope,'native':native,'proof':proof}
