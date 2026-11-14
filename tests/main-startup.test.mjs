@@ -59,7 +59,7 @@ async function boot({ setup = false, flags = ['--show-inactive'], lock = true, u
   // Electron's app.quit(): before-quit first; the quit goes ahead unless a handler prevented it.
   quit() { const event = { prevented: false, preventDefault() { this.prevented = true; } }; log.quits = (log.quits || 0) + 1; if (appEvents['before-quit']) appEvents['before-quit'](event); if (!event.prevented) log.exits.push(0); } };
  const electron = { app, BrowserWindow, Tray, Menu: { buildFromTemplate: (items) => items }, dialog: { showErrorBox: (...args) => log.errors.push(args), showMessageBox: async () => ({ response: 1 }) },
-  nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, session: { defaultSession: { setPermissionRequestHandler(fn) { log.permissionHandler=fn; } } }, shell: { openExternal() {}, showItemInFolder() {} },
+  nativeImage: { createFromPath: () => ({ resize: () => ({}), addRepresentation() {} }) }, session: { defaultSession: { setPermissionRequestHandler(fn) { log.permissionHandler=fn; } } }, shell: { openExternal() {}, showItemInFolder() {} },
   clipboard: { writeText: text=>log.clipboard.push(text) }, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } } };
  const updater = updaterLike ? updaterLike(app) : Object.assign(new EventEmitter(), { setFeedURL() {}, checkForUpdates: async () => ({}) });
  log.updater = updater;

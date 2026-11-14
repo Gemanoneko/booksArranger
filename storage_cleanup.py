@@ -17,7 +17,7 @@ from pathlib import Path
 from scanner import connect
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, VerifiedDirectory, DirectoryNotEmptyError, DirectoryDispositionUnsupported, ordinary
 from source_cleanup import packed, stamp, single_stream
-from storage_relocation_native import facts_match, retained_job, retained_path
+from storage_relocation_native import facts_match, retained_job, retained_path, managed_read_path
 # The MP3 trailing-tag repair's private copy and proof (audio_pipeline._mp3_tag_copy); exact producer receipts decide their bytes.
 TAG_REPAIR=re.compile(r'tag-repair-[0-9a-f]{32}\.(?:mp3|json)')
 
@@ -526,7 +526,7 @@ class StorageCleanup:
                 if recorded.get('attempt_id')==attempt.name and name in recorded.get('files',{}):
                     entry=recorded['files'][name];approved=(entry['sha256'],entry['size'])
                 elif name.endswith(('.jpg','.png')):
-                    approved=(manifest['cover']['sha256'],Path(manifest['cover']['path']).stat().st_size)
+                    approved=(manifest['cover']['sha256'],managed_read_path(manifest['cover']['path'],manifest['cover']['sha256']).stat().st_size)
                 elif name in ('checked.m4b','compatible.m4b'):
                     approved=(output['sha256'],output['size'])
                 elif name=='inputs.txt':

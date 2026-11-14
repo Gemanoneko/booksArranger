@@ -1003,7 +1003,9 @@ def prepare_source(source_root, target_root, scopes, catalog_relative, workspace
 def pinned_receipt(path, expected_sha256, *, receipt_rename_parent=None):
     from native_io import VerifiedFile, receipt_boundary
     from source_cleanup import single_stream
-    path = Path(path).absolute()
+    from storage_relocation_native import current
+    context=current()
+    path = Path(context.control_location(path,expected_sha256) if context and context.namespace else path).absolute()
     with receipt_boundary(path,receipt_rename_parent), VerifiedFile(path) as held:
         need(held.facts()['links'] == 1 and held.facts()['size'] <= MAX_RECEIPT,
              'Receipt is linked/oversized')

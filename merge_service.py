@@ -4693,7 +4693,8 @@ class MergeService:
         manifest=json.loads(row['manifest'])
         protected={os.path.normcase(os.path.abspath(item['path'])) for item in manifest.get('sources') or [] if isinstance(item,dict) and item.get('path')}
         cover=manifest.get('cover') if isinstance(manifest.get('cover'),dict) else {}
-        if cover.get('path'):protected.add(os.path.normcase(os.path.abspath(cover['path'])))
+        from cleanup_ownership import cover_protection_paths
+        for location in cover_protection_paths(cover):protected.add(os.path.normcase(os.path.abspath(location)))
         libraries=[ordinary(path) for path in getattr(getattr(self,'inventory',None),'roots',{}).values() if path]
         targets=[]
         with connect(self.inventory.database) as db:

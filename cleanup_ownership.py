@@ -16,6 +16,22 @@ _TRACKED = {
     'reacquire_markers': 'snapshot,state',
 }
 
+
+def cover_protection_paths(cover):
+    """Conservative references only; never a read or deletion authorization.
+
+    An immutable job may name its managed cover in the old data namespace.
+    Protect both names, including a missing/replaced current file, so migration
+    cannot make referenced artwork look unowned. External covers stay unchanged.
+    """
+    path=cover.get('path') if isinstance(cover,dict) else None
+    if not isinstance(path,str) or not path:return ()
+    from storage_relocation_native import current
+    context=current();namespace=context.namespace if context else None
+    if namespace and namespace.permitted(path):
+        return (path,namespace.current_path(path))
+    return (path,)
+
 class OwnershipIndex:
     def __init__(self):
         self.lock = threading.RLock()
@@ -62,7 +78,7 @@ class OwnershipIndex:
                     for source in other.get('sources') or []:
                         if isinstance(source, dict):add(source.get('path'), 'job', owner)
                     cover = other.get('cover')
-                    if isinstance(cover, dict):add(cover.get('path'), 'job', owner)
+                    for path in cover_protection_paths(cover):add(path, 'job', owner)
                 if 'reacquire_markers' in tables:
                     for (snapshot,) in db.execute("SELECT snapshot FROM reacquire_markers WHERE state!='archived'"):
                         for member in (json.loads(snapshot) or {}).get('members') or []:

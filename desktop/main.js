@@ -119,8 +119,7 @@ function readSettings() {
   if(!fs.existsSync(file))return {};
   const info=fs.lstatSync(file);
   if(!info.isFile()||info.isSymbolicLink()||info.size>8192)throw new Error('Desktop settings are not an ordinary bounded file; retained unchanged.');
-  const value=JSON.parse(fs.readFileSync(file,'utf8'));
-  if(!value||typeof value.dataDir!=='string'||!path.isAbsolute(value.dataDir))throw new Error('Desktop settings need an explicit absolute data folder; retained unchanged.');
+  const value=installationKit.profileSettings(JSON.parse(fs.readFileSync(file,'utf8')),installation);
   const sourcesFile=path.join(app.getPath('userData'),'audiobook-sources.json');
   if(fs.existsSync(sourcesFile)){
     const sourceInfo=fs.lstatSync(sourcesFile);
@@ -434,6 +433,13 @@ async function restartEngine(config) {
 function iconImage() {
   return nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
 }
+function trayImage() {
+  // Dedicated small artwork preserves the book silhouette at Windows tray
+  // densities; resizing the full-size application art loses those details.
+  const image=nativeImage.createFromPath(path.join(__dirname,'tray-16.png'));
+  for(const [size,scaleFactor] of [[24,1.5],[32,2]])image.addRepresentation({scaleFactor,buffer:fs.readFileSync(path.join(__dirname,`tray-${size}.png`))});
+  return image;
+}
 
 // The window exists from app ready (Judy 3.2): its first frame is the app's own page from disk (the same markup and
 // script, showing Step 1 and every placeholder) until the engine answers and serves the page itself.
@@ -504,7 +510,7 @@ function trayMenu() {
 }
 
 function createTray() {
-  state.tray = new Tray(iconImage().resize({ width: 16, height: 16 }));
+  state.tray = new Tray(trayImage());
   state.tray.setToolTip('Books Arranger');
   state.tray.setContextMenu(trayMenu());
   state.tray.on('click', showWindow);
@@ -745,7 +751,7 @@ function startConfigured(config){
   currentConfig=config;
   if(installation&&config.catalogMode==='new'&&!fs.existsSync(path.join(app.getPath('userData'),'desktop-settings.json'))&&!pendingSettings){
     const file=path.join(app.getPath('userData'),'desktop-settings.json');
-    pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[file,config.dataDir]);
+    pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[file,config.dataDir,...(installation?['--installation-config',installation.filename]:[])]);
   }
   loadState=require(path.join(config.backendDir,'web','load-state.js'));
   state.firstFrame=require('node:url').pathToFileURL(path.join(config.backendDir,'web','index.html')).href;
@@ -790,7 +796,7 @@ ipcMain.handle('books:select',async(event,choice)=>{
   // Persist only after the chosen catalog has loaded. CREATE_NEW refuses unexpected
   // existing settings; no fallback or migration of selected data.
   const settingsFile=path.join(app.getPath('userData'),'desktop-settings.json');
-  pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[settingsFile,config.dataDir]);
+  pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[settingsFile,config.dataDir,...(installation?['--installation-config',installation.filename]:[])]);
   // The setup window closes and the main window opens at Step 1; a failure after this is the strip's Stopped.
   startConfigured(config);
   if(setupWindow){setupWindow.close();setupWindow=null;}

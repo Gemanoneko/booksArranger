@@ -80,7 +80,7 @@ def index_members(rows, scope, *, allow_empty=False):
 
 
 @contextmanager
-def retained_target_lease(target, records):
+def retained_target_lease(target, records, *, namespace=None):
     """Hold every exact file/directory and shared ancestor against replacement."""
     from native_io import DirectoryBoundary
     from source_cleanup import single_stream
@@ -98,18 +98,30 @@ def retained_target_lease(target, records):
             relative=_relative(native['relative'])
             if _key(relative)!=key:
                 raise RelocationRefused('Retained native record escaped its registered path')
-            path=target/relative
+            path=Path(namespace.current_path(str(target/relative))) if namespace else target/relative
             if path.parent not in guards:
-                guards[path.parent]=stack.enter_context(DirectoryBoundary(target.anchor,path.parent))
+                guards[path.parent]=stack.enter_context(DirectoryBoundary(path.anchor,path.parent))
             directory='facts' not in native
             item=stack.enter_context(NativeItem(path,directory=directory))
             if directory:
                 _no_directory_streams(path)
                 valid=item.facts['identity']==native['identity']
+                if namespace:
+                    tail=_key(str(path.relative_to(namespace.data)))
+                    bridge=namespace.value['directories'].get(tail)
+                    valid=bool(bridge and bridge['prior']==native['identity'] and item.facts['identity']==bridge['current'])
             else:
                 single_stream(path)
                 valid=item.facts==native['facts'] and item.sha256()==native['sha256']
-            if not valid or security.capture(item)['sha256']!=record['security_sha256']:
+                if namespace:
+                    bridge=namespace.file_binding(path)
+                    valid=bool(bridge and bridge['prior']==native['facts'] and item.facts==bridge['current'] and
+                               item.sha256()==bridge['sha256']==native['sha256'])
+            expected_security=record['security_sha256']
+            if namespace:
+                valid=valid and bridge['prior_security']['sha256']==record['security_sha256']
+                expected_security=bridge['current_security']['sha256']
+            if not valid or security.capture(item)['sha256']!=expected_security:
                 raise RelocationRefused('Retained target identity, bytes or permissions changed: '+relative)
             items[key]=item
             report('retained',len(items),len(records))

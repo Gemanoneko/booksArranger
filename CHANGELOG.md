@@ -1,6 +1,13 @@
 # Changelog
 
-## [v0.28.6] - Unreleased
+## [v0.28.7] - Unreleased
+
+### Added
+
+- Keep installed storage and profile paths relative to the application folder; migrate recognized existing installations while preserving queued work and supporting verified drive relocation.
+- Use the new book icon and dedicated tray icons.
+
+## [v0.28.6] - 2026-11-14
 
 ### Fixed
 

@@ -109,14 +109,15 @@ from storage_relocation_operator import bounded_operation
 
 
 @bounded_operation
-def source_detach(manifest_path,manifest_sha256,source_plan_sha256,backup_pin,*,consent_sha256=None):
+def source_detach(manifest_path,manifest_sha256,source_plan_sha256,backup_pin,*,consent_sha256=None,
+                  recovery_receipt_sha256=None):
     """Preview by default. An exact reviewed consent publishes an I-only admission."""
     from catalog_owner import catalog_lock
     from storage_relocation_native import logical_catalog_location,selected_catalog_relocation
     from storage_relocation_operator import checkpoint,create_new,digest,need,packed,pinned_receipt
     path=Path(manifest_path).absolute()
     pin={'manifest':str(path),'sha256':manifest_sha256}
-    with selected_catalog_relocation(pin) as context, ExitStack() as held:
+    with selected_catalog_relocation(pin,detach_recovery_sha256=recovery_receipt_sha256) as context, ExitStack() as held:
         manifest=context.manifest
         database=Path(manifest.target_root)/manifest.scopes[0]/'inventory.sqlite3'
         logical=logical_catalog_location(database)
@@ -124,7 +125,10 @@ def source_detach(manifest_path,manifest_sha256,source_plan_sha256,backup_pin,*,
         with catalog_lock(logical,{}):
             context.require_normal_operation()
             need(context.retention_record and not context.detach_record and not context.finalization_record and
-                 context.source_fence and not path_out.exists(), 'Source detach requires untouched attached retained runtime')
+                 context.source_fence and (not path_out.exists() if recovery_receipt_sha256 is None else path_out.exists()),
+                 'Source detach requires attached retained runtime or its exact interrupted receipt')
+            recovering = held.enter_context(pinned_receipt(path_out,recovery_receipt_sha256)) \
+                if recovery_receipt_sha256 is not None else None
             source_fence=context.source_fence
             fence=source_fence.receipt
             need(fence['source_plan_sha256']==source_plan_sha256,'Source detach plan pin differs')
@@ -143,6 +147,9 @@ def source_detach(manifest_path,manifest_sha256,source_plan_sha256,backup_pin,*,
                          source_plan_sha256=source_plan_sha256,backup=dict(backup_pin),
                          forfeit_unreconciled_rollback=True,disposal_authorized=False)
             sha=digest(packed(proof))
+            if recovering is not None:
+                need(recovering==proof and sha==recovery_receipt_sha256,
+                     'Interrupted source detach no longer matches source, target and independent archive')
             result=dict(phase='source-detach-preview',consent_sha256=sha,proof=proof)
             if consent_sha256 is None:return result
             need(consent_sha256==sha,'Source detach differs from separately reviewed consent')
@@ -153,7 +160,7 @@ def source_detach(manifest_path,manifest_sha256,source_plan_sha256,backup_pin,*,
                 checkpoint();item.revalidate()
                 need(security.capture(item)['sha256']==context.retained['target_members'][key]['security_sha256'],
                      'Retained target became ineligible during detach')
-            output=create_new(path_out,packed(proof))
+            output=recovery_receipt_sha256 or create_new(path_out,packed(proof))
             with closing(sqlite3.connect(database,timeout=2)) as db:
                 db.execute('PRAGMA synchronous=FULL');db.execute('BEGIN IMMEDIATE')
                 need(registration(db) is None,'Source detach registration appeared during preparation')
