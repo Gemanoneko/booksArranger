@@ -3,7 +3,7 @@
 // after the engine answered within 5 s; on the 706 MB catalog it did not, the engine stopped anyway, exited 0 and the
 // app closed without installing. Now update mode starts before the request is sent, a slow answer is not a failure
 // (the request is sent again; the engine treats a repeat as the same update), and the engine's own native exit is
-// the only "done". Status polls feed the progress line only. One overall bound: past it the shell cancels and the
+// the only "done". Status polls feed the progress line only. One overall bound: past it the shell requests rollback and the
 // old app runs on. Every failure is typed (error.updateCause) so the page shows its own line, never raw text.
 const BOUND_MS = 180000; // T_safe 90 s + T_force 60 s (desktop_backend.py UPDATE_SAFE/UPDATE_FORCE) + 30 s
 const POST_TIMEOUT_MS = 15000;
@@ -25,7 +25,7 @@ function problemsOf(outcome) {
  return list.filter(item => item && RESUME_KINDS.includes(item.kind)).map(item => ({ kind: item.kind, cause: item.cause === 'refused' ? 'refused' : 'still_stopping' }));
 }
 
-async function parkOwnedEngine({ state, request, sleep, broadcast, now = Date.now, progress = () => {}, cancelRequested = () => false,
+async function parkOwnedEngine({ state, request, sleep, broadcast, now = Date.now, progress = () => {},
  boundMs = BOUND_MS, postTimeoutMs = POST_TIMEOUT_MS, cancelTimeoutMs = CANCEL_TIMEOUT_MS, pollMs = POLL_MS, exitGraceMs = EXIT_GRACE_MS }) {
  if (state.quit !== 'none' || state.backendExited || !state.owner) throw stopped('refused', 'Owned running engine is required before restarting to update');
  // Update mode first: from here an engine exit with code 0 means "install", never "close the app".
@@ -33,12 +33,11 @@ async function parkOwnedEngine({ state, request, sleep, broadcast, now = Date.no
  const deadline = now() + boundMs;
  let last = null, tooLate = false;
  const exited = () => state.backendExited;
- async function cancel(cause) {
+ async function rollBackAtDeadline() {
   // The engine undoes the update and starts again what it stopped; a 409 'started' means it is already ending.
   for (let attempt = 1; attempt <= CANCEL_TRIES; attempt++) {
    try {
-    // Judy 0.22.2 6.2: the engine answers Cancel once the work has started again (up to its 25 s resume bound); meanwhile
-    // its status says what is still to resume, which the page names from 3 s on.
+    // The engine answers rollback after attempting to restart the work. Keep polling progress while it does.
     const posting = request('POST', '/api/desktop/update-cancel', { desktop: true, timeout: cancelTimeoutMs });
     let settled = false; posting.then(() => { settled = true; }, () => { settled = true; });
     (async () => {
@@ -49,7 +48,7 @@ async function parkOwnedEngine({ state, request, sleep, broadcast, now = Date.no
     })();
     const answer = await posting;
     const outcome = answer && answer.update && answer.update.outcome;
-    return stopped(cause, cause === 'bound' ? 'The engine did not stop within the update bound' : 'Update cancelled',
+    return stopped('bound', 'The engine did not stop within the update bound',
      { waiting: (outcome && outcome.waiting) || (last && last.waiting) || [], resumeProblems: problemsOf(outcome) });
    } catch (error) {
     if (error.status === 409) { tooLate = true; return null; }
@@ -61,7 +60,7 @@ async function parkOwnedEngine({ state, request, sleep, broadcast, now = Date.no
  try {
   let accepted = false;
   while (!accepted && !exited()) {
-   if (cancelRequested() || now() >= deadline) { const error = await cancel(cancelRequested() ? 'cancelled' : 'bound'); if (error) throw error; break; }
+   if (now() >= deadline) { const error = await rollBackAtDeadline(); if (error) throw error; break; }
    try {
     const answer = await request('POST', '/api/desktop/update', { desktop: true, timeout: postTimeoutMs });
     accepted = true; last = (answer && answer.update) || last; if (last) progress(last);
@@ -71,7 +70,7 @@ async function parkOwnedEngine({ state, request, sleep, broadcast, now = Date.no
    }
   }
   while (!exited()) {
-   if (!tooLate && (cancelRequested() || now() >= deadline)) { const error = await cancel(cancelRequested() ? 'cancelled' : 'bound'); if (error) throw error; }
+   if (!tooLate && now() >= deadline) { const error = await rollBackAtDeadline(); if (error) throw error; }
    if (tooLate && now() >= deadline + exitGraceMs) throw stopped('engine_stuck', 'The engine did not end after the update began');
    await sleep(pollMs); if (exited()) break;
    let status = null;

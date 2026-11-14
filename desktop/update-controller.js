@@ -4,7 +4,7 @@
 // 0.22.1 (ruling 27; Judy's 0.22.1 UX spec, section 2): Check, Download and Install each keep their own record
 // (phase, HH:MM, typed cause), so a failed install can never show up as a check result. A check is bounded (30 s an
 // attempt, 3 attempts, 5 s and 15 s apart). Restart to update has no idle gate: the engine stops its work in bounded
-// steps and can be cancelled. Once the engine has ended, any failure to start the installer starts the old engine
+// steps. Once the engine has ended, any failure to start the installer starts the old engine
 // again. Raw error text goes to the log, never to the page.
 const CHECK_ATTEMPTS = 3;
 const CHECK_ATTEMPT_MS = 30000;
@@ -65,11 +65,11 @@ class UpdateController {
   constructor({provider, packaged, version = '', notify, acquireArtifact, parkEngine, install, restartEngine = async () => {}, exists = () => true,
     log = () => {}, now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))}) {
     Object.assign(this,{provider,packaged,version,notify,acquireArtifact,parkEngine,install,restartEngine,exists,log,now,sleep});
-    this.available='';this.ready=null;this.seen=null;this.downloadFailed='';this.cancelRequested=false;this.installerShown=false;
+    this.available='';this.ready=null;this.seen=null;this.downloadFailed='';this.installerShown=false;
     this.busy={check:false,download:false,install:false};
     this.check_={phase:packaged?'idle':'dev',at:'',cause:'',code:0,attempt:0};
     this.download_={phase:'idle',at:'',cause:'',progress:0};
-    this.install_={phase:'idle',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[],resuming:[],resumeSeconds:0,cancelAt:0};
+    this.install_={phase:'idle',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[]};
     provider.autoDownload=false;provider.autoInstallOnAppQuit=false;provider.autoRunAppAfterInstall=true;
     provider.on('update-available',info=>{this.seen={available:String(info.version||'')};});
     provider.on('update-not-available',()=>{this.seen={current:true};});
@@ -82,12 +82,9 @@ class UpdateController {
     provider.on('error',error=>this.log('updater: '+text(error)));
   }
   get value(){
-    const installing=this.busy.install;
     return {version:this.version,available:this.available||(this.ready&&this.ready.version)||'',ready:!!this.ready,packaged:!!this.packaged,
       busy:{...this.busy},check:{...this.check_},download:{...this.download_},
-      install:{...this.install_,waiting:this.install_.waiting.map(item=>({...item})),critical:[...this.install_.critical],problems:this.install_.problems.map(item=>({...item})),stopped:[...this.install_.stopped],
-        resuming:(this.install_.resuming||[]).map(item=>({...item})),cancelling:installing&&this.cancelRequested},
-      canCancel:installing&&!this.cancelRequested&&['starting','pausing','forcing'].includes(this.install_.phase),
+      install:{...this.install_,waiting:this.install_.waiting.map(item=>({...item})),critical:[...this.install_.critical],problems:this.install_.problems.map(item=>({...item})),stopped:[...this.install_.stopped]},
       showInstaller:this.installerShown&&!!this.ready&&this.exists(this.ready.path),installerPath:this.ready?this.ready.path:''};
   }
   emit(){this.notify(this.value);}
@@ -141,23 +138,14 @@ class UpdateController {
     if(!INSTALL_BUSY.includes(phase)||this.install_.phase==='installing')return;
     this.install_={...this.install_,phase,waiting:Array.isArray(update.waiting)?update.waiting:[],critical:Array.isArray(update.critical)?update.critical:[],
       elapsed:Number(update.elapsed)||0,safe:Number(update.safe_seconds)||this.install_.safe,
-      stopped:Array.isArray(update.stopped)?update.stopped.filter(kind=>STOPPED_KINDS.includes(kind)):this.install_.stopped,
-      // Judy 0.22.2 6.2: what Cancel is still starting again, and the engine's bound for it.
-      resuming:Array.isArray(update.resuming)?update.resuming.filter(item=>item&&typeof item.kind==='string').map(item=>({kind:item.kind,title:String(item.title||'')})):this.install_.resuming||[],
-      resumeSeconds:Number(update.resume_seconds)||this.install_.resumeSeconds||0};
+      stopped:Array.isArray(update.stopped)?update.stopped.filter(kind=>STOPPED_KINDS.includes(kind)):this.install_.stopped};
     this.emit();
-  }
-  // Futaba's 0.22.1 QA, m-2 (Judy 0.22.2 6.2): the press is answered at once. cancelling and cancelAt let the page write
-  // "Cancelling the update…" and, from 3 s, what is slow to resume, while the engine starts the work again (up to 25 s).
-  cancel(){
-    if(!this.value.canCancel)return false;
-    this.cancelRequested=true;this.install_={...this.install_,cancelAt:this.now()};this.emit();return true;
   }
   async restart(){
     if(!this.packaged||!this.ready)throw new Error('A verified downloaded update is required');
     if(this.busy.install||this.busy.download)return this.value;
-    this.busy.install=true;this.cancelRequested=false;this.installerShown=false;
-    this.install_={phase:'starting',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[],resuming:[],resumeSeconds:0,cancelAt:0};this.emit();
+    this.busy.install=true;this.installerShown=false;
+    this.install_={phase:'starting',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[]};this.emit();
     const ready=this.ready;let lease=null,engineEnded=false;
     try{
       // Keep the exact checksum-verified installer write/delete denied from before the engine stops until the
@@ -165,13 +153,9 @@ class UpdateController {
       try{lease=await this.acquireArtifact(ready);}
       catch(error){throw Object.assign(error,{updateCause:/timed out/i.test(error.message)?'verify_timeout':'checksum'});}
       if(!lease.isAlive())throw Object.assign(new Error('Installer native lease ended; update cancelled'),{updateCause:'checksum'});
-      try{await this.parkEngine({progress:update=>this.progress(update),cancelRequested:()=>this.cancelRequested});}
+      try{await this.parkEngine({progress:update=>this.progress(update)});}
       catch(error){engineEnded=error.updateCause==='engine_exit';throw error;}
       engineEnded=true;
-      // Futaba's 0.22.2 QA, m-1: Cancel pressed while an idle engine was already ending for the update (under a second)
-      // was answered and the install went on. Nothing is installed yet: the old engine starts again and the update is
-      // cancelled; what the engine had stopped is named as for any ended engine.
-      if(this.cancelRequested)throw Object.assign(new Error('Update cancelled after the engine had stopped'),{updateCause:'cancelled',engineEnded:true});
       if(!lease.isAlive())throw Object.assign(new Error('Installer native lease ended; update cancelled'),{updateCause:'checksum'});
       this.install_={...this.install_,phase:'installing'};this.emit();
       await this.install(ready); // resolves once the installer process exists; the app then exits
@@ -182,13 +166,13 @@ class UpdateController {
       if(engineEnded){try{await this.restartEngine();}catch(restartError){this.log('Engine restart failed: '+text(restartError));cause='engine_restart';}}
       if(cause==='checksum'){this.ready=null;this.download_={phase:'idle',at:'',cause:'',progress:0};}
       this.installerShown=['bound','installer_blocked'].includes(cause);
-      // Senua's 0.22.1 review, W3: what the engine could not start again after Cancel, its bound or a failed close.
-      this.install_={...this.install_,phase:cause==='cancelled'?'cancelled':'failed',at:this.stamp(),cause,
+      // Report work that could not resume after a deadline or a failed close.
+      this.install_={...this.install_,phase:'failed',at:this.stamp(),cause,
         waiting:Array.isArray(error.waiting)&&error.waiting.length?error.waiting:this.install_.waiting,
-        problems:ENGINE_ENDED.includes(cause)||error.engineEnded===true?stoppedProblems(this.install_.stopped)
+        problems:ENGINE_ENDED.includes(cause)?stoppedProblems(this.install_.stopped)
           :Array.isArray(error.resumeProblems)?error.resumeProblems.map(item=>({kind:String(item.kind),cause:String(item.cause)})):[]};
       return this.value;
-    }finally{if(lease)await lease.close();this.busy.install=false;this.cancelRequested=false;this.emit();
+    }finally{if(lease)await lease.close();this.busy.install=false;this.emit();
       // Senua's 0.22.1 review, W16: an engine exit that arrived while the lease was still closing is handled now.
       if(this.lateExitPending){this.lateExitPending=false;await this.lateEngineExit();}}
   }

@@ -515,8 +515,8 @@ function loadTip(tooltip) {
 
 // ── Quit ────────────────────────────────────────────────────────────────────
 async function requestQuit({ confirmed }) {
+  if (updateController?.busy.install || state.quit !== 'none') return;
   if(state.backendExited)return finishExit(state.backend?.exitCode===0?0:1);
-  if (state.quit !== 'none') return;
   if (!state.loaded) return quitWhileLoading();
   let status = null;
   try {
@@ -535,8 +535,10 @@ async function requestQuit({ confirmed }) {
       detail: `${title} finishes converting first, then Books Arranger closes. Queued books stay queued for next time.`,
       buttons: ['Quit after this book', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
     });
-    if (choice.response !== 0 || state.quit !== 'none') return;
+    if (choice.response !== 0) return;
   }
+  // The status request or the confirmation dialog may have yielded to an update.
+  if (updateController?.busy.install || state.quit !== 'none') return;
   state.quit = 'requested';
   refreshTray(busy.converting ? 'Books Arranger — quitting after the current book' : 'Books Arranger — quitting');
   // 0.22.3 (seen on 0.22.1 under load: "Quit could not be confirmed; ownership remains held. Request timed out"): one
@@ -726,8 +728,11 @@ async function restartEngineAfterUpdate(config){
 }
 ipcMain.handle('books:update-check',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.check();});
 ipcMain.handle('books:update-download',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.download();});
-ipcMain.handle('books:update-install',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.restart();});
-ipcMain.handle('books:update-cancel',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.cancel();});
+ipcMain.handle('books:update-install',async event=>{
+  if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');
+  if(state.quit!=='none'||!startupKit.restartItem({loaded:state.loaded,verdict:state.verdict}).enabled)return updateController.value;
+  return updateController.restart();
+});
 ipcMain.handle('books:update-show-installer',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');
   const {showInstaller,installerPath}=updateController.value;if(!showInstaller)return false;shell.showItemInFolder(installerPath);return true;});
 // The window, the tray and the updater exist from the first frame; the engine is launched beside them and the page
