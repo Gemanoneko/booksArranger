@@ -18,6 +18,11 @@ import sqlite3
 import sys
 import uuid
 
+# Installer plugins import this module while its CLI is running. Keep one
+# exception/class identity so imported typed refusals reach the wizard handler.
+if __name__ == '__main__':
+    sys.modules['storage_lifecycle'] = sys.modules[__name__]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from native_io import DirectoryBoundary, VerifiedFile, VerifiedDirectory, kernel, BoundaryError
 from source_cleanup import single_stream

@@ -3,7 +3,7 @@
   "electronVersion": "44.4.5",
   "builderVersion": "26.15.3",
   "iconConverterVersion": "1.2.3",
-  "packageLockSha256": "e3abcf466deda1adf9b0bfb5ea59a8031504617270bf0c3c21f38f05e8d53afc",
+  "packageLockSha256": "9986ac0006d8eff17b664b185a95cba48f69cad3c82d0f3b5c5ffd0da7a1d518",
   "seedDirectory": "build-cache/pack-inputs",
   "files": {
     "electron/electron-v44.4.5-win32-x64.zip": {

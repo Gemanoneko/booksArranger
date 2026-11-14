@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.9] - Unreleased
+
+### Fixed
+
+- Resume a completed portable data binding when its legacy migration receipt exceeds the ordinary JSON limit; keep newly written receipt diagnostics compact.
+
 ## [v0.28.8] - Unreleased
 
 ### Fixed

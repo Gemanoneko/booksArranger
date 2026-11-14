@@ -16,6 +16,45 @@ def _read(path):
     from storage_lifecycle import _json
     return _json(path)
 
+# Legacy 0.28.7/8 bound receipts included every diagnostic path update.
+# This exception applies only to that typed stage, never generic control JSON.
+MAX_BOUND_RECEIPT = 128 * 1024 * 1024
+
+
+def _read_bound(path,intent,anchor):
+    from storage_lifecycle import _json
+    from portable_catalog_paths import COLUMNS
+    value,facts,sha=_json(path,MAX_BOUND_RECEIPT)
+    need(isinstance(value,dict) and set(value)=={'storage_relocation','changed_locations'},'Malformed portable bound receipt')
+    pin=value['storage_relocation']
+    if intent['bootstrap'].get('storage_relocation'):
+        expected=anchor/'Storage'/('runtime-'+str(uuid.uuid5(uuid.UUID(intent['migration_id']),'runtime'))+'.json')
+        need(isinstance(pin,dict) and set(pin)=={'manifest','sha256'} and Path(pin['manifest'])==expected,
+             'Portable bound receipt refers to another runtime')
+        descriptor,_,descriptor_sha=_read(expected)
+        need(descriptor_sha==pin['sha256'] and descriptor.get('migration_id')==intent['migration_id'],
+             'Portable bound runtime digest changed')
+    else:need(pin is None,'Unexpected portable runtime binding')
+    changes=value['changed_locations']
+    if isinstance(changes,list):
+        need(len(changes)<=400000,'Legacy portable change census exceeds bound')
+        for row in changes:
+            need(isinstance(row,list) and len(row)==5 and row[0] in COLUMNS and row[1] in COLUMNS[row[0]] and
+                 type(row[2]) is int and all(isinstance(x,str) and len(x)<=32767 for x in row[3:]),
+                 'Malformed legacy portable path change')
+    else:
+        need(isinstance(changes,dict) and set(changes)=={'schema','count','columns','sha256','authority'} and
+             changes['schema']=='books-portable-path-change-summary-v1' and changes['authority'] is False and
+             type(changes['count']) is int and 0<=changes['count']<=400000 and isinstance(changes['columns'],dict),
+             'Malformed portable path summary')
+        from storage_relocation import _sha
+        _sha(changes['sha256'])
+        need(all(k in {t+'.'+c for t,cols in COLUMNS.items() for c in cols} and type(v) is int and 0<=v<=100000
+                 for k,v in changes['columns'].items()) and sum(changes['columns'].values())==changes['count'],
+             'Portable path summary count differs')
+    return value,facts,sha
+
+
 def _new(path,value):
     from storage_lifecycle import _write_new
     return _write_new(path,packed(value))['sha256']
@@ -353,7 +392,7 @@ def _finish_guarded(intent,original,anchor,bootstrap_path,stage,snapshot):
         else:output=dict(storage_relocation=None,changed_locations=[])
         _new(stage('bound'),output)
         return _pending(bootstrap_path,'bound','Saving your existing settings…')
-    bound,_,_=_read(stage('bound'))
+    bound,_,_=_read_bound(stage('bound'),intent,anchor)
     if not stage('settings').exists():
         settings=Path(original['profile_dir'])/'desktop-settings.json'
         value,facts,sha=_read(settings)

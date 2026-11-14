@@ -10,7 +10,7 @@ JSON_KEYS={'path','root','cover_path','cache_path','staging_path','working_path'
 
 def migrate(db,before,after):
     tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    changed=[]
+    changed=0;counts={};change_digest=hashlib.sha256()
     def path(value):
         if not isinstance(value,str) or not ntpath.isabs(value):return value
         for origin in before:
@@ -29,6 +29,8 @@ def migrate(db,before,after):
                 new=path(old)
                 if new!=old:
                     db.execute('UPDATE "'+table+'" SET "'+column+'"=? WHERE rowid=? AND "'+column+'"=?',(new,key,old))
-                    changed.append((table,column,key,old,new))
+                    event=(table,column,key,old,new)
+                    change_digest.update(json.dumps(event,ensure_ascii=False,separators=(',',':')).encode('utf8')+b'\n')
+                    changed+=1;counts[table+'.'+column]=counts.get(table+'.'+column,0)+1
     # Queued/paused/completed manifests and their hashes remain byte-identical.
-    return changed
+    return dict(schema='books-portable-path-change-summary-v1',count=changed,columns=counts,sha256=change_digest.hexdigest(),authority=False)
