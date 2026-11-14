@@ -11,6 +11,7 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include FileFunc.nsh
+!include "${__FILEDIR__}\installer-refusal.nsh"
 !ifdef DELETE_APP_DATA_ON_UNINSTALL
   !undef DELETE_APP_DATA_ON_UNINSTALL
 !endif
@@ -89,6 +90,7 @@ Var BooksReviewedPerUser
 !macroend
 
 !macro BooksCommon PREFIX
+!insertmacro BooksRefusalSupport "${PREFIX}"
 Function ${PREFIX}BooksEnsurePayload
   ${If} $BooksPayloadReady != "1"
     ReadEnvStr $BooksMaintenanceParent "TEMP"
@@ -146,9 +148,12 @@ Function ${PREFIX}BooksRunHelper
   StrCmp $8 0 books_helper_temp_failed
   System::Call 'kernel32::SetEnvironmentVariableW(w "BOOKS_WORK_TEMP", w "$PLUGINSDIR\books-work") i .r8'
   StrCmp $8 0 books_helper_temp_failed
+  ReadINIStr $BooksLastHelperAction "$BooksRequest" "request" "action"
   nsExec::ExecToStack /TIMEOUT=600000 '"$PLUGINSDIR\books-lifecycle\python\python.exe" -I -B "$PLUGINSDIR\books-lifecycle\backend\storage_lifecycle.py" --wizard-request "$BooksRequest" --wizard-response "$BooksResponse"'
   Pop $0
   Pop $1
+  StrCpy $BooksLastHelperExit $0
+  StrCpy $BooksLastHelperOutput $1
   ReadINIStr $2 "$BooksResponse" "result" "ok"
   ${If} $0 != "0"
     StrCpy $2 "0"
@@ -169,10 +174,14 @@ Function ${PREFIX}BooksRefuse
   ${If} $3 == ""
     StrCpy $3 "Books Arranger could not verify that its work has stopped. Choose Quit in Books Arranger and wait for its work to finish, then try again."
   ${EndIf}
+  Call ${PREFIX}BooksPersistRefusal
   ${IfNot} ${Silent}
     MessageBox MB_OK|MB_ICONEXCLAMATION "$3"
   ${EndIf}
   SetErrorLevel 20
+  ${If} $BooksRefusalStatus == "failed"
+    SetErrorLevel 21
+  ${EndIf}
   Quit
 FunctionEnd
 

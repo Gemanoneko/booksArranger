@@ -1945,6 +1945,7 @@ def wizard(request_path,response_path):
     response['result']={'ok':'0','code':'could_not_check'}
     exitcode=1
     from storage_lifecycle_controls import ControlRecordsHeld
+    from directory_retention import DirectoryRetentionRefused
     try:
         ini=_read_ini(request_path);req=ini['request'];action=req.get('action','')
         if action=='process-check':
@@ -2098,6 +2099,10 @@ def wizard(request_path,response_path):
         else:response['result'].update(code='control_records_held',message='This location could not be checked. Keep it or restore access before continuing.',details=str(error))
     except LifecycleRefused as error:
         response['result'].update(code=error.code,path=error.path,message=MESSAGES.get(error.code,'This location could not be checked. Keep it or restore access before continuing.'))
+    except DirectoryRetentionRefused as error:
+        response['result'].update(code='directory_retention_refused',
+            message='This location could not be checked. Keep it or restore access before continuing.',
+            exception_type=type(error).__name__,details=str(error)[:4096])
     except (OSError,ValueError,sqlite3.Error,configparser.Error):
         response['result'].update(code='could_not_check',message='This location could not be checked. Keep it or restore access before continuing.')
     import io
