@@ -139,6 +139,9 @@ class ProducerRecovery:
             files=[]
             for row in scope['files']:
                 path=ordinary(row['path'])
+                if relocated_expected is not None:
+                    from storage_relocation_native import retained_current_read_path
+                    path=ordinary(retained_current_read_path(path))
                 if path.parent!=stage or path.name!=row['name']:raise ValueError('Old artifact path is outside its exact attempt')
                 file=held.enter_context(VerifiedFile(path));single_stream(path);facts=file.facts()
                 if facts['links']!=1:raise ValueError('Old artifact has an alias; files retained')
@@ -381,7 +384,42 @@ def verify_retained(db,job_id,attempt_id,states=('isolated_retained',)):
     elif 'basis' in proof or later['uptime_ms']>=prior['uptime_ms']:raise ValueError('Retained producer closure is unproved')
     job=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone();attempt=db.execute('SELECT * FROM working_attempts WHERE job_id=? AND attempt_id=?',(job_id,attempt_id)).fetchone()
     files=[dict(r) for r in db.execute('SELECT * FROM working_files WHERE job_id=? AND attempt_id=? ORDER BY name',(job_id,attempt_id))]
-    if job is None or dict(job)!=scope['job'] or attempt is None or dict(attempt)!=proof['target_attempt'] or files!=scope['files']:raise ValueError('Retained history changed; no cleanup or reuse permitted')
+    if job is None or dict(job)!=scope['job'] or attempt is None or dict(attempt)!=proof['target_attempt']:raise ValueError('Retained history changed; no cleanup or reuse permitted')
+    expected_files=scope['files']
+    if files!=expected_files:
+        from storage_relocation_native import retained_location_match
+        location_match=retained_location_match
+        if saved['state']=='disposed':
+            # A closed ledger legitimately names files absent from the physical
+            # migration census. Authenticate the existing disposal, never infer
+            # it from absence or create new cleanup authority.
+            disposal=proof.get('disposal') or {}
+            child_id=disposal.get('child_job_id')
+            child=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(child_id,)).fetchone()
+            relation=db.execute('SELECT binding FROM audio_retry_intents WHERE parent_job_id=? AND child_job_id=?',(job_id,child_id)).fetchone()
+            output=json.loads(child['output'] or 'null') if child else None
+            binding=(json.loads(child['manifest']).get('retry_intent') or {}) if child else {}
+            if (proof.get('basis')!='boot_after_attempt' or
+                set(disposal)!={'child_job_id','intended','removed','files'} or
+                not all(isinstance(disposal.get(k),str) and disposal[k] for k in ('intended','removed')) or
+                _milliseconds(disposal['removed'])<_milliseconds(disposal['intended']) or
+                disposal.get('files')!=[{k:item[k] for k in ('name','sha256')} for item in native['files']] or
+                child is None or child['state']!='completed' or
+                not isinstance(output,dict) or output.get('job_id')!=child_id or
+                (output.get('validation') or {}).get('passed') is not True or
+                relation is None or json.loads(relation[0])!=binding or
+                binding.get('parent_job_id')!=job_id or binding.get('retained_checkpoint_id')!=saved['id'] or
+                binding.get('retained_disposal') is not True or
+                any(ordinary(old['path'])!=ordinary(native['stage'])/old['name'] for old in expected_files)):
+                raise ValueError('Disposed retained history has no exact completed-child proof')
+            from storage_relocation_native import disposed_history_location_match
+            location_match=disposed_history_location_match
+        if len(files)!=len(expected_files) or any(
+            {k:v for k,v in now.items() if k!='path'}!={k:v for k,v in old.items() if k!='path'} or
+            not isinstance(now.get('path'),str) or not isinstance(old.get('path'),str) or
+            not location_match(now['path'],old['path'])
+            for now,old in zip(files,expected_files)):
+            raise ValueError('Retained history changed; no cleanup or reuse permitted')
     return {'checkpoint_id':saved['id'],'scope':scope,'native':native,'proof':proof}
 
 def protected_dependency(db,paths):
@@ -391,7 +429,10 @@ def protected_dependency(db,paths):
     targets=[ordinary(path) for path in paths]
     for raw in db.execute("SELECT job_id,attempt_id FROM producer_recovery_checkpoints WHERE state='isolated_retained'"):
         record=verify_retained(db,raw[0],raw[1]);scope=record['scope'];stage=ordinary(record['native']['stage'])
+        from storage_relocation_native import retained_current_read_path
+        current_stage=ordinary(retained_current_read_path(stage,directory=True))
+        stages={stage,current_stage}
         sources=[ordinary(item['path']) for item in json.loads(scope['attempt']['manifest'])['sources']]
         for path in targets:
-            if path==stage or stage in path.parents or path in stage.parents or any(path==source or path in source.parents for source in sources):return True
+            if any(path==kept or kept in path.parents or path in kept.parents for kept in stages) or any(path==source or path in source.parents for source in sources):return True
     return False

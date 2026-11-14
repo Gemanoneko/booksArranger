@@ -631,6 +631,34 @@ def watch_shell(control):
         control.stop_now('shell_pipe_closed')
 
 
+class ShellLifetime:
+    """One pipe reader from bootstrap onward; EOF cannot be missed before ready."""
+    def __init__(self):
+        self.lost=threading.Event()
+        self.lock=threading.Lock()
+        self.control=None
+
+    def start(self):
+        descriptor=sys.stdin.fileno()  # Missing owned pipe is a bootstrap refusal.
+        def read():
+            try:
+                while os.read(descriptor,4096):pass
+            except OSError:pass
+            self.lost.set()
+            with self.lock:control=self.control
+            if control is not None:control.stop_now('shell_pipe_closed')
+        threading.Thread(target=read,name='books-desktop-shell',daemon=True).start()
+
+    def attach(self,control):
+        with self.lock:
+            self.control=control
+            closed=self.lost.is_set()
+        if closed:control.stop_now('shell_pipe_closed')
+
+    def check(self):
+        if self.lost.is_set():raise RuntimeError('The app closed before the data folder check finished.')
+
+
 def _process_running(pid):
     import ctypes
     from ctypes import wintypes
@@ -732,6 +760,8 @@ def main(argv=None):
     database = database_argument(argv)
     if not database:
         raise SystemExit('Books Arranger desktop backend needs --database.')
+    lifetime=ShellLifetime()
+    lifetime.start()
     from storage_relocation_native import configure_from_environment,configure_work_temp
     configure_work_temp()
     configure_from_environment()
@@ -740,13 +770,21 @@ def main(argv=None):
     def ready(server):
         server.RequestHandlerClass = handler_class(web_server.Handler, token)
         server.desktop = DesktopControl(server, exit_bound=DesktopControl.EXIT_AFTER)
-        threading.Thread(target=watch_shell, args=(server.desktop,), name='books-desktop-shell', daemon=True).start()
+        lifetime.attach(server.desktop)
 
     def startup_guard(database, roots, port):
         from desktop_catalog import inspect_folder
         inspect_folder(Path(database).parent,mode,roots,(Path(__file__).resolve().parent,))
-    web_server.main(argv, ready=ready, before_start=retire_stale_record,
-                    startup_guard=startup_guard,create_data=mode=='new')
+    from storage_relocation_native import current
+    from storage_admission_progress import Admission
+    from contextlib import nullcontext
+    def progress(value):
+        print('BOOKS_STORAGE_ADMISSION '+json.dumps(value,separators=(',',':')),flush=True)
+    # This same owned engine keeps the admitted native handles through normal
+    # operation. No preliminary process repeats the full fence/member scan.
+    with Admission(progress,cancelled=lifetime.lost.is_set) if current() is not None else nullcontext() as admission:
+        web_server.main(argv, ready=ready, before_start=retire_stale_record,
+                        startup_guard=startup_guard,create_data=mode=='new',admission=admission,before_mutation=lifetime.check)
     return 0
 
 

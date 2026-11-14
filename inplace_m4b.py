@@ -448,7 +448,7 @@ def _edit(manifest, stage, stop, progress, session):
         if zone_identifier.streams(source) != [('::$DATA', intent['output_size'])]:
             raise ap.ValidationError('Additional filesystem streams appeared during the in-place edit')
         # The copy flow's last check of its output, the same refusal (Sergei: the fast path runs every check the copy flow runs)
-        if ap.digest(manifest['cover']['path'], stop) != manifest['cover']['sha256']:
+        if ap.digest(ap.reviewed_cover_path(manifest['cover']), stop) != manifest['cover']['sha256']:
             raise ap.ValidationError('Selected cover changed — review required')
         session.record('written', verified=_stamp())
         receipt = mp.receipt(plan, original, expected) | {'all_retained_bytes_verified': True}

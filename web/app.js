@@ -410,7 +410,12 @@ function applyStartup(value){
   if(fresh)stoppedTechnical=null;
   if(fresh && value.phase==='launching')loadTracker.restart(value.startedAt);
   else if(fresh)loadTracker.launchedAt=value.startedAt;
-  if(!wasStopped && loadStopped() && loadingActive)announceLoad('Books Arranger stopped loading. Try again is available.');
+  if(value.admission&&value.admission.state!=='complete'){
+    const a=value.admission;
+    loadAnswer={...a,admission:true,step:'admission',n:1,of:4,unit:'items',restart_safe:false,progress_age_ms:Math.max(0,a.updatedAt-a.progressAt)};
+    if(a.updatedAt!==null)loadTracker.observe({loading:loadAnswer},a.updatedAt);
+  }else if(loadAnswer?.admission){loadAnswer=null;loadTracker.answered=false;}
+  if(!wasStopped && loadStopped() && loadingActive)announceLoad(value.admission?'Data folder check stopped.':'Books Arranger stopped loading. Try again is available.');
   renderLoad();loadPlaceholders();
 }
 // Every engine answer: the loading object, or none (loaded). A "still updating" 503 is an answer too (heard).
@@ -426,10 +431,10 @@ function loadTechnical(verdict){
   const lines=[],step=LS.stepOf(loadTracker.answered?loadAnswer:null),now=Date.now();
   lines.push(`Step: ${step.id} (${step.n} of ${step.of})`);
   if(loadAnswer && Number.isFinite(loadAnswer.done))lines.push(`Counts: ${loadAnswer.done}${Number.isFinite(loadAnswer.total)?' of '+loadAnswer.total:''} ${loadAnswer.unit || 'items'}`);
-  lines.push(`Engine answered: ${loadTracker.answered?Math.floor((now-loadTracker.answerAt)/1000)+' s ago':'never'}`);
+  lines.push(`${loadAnswer?.admission?'Check updated':'Engine answered'}: ${loadTracker.answered?Math.floor((now-loadTracker.answerAt)/1000)+' s ago':'never'}`);
   lines.push(`Progress: ${Math.floor((now-loadTracker.progressAt)/1000)} s ago`);
   lines.push(`Loading started: ${new Date(loadTracker.launchedAt).toISOString()}`);
-  lines.push(`State: ${verdict.state}${loadAnswer?.restart_safe===false?' (the engine is changing the catalog)':''}`);
+  lines.push(`State: ${verdict.state}${loadAnswer?.restart_safe===false?(loadAnswer.admission?' (data folder check has not stopped)':' (the engine is changing the catalog)'):''}`);
   if(loadAnswer?.error)lines.push('Engine: '+loadAnswer.error);
   if(shellStartup?.exited){lines.push(`Engine exit code: ${shellStartup.exited.code ?? 'unknown'}`);if(shellStartup.exited.lastLines)lines.push('Last engine output:\n'+shellStartup.exited.lastLines);}
   return lines.join('\n');
@@ -437,8 +442,13 @@ function loadTechnical(verdict){
 function renderLoad(){
   if(!LS || !loadingActive || !$('load-strip'))return;
   const now=Date.now(),stopped=loadStopped(),verdict=LS.evaluate(loadTracker,now,{stopped});
-  const loading=loadTracker.answered?loadAnswer:null,step=LS.stepOf(loading),line=LS.stateLine(verdict,loading,{portPid:shellStartup?.portPid});
+  const loading=loadAnswer?.admission?loadAnswer:loadTracker.answered?loadAnswer:null,step=LS.stepOf(loading),line=LS.stateLine(verdict,loading,{portPid:shellStartup?.portPid});
   setText('load-word',line.word);setText('load-text',line.text);
+  const admission=loading?.admission===true;
+  if($('load-admission')){
+    $('load-admission').hidden=!admission;
+    setText('load-admission',admission?(stopped&&loading.error?loading.error:now-loading.startedAt>loading.limit_ms?'Waiting for the current check to return.':LS.admissionPhase(loading)):'');
+  }
   $('load-strip').classList?.toggle('alert',['stuck','stopped'].includes(verdict.state));
   const fraction=LS.fraction(loading),segments=[...(document.querySelectorAll?.('#load-bar .load-segment') || [])];
   segments.forEach((segment,index)=>{
@@ -454,12 +464,21 @@ function renderLoad(){
   const detail=stopped?[]:LS.detailParts(loadTracker,now,loading,shellStartup?.lastLoadMs),detailText=detail.join(' · ');
   if($('load-detail').dataset?.text!==detailText){$('load-detail').replaceChildren(...detail.flatMap((part,i)=>i?[' · ',node('span',part)]:[node('span',part)]));if($('load-detail').dataset)$('load-detail').dataset.text=detailText;}
   $('load-detail').hidden=stopped;
+  $('load-detail').title=admission?'If this time is exceeded, startup stops after the current check returns.':'';
+  if(admission)$('load-detail').setAttribute('aria-description',$('load-detail').title);
+  else $('load-detail').removeAttribute?.('aria-description');
   const stuck=verdict.state==='stuck',actions=stuck || stopped;
   $('load-actions').hidden=!actions;$('load-details').hidden=!actions;
   // Restart engine and Try again are the shell's (desktop); browser mode keeps Copy details only (Judy 3.4).
   $('load-restart').hidden=!(stuck && !stopped && shellApi);$('load-retry').hidden=!(stopped && shellApi);
   const unsafe=loading?.restart_safe===false;
   $('load-restart').setAttribute('aria-disabled',unsafe?'true':'false');$('load-restart').title=unsafe?NOT_SAFE:'Stop the engine and start it again. Loading starts over. Your files are not touched.';
+  if(admission){
+    $('load-restart').title='Wait for the data folder check to stop before restarting.';
+    $('load-retry').setAttribute('aria-disabled',stopped&&!loading.verification_required?'false':'true');
+    $('load-retry').title=stopped&&!loading.verification_required?'Start the data folder check again.':'Wait for the data folder check to stop before restarting.';
+    $('load-copy').title='Copy the data folder check details to the clipboard.';
+  }else{$('load-retry').setAttribute('aria-disabled','false');$('load-retry').title='Start the engine again.';}
   if(actions){
     // A stopped engine cannot update its diagnostics. Keep the same text node
     // while it is selected; ticking ages used to clear Ctrl+C's selection.
@@ -467,11 +486,11 @@ function renderLoad(){
     setText('load-technical',stopped?stoppedTechnical:loadTechnical(verdict));
   }
   // Announcements: events only (a step starts, Stuck, moving again, Stopped); Waiting is not announced.
-  const stepKey=`${step.n}/${step.of}/${step.id}`;
-  if(stepKey!==loadStep && !stopped){if(loadStep)announceLoad(`Step ${step.n} of ${step.of}: ${step.words}.`);loadStep=stepKey;}
+  const stepKey=`${step.n}/${step.of}/${step.id}/${admission?loading.phase:''}`;
+  if(stepKey!==loadStep && !stopped){if(loadStep)announceLoad(admission?LS.admissionPhase({...loading,total:null}):`Step ${step.n} of ${step.of}: ${step.words}.`);loadStep=stepKey;}
   if(verdict.state!==loadVerdict){
     // N4 (Judy's implementation check): an inert Restart engine is never announced as available.
-    if(stuck)announceLoad(`Loading is stuck. ${verdict.signal==='answer'?`The engine hasn't answered for ${LS.duration(verdict.quiet)}.`:`No progress for ${LS.duration(verdict.quiet)}.`}${!shellApi?'':unsafe?' The engine is changing the catalog, so Restart engine waits.':' Restart engine is available.'}`);
+    if(stuck)announceLoad(admission?'Data folder check has stopped reporting progress. Wait for it to stop before restarting.':`Loading is stuck. ${verdict.signal==='answer'?`The engine hasn't answered for ${LS.duration(verdict.quiet)}.`:`No progress for ${LS.duration(verdict.quiet)}.`}${!shellApi?'':unsafe?' The engine is changing the catalog, so Restart engine waits.':' Restart engine is available.'}`);
     else if(loadVerdict==='stuck' && verdict.state==='working')announceLoad('Loading is moving again.');
     loadVerdict=verdict.state;
   }

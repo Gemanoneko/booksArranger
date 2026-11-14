@@ -119,8 +119,7 @@ function readSettings() {
   if(!fs.existsSync(file))return {};
   const info=fs.lstatSync(file);
   if(!info.isFile()||info.isSymbolicLink()||info.size>8192)throw new Error('Desktop settings are not an ordinary bounded file; retained unchanged.');
-  const value=JSON.parse(fs.readFileSync(file,'utf8'));
-  if(!value||typeof value.dataDir!=='string'||!path.isAbsolute(value.dataDir))throw new Error('Desktop settings need an explicit absolute data folder; retained unchanged.');
+  const value=installationKit.profileSettings(JSON.parse(fs.readFileSync(file,'utf8')),installation);
   const sourcesFile=path.join(app.getPath('userData'),'audiobook-sources.json');
   if(fs.existsSync(sourcesFile)){
     const sourceInfo=fs.lstatSync(sourcesFile);
@@ -231,6 +230,12 @@ function startBackend(config) {
     while ((end = state.hostOutput.indexOf('\n')) !== -1) {
       const line = state.hostOutput.slice(0, end).trim();
       state.hostOutput = state.hostOutput.slice(end + 1);
+      if(line.startsWith('BOOKS_STORAGE_ADMISSION ')){
+        if(generation===state.generation&&state.owner&&state.backend===child){
+          try{if(state.startup.admission(JSON.parse(line.slice('BOOKS_STORAGE_ADMISSION '.length))))pushStartup();}catch{}
+        }
+        continue;
+      }
       if (!line.startsWith('BOOKS_ENGINE_OWNER ')) continue;
       try {
         const proof = JSON.parse(line.slice('BOOKS_ENGINE_OWNER '.length));
@@ -385,6 +390,7 @@ function launchEngine(config, { fresh = true } = {}) {
   state.ready = false; state.loaded = false; state.verdict = 'working';
   state.output = '';
   if (fresh) state.startup.launch(); // a Restart engine started its launch (and its clock) at the press
+  if(config.storageRelocation)state.startup.beginAdmission();
   pushStartup(); loadTip(loadState.trayTooltip({ state: 'working' }, null, false));
   startBackend(config); // first: the watch reads this launch's exit flag, never the last launch's
   return watchEngine(state.generation);
@@ -409,6 +415,8 @@ function relaunchConfig(config) {
 }
 async function restartEngine(config) {
   if (state.loaded || state.quit !== 'none' || state.restarting) return false;
+  const admission=state.startup?.value.admission;
+  if(admission&&admission.state!=='complete'&&(!state.backendExited||admission.verification_required))return false;
   state.restarting = true;
   config = relaunchConfig(config);
   try {
@@ -424,6 +432,13 @@ async function restartEngine(config) {
 // ── Window and tray ─────────────────────────────────────────────────────────
 function iconImage() {
   return nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
+}
+function trayImage() {
+  // Dedicated small artwork preserves the book silhouette at Windows tray
+  // densities; resizing the full-size application art loses those details.
+  const image=nativeImage.createFromPath(path.join(__dirname,'tray-16.png'));
+  for(const [size,scaleFactor] of [[24,1.5],[32,2]])image.addRepresentation({scaleFactor,buffer:fs.readFileSync(path.join(__dirname,`tray-${size}.png`))});
+  return image;
 }
 
 // The window exists from app ready (Judy 3.2): its first frame is the app's own page from disk (the same markup and
@@ -495,7 +510,7 @@ function trayMenu() {
 }
 
 function createTray() {
-  state.tray = new Tray(iconImage().resize({ width: 16, height: 16 }));
+  state.tray = new Tray(trayImage());
   state.tray.setToolTip('Books Arranger');
   state.tray.setContextMenu(trayMenu());
   state.tray.on('click', showWindow);
@@ -736,7 +751,7 @@ function startConfigured(config){
   currentConfig=config;
   if(installation&&config.catalogMode==='new'&&!fs.existsSync(path.join(app.getPath('userData'),'desktop-settings.json'))&&!pendingSettings){
     const file=path.join(app.getPath('userData'),'desktop-settings.json');
-    pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[file,config.dataDir]);
+    pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[file,config.dataDir,...(installation?['--installation-config',installation.filename]:[])]);
   }
   loadState=require(path.join(config.backendDir,'web','load-state.js'));
   state.firstFrame=require('node:url').pathToFileURL(path.join(config.backendDir,'web','index.html')).href;
@@ -781,7 +796,7 @@ ipcMain.handle('books:select',async(event,choice)=>{
   // Persist only after the chosen catalog has loaded. CREATE_NEW refuses unexpected
   // existing settings; no fallback or migration of selected data.
   const settingsFile=path.join(app.getPath('userData'),'desktop-settings.json');
-  pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[settingsFile,config.dataDir]);
+  pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[settingsFile,config.dataDir,...(installation?['--installation-config',installation.filename]:[])]);
   // The setup window closes and the main window opens at Step 1; a failure after this is the strip's Stopped.
   startConfigured(config);
   if(setupWindow){setupWindow.close();setupWindow=null;}
@@ -821,7 +836,8 @@ if (!app.requestSingleInstanceLock()) {
     try {
       config = configuration();
       currentConfig=config;
-      if(config.storageRelocation)await runReadOnlyPython(config,'desktop_storage_admission.py',['--database',path.join(config.dataDir,'inventory.sqlite3')]);
+      // The owned engine performs full storage admission before catalog recovery
+      // and workers, and reports it to the first frame. Do not run it twice.
       if(config.requiresSetup)await chooseCatalog();
       else startConfigured(config); // the engine's own failures show in the window's load strip (Stopped)
     } catch (error) {

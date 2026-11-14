@@ -13,6 +13,16 @@ function createStartup({ now = Date.now, lastLoadMs = null } = {}) {
   // Restart engine and Try again start a new launch; "last load took" stays.
   launch() { value = { phase: 'launching', startedAt: now(), lastLoadMs: value.lastLoadMs, exited: null, portPid: null }; return this.value; },
   running() { if (value.phase === 'launching') value = { ...value, phase: 'running' }; return this.value; },
+  beginAdmission() { value={...value,admission:{state:'pending',phase:'pending',done:0,total:null,startedAt:now(),updatedAt:null,limit_ms:597000}};return this.value; },
+  admission(event) {
+   if(value.phase!=='launching'||!event||!['active','complete','failed'].includes(event.state)||event.limit_ms!==597000||!Number.isSafeInteger(event.elapsed_ms)||event.elapsed_ms<0)return false;
+   if(value.admission&&!['active','pending'].includes(value.admission.state)&&!(value.admission.state==='complete'&&event.state==='failed'))return false;
+   if(value.admission?.elapsed_ms>event.elapsed_ms)return false;
+   if(event.state==='active'&&(!['records','database','source','namespace','retained'].includes(event.phase)||!Number.isSafeInteger(event.done)||event.done<0||!(event.total===null||Number.isSafeInteger(event.total)&&event.total>=event.done)||!Number.isSafeInteger(event.bytes)||event.bytes<0||!Number.isSafeInteger(event.progress_age_ms)||event.progress_age_ms<0||event.progress_age_ms>event.elapsed_ms))return false;
+   const at=now();
+   value={...value,admission:{...value.admission,...event,error:String(event.error||'').slice(0,4096),updatedAt:at,progressAt:at-(event.progress_age_ms||0),startedAt:at-event.elapsed_ms}};
+   return true;
+  },
   // The shell's fact: the engine process exited, or another copy holds the port. The first cause stays.
   stopped({ code = null, lastLines = '', portPid = null } = {}) {
    if (value.phase === 'stopped') return this.value;

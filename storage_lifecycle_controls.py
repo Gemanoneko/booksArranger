@@ -22,13 +22,13 @@ SQL_REFERENCES=('storage_relocation_verification','storage_relocation_source_fin
                 'storage_relocation_source_finalization_files')
 MAX_FILES=400000
 EXPECTED_SCHEMAS={
- 'bootstrap':{'books-arranger-installation-v1'},
+ 'bootstrap':{'books-arranger-installation-v1','books-arranger-installation-v2'},
  'ownership_manifest':{'books-installation-ownership-v1'},
  'ownership_provenance':{'books-installation-ownership-v1'},
  'package_ownership':{'books-installation-ownership-v1'},
  'retained_package':{'books-legacy-package-retirement-v1'},
  'retained_profile':{'books-retained-profile-copy-v1'},
- 'storage_relocation':{'books-storage-relocation-v1'},
+ 'storage_relocation':{'books-storage-relocation-v1','books-portable-runtime-v1'},
  'control_provenance':{'books-control-producer-index-v1'},
  'catalog:storage_relocation_verification':{'books-storage-target-verification-v1'},
  'catalog:storage_relocation_source_finalization':{'books-source-finalization-v1','books-source-retirement-v1'},

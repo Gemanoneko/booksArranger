@@ -29,8 +29,19 @@ def _create(path,value,name):
     with support_dispositions(parent,[path]):held.dispose();held.__exit__(None,None,None)
    held.__exit__(None,None,None)
  return {'ok':True}
-def save(path,folder):
- return _create(path,{'dataDir':str(Path(folder).absolute()),'catalogMode':'existing'},'desktop-settings.json')
+def save(path,folder,installation_config=None):
+ value={'dataDir':str(Path(folder).absolute()),'catalogMode':'existing'}
+ if installation_config:
+  from storage_lifecycle import _json
+  from installation_storage import decode,SCHEMA
+  bootstrap=Path(installation_config).absolute();raw,_,_=_json(bootstrap,65536)
+  if raw.get('schema')==SCHEMA:
+   bound=decode(raw,bootstrap.parent)
+   if Path(bound['data_dir'])!=Path(folder).absolute() or Path(bound['profile_dir'])!=Path(path).absolute().parent:
+    raise ValueError('Settings destination differs from the portable installation')
+   value['dataDir']=raw['data_dir']
+   if raw.get('storage_relocation'):value['storage_relocation']=raw['storage_relocation']
+ return _create(path,value,'desktop-settings.json')
 
 def configure_sources(path,roots,sources,output_root=None):
  from source_config import normalize_sources
@@ -47,7 +58,11 @@ def main():
    with plan_path.open('rb') as source:raw=source.read(16385)
    if len(raw)>16384:raise ValueError('Source configuration plan exceeds bound')
    plan=json.loads(raw);result=configure_sources(sys.argv[2],plan['roots'],plan['audiobook_sources'],plan.get('audiobook_output_root'))
-  else:result=save(*sys.argv[1:])
+  else:
+   import argparse
+   parser=argparse.ArgumentParser();parser.add_argument('path');parser.add_argument('folder')
+   parser.add_argument('--installation-config')
+   args=parser.parse_args();result=save(args.path,args.folder,args.installation_config)
  except Exception as error:print(json.dumps({'ok':False,'error':str(error)}));return 1
  print(json.dumps(result));return 0
 if __name__=='__main__':raise SystemExit(main())

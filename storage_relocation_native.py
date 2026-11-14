@@ -71,8 +71,8 @@ def _junction_target(handle):
 
 
 class NativeContext:
-    def __init__(self, manifest_path, expected_sha256):
-        from native_io import DirectoryBoundary, VerifiedFile, kernel
+    def __init__(self, manifest_path, expected_sha256, *, receipt_rename_parent=None, detach_recovery_sha256=None, physical_catalog=False):
+        from native_io import DirectoryBoundary, VerifiedFile, kernel, receipt_boundary
         from source_cleanup import single_stream
         self.stack = contextlib.ExitStack()
         self.database = None
@@ -86,30 +86,92 @@ class NativeContext:
         self.pending_verification = None
         self.finalization_record = None
         self.pending_finalization = None
+        self.detach_record = None
+        self.pending_detach = None
+        self.detach_recovery_sha256 = detach_recovery_sha256
+        if detach_recovery_sha256 is not None:
+            from storage_relocation import _sha
+            _sha(detach_recovery_sha256)
+        self.retention_record = None
+        self.pending_retention = None
+        self.retained = None
+        self.retained_members = {}
+        self.retained_jobs = frozenset()
+        self.retained_items = {}
         self.manifest_path = Path(manifest_path).absolute()
+        self.configuration_path = self.manifest_path
+        self.configuration_digest = expected_sha256
+        self.namespace = None
+        _need(type(physical_catalog) is bool,'Physical catalog capability must be explicit')
+        self.physical_catalog=physical_catalog
+        self.receipt_rename_parent = Path(receipt_rename_parent).absolute() if receipt_rename_parent is not None else None
         self._closed = False
         try:
-            self.stack.enter_context(DirectoryBoundary(self.manifest_path.anchor, self.manifest_path.parent))
+            self.stack.enter_context(receipt_boundary(self.manifest_path,self.receipt_rename_parent))
             descriptor = self.stack.enter_context(VerifiedFile(self.manifest_path))
             _need(descriptor.facts()['links'] == 1 and descriptor.facts()['size'] <= 64 * 1024 * 1024,
                   'Selected storage descriptor is not an ordinary bounded unique file')
             single_stream(self.manifest_path)
-            self.manifest = parse_manifest(b''.join(descriptor.chunks()), expected_sha256)
-            target = Path(self.manifest.target_root)
+            raw = b''.join(descriptor.chunks())
+            import hashlib
+            _need(hashlib.sha256(raw).hexdigest()==expected_sha256,'Storage descriptor bytes changed')
+            if json.loads(raw).get('schema') == 'books-portable-runtime-v1':
+                from storage_portable_namespace import parse_binding, anchored
+                _need(self.configuration_path.parent.name=='Storage','Portable binding must be in its managed Storage folder')
+                anchor=self.configuration_path.parent.parent
+                origin=json.loads(raw)['origin']
+                origin_path=Path(anchored(anchor,origin['relative']))
+                self.stack.enter_context(receipt_boundary(origin_path,self.receipt_rename_parent))
+                origin_file=self.stack.enter_context(VerifiedFile(origin_path))
+                single_stream(origin_path)
+                _need(origin_file.facts()['links']==1 and origin_file.facts()['size']<=64*1024*1024,
+                      'Portable origin descriptor is not bounded unique data')
+                self.namespace=parse_binding(raw,expected_sha256,anchor,b''.join(origin_file.chunks()))
+                self.manifest=self.namespace.origin
+                self.manifest_path=Path(origin['path']) # immutable provenance token, never an I/O fallback
+                target=Path(self.namespace.data)
+                target_identity=self.namespace.value['root_identity']
+            else:
+                self.manifest = parse_manifest(raw, expected_sha256)
+                target = Path(self.manifest.target_root)
+                target_identity=self.manifest.directories[''].target
             kernel.GetDriveTypeW.argtypes = [wintypes.LPCWSTR]
             kernel.GetDriveTypeW.restype = wintypes.UINT
             _need(kernel.GetDriveTypeW(target.anchor) == 3,
                   'Relocated application state requires its configured local fixed drive')
             self.target_boundary = self.stack.enter_context(DirectoryBoundary(target.anchor, target))
-            _need(tuple(self.target_boundary.identities[-1][1:]) == self.manifest.directories[''].target,
+            _need(tuple(self.target_boundary.identities[-1][1:]) == tuple(target_identity),
                   'Configured storage target native root identity changed')
         except BaseException:
             self.stack.close()
             raise
 
     def is_alias(self, path, operation_path):
-        return (_key(str(path)) == _key(self.manifest.source_root) and
+        return (self.namespace is None and not self.physical_catalog and _key(str(path)) == _key(self.manifest.source_root) and
                 self.manifest.permitted(str(operation_path)))
+
+    def logical_location(self,path):
+        if self.namespace:return self.namespace.current_path(path)
+        logical=self.manifest.logical_location(str(path))
+        if self.physical_catalog:return ntpath.join(self.manifest.target_root,self.manifest.relative(logical))
+        return logical
+
+    def origin_location(self,path):
+        return self.namespace.origin_path(path) if self.namespace else self.manifest.logical_location(str(path))
+
+    def permitted(self,path):
+        if self.namespace:return self.namespace.permitted(path)
+        if self.physical_catalog:
+            try:self.manifest.logical_location(str(path));return True
+            except RelocationRefused:return False
+        return self.manifest.permitted(str(path))
+
+    def control_location(self,path,sha256):
+        if self.namespace:
+            from storage_relocation import _inside
+            if _inside(str(path),self.namespace.data):return str(path)
+            return self.namespace.control_path(path,sha256)
+        return str(path)
 
     def alias_handle(self, path, operation_path, handle):
         """Return an independently owned ordinary target handle, not fake facts."""
@@ -168,6 +230,32 @@ class NativeContext:
             finalization=db.execute('SELECT catalog_id,generation,base_fence_sha256,verification_sha256,'
                 'receipt_path,receipt_sha256,state,revision FROM storage_relocation_source_finalization').fetchall() \
                 if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_relocation_source_finalization'").fetchone() else []
+            retention=db.execute('SELECT catalog_id,generation,manifest_sha256,verification_sha256,receipt_path,receipt_sha256 '
+                'FROM storage_relocation_retention').fetchall() if db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_relocation_retention'").fetchone() else []
+            from storage_source_detach import registration,receipt_path
+            detached=registration(db)
+            if self.physical_catalog:
+                _need(detached is not None,'Direct physical admission requires a completed source detach')
+            if self.namespace:
+                from storage_portable_namespace import registration as portable_registration
+                portable=portable_registration(db)
+                _need(portable==(self.manifest.catalog_id,self.manifest.generation,
+                      self.namespace.value['binding_id'],self.namespace.digest,self.namespace.value['revision']),
+                      'Current portable catalog is not durably bound to this namespace')
+                _need(detached is not None and detached[7]==self.namespace.value['detach_sha256'],
+                      'Portable runtime requires its verified source-independent transition')
+            if detached is None:
+                try:receipt_path(self.manifest_path).lstat()
+                except FileNotFoundError:pass
+                else:
+                    _need(self.detach_recovery_sha256 is not None,
+                          'Unregistered source detach receipt requires explicit recovery')
+                    from storage_relocation_operator import pinned_receipt
+                    # Explicit recovery still admits the ATTACHED catalog and
+                    # holds its source fence. This pin grants no detached I/O.
+                    with pinned_receipt(receipt_path(self.manifest_path), self.detach_recovery_sha256):
+                        pass
         _need(len(rows) == 1, 'Exactly one active catalog storage generation is required')
         row = rows[0]
         _need(row[:4] == (self.manifest.catalog_id, self.manifest.generation, self.manifest.digest,
@@ -194,6 +282,19 @@ class NativeContext:
                   'Source finalization does not belong to this independently verified catalog')
         if initializing:self.pending_finalization=finalized
         else:_need(self.finalization_record==finalized,'Source finalization changed during catalog ownership')
+        _need(len(retention)<=1, 'Multiple retained runtime generations are unsupported')
+        retained=tuple(retention[0]) if retention else None
+        if retained:
+            _need(row[4]=='active' and finalized is None and retained[:4]==(*verification[0][:3],verification[0][4]),
+                  'Retained runtime registration belongs to a different generation')
+        if initializing:self.pending_retention=retained
+        else:_need(self.retention_record==retained,'Retained runtime registration changed during catalog ownership')
+        if detached:
+            _need(retained and not finalized and detached[:6]==(
+                *row[:3],row[6],verification[0][4],retained[5]),
+                'Source detach belongs to a different retained catalog')
+        if initializing:self.pending_detach=detached
+        else:_need(self.detach_record==detached,'Source detach registration changed during catalog ownership')
         return row
 
     def require_normal_operation(self):
@@ -202,9 +303,9 @@ class NativeContext:
 
     @contextlib.contextmanager
     def catalog_lease(self, database, owner, owner_file):
-        _need(self.database is None and self.manifest.permitted(str(database)),
+        _need(self.database is None and self.permitted(str(database)),
               'Relocation requires its exact managed catalog')
-        binding=self.manifest.files.get(_key(self.manifest.relative(str(database))))
+        binding=self.manifest.files.get(_key(self.manifest.relative(self.origin_location(database))))
         _need(binding and 'catalog-storage' in binding.receipt_classes,
               'Selected catalog has no explicit source-to-target native storage binding')
         self.database, self.owner, self.owner_file = str(Path(database).absolute()), owner, owner_file
@@ -213,7 +314,14 @@ class NativeContext:
             # Permit SQLite read/write handles, but exclude rename/replacement
             # for the entire catalog owner lifetime. UUIDs copied inside another
             # database are insufficient authority for this native file.
-            self.catalog_binding=binding
+            if self.namespace:
+                from types import SimpleNamespace
+                current=self.namespace.file_binding(database)
+                _need(current is not None,'Portable catalog has no exact native binding')
+                self.catalog_binding=SimpleNamespace(target=current['current'])
+            else:self.catalog_binding=binding
+            from storage_admission_progress import report
+            report('database',0)
             self.catalog_handle=kernel.CreateFileW(self.database,0x81,3,None,3,0x00200000,None)
             if self.catalog_handle==ctypes.c_void_p(-1).value:
                 self.catalog_handle=None
@@ -222,22 +330,29 @@ class NativeContext:
             from storage_relocation_operator import verify_source_fence,pinned_receipt
             with contextlib.ExitStack() as evidence:
                 finalization=self.pending_finalization
-                if finalization:
+                detached=self.pending_detach
+                if detached:
+                    from storage_source_detach import verify_runtime_receipt
+                    evidence.enter_context(verify_runtime_receipt(self.manifest_path,self.manifest,detached,receipt_rename_parent=self.receipt_rename_parent))
+                    fence=None
+                elif finalization:
                     from storage_source_finalization import verify_source_finalization
-                    fence=evidence.enter_context(verify_source_finalization(finalization[4],finalization[5],database=self.database))
+                    fence=evidence.enter_context(verify_source_finalization(finalization[4],finalization[5],database=self.database,receipt_rename_parent=self.receipt_rename_parent))
                 else:
-                    fence=evidence.enter_context(verify_source_fence(str(self.manifest_path)+'.source-fence.json',row[6]))
-                receipt=fence.receipt
-                _need(receipt.get('generation')==self.manifest.generation and
+                    fence=evidence.enter_context(verify_source_fence(str(self.manifest_path)+'.source-fence.json',row[6],receipt_rename_parent=self.receipt_rename_parent))
+                if fence is not None:
+                    receipt=fence.receipt
+                    _need(receipt.get('generation')==self.manifest.generation and
                       receipt.get('catalog_id')==self.manifest.catalog_id and
                       receipt.get('source_snapshot_sha256')==self.manifest.source_snapshot_sha256,
                       'Source write fence belongs to a different storage generation')
                 self.source_fence=fence
+                self.detach_record=detached
                 self.finalization_record=finalization
                 self.activation_row=tuple(row)
                 if row[4]=='active':
                     registration=self.pending_verification
-                    proof=evidence.enter_context(pinned_receipt(registration[3],registration[4]))
+                    proof=evidence.enter_context(pinned_receipt(registration[3],registration[4],receipt_rename_parent=self.receipt_rename_parent))
                     _need(proof.get('schema')=='books-storage-target-verification-v1' and
                           proof.get('catalog_id')==self.manifest.catalog_id and
                           proof.get('generation')==self.manifest.generation and
@@ -247,10 +362,39 @@ class NativeContext:
                           proof.get('source_fence_sha256')==row[6] and
                           proof.get('verified_state_sha256')==registration[5] and
                           proof.get('target_root_identity')==list(self.manifest.directories[''].target) and
-                          proof.get('source_root_identity')==list(self.manifest.directories[''].source) and
-                          proof.get('complete') is True and not proof.get('held_classes'),
+                          proof.get('source_root_identity')==list(self.manifest.directories[''].source),
                           'Independent storage verification does not authorize this catalog generation')
+                    retention=self.pending_retention
+                    if retention:
+                        from storage_retained_runtime import SCHEMA,index_members,retained_target_lease
+                        _need(proof.get('complete') is False and proof.get('preservation_copy_verified') is True
+                              and len(proof.get('held_classes') or ())==1 and
+                              proof['held_classes'][0].get('class')=='preservation-only',
+                              'Retained runtime requires the exact copy verification hold')
+                        record=evidence.enter_context(pinned_receipt(retention[4],retention[5],receipt_rename_parent=self.receipt_rename_parent))
+                        _need(record.get('schema')==SCHEMA and retention[:4]==tuple(
+                            record.get(name) for name in ('catalog_id','generation','manifest_sha256','verification_sha256'))
+                            and record.get('scope') in self.manifest.scopes,
+                            'Retained runtime receipt belongs to a different verification')
+                        members=index_members(record.get('members'),record['scope'])
+                        historical=record.get('historical_members')
+                        _need(isinstance(historical,list) and set(historical)<=set(members) and
+                              len(set(historical))==len(historical) and
+                              set(members)==set(record.get('target_members',{})) and
+                              len(members)-len(historical)==record.get('reviewed_copy_members')==
+                              proof['held_classes'][0].get('entries'),
+                              'Retained runtime member count or namespace differs')
+                        self.retained_items=evidence.enter_context(
+                            retained_target_lease(self.manifest.target_root,record['target_members'],namespace=self.namespace))
+                        self.retained=record
+                        self.retained_members=members
+                        self.retained_jobs=frozenset(member['job_id'] for member in members.values() if 'job_id' in member)
+                        self.retention_record=retention
+                    else:
+                        _need(proof.get('complete') is True and not proof.get('held_classes'),
+                              'Independent storage verification has unresolved obligations')
                     self.verification_record=registration
+                report('database',0)
                 self._activation()
                 yield self
         finally:
@@ -261,17 +405,38 @@ class NativeContext:
             self.owner = self.database = self.owner_file = self.source_fence = self.activation_row = None
             self.verification_record=self.pending_verification=None
             self.finalization_record=self.pending_finalization=None
+            self.detach_record=self.pending_detach=None
+            self.retention_record=self.pending_retention=self.retained=None
+            self.retained_members={}
+            self.retained_jobs=frozenset()
+            self.retained_items={}
 
     def facts_match(self, logical_path, actual, expected, receipt_class):
         self.require_normal_operation()
+        if self.namespace:
+            if not self.permitted(logical_path):return False
+            bridge=self.namespace.file_binding(logical_path)
+            if not bridge or actual!=bridge['current']:return False
+            from storage_relocation import RECEIPT_CLASSES
+            if receipt_class in RECEIPT_CLASSES-{'storage-directory'} and expected in bridge['location_history']:return True
+            actual=bridge['prior']
+            logical_path=self.origin_location(logical_path)
         return self.manifest.historical_facts_match(str(logical_path), actual, expected,
             receipt_class=receipt_class, catalog_id=self.manifest.catalog_id,
             generation=self.manifest.generation)
 
     def identity_match(self, logical_path, actual_facts, expected_identity, receipt_class):
         self.require_normal_operation()
-        if not self.manifest.permitted(str(logical_path)):
+        if not self.permitted(str(logical_path)):
             return False
+        if self.namespace:
+            bridge=self.namespace.file_binding(logical_path)
+            if not bridge or any(actual_facts.get(k)!=bridge['current'][k] for k in
+                    ('identity','dev','ino','identity_method','identity_api_error','links')):return False
+            from storage_relocation import RECEIPT_CLASSES
+            if receipt_class in RECEIPT_CLASSES-{'storage-directory'} and expected_identity in [row['identity'] for row in bridge['location_history']]:return True
+            actual_facts=bridge['prior']
+            logical_path=self.origin_location(logical_path)
         binding = self.manifest.files.get(_key(self.manifest.relative(str(logical_path))))
         return bool(binding and receipt_class in binding.receipt_classes and
                     all(actual_facts.get(key)==_plain(binding.target)[key] for key in
@@ -282,8 +447,13 @@ class NativeContext:
     def catalog_identity_match(self, actual, expected):
         """Copied catalog LOCATION only; never producer origin/closure evidence."""
         self.require_normal_operation()
-        binding=self.manifest.files.get(_key(self.manifest.relative(self.database)))
+        binding=self.manifest.files.get(_key(self.manifest.relative(self.origin_location(self.database))))
         keys=('identity','dev','ino','identity_method','identity_api_error','links')
+        if self.namespace:
+            bridge=self.namespace.file_binding(self.database)
+            if not bridge or actual!={k:bridge['current'][k] for k in keys}:return False
+            if set(expected)==set(keys) and expected in [{k:row[k] for k in keys} for row in bridge['location_history']]:return True
+            actual={k:bridge['prior'][k] for k in keys}
         return bool(binding and 'catalog-storage' in binding.receipt_classes and
                     set(actual)==set(expected)==set(keys) and
                     actual=={k:_plain(binding.target)[k] for k in keys} and
@@ -291,7 +461,33 @@ class NativeContext:
 
     def ancestry_match(self, boundary, expected, operation_path, prefix=False):
         self.require_normal_operation()
-        _need(self.manifest.permitted(str(operation_path)), 'Unmanaged ancestry binding refused')
+        _need(self.permitted(str(operation_path)), 'Unmanaged ancestry binding refused')
+        if self.namespace:
+            boundary.revalidate()
+            if not isinstance(expected,(list,tuple)) or not expected:return False
+            ns=self.namespace
+            known={}
+            for row in ns.value['origin_ancestry']+ns.value['previous_ancestry']:
+                known.setdefault(_key(row[0]),set()).add(tuple(row[1:]))
+            for relative,binding in self.manifest.directories.items():
+                known.setdefault(_key(ntpath.join(self.manifest.source_root,relative)),set()).add(binding.source)
+                known.setdefault(_key(ntpath.join(self.manifest.target_root,relative)),set()).add(binding.target)
+            actual={_key(row[0]):tuple(row[1:]) for row in boundary.identities}
+            for old in expected:
+                if not isinstance(old,(list,tuple)) or len(old)!=4:return False
+                path=str(old[0]);identity=tuple(old[1:])
+                if ns.permitted(path):
+                    now=ns.current_path(path);relative=ntpath.relpath(now,ns.data)
+                    key='' if relative=='.' else _key(relative)
+                    bridge=ns.value['directories'].get(key)
+                    if not bridge or actual.get(_key(now))!=tuple(bridge['current']):return False
+                    if identity not in [tuple(bridge['prior']),*(tuple(row) for row in bridge['location_history'])] and identity not in known.get(_key(path),set()):return False
+                elif identity not in known.get(_key(path),set()):return False
+            last=str(expected[-1][0])
+            if not ns.permitted(last):return False
+            mapped=ns.current_path(last)
+            from storage_relocation import _inside
+            return _inside(str(boundary.parent),mapped) if prefix else _key(mapped)==_key(str(boundary.parent))
         boundary.revalidate()
         actual = boundary.identities
         if prefix and isinstance(expected,(list,tuple)) and len(expected)<=len(actual):actual=actual[:len(expected)]
@@ -322,13 +518,52 @@ class NativeContext:
             self._closed = True
 
 
-def configure(manifest_path, expected_sha256):
+def configure(manifest_path, expected_sha256, *, receipt_rename_parent=None, detach_recovery_sha256=None, physical_catalog=False):
     global _context
     with _lock:
         _need(_context is None, 'A different storage relocation is already selected')
-        result = NativeContext(manifest_path, expected_sha256)
+        result = NativeContext(manifest_path, expected_sha256, receipt_rename_parent=receipt_rename_parent,
+                               detach_recovery_sha256=detach_recovery_sha256,physical_catalog=physical_catalog)
         _context = result
         return result
+
+
+def retained_runtime(database):
+    context = current()
+    if not context or not context.retained:return False
+    try:
+        logical=context.logical_location(str(Path(database).absolute()))
+    except RelocationRefused:return False
+    return _key(context.database)==_key(logical)
+
+
+def retained_job(database, job_id):
+    return retained_runtime(database) and job_id in current().retained_jobs
+
+
+def retained_path(path, *, parent=False):
+    context=current()
+    if not context or not context.retained:return None
+    try:
+        absolute=str(Path(path).absolute())
+        key=_key(context.manifest.relative(context.origin_location(absolute)))
+    except RelocationRefused:return None
+    if parent:
+        from storage_relocation import _inside
+        if any(_inside(item,key) for item in context.retained_members):return True
+    return context.retained['target_members'].get(key)
+
+
+def verify_retained_read(path, facts, sha):
+    record=retained_path(path)
+    if record:
+        from storage_relocation_operator import Security
+        context=current()
+        item=context.retained_items[_key(record['native']['relative'])]
+        item.revalidate()
+        if (record['native'].get('facts')!=facts or record['native'].get('sha256')!=sha or
+                Security().capture(item)['sha256']!=record['security_sha256']):
+            raise RelocationRefused('Retained storage read differs from its verified copied bytes, identity or permissions')
 
 
 def configure_from_environment(environment=None):
@@ -338,14 +573,14 @@ def configure_from_environment(environment=None):
         return None
     _need(file and digest, 'Both explicit storage descriptor and SHA-256 are required')
     if _context is not None:
-        _need(str(_context.manifest_path) == str(Path(file).absolute()) and
-              _context.manifest.digest == digest, 'Storage selection differs from retained context')
+        _need(str(_context.configuration_path) == str(Path(file).absolute()) and
+              _context.configuration_digest == digest, 'Storage selection differs from retained context')
         return _context
     return configure(file, digest)
 
 
 @contextlib.contextmanager
-def selected_catalog_relocation(selection):
+def selected_catalog_relocation(selection, *, receipt_rename_parent=None, detach_recovery_sha256=None, physical_catalog=False):
     """Temporarily retain an explicit descriptor without changing work temp."""
     global _context
     prior=current()
@@ -354,11 +589,17 @@ def selected_catalog_relocation(selection):
         yield None
         return
     if prior is not None:
-        _need(str(prior.manifest_path)==str(Path(selection['manifest']).absolute()) and
-              prior.manifest.digest==selection['sha256'],'Storage selection differs from retained context')
+        requested=Path(receipt_rename_parent).absolute() if receipt_rename_parent is not None else None
+        _need(prior.receipt_rename_parent==requested,'Storage receipt lease capability differs from retained context')
+        _need(prior.detach_recovery_sha256==detach_recovery_sha256,
+              'Storage detach recovery capability differs from retained context')
+        _need(prior.physical_catalog==physical_catalog,'Physical catalog capability differs from retained context')
+        _need(str(prior.configuration_path)==str(Path(selection['manifest']).absolute()) and
+              prior.configuration_digest==selection['sha256'],'Storage selection differs from retained context')
         yield prior
         return
-    selected=configure(selection['manifest'],selection['sha256'])
+    selected=configure(selection['manifest'],selection['sha256'],receipt_rename_parent=receipt_rename_parent,
+                       detach_recovery_sha256=detach_recovery_sha256,physical_catalog=physical_catalog)
     try:
         yield selected
     finally:
@@ -381,27 +622,71 @@ def close():
 
 
 def facts_match(path, actual, expected, *, receipt_class):
-    if _context and _context.manifest.permitted(str(path)):_context.require_normal_operation()
+    if _context and _context.permitted(str(path)):_context.require_normal_operation()
     if actual == expected:
         return True
     return bool(_context and _context.facts_match(path, actual, expected, receipt_class))
 
 
 def identity_match(path, actual_facts, expected_identity, *, receipt_class):
-    if _context and _context.manifest.permitted(str(path)):_context.require_normal_operation()
+    if _context and _context.permitted(str(path)):_context.require_normal_operation()
     if actual_facts['identity'] == expected_identity:
         return True
     return bool(_context and _context.identity_match(path, actual_facts, expected_identity, receipt_class))
 
 
 def ancestry_match(boundary, expected, *, operation_path, prefix=False):
-    if _context and _context.manifest.permitted(str(operation_path)):_context.require_normal_operation()
+    if _context and _context.permitted(str(operation_path)):_context.require_normal_operation()
     actual=boundary.identities
     if prefix and isinstance(expected,(list,tuple)) and len(expected)<=len(actual):actual=actual[:len(expected)]
     if [list(x) for x in actual] == [list(x) for x in expected]:
         boundary.revalidate()
         return True
     return bool(_context and _context.ancestry_match(boundary, expected, operation_path,prefix))
+
+
+def retained_current_read_path(path, *, directory=False):
+    """Current location of an immutable retained member, for observation only.
+
+    This grants neither producer closure nor disposal authority. Callers retain
+    the original path in every historical record and validate fresh native facts.
+    """
+    original=str(path)
+    if not _context or not _context.namespace:return original
+    _context.require_normal_operation()
+    namespace=_context.namespace
+    current=namespace.current_path(original)
+    if directory:
+        relative=ntpath.relpath(current,namespace.data)
+        key='' if relative=='.' else _key(relative)
+        _need(key in namespace.value['directories'],'Retained directory has no portable binding')
+    else:_need(namespace.file_binding(original) is not None,'Retained file has no portable binding')
+    return current
+
+
+def retained_location_match(current, historical, *, directory=False):
+    """Compare only location; every other retained-proof field stays exact."""
+    if current==historical:return True
+    if not _context or not _context.namespace:return False
+    try:
+        return _key(str(current))==_key(retained_current_read_path(historical,directory=directory))
+    except RelocationRefused:
+        return False
+
+
+def disposed_history_location_match(current, historical):
+    """Ledger-only location equivalence after independently proved disposal.
+
+    Deleted members cannot belong to the current physical census. This grants
+    no native read, recreation, reuse or deletion authority.
+    """
+    if current==historical:return True
+    if not _context or not _context.namespace:return False
+    try:
+        _context.require_normal_operation()
+        return _key(str(current))==_key(_context.namespace.current_path(historical))
+    except RelocationRefused:
+        return False
 
 
 def retained_observation_match(actual,expected,boundary,*,operation_path):
@@ -418,14 +703,16 @@ def retained_observation_match(actual,expected,boundary,*,operation_path):
     _context.require_normal_operation()
     keys={'schema','ownership_authority','catalog','stage','ancestry','marker_sha256','files'}
     if not isinstance(expected,dict) or set(actual)!=keys or set(expected)!=keys:return False
-    if any(actual[k]!=expected[k] for k in ('schema','ownership_authority','stage','marker_sha256')):return False
+    if any(actual[k]!=expected[k] for k in ('schema','ownership_authority','marker_sha256')):return False
+    if not retained_location_match(actual['stage'],expected['stage'],directory=True):return False
     if actual['schema']!='books-unadopted-attempt-fence-v1' or actual['ownership_authority'] is not False:return False
     if not _context.catalog_identity_match(actual['catalog'],expected['catalog']):return False
     if not ancestry_match(boundary,expected['ancestry'],operation_path=operation_path):return False
     if not isinstance(expected['files'],list) or len(actual['files'])!=len(expected['files']):return False
     for now,old in zip(actual['files'],expected['files']):
         if not isinstance(old,dict) or set(now)!=set(old) or set(now)!={'name','path','facts','sha256'}:return False
-        if any(now[k]!=old[k] for k in ('name','path','sha256')):return False
+        if any(now[k]!=old[k] for k in ('name','sha256')):return False
+        if not retained_location_match(now['path'],old['path']):return False
         if not facts_match(now['path'],now['facts'],old['facts'],receipt_class='retained-source'):return False
     return True
 
@@ -434,7 +721,7 @@ def require_normal_operation(database):
     """Admission before constructor recovery, schema writes or any workers."""
     if _context:
         path=str(Path(database).absolute())
-        try:_context.manifest.logical_location(path)
+        try:_context.logical_location(path)
         except RelocationRefused:
             assert_legacy_catalog(database)
             return
@@ -444,7 +731,31 @@ def require_normal_operation(database):
 
 def logical_catalog_location(database):
     if not _context:return str(Path(database).absolute())
-    return _context.manifest.logical_location(str(Path(database).absolute()))
+    return _context.logical_location(str(Path(database).absolute()))
+
+
+def managed_read_path(path,sha256=None):
+    """Explicit current-data READ location for immutable job cover references.
+
+    Never used for source retirement, user inputs/outputs, or deletion. Returning
+    a path does not confer producer/cleanup authority; the consumer still checks
+    its own manifest hash while reading/copying the bytes.
+    """
+    location=Path(path).absolute();context=current()
+    if not context or not context.namespace:return location
+    from storage_relocation import _inside
+    namespace=context.namespace
+    if _inside(str(location),namespace.data) or not namespace.permitted(str(location)):return location
+    context.require_normal_operation()
+    bridge=namespace.file_binding(location)
+    _need(bridge is not None and (sha256 is None or sha256==bridge['sha256']),
+          'Managed read lacks its exact portable content binding')
+    actual=Path(namespace.current_path(location))
+    from native_io import DirectoryBoundary,VerifiedFile
+    with DirectoryBoundary(actual.anchor,actual.parent),VerifiedFile(actual) as held:
+        _need(held.facts()==bridge['current'] and held.sha256()==bridge['sha256'],
+              'Portable managed read identity or bytes changed')
+    return actual
 
 
 def assert_legacy_catalog(database):

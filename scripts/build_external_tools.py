@@ -9,14 +9,14 @@ import os
 from pathlib import Path
 from native_io import BoundaryError,DirectoryBoundary,VerifiedFile,kernel,ordinary
 
-# 2026-10-30 (ruling 73a): git.exe, ucrt64 git.exe and zlib1.dll re-pinned to the
-# installed Git for Windows 2.56.0.windows.4 (machine updated 2026-10-26). The
-# other three DLL pins and every alias/link profile are unchanged by that update.
-GIT_WRAPPER_SHA256='20d0dde30a65afb6e5810a883700a94dcd77fbf3b44b32868d45bf7c9b30137c'
+# 2026-11-14 diagnostic candidate: independently verified signed installed
+# Git 2.56.1.windows.1 wrapper/core. All four DLL pins and exact alias/link
+# profiles remain unchanged. Evidence: ../refusal-fixture-20261114/git-profile-candidate.json.
+GIT_WRAPPER_SHA256='177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48'
 GIT=Path('C:/Program Files/Git/cmd/git.exe')
 GIT_ALIASES=(GIT,GIT.with_name('git-lfs.exe'))
 CORE=Path('C:/Program Files/Git/ucrt64/bin/git.exe')
-CORE_SHA256='9c75f3f41eb5686bacde4b7c4fdfcd7970e8b699ee05c8d7a0cc9c8a7ddaffe8'
+CORE_SHA256='9bf8ee81d79f38a11eaf7799499a634c46a718e009a4a9b2b20b115804643302'
 CORE_ALIASES=tuple(CORE.with_name(name) for name in ('git.exe','git-upload-pack.exe','git-upload-archive.exe','git-receive-pack.exe'))
 CORE_DLLS={
  'libiconv-2.dll':'94ec68fb8d342b6c91b6b48a8d95092819cdcd006a7166e0b68062f946afd08a',

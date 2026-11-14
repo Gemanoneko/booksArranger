@@ -4,10 +4,25 @@
 !macroundef uninstallOldVersion
 !macro uninstallOldVersion ROOT_KEY
   ReadRegStr $R1 ${ROOT_KEY} "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ${If} $BooksReviewedCommand != ""
+  ${AndIf} $R1 != $BooksReviewedOldApplication
+    Call BooksRefuse
+  ${EndIf}
   ${If} $R1 != ""
     ReadRegStr $R2 ${ROOT_KEY} "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
     Call BooksNewRequest
-    ${If} $R2 == "0.27.0"
+    ${If} $BooksReviewedCommand != ""
+      ReadRegStr $R1 ${ROOT_KEY} "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+      ReadRegStr $R2 ${ROOT_KEY} "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+      ReadRegStr $R3 ${ROOT_KEY} "${UNINSTALL_REGISTRY_KEY}" "DisplayName"
+      ReadRegStr $R4 ${ROOT_KEY} "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+      WriteINIStr "$BooksRequest" "request" "action" "retire-unattended-package"
+      WriteINIStr "$BooksRequest" "request" "command_line" "$BooksReviewedCommand"
+      WriteINIStr "$BooksRequest" "request" "registered_application_dir" "$R1"
+      WriteINIStr "$BooksRequest" "request" "registered_version" "$R2"
+      WriteINIStr "$BooksRequest" "request" "registered_display_name" "$R3"
+      WriteINIStr "$BooksRequest" "request" "registered_uninstall_string" "$R4"
+    ${ElseIf} $R2 == "0.27.0"
       WriteINIStr "$BooksRequest" "request" "action" "retire-legacy-package"
     ${Else}
       WriteINIStr "$BooksRequest" "request" "action" "retire-owned-package"

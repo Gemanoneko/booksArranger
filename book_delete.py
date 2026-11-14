@@ -261,10 +261,11 @@ class _Holders:
                 for path in (s.get('path', '') for s in manifest.get('sources') or [] if isinstance(s, dict)):
                     if path:
                         self.titles.setdefault(_key(path), title)
-                cover = manifest['cover'].get('path', '') if isinstance(manifest.get('cover'), dict) else ''
-                if cover and _key(cover) not in self.titles:
-                    self.titles[_key(cover)] = title
-                    covers.add(_key(cover))
+                from cleanup_ownership import cover_protection_paths
+                for cover in cover_protection_paths(manifest.get('cover')):
+                    if _key(cover) not in self.titles:
+                        self.titles[_key(cover)] = title
+                        covers.add(_key(cover))
         if _table(db, 'reacquire_markers'):
             for r in db.execute('SELECT candidate_id,state,snapshot FROM reacquire_markers WHERE candidate_id!=?', (identity,)):
                 if r['state'] == 'archived' and r['candidate_id'] not in current:

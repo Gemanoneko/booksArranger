@@ -17,7 +17,7 @@ from pathlib import Path
 from scanner import connect
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, VerifiedDirectory, DirectoryNotEmptyError, DirectoryDispositionUnsupported, ordinary
 from source_cleanup import packed, stamp, single_stream
-from storage_relocation_native import facts_match
+from storage_relocation_native import facts_match, retained_job, retained_path, managed_read_path
 # The MP3 trailing-tag repair's private copy and proof (audio_pipeline._mp3_tag_copy); exact producer receipts decide their bytes.
 TAG_REPAIR=re.compile(r'tag-repair-[0-9a-f]{32}\.(?:mp3|json)')
 
@@ -256,6 +256,8 @@ class StorageCleanup:
         return dict(row) if row else None
 
     def _prepare(self, stack, job_id, kind, path, root, expected=None):
+        if retained_job(self.database,job_id) or retained_path(path):
+            raise BoundaryError('Historical migration evidence is retained; cleanup is unavailable for this job')
         from producer_recovery import protected_dependency
         with connect(self.database) as db:
             if protected_dependency(db,[path]):raise BoundaryError('Isolated old files and source dependencies are retained')
@@ -524,7 +526,7 @@ class StorageCleanup:
                 if recorded.get('attempt_id')==attempt.name and name in recorded.get('files',{}):
                     entry=recorded['files'][name];approved=(entry['sha256'],entry['size'])
                 elif name.endswith(('.jpg','.png')):
-                    approved=(manifest['cover']['sha256'],Path(manifest['cover']['path']).stat().st_size)
+                    approved=(manifest['cover']['sha256'],managed_read_path(manifest['cover']['path'],manifest['cover']['sha256']).stat().st_size)
                 elif name in ('checked.m4b','compatible.m4b'):
                     approved=(output['sha256'],output['size'])
                 elif name=='inputs.txt':
@@ -654,6 +656,7 @@ class StorageCleanup:
             return {'job_id':job_id,'output_sha256':output['sha256'],'files':result,'bytes':sum(item['size'] for item in result),'dry_run':dry_run}
 
     def run(self, job_id, include_recovery=False):
+        if retained_job(self.database,job_id):raise BoundaryError('Historical migration evidence is retained; cleanup is unavailable')
         output_hash = ''
         self._phase='verify completed output';self._disposition='not_started'
         try:
@@ -1056,6 +1059,7 @@ class StorageCleanup:
         return outcome
 
     def run_folders(self, job_id, progress=None, rerun=False):
+        if retained_job(self.database,job_id):raise BoundaryError('Historical migration evidence is retained; cleanup is unavailable')
         """Check only completed enrolled source parents; never enroll originals. rerun (ruling 76b, sweep_folders only): a
         cleanup an earlier version finished runs again."""
         with connect(self.database) as db:
@@ -1108,6 +1112,8 @@ class StorageCleanup:
         p = ordinary(path)
         if not p.is_relative_to(root) or p.name != 'checked.m4b' or p.parent.parent != root:
             raise BoundaryError('Only a retained owned chapter-repair checked copy is eligible')
+        if retained_path(p.parent,parent=True):
+            raise BoundaryError('This migrated chapter-repair record is retained')
         with self.protected_output(job_id) as (manifest,parent_output), contextlib.ExitStack() as stack:
             journal = stack.enter_context(VerifiedFile(p.parent / 'corrected-artifact.jsonl'))
             if journal.facts()['size'] > 2 * 1024 * 1024:

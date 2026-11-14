@@ -575,6 +575,9 @@ class AudioJobs:
         routine=True (startup re-check, Start) uses the cheap identity check when available and treats
         an exact authorized former-output retirement as history. A stop is raised, never a verdict.
         """
+        if routine and row['state']=='completed':
+            from storage_relocation_native import retained_job
+            if retained_job(self.database,row['job_id']):return None
         journal = json.loads(row["journal"])
         manifest=json.loads(row['manifest'])
         import publication_reuse
@@ -1344,14 +1347,16 @@ class AudioJobs:
 
     def _pending_unreserved(self, priority):
         from manual_conversion import active_keys, source_keys
+        from storage_relocation_native import retained_runtime,retained_job
         with self._db() as db:
             query = "SELECT * FROM audio_jobs WHERE state='pending' AND " + CURRENT
             keys = active_keys(db)
             order = ' ORDER BY CASE WHEN job_id=? THEN 0 ELSE 1 END,created,job_id'
-            if not keys:
+            if not keys and not retained_runtime(self.database):
                 row = db.execute(query + order + ' LIMIT 1', (priority,)).fetchone()
                 return [dict(row)] if row else []
             for row in db.execute(query + order, (priority,)):
+                if retained_job(self.database,row['job_id']):continue
                 manifest = json.loads(row['manifest'])
                 if manifest.get('manual_conversion') or keys.isdisjoint(source_keys(manifest)):
                     return [dict(row)]
@@ -1361,6 +1366,9 @@ class AudioJobs:
         """The worker takes a pending job: 'claimed', 'gone' (no longer pending, or set aside) or 'stale' (planned under other
         names than Sergei's saved ones). The names check reads outside the lock; the stamp, read again under it, proves no
         Save or Forget came between (a Save writes under this lock, so it either sees the claim or the claim sees it)."""
+        from storage_relocation_native import retained_job
+        if retained_job(self.database,row['job_id']):
+            return 'gone'
         for _ in range(5):
             stamp = None
             stale = False

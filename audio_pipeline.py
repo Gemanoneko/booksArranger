@@ -3,6 +3,7 @@ import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib,str
 from pathlib import Path
 from fractions import Fraction
 from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob,VerifiedFile
+from storage_relocation_native import managed_read_path
 
 from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding, AUTOMATIC_PROFILE, freeze_automatic_policy, choose_automatic_encoding
 from quicktime_chapters import normalize
@@ -559,10 +560,15 @@ def snapshot_manifest(manifest,stage,stop,report=None):
         step.update(index+1,index+1,force=True)
     return copies,durations,protected_cover(manifest,stage,stop),profiles
 
+def reviewed_cover_path(cover):
+    """Resolve only this immutable cover READ, never input/output or disposal."""
+    return ordinary(managed_read_path(cover['path'],cover['sha256']))
+
+
 def protected_cover(manifest,stage,stop):
     """The reviewed cover as an owned hash-checked stage copy, probed (and decoded for the automatic profile)."""
     cover=manifest['cover']
-    cover_source=ordinary(cover['path'])
+    cover_source=reviewed_cover_path(cover)
     if cover_source.stat().st_size>MAX_IMAGE:raise ValidationError('Selected cover exceeds8 MiB')
     cover_bytes=cover_source.read_bytes()
     extension='.png' if cover_bytes.startswith(b'\x89PNG\r\n\x1a\n') else '.jpg' if cover_bytes.startswith(b'\xff\xd8\xff') else None
@@ -1159,7 +1165,7 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
             remember_generated(output,validation['sha256'],validation['size'])
         else:remember_generated(output,validation['sha256'],validation['size'])
         for item in manifest['sources']:same_source(item,stop)
-        if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:raise ValidationError('Selected cover changed — review required')
+        if digest(reviewed_cover_path(manifest['cover']),stop)!=manifest['cover']['sha256']:raise ValidationError('Selected cover changed — review required')
         if held_output.sha256()!=validation['sha256'] or held_output.facts()['size']!=validation['size']:
             raise ValidationError('Final output differs from its leased verification artifact')
         return output,validation
@@ -1221,7 +1227,7 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
                     raise ValidationError('Preservation source identity changed')
                 if held_output.sha256()!=receipt['sha256']:raise ValidationError('Preserved candidate identity changed')
                 for item in manifest['sources']:same_source(item,stop)
-                if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:
+                if digest(reviewed_cover_path(manifest['cover']),stop)!=manifest['cover']['sha256']:
                     raise ValidationError('Selected cover changed — review required')
                 receipt.update(reread);receipt['pcm_verified']=True
                 validation={'profile':manifest.get('profile',LEGACY_PROFILE),'encoding':encoding,'duration':duration,
@@ -1296,7 +1302,7 @@ def publish(output,manifest,validation,stop,journal,revision_guard,review_lock=N
         if stop.is_set():raise Paused('Publication paused; owned temporary retained for recovery')
         for item in manifest['sources']:same_source(item,stop,read)
         step.update(done[0],force=True)
-        if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:raise ValidationError('Cover changed — review required')
+        if digest(reviewed_cover_path(manifest['cover']),stop)!=manifest['cover']['sha256']:raise ValidationError('Cover changed — review required')
         with review_lock if review_lock is not None else contextlib.nullcontext():
             if not revision_guard():raise ValidationError('Candidate review changed — review required')
             boundary.revalidate()

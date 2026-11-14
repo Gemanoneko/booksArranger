@@ -5,6 +5,25 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+test('admission telemetry remains pre-ready, refuses stale events, preserves final refusal',()=>{
+ let now=1000;const startup=S.createStartup({now:()=>now});
+ startup.beginAdmission();
+ assert.equal(startup.value.admission.updatedAt,null);
+ const event={state:'active',phase:'retained',done:2,total:8134,bytes:4096,elapsed_ms:16000,progress_age_ms:0,limit_ms:597000};
+ now=17000;assert.equal(startup.admission(event),true);
+ assert.equal(startup.value.phase,'launching');
+ now=22000;startup.admission({...event,elapsed_ms:21000,progress_age_ms:5000});
+ assert.equal(startup.value.admission.progressAt,17000);
+ assert.equal(startup.admission(event),false);
+ assert.equal(startup.admission({state:'complete',elapsed_ms:22000,limit_ms:597000}),true);
+ assert.equal(startup.value.phase,'launching');
+ assert.equal(startup.admission({...event,elapsed_ms:23000}),false);
+ assert.equal(startup.admission({state:'failed',elapsed_ms:23000,limit_ms:597000,error:'pipe closed'}),true);
+ startup.stopped({code:1});
+ assert.equal(startup.admission({...event,elapsed_ms:24000}),false);
+ startup.launch();assert.equal(startup.value.admission,undefined);
+});
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const S = require('../desktop/startup.js');

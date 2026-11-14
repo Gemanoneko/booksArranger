@@ -99,6 +99,21 @@ def relocated_marker(previous,current):
     if set(previous)!=set(current) or previous.get('schema')!=current.get('schema') or \
        previous.get('phase')!='context' or previous.get('owner_kind')!='catalog' or current.get('owner_kind')!='catalog':return False
     try:
+        if relocation.namespace:
+            ns=relocation.namespace
+            for field in ('owner_path','root'):
+                if _key(ns.current_path(previous[field]))!=_key(ns.current_path(current[field])):return False
+            owner=ns.file_binding(current['owner_path']);catalog=ns.file_binding(relocation.database)
+            if not owner or not catalog:return False
+            if (previous['owner_identity'] not in [owner['prior']['identity'],*(r['identity'] for r in owner['location_history'])] or current['owner_identity']!=owner['current']['identity'] or
+                previous['catalog_identity'] not in [catalog['prior']['identity'],*(r['identity'] for r in catalog['location_history'])] or current['catalog_identity']!=catalog['current']['identity']):return False
+            root_path=Path(current['root']);relative=_key(str(root_path.relative_to(ns.data)))
+            root=ns.value['directories'].get(relative)
+            if not root or previous['root_identity'] not in [root['prior'],*root['location_history']] or current['root_identity']!=root['current']:return False
+            from native_io import DirectoryBoundary
+            with DirectoryBoundary(root_path.anchor,root_path) as boundary:
+                return relocation.ancestry_match(boundary,previous['ancestry'],operation_path=root_path) and \
+                    [list(item) for item in boundary.identities]==current['ancestry']
         for field in ('owner_path','root'):
             if _key(manifest.logical_location(previous[field]))!=_key(manifest.logical_location(current[field])):return False
         owner=manifest.files.get(_key(manifest.relative(manifest.logical_location(current['owner_path']))))

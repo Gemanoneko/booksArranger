@@ -1,5 +1,73 @@
 # Changelog
 
+## [v0.28.12] - Unreleased
+
+### Fixed
+
+- Admit authenticated historical locations for fully disposed retained-recovery records after storage migration while preserving strict checks for existing files.
+
+## [v0.28.11] - Unreleased
+
+### Fixed
+
+- Recognize authenticated retained-file location history during startup after portable storage migration without relaxing file identity protection.
+
+## [v0.28.10] - Unreleased
+
+### Fixed
+
+- Read the installer commit outcome correctly so a completed storage switch continues to custom uninstall registration without a false failure message.
+
+## [v0.28.9] - Unreleased
+
+### Fixed
+
+- Resume a completed portable data binding when its legacy migration receipt exceeds the ordinary JSON limit; keep newly written receipt diagnostics compact.
+
+## [v0.28.8] - Unreleased
+
+### Fixed
+
+- Use the reviewed existing-profile authority when upgrading in the same application folder, matching the verified cross-drive upgrade path.
+
+## [v0.28.7] - Unreleased
+
+### Added
+
+- Keep installed storage and profile paths relative to the application folder; migrate recognized existing installations while preserving queued work and supporting verified drive relocation.
+- Use the new book icon and dedicated tray icons.
+
+## [v0.28.6] - 2026-11-14
+
+### Fixed
+
+- Allow the retained-data install record switch while keeping receipt identity, catalog and delete protections held. Limit parent write sharing to the installation folder.
+- Correct the installer declaration audit and isolate lifecycle test registry fixtures.
+
+## [v0.28.5] - 2026-11-14
+
+### Fixed
+
+- Show startup storage-admission progress in the loading view instead of timing out a duplicate preliminary check. Complete the full admission before catalog mutation or normal workers start.
+
+## [v0.28.4] - 2026-11-14
+
+### Added
+
+- Verify and detach a migrated catalog from its old source while retaining protected recovery evidence.
+
+## [v0.28.3] - 2026-11-14
+
+### Fixed
+
+- Allow unattended setup to select an explicitly verified existing catalog during local storage migration.
+
+## [v0.28.2] - 2026-11-14
+
+### Fixed
+
+- Preserve verified historical staging membership during local storage migration and keep retained copies protected.
+
 ## [v0.28.1] - 2026-11-13
 
 ### Fixed

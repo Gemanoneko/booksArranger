@@ -18,6 +18,11 @@ import sqlite3
 import sys
 import uuid
 
+# Installer plugins import this module while its CLI is running. Keep one
+# exception/class identity so imported typed refusals reach the wizard handler.
+if __name__ == '__main__':
+    sys.modules['storage_lifecycle'] = sys.modules[__name__]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from native_io import DirectoryBoundary, VerifiedFile, VerifiedDirectory, kernel, BoundaryError
 from source_cleanup import single_stream
@@ -61,8 +66,8 @@ def capture_current_package(application_dir,installation_id):
 
 
 def remove_current_package(bootstrap_path,expected_application_dir=None):
-    bootstrap,_,_=_json(bootstrap_path,65536)
-    _need(bootstrap.get('schema')=='books-arranger-installation-v1','package_ownership_required')
+    bootstrap,_,_=_installation_json(bootstrap_path,65536)
+    _need(bootstrap.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2'),'package_ownership_required')
     if expected_application_dir is not None:
         _need(os.path.normcase(str(_absolute(expected_application_dir)))==os.path.normcase(str(_absolute(bootstrap['application_dir']))),
             'installation_location_changed',bootstrap_path)
@@ -125,8 +130,8 @@ def _seal_install_controls(value,namespace_pin=None,previous=None,backup_path=No
 
 
 def publish_current_package(bootstrap_path,retained_package=None,control_namespace=None):
-    bootstrap,facts,sha=_json(bootstrap_path,65536)
-    _need(bootstrap.get('schema')=='books-arranger-installation-v1','package_ownership_required')
+    bootstrap,facts,sha=_installation_json(bootstrap_path,65536)
+    _need(bootstrap.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2'),'package_ownership_required')
     _need(process_check([bootstrap['application_dir']])['state']=='available','in_use')
     changed=dict(bootstrap,package_ownership=capture_current_package(bootstrap['application_dir'],bootstrap['installation_id']))
     if retained_package:changed=_attach_retained_package(changed,retained_package)
@@ -162,14 +167,36 @@ def admit_application_target(application_dir,registered_application_dir='',regis
     return dict(ok=True,state='verified_old_package',path=str(target))
 
 
-def legacy_update_plan(application_dir,version,*,process_name='Books Arranger.exe'):
+def legacy_update_plan(application_dir,version,*,process_name='Books Arranger.exe',source_application_dir=None):
     """Preserve this machine's exact legacy catalog/profile during silent update."""
     app=_absolute(application_dir);bootstrap=app.parent/BOOTSTRAP
+    pending=app.parent/'Storage/portable-migration.json'
+    if pending.exists():
+        intent,_,_=_json(pending)
+        if not (app.parent/intent['completion']).exists():
+            plan=intent.get('reviewed_plan')
+            _need(isinstance(plan,dict) and hashlib.sha256(json.dumps(plan,sort_keys=True,separators=(',',':')).encode()).hexdigest()==intent['plan_sha256'],
+                  'installation_commit_incomplete',pending)
+            return dict(existing_bootstrap=True,plan=plan)
     if bootstrap.exists():
-        value,_,_=_json(bootstrap,65536)
-        _need(value.get('schema')=='books-arranger-installation-v1' and
+        value,_,_=_installation_json(bootstrap,65536)
+        _need(value.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2') and
             value.get('application_dir')==str(app),'legacy_update_requires_assisted_setup',bootstrap)
-        return dict(existing_bootstrap=True)
+        chosen=selection_plan('existing',str(Path(value['data_dir'])/'inventory.sqlite3'),
+            application_dir=str(app),profile_dir=value['profile_dir'],
+            config_paths=[str(Path(value['profile_dir'])/'desktop-settings.json')],
+            reviewed_profile_authority=_profile_source_authority(value['profile_dir'],reviewed_bootstrap=bootstrap))
+        return dict(existing_bootstrap=True,plan=chosen)
+    if source_application_dir and _absolute(source_application_dir)!=app:
+        source_app=_absolute(source_application_dir);source_bootstrap=source_app.parent/BOOTSTRAP
+        value,_,_=_installation_json(source_bootstrap)
+        _need(value['application_dir']==str(source_app),'legacy_update_requires_assisted_setup',source_bootstrap)
+        _need(process_check([source_app,app],process_name)['state']=='available','in_use')
+        chosen=selection_plan('existing',str(Path(value['data_dir'])/'inventory.sqlite3'),
+            application_dir=str(app),profile_dir=str(app.parent/'Profile'),
+            config_paths=[str(Path(value['profile_dir'])/'desktop-settings.json')],
+            reviewed_profile_authority=_profile_source_authority(value['profile_dir'],reviewed_bootstrap=source_bootstrap))
+        return dict(existing_bootstrap=True,plan=chosen)
     _need(version=='0.27.0','legacy_update_requires_assisted_setup',app)
     _need(process_check([app],process_name)['state']=='available','in_use')
     roaming=os.environ.get('APPDATA');_need(roaming,'legacy_update_requires_assisted_setup')
@@ -187,21 +214,24 @@ def legacy_update_plan(application_dir,version,*,process_name='Books Arranger.ex
     return dict(existing_bootstrap=False,plan=chosen)
 
 
-def retire_owned_package(installation_dir,version,*,process_name='Books Arranger.exe',_inspect=False):
-    root=_absolute(installation_dir);bootstrap,_,_=_json(root.parent/BOOTSTRAP,65536)
-    _need(bootstrap.get('schema')=='books-arranger-installation-v1' and
+def retire_owned_package(installation_dir,version,*,process_name='Books Arranger.exe',_inspect=False,_reviewed_owner=None):
+    root=_absolute(installation_dir);bootstrap,_,_=_installation_json(root.parent/BOOTSTRAP,65536)
+    _need(bootstrap.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2') and
         _absolute(bootstrap['application_dir'])==root,'package_ownership_required')
     pin=bootstrap.get('package_ownership');_need(isinstance(pin,dict),'package_ownership_required')
     owner,_,sha=_json(pin['manifest']);_need(sha==pin['sha256'] and owner.get('installation_id')==bootstrap['installation_id'] and
         owner.get('application_dir')==str(root) and len(owner['roots'])==1,'package_ownership_required')
+    if _reviewed_owner is not None:_need(owner==_reviewed_owner,'package_ownership_required',root)
     package=owner['roots'][0];_need(package['path']==str(root) and package['role']=='application','package_ownership_required')
     with DirectoryBoundary(root.anchor,root) as held:_need(list(held.identities[-1][1:])==package['identity'],'package_ownership_required')
     files={entry['relative']:dict(size=entry['facts']['size'],sha256=entry['sha256'],facts=entry['facts']) for entry in package['files']}
     trusted=dict(schema='books-trusted-legacy-package-v1',version=version,files=files,installer_sha256=None,package_proof_sha256=sha)
-    return retire_legacy_package(installation_dir,version,process_name=process_name,_trusted=trusted,_inspect=_inspect)
+    return retire_legacy_package(installation_dir,version,process_name=process_name,_trusted=trusted,_inspect=_inspect,
+                                 _root_identity=package['identity'] if _reviewed_owner is not None else None)
 
 
-def retire_legacy_package(installation_dir, version, *, process_name='Books Arranger.exe',_trusted=None,_inspect=False):
+def retire_legacy_package(installation_dir, version, *, process_name='Books Arranger.exe',_trusted=None,_inspect=False,
+                          _root_identity=None):
     """Remove only an exact accepted binary payload. Never execute its uninstaller.
 
     Registry publication and the installer-created shortcuts remain the NEW
@@ -220,6 +250,8 @@ def retire_legacy_package(installation_dir, version, *, process_name='Books Arra
     _need(process_check([root], process_name)['state']=='available','in_use',root)
     with contextlib.ExitStack() as stack:
         boundary = stack.enter_context(DirectoryBoundary(root.anchor,root))
+        if _root_identity is not None:
+            _need(list(boundary.identities[-1][1:])==_root_identity,'package_ownership_required',root)
         observed = set(); directories = []
         for folder, names, files in os.walk(root,followlinks=False):
             folder=Path(folder)
@@ -299,7 +331,7 @@ class LifecycleRefused(ValueError):
 def _wait_uninstall_launcher(pid,application_dir):
     """Wait only for the exact pinned new launcher; never ignore a live PID."""
     _need(isinstance(pid,int) and 0<pid<2**32,'invalid_launcher_pid')
-    root=_absolute(str(application_dir));bootstrap,_,_=_json(root.parent/BOOTSTRAP,65536)
+    root=_absolute(str(application_dir));bootstrap,_,_=_installation_json(root.parent/BOOTSTRAP,65536)
     _need(bootstrap.get('application_dir')==str(root),'launcher_package_unverified')
     pin=bootstrap.get('package_ownership');_need(isinstance(pin,dict),'launcher_package_unverified')
     package,_,sha=_json(pin['manifest']);_need(sha==pin['sha256'],'launcher_package_unverified')
@@ -390,6 +422,7 @@ def process_check(installation_dirs=(), process_name='Books Arranger.exe',*,laun
     for config in known_configurations():
         if not Path(config).exists():continue
         settings,_,_=_json(config,16384)
+        settings=_profile_settings(settings,config)
         _need(isinstance(settings,dict),'process_check_unavailable',config)
         if not settings.get('dataDir'):continue
         lock=_absolute(settings['dataDir'])/'inventory.sqlite3.lock'
@@ -449,6 +482,25 @@ def _json(path, limit=MAX_JSON):
         return json.loads(raw.decode('utf-8'), object_pairs_hook=unique), facts, hashlib.sha256(raw).hexdigest()
 
 
+def _installation_json(path,limit=65536):
+    from installation_storage import decode
+    value,facts,sha=_json(path,limit)
+    return decode(value,Path(path).absolute().parent),facts,sha
+
+
+def _profile_settings(value,path):
+    if not isinstance(value,dict) or not isinstance(value.get('dataDir'),str) or Path(value['dataDir']).is_absolute():return value
+    bootstrap=Path(path).absolute().parent.parent/BOOTSTRAP
+    raw,_,_=_json(bootstrap,65536);bound,_,_=_installation_json(bootstrap)
+    _need(raw.get('schema')=='books-arranger-installation-v2' and value['dataDir']==raw['data_dir'] and
+          Path(bound['profile_dir'])==Path(path).absolute().parent,'settings_changed',path)
+    result=dict(value,dataDir=bound['data_dir'])
+    if value.get('storage_relocation'):
+        _need(value['storage_relocation']==raw.get('storage_relocation'),'settings_changed',path)
+        result['storage_relocation']=bound['storage_relocation']
+    return result
+
+
 def _local(path):
     kernel.GetDriveTypeW.argtypes = [wintypes.LPCWSTR]
     kernel.GetDriveTypeW.restype = wintypes.UINT
@@ -460,6 +512,20 @@ def _pinned_relocation(database, activation, registration=None, selection=None):
     from storage_relocation import parse_manifest
     catalog_id,generation,manifest_sha,phase=activation
     _need(phase in ('active','verifying'),'relocation_verification_required',database)
+    local_bootstrap=Path(database).parent.parent/BOOTSTRAP
+    if selection is None and local_bootstrap.exists():
+        portable,_,_=_installation_json(local_bootstrap)
+        if portable.get('schema')=='books-arranger-installation-v2' and Path(portable['data_dir'])==Path(database).parent:
+            selection=portable.get('storage_relocation')
+    if selection is not None:
+        candidate,_,candidate_sha=_json(selection['manifest'])
+        if candidate.get('schema')=='books-portable-runtime-v1':
+            _need(candidate_sha==selection['sha256'] and candidate['origin']['sha256']==manifest_sha and
+                  (candidate['catalog_id'],candidate['generation'])==(catalog_id,generation),'relocation_configuration_required')
+            from storage_relocation_native import selected_catalog_relocation
+            with selected_catalog_relocation(selection) as context:
+                _need(Path(context.logical_location(database))==Path(database),'relocation_configuration_required')
+            return dict(selection)
     if selection is None:
         _need(registration is not None,'relocation_configuration_required',database)
         rid,rgen,rsha,receipt_path,receipt_sha,_=registration
@@ -549,6 +615,7 @@ def inspect_existing(database, *, config_paths=()):
         for config in tuple(config_paths)[:MAX_CANDIDATES]:
             try:
                 settings, settings_facts, settings_hash = _json(config, 16384)
+                settings=_profile_settings(settings,config)
                 if not isinstance(settings, dict) or not isinstance(settings.get('dataDir'), str):
                     continue
                 configured = _absolute(settings['dataDir']) / 'inventory.sqlite3'
@@ -607,14 +674,15 @@ def known_candidates(config_paths=(), extra_candidates=(), bootstrap_paths=()):
     for bootstrap in bootstraps:
         if not Path(bootstrap).exists():continue
         try:
-            value,_,_=_json(bootstrap,65536)
-            _need(value.get('schema')=='books-arranger-installation-v1','invalid_installation_reference',bootstrap)
+            value,_,_=_installation_json(bootstrap,65536)
+            _need(value.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2'),'invalid_installation_reference',bootstrap)
             paths.append(str(_absolute(value['data_dir'])/'inventory.sqlite3'))
             configs.append(str(_absolute(value['profile_dir'])/'desktop-settings.json'))
         except (OSError,ValueError):paths.append(str(Path(bootstrap).absolute()))
     for config in configs:
         try:
             value, _, _ = _json(config, 16384)
+            value=_profile_settings(value,config)
             if isinstance(value, dict) and isinstance(value.get('dataDir'), str):
                 paths.append(str(_absolute(value['dataDir']) / 'inventory.sqlite3'))
         except (OSError, ValueError):
@@ -648,8 +716,8 @@ def known_configurations(extra=()):
         configs.append(str(Path(os.environ['APPDATA'])/'Books Arranger'/'desktop-settings.json'))
     for bootstrap in registered_bootstraps():
         if not Path(bootstrap).exists():continue
-        value,_,_=_json(bootstrap,65536)
-        _need(value.get('schema')=='books-arranger-installation-v1','installation_reference_unchecked',bootstrap)
+        value,_,_=_installation_json(bootstrap,65536)
+        _need(value.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2'),'installation_reference_unchecked',bootstrap)
         configs.append(str(_absolute(value['profile_dir'])/'desktop-settings.json'))
     _need(len(configs)<=MAX_CANDIDATES,'discovery_bound_exceeded')
     return tuple(dict.fromkeys(configs))
@@ -710,15 +778,16 @@ def _commit_maintenance(selected):
     return str(path),identity
 
 
-def selection_plan(mode, location, *, application_dir, profile_dir, config_paths=(), protected_paths=()):
+def selection_plan(mode, location, *, application_dir, profile_dir, config_paths=(), protected_paths=(),
+                   reviewed_profile_authority=None):
     app, profile = _absolute(str(application_dir)), _absolute(str(profile_dir))
     from storage_lifecycle_controls import assert_no_pending_overlap
     selected=_absolute(str(location));data_scope=selected.parent if selected.name=='inventory.sqlite3' else selected
     assert_no_pending_overlap([str(app),str(profile),str(data_scope)])
     previous=None;bootstrap=app.parent/BOOTSTRAP
     if bootstrap.exists():
-        old,oldfacts,oldhash=_json(bootstrap,65536)
-        _need(old.get('schema')=='books-arranger-installation-v1' and old.get('application_dir')==str(app),
+        old,oldfacts,oldhash=_installation_json(bootstrap,65536)
+        _need(old.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2') and old.get('application_dir')==str(app),
               'existing_installation_selection_preserved',bootstrap)
         previous=dict(path=str(bootstrap),facts=oldfacts,sha256=oldhash,value=old)
     if mode == 'existing':
@@ -733,7 +802,11 @@ def selection_plan(mode, location, *, application_dir, profile_dir, config_paths
         if row.get('storage_relocation'):chosen['storage_relocation']=row['storage_relocation']
         if row.get('verification_required'):chosen['verification_required']=True
         if chosen.get('profile_confirmed'):
-            chosen['profile_source_authority']=_profile_source_authority(chosen['associated_profile'])
+            if reviewed_profile_authority is not None:
+                _validate_profile_source_authority(_absolute(chosen['associated_profile']),reviewed_profile_authority)
+                chosen['profile_source_authority']=reviewed_profile_authority
+            else:
+                chosen['profile_source_authority']=_profile_source_authority(chosen['associated_profile'])
     elif mode == 'new':
         chosen = inspect_new(location, protected_paths=protected_paths)
         chosen['database'] = str(_absolute(str(location)) / 'inventory.sqlite3')
@@ -762,7 +835,12 @@ def selection_plan(mode, location, *, application_dir, profile_dir, config_paths
 def _replace_bootstrap(path,raw,expected,*,backup_path=None):
     """Exact native old-file rotation + no-replace publish; retain rollback copy."""
     from native_io import rename_no_replace
-    path=_absolute(str(path));temp=path.with_name('.books-installation-'+str(uuid.uuid4())+'.json')
+    path=_absolute(str(path))
+    value=json.loads(raw)
+    if value.get('schema')=='books-arranger-installation-v2' and Path(value['application_dir']).is_absolute():
+        from installation_storage import encode
+        raw=json.dumps(encode(value,path.parent),sort_keys=True).encode('utf8')
+    temp=path.with_name('.books-installation-'+str(uuid.uuid4())+'.json')
     backup=Path(backup_path) if backup_path is not None else path.with_name('books-arranger-installation.previous-'+str(uuid.uuid4())+'.json')
     _need(backup.parent==path.parent and backup.name.startswith('books-arranger-installation.previous-') and backup.suffix=='.json',
         'invalid_bootstrap_rotation',backup)
@@ -831,22 +909,23 @@ def _profile_source_allowed(path):
     if roaming:allowed.append(Path(roaming)/'Books Arranger')
     for bootstrap in registered_bootstraps():
         if not Path(bootstrap).exists():continue
-        value,_,_=_json(bootstrap,65536)
-        if value.get('schema')=='books-arranger-installation-v1':allowed.append(_absolute(value['profile_dir']))
+        value,_,_=_installation_json(bootstrap,65536)
+        if value.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2'):allowed.append(_absolute(value['profile_dir']))
     return any(os.path.normcase(_physical(path))==os.path.normcase(_physical(root)) for root in allowed if root.exists())
 
 
-def _profile_source_authority(path):
+def _profile_source_authority(path, *, reviewed_bootstrap=None):
     """Seal the registered source before stock registry publication replaces it."""
-    path=_absolute(str(path));_need(_profile_source_allowed(path),'profile_account_not_confirmed',path)
+    path=_absolute(str(path))
+    if reviewed_bootstrap is None:_need(_profile_source_allowed(path),'profile_account_not_confirmed',path)
     with DirectoryBoundary(path.anchor,path) as boundary:
         result=dict(profile=str(path),identity=list(boundary.identities[-1][1:]),account_sid=_current_user_sid())
     roaming=os.environ.get('APPDATA')
-    if roaming and os.path.normcase(_physical(path))==os.path.normcase(_physical(Path(roaming)/'Books Arranger')):
+    if reviewed_bootstrap is None and roaming and os.path.normcase(_physical(path))==os.path.normcase(_physical(Path(roaming)/'Books Arranger')):
         result['kind']='legacy-current-account';return result
-    for bootstrap in registered_bootstraps():
-        value,facts,sha=_json(bootstrap,65536)
-        if value.get('schema')!='books-arranger-installation-v1' or _absolute(value['profile_dir'])!=path:continue
+    for bootstrap in ([reviewed_bootstrap] if reviewed_bootstrap is not None else registered_bootstraps()):
+        value,facts,sha=_installation_json(bootstrap,65536)
+        if value.get('schema') not in ('books-arranger-installation-v1','books-arranger-installation-v2') or _absolute(value['profile_dir'])!=path:continue
         producer=value.get('ownership_provenance')
         _need(isinstance(producer,dict),'profile_producer_not_confirmed',bootstrap)
         owned,_,digest=_json(producer['manifest'])
@@ -870,7 +949,7 @@ def _validate_profile_source_authority(path,authority):
               'profile_account_not_confirmed',path)
     else:
         _need(authority.get('kind')=='registered-installation','profile_account_not_confirmed',path)
-        value,facts,sha=_json(authority['bootstrap'],65536)
+        value,facts,sha=_installation_json(authority['bootstrap'],65536)
         _need(facts==authority['bootstrap_facts'] and sha==authority['bootstrap_sha256'] and
               value.get('ownership_provenance')==authority['producer'] and _absolute(value['profile_dir'])==path,
               'profile_source_changed',path)
@@ -907,6 +986,7 @@ def _copy_profile(source,destination,settings_path,settings_facts,settings_sha25
     else:_validate_profile_source_authority(source,source_authority)
     _need(not _under(source,destination) and not _under(destination,source),'profile_roots_overlap')
     value,facts,digest=_json(settings_path,16384)
+    value=_profile_settings(value,settings_path)
     _need(facts==settings_facts and digest==settings_sha256,'settings_changed',settings_path)
     result=[];source_members=[]
     with contextlib.ExitStack() as stack:
@@ -947,12 +1027,12 @@ def _copy_profile(source,destination,settings_path,settings_facts,settings_sha25
 
 
 @contextlib.contextmanager
-def _selection_catalog(chosen, relocation):
+def _selection_catalog(chosen, relocation, *, receipt_rename_parent=None):
     from catalog_owner import catalog_lock
     from storage_relocation_native import logical_catalog_location, selected_catalog_relocation
     _need(relocation==chosen.get('storage_relocation'),'invalid_relocation_selection')
     _need(not chosen.get('verification_required'),'relocation_verification_required',chosen['database'])
-    with selected_catalog_relocation(relocation) as context:
+    with selected_catalog_relocation(relocation,receipt_rename_parent=receipt_rename_parent) as context:
         database=logical_catalog_location(chosen['resolved_database'])
         with catalog_lock(database,{}):
             if context is not None:context.require_normal_operation()
@@ -971,7 +1051,165 @@ def _selected_profile_affinity(configured, selected, facts):
     return _relocated_profile_catalog(configured,selected,facts,context.manifest)
 
 
+def unattended_arguments(command_line):
+    shell=ctypes.WinDLL('shell32',use_last_error=True)
+    parse=shell.CommandLineToArgvW
+    parse.argtypes=[wintypes.LPCWSTR,ctypes.POINTER(ctypes.c_int)]
+    parse.restype=ctypes.POINTER(wintypes.LPWSTR)
+    size=ctypes.c_int()
+    argv=parse(command_line,ctypes.byref(size))
+    _need(bool(argv),'invalid_request')
+    try:
+        _need(size.value==4 and argv[1]=='/S' and argv[2].startswith('--books-reviewed-plan=') and
+              argv[3].startswith('--books-reviewed-sha256='),'invalid_request')
+        plan=argv[2].split('=',1)[1]
+        sha=argv[3].split('=',1)[1]
+        _need(bool(plan) and re.fullmatch('[a-f0-9]{64}',sha),'invalid_request')
+        return plan,sha
+    finally:
+        local=ctypes.WinDLL('kernel32')
+        local.LocalFree.argtypes=[ctypes.c_void_p]
+        local.LocalFree(argv)
+
+
+def unattended_request(path, sha, registered):
+    request,_,digest=_json(path)
+    _need(digest==sha and set(request)=={'schema','registration','old_package','selection_plan'} and
+          request['schema']=='books-unattended-existing-install-v2' and request['registration']==registered and
+          all(registered.get(key) for key in ('application','version','display_name','uninstall_string')),
+          'selection_changed',path)
+    return request
+
+
+def _unattended_registration(req):
+    return {name:req['registered_'+ini_name] for name,ini_name in
+            (('application','application_dir'),('version','version'),
+             ('display_name','display_name'),('uninstall_string','uninstall_string'))}
+
+
+def unattended_old_package(registered, old_proof, process_name):
+    """Verify the owned package independently of stale Add/Remove metadata."""
+    old=_absolute(registered['application'])
+    _local(old)
+    bootstrap=old.parent/BOOTSTRAP
+    value,_,digest=_installation_json(bootstrap,65536)
+    _need(isinstance(old_proof,dict) and set(old_proof)=={'bootstrap_sha256','artifact'} and
+          digest==old_proof['bootstrap_sha256'] and value.get('application_dir')==str(old),
+          'package_ownership_required',bootstrap)
+    artifact=old_proof['artifact']
+    artifact_path=_absolute(artifact['path']);_local(artifact_path)
+    _need(artifact_path.drive.upper()=='I:' and set(artifact)=={'path','sha256'},
+          'package_ownership_required',artifact_path)
+    known,_,known_sha=_json(artifact_path)
+    _need(known_sha==artifact['sha256']=='2795f374ecedfabde1a0e544cc01513d5bf06f6d0d2c7d25b945924e8d4d03fd' and
+          known.get('schema')=='books-desktop-artifacts-v1' and
+          known.get('version')=='0.28.1' and known.get('source_head')=='243c98f28d05a8065af9e4dfd2fcb96f437a73ec' and
+          known.get('payload',{}).get('verified') is True and known['payload'].get('installer_equivalent') is True,
+          'package_ownership_required',artifact_path)
+    owner_pin=value['package_ownership']
+    owner,_,owner_sha=_json(owner_pin['manifest'])
+    _need(owner_sha==owner_pin['sha256'] and owner['installation_id']==value['installation_id'] and
+          len(owner['roots'])==1 and owner['roots'][0]['path']==str(old),'package_ownership_required',bootstrap)
+    owned={entry['relative'].replace('\\','/'):{'size':entry['facts']['size'],'sha256':entry['sha256']}
+           for entry in owner['roots'][0]['files']}
+    built=known['payload']['files']
+    _need(set(owned)-set(built)=={'Uninstall Books Arranger.exe','uninstallerIcon.ico'} and
+          all(owned.get(name)=={'size':entry['size'],'sha256':entry['sha256']} for name,entry in built.items()),
+          'package_ownership_required',old)
+    retire_owned_package(str(old),'0.28.1',process_name=process_name,_inspect=True)
+    return _profile_source_authority(value['profile_dir'],reviewed_bootstrap=bootstrap)
+
+
+def unattended_selection(plan_path, plan_sha256, registered, process_name):
+    """Admit an explicit fresh, same-account migration before package retirement."""
+    path=_absolute(plan_path)
+    _local(path)
+    request=unattended_request(path,plan_sha256,registered)
+    plan=request['selection_plan']
+    chosen=plan['selection']
+    app,profile,db=(_absolute(plan['application_dir']),_absolute(plan['profile_dir']),_absolute(chosen['database']))
+    old=_absolute(registered['application'])
+    _need(chosen['mode']=='existing' and chosen.get('profile_confirmed') is True and
+          not chosen.get('verification_required') and chosen.get('storage_relocation') and
+          all(item.drive.upper()=='I:' for item in (path,app,profile,db)) and old.drive.upper()=='C:' and
+          app.name=='Books Arranger' and profile==app.parent/'Profile' and
+          chosen['resolved_database']==str(db) and db.name=='inventory.sqlite3' and
+          not _under(path,app.parent) and not _under(path,db.parent),
+          'invalid_relocation_selection',path)
+    _need(not any(os.path.lexists(item) for item in (app,profile,app.parent/BOOTSTRAP,
+          app.parent/'books-arranger-selection-in-progress.json')), 'new_managed_folder_not_empty',app)
+    for name in ('Temp','Downloads','Logs','MaintenanceTemp'):
+        item=app.parent/name
+        _need(not os.path.lexists(item),'new_managed_folder_not_empty',item)
+    authority=chosen.get('profile_source_authority') or {}
+    _need(authority.get('kind')=='registered-installation' and
+          authority.get('bootstrap')==str(old.parent/BOOTSTRAP),
+          'profile_producer_not_confirmed',path)
+    _validate_profile_source_authority(_absolute(chosen['associated_profile']),authority)
+    _need(process_check([str(old),str(app)],process_name)['state']=='available','in_use',old)
+    _need(authority==unattended_old_package(registered,request['old_package'],process_name),
+          'profile_producer_not_confirmed',path)
+    fresh=selection_plan('existing',db,application_dir=app,profile_dir=profile,
+                         config_paths=[chosen['profile_settings_path']],reviewed_profile_authority=authority)
+    _need(fresh==plan,'selection_changed',path)
+    admit_application_target(str(app),str(old),'0.28.1',process_name)
+    with _selection_catalog(chosen,chosen['storage_relocation']) as _:
+        from storage_relocation_native import retained_runtime
+        _need(retained_runtime(db),'relocation_verification_required',db)
+    return plan
+
+
+def retire_unattended_package(command_line,registered,process_name):
+    from storage_relocation_operator import pinned_receipt
+    plan_path,sha=unattended_arguments(command_line)
+    path=_absolute(plan_path);_local(path)
+    old=_absolute(registered['application'])
+    _need(path.drive.upper()=='I:' and old.drive.upper()=='C:','selection_changed',path)
+    with contextlib.ExitStack() as held:
+        held.enter_context(pinned_receipt(path,sha))
+        request=unattended_request(path,sha,registered)
+        proof=request['old_package']
+        bootstrap=held.enter_context(pinned_receipt(old.parent/BOOTSTRAP,proof['bootstrap_sha256']))
+        pin=bootstrap['package_ownership']
+        owner=held.enter_context(pinned_receipt(pin['manifest'],pin['sha256']))
+        artifact=proof['artifact']
+        held.enter_context(pinned_receipt(artifact['path'],artifact['sha256']))
+        unattended_old_package(registered,proof,process_name)
+        return retire_owned_package(str(old),'0.28.1',process_name=process_name,_reviewed_owner=owner)
+
+
 def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storage_relocation=None,
+                     process_name='Books Arranger.exe',require_package=False,retained_package=None,control_namespace=None):
+    """Installer-only portable transition; ordinary selection remains nonmoving."""
+    kwargs=dict(installation_id=installation_id,storage_relocation=storage_relocation,
+                process_name=process_name,require_package=require_package,
+                retained_package=retained_package,control_namespace=control_namespace)
+    if not require_package:return _commit_selection_legacy(plan,expected_plan_sha256,**kwargs)
+    raw=json.dumps(plan,sort_keys=True,separators=(',',':')).encode('utf8')
+    _need(hashlib.sha256(raw).hexdigest()==expected_plan_sha256,'selection_changed')
+    app=_absolute(plan['application_dir']);bootstrap=app.parent/BOOTSTRAP
+    journal=app.parent/'Storage/portable-migration.json'
+    if not journal.exists():
+        _commit_selection_legacy(plan,expected_plan_sha256,**kwargs)
+        if plan['selection']['mode']=='new':
+            from installation_storage import encode
+            value,facts,sha=_installation_json(bootstrap)
+            _need(Path(value['data_dir'])==app.parent/'Data','invalid_installation_layout')
+            _replace_bootstrap(bootstrap,json.dumps(encode(value,app.parent),sort_keys=True).encode('utf8'),
+                dict(value=value,facts=facts,sha256=sha))
+            publish_current_package(bootstrap,retained_package,control_namespace)
+            return dict(ok=True,bootstrap=str(bootstrap),database=str(app.parent/'Data/inventory.sqlite3'),
+                        result='portable_selection_committed',pending=False)
+    from portable_storage_migration import step
+    result=step(bootstrap,expected_plan_sha256,reviewed_plan=plan)
+    if not result.get('pending'):
+        # Capture the actual current package again on a resumed installer: a
+        # retry may have retained/replaced binaries after migration preparation.
+        publish_current_package(bootstrap,retained_package,control_namespace)
+    return result
+
+
+def _commit_selection_legacy(plan, expected_plan_sha256, *, installation_id=None, storage_relocation=None,
                      process_name='Books Arranger.exe',require_package=False,retained_package=None,control_namespace=None):
     """Final install commit only. No catalog migration or schema initialization."""
     raw=json.dumps(plan,sort_keys=True,separators=(',',':')).encode('utf8')
@@ -996,13 +1234,13 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
           (not maintenance_review['previously_bound'] or selected_maintenance.get('identity')==maintenance_review['identity']),
           'selection_changed')
     if bootstrap.exists():
-        existing,existingfacts,existinghash=_json(bootstrap,65536)
+        existing,existingfacts,existinghash=_installation_json(bootstrap,65536)
         _need(previous and existingfacts==previous['facts'] and existinghash==previous['sha256'] and
               existing==previous['value'],'selection_changed',bootstrap)
         if (existing.get('data_dir')==chosen['data_dir'] and existing.get('profile_dir')==str(profile) and mode=='existing'):
             check=inspect_existing(chosen['database'])
             _need(check['state']=='available' and check['facts']==chosen['database_facts'],'selection_changed',chosen['database'])
-            with _selection_catalog(chosen,storage_relocation):
+            with _selection_catalog(chosen,storage_relocation,receipt_rename_parent=root):
                 if existing.get('storage_relocation')==storage_relocation and not require_package and existing.get('maintenance_temp_dir'):
                     return {'ok':True,'bootstrap':str(bootstrap),'result':'existing_selection_kept','database':chosen['database']}
                 changed=dict(existing)
@@ -1049,7 +1287,7 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
         _need(again['existing']==chosen['existing'],'selection_changed',chosen['data_dir'])
     with contextlib.ExitStack() as stack:
         if mode=='existing':
-            stack.enter_context(_selection_catalog(chosen,storage_relocation))
+            stack.enter_context(_selection_catalog(chosen,storage_relocation,receipt_rename_parent=root))
         else:
             data=_absolute(chosen['data_dir'])
             with DirectoryBoundary(data.anchor,data,create=True):pass
@@ -1071,6 +1309,7 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
         settings=profile/'desktop-settings.json'
         if settings.exists():
             old,_,_=_json(settings,16384)
+            old=_profile_settings(old,chosen.get('profile_settings_path') or settings)
             if _absolute(old.get('dataDir',''))!=_absolute(chosen['data_dir']):
                 with VerifiedFile(_absolute(old.get('dataDir',''))/'inventory.sqlite3') as kept,VerifiedFile(chosen['database']) as selected:
                     _need(kept.facts()['identity']==selected.facts()['identity'] or
@@ -1125,7 +1364,14 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
             descriptor,_,descriptor_digest=_json(storage_relocation['manifest'],64*1024*1024)
             _need(descriptor_digest==storage_relocation['sha256'],'invalid_relocation_selection')
             # Pure validation only: runtime/operator still require activation.
-            parse_manifest(Path(storage_relocation['manifest']).read_bytes(),storage_relocation['sha256'])
+            if descriptor.get('schema')=='books-portable-runtime-v1':
+                from storage_relocation_native import current
+                admitted=current()
+                _need(admitted is not None and admitted.namespace is not None and
+                      str(admitted.configuration_path)==storage_relocation['manifest'] and
+                      admitted.configuration_digest==storage_relocation['sha256'],'invalid_relocation_selection')
+                admitted.require_normal_operation()
+            else:parse_manifest(Path(storage_relocation['manifest']).read_bytes(),storage_relocation['sha256'])
             value['storage_relocation']=storage_relocation
         if require_package:value['package_ownership']=capture_current_package(str(app),installation_id)
         if retained_package:value['retained_package']=retained_package
@@ -1205,7 +1451,7 @@ def _other_installation_paths(installation_id,application_dir=None):
         if not Path(path).exists():
             continue
         value, _, _ = _json(path, 65536)
-        _need(value.get('schema') == 'books-arranger-installation-v1', 'installation_reference_unchecked', path)
+        _need(value.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2'), 'installation_reference_unchecked', path)
         same=(value.get('installation_id')==installation_id and application_dir is not None and
               os.path.normcase(str(_absolute(value['application_dir'])))==os.path.normcase(str(_absolute(application_dir))))
         if not same:
@@ -1561,7 +1807,7 @@ def refresh_ownership(ownership_path, expected_sha256, *, output_path,bootstrap_
         roots.append(root)
     refreshed=dict(manifest,roots=roots)
     if bootstrap_path:
-        bootstrap,_,_=_json(bootstrap_path,65536);pin=bootstrap.get('ownership_provenance')
+        bootstrap,_,_=_installation_json(bootstrap_path,65536);pin=bootstrap.get('ownership_provenance')
         _need(isinstance(pin,dict) and bootstrap.get('installation_id')==manifest['installation_id'],'ownership_not_confirmed')
         original,_,sha=_json(pin['manifest']);_need(sha==pin['sha256'] and original['installation_id']==manifest['installation_id'],'ownership_not_confirmed')
         refreshed['producer']=dict(bootstrap=str(bootstrap_path),manifest=pin['manifest'],sha256=pin['sha256'])
@@ -1611,8 +1857,8 @@ def runtime_copy_row(bootstrap,runtime_path):
 
 
 def review_uninstall(bootstrap_path, *, output_dir=None,expected_application_dir=None,runtime_path=None):
-    bootstrap,_,_=_json(bootstrap_path,65536)
-    _need(bootstrap.get('schema')=='books-arranger-installation-v1','ownership_not_confirmed',bootstrap_path)
+    bootstrap,_,_=_installation_json(bootstrap_path,65536)
+    _need(bootstrap.get('schema') in ('books-arranger-installation-v1','books-arranger-installation-v2'),'ownership_not_confirmed',bootstrap_path)
     from storage_lifecycle_controls import assert_no_pending_overlap
     assert_no_pending_overlap([bootstrap[k] for k in ('application_dir','data_dir','profile_dir','temp_dir','downloads_dir','logs_dir')],bootstrap['installation_id'])
     if expected_application_dir is not None:
@@ -1703,7 +1949,7 @@ def plan_selected_cleanup(ownership_path,ownership_sha256,selected_roots,source_
         if str(bootstrap_path) in selected_roots:
             from storage_lifecycle_controls import review_control_records,plan_control_retirement
             _need(len(bootstrap_paths)==1 and source_pin is None,'complete_control_cleanup_requires_separate_source_retirement')
-            bootstrap,_,_=_json(bootstrap_path,65536)
+            bootstrap,_,_=_installation_json(bootstrap_path,65536)
             selected=[p for p in selected_roots if str(p)!=str(bootstrap_path)]
             ordinary=plan_cleanup(ownership_path,ownership_sha256,selected_roots=selected,bootstrap_paths=bootstrap_paths) if selected else None
             controls=plan_control_retirement(review_control_records(bootstrap_path,other_bootstraps=registered_bootstraps()),
@@ -1807,6 +2053,7 @@ def wizard(request_path,response_path):
     response['result']={'ok':'0','code':'could_not_check'}
     exitcode=1
     from storage_lifecycle_controls import ControlRecordsHeld
+    from directory_retention import DirectoryRetentionRefused
     try:
         ini=_read_ini(request_path);req=ini['request'];action=req.get('action','')
         if action=='process-check':
@@ -1816,12 +2063,16 @@ def wizard(request_path,response_path):
         elif action=='admit-application-target':
             result=admit_application_target(req['application_dir'],req.get('registered_application_dir',''),req.get('registered_version',''),req.get('process_name','Books Arranger.exe'))
         elif action=='legacy-update-plan':
-            result=legacy_update_plan(req['application_dir'],req.get('version',''),process_name=req.get('process_name','Books Arranger.exe'))
+            result=legacy_update_plan(req['application_dir'],req.get('version',''),process_name=req.get('process_name','Books Arranger.exe'),
+                source_application_dir=req.get('source_application_dir'))
             response['result']['existing_bootstrap']=str(result['existing_bootstrap'])
             if result.get('plan'):
                 raw=json.dumps(result['plan'],sort_keys=True,separators=(',',':')).encode('utf8')
                 path=Path(response_path).parent/('legacy-update-selection-'+str(uuid.uuid4())+'.json');produced=_write_new(path,raw)
                 response['result'].update(plan_path=str(path),plan_sha256=produced['sha256'])
+                response['result'].update(database=result['plan']['selection']['database'],
+                    data_dir=result['plan']['selection']['data_dir'],profile_dir=result['plan']['profile_dir'],
+                    profile_confirmed=str(result['plan']['selection'].get('profile_confirmed',False)))
         elif action=='prepare-application-stage':
             from application_publication import prepare_application_stage,admit_empty_application_target
             from storage_lifecycle_controls import create_control_namespace
@@ -1857,6 +2108,9 @@ def wizard(request_path,response_path):
         elif action=='retire-owned-package':
             result=retire_owned_package(req['installation_dir'],req['version'],process_name=req.get('process_name','Books Arranger.exe'))
             response['result'].update(receipt=result['receipt'],receipt_sha256=result['receipt_sha256'])
+        elif action=='retire-unattended-package':
+            result=retire_unattended_package(req['command_line'],_unattended_registration(req),req['process_name'])
+            response['result'].update(receipt=result['receipt'],receipt_sha256=result['receipt_sha256'])
         elif action=='remove-package':
             result=remove_current_package(req['bootstrap'],req['application_dir'])
         elif action=='capture-package':
@@ -1882,6 +2136,16 @@ def wizard(request_path,response_path):
             response['result'].update(plan_path=str(plan),plan_sha256=hashlib.sha256(raw).hexdigest(),
                 data_dir=result['selection']['data_dir'],database=result['selection']['database'],
                 profile_dir=result['profile_dir'],profile_confirmed=str(result['selection'].get('profile_confirmed',False)))
+        elif action=='unattended-selection':
+            plan_path,plan_sha=unattended_arguments(req['command_line'])
+            registration=_unattended_registration(req)
+            result=unattended_selection(plan_path,plan_sha,registration,req['process_name'])
+            raw=json.dumps(result,sort_keys=True,separators=(',', ':')).encode('utf8')
+            plan=Path(response_path).absolute().parent/('unattended-selection-'+str(uuid.uuid4())+'.json')
+            _write_new(plan,raw)
+            response['result'].update(plan_path=str(plan),plan_sha256=hashlib.sha256(raw).hexdigest(),
+                application_dir=result['application_dir'],profile_dir=result['profile_dir'],old_package_version='0.28.1',
+                old_application=registration['application'])
         elif action=='commit-selection':
             plan,_,digest=_json(req['plan_path'])
             _need(digest==req['plan_sha256'],'selection_changed')
@@ -1889,6 +2153,7 @@ def wizard(request_path,response_path):
             namespace=dict(manifest=req['control_namespace'],sha256=req['control_namespace_sha256']) if req.get('control_namespace') else None
             result=commit_selection(plan,digest,process_name=req.get('process_name','Books Arranger.exe'),require_package=True,retained_package=retained,control_namespace=namespace)
             response['result'].update(bootstrap=result['bootstrap'],database=result['database'],outcome=result['result'])
+            response['result'].update(pending=str(result.get('pending',False)),phase=result.get('phase',''),message=result.get('message',''))
         elif action=='review-uninstall':
             result=review_uninstall(req['bootstrap'],output_dir=Path(response_path).absolute().parent,expected_application_dir=req['application_dir'],runtime_path=req.get('runtime_path'))
             response['result'].update(count=str(len(result['targets'])),database=result['database'],profile_dir=result['profile_dir'],
@@ -1947,6 +2212,10 @@ def wizard(request_path,response_path):
         else:response['result'].update(code='control_records_held',message='This location could not be checked. Keep it or restore access before continuing.',details=str(error))
     except LifecycleRefused as error:
         response['result'].update(code=error.code,path=error.path,message=MESSAGES.get(error.code,'This location could not be checked. Keep it or restore access before continuing.'))
+    except DirectoryRetentionRefused as error:
+        response['result'].update(code='directory_retention_refused',
+            message='This location could not be checked. Keep it or restore access before continuing.',
+            exception_type=type(error).__name__,details=str(error)[:4096])
     except (OSError,ValueError,sqlite3.Error,configparser.Error):
         response['result'].update(code='could_not_check',message='This location could not be checked. Keep it or restore access before continuing.')
     import io

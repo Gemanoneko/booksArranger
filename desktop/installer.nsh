@@ -11,6 +11,11 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include FileFunc.nsh
+!include "${__FILEDIR__}\installer-refusal.nsh"
+; This custom include is parsed before electron-builder's multiUser.nsh.
+; Use its canonical keys with the builder's command-line identity defines.
+!define BOOKS_INSTALL_REGISTRY_KEY "Software\${APP_GUID}"
+!define BOOKS_UNINSTALL_REGISTRY_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}"
 !ifdef DELETE_APP_DATA_ON_UNINSTALL
   !undef DELETE_APP_DATA_ON_UNINSTALL
 !endif
@@ -70,6 +75,14 @@ Var BooksApplicationStagePlan
 Var BooksApplicationStageSha
 Var BooksControlNamespace
 Var BooksControlNamespaceSha
+Var BooksReviewedCommand
+Var BooksReviewedOldVersion
+Var BooksReviewedOldApplication
+Var BooksReviewedPerUser
+Var BooksAutomaticUpgrade
+Var BooksAutomaticNew
+Var BooksMigrationSteps
+Var BooksSourceApplication
 !endif
 
 !macro BooksTip CONTROL TEXT
@@ -85,6 +98,7 @@ Var BooksControlNamespaceSha
 !macroend
 
 !macro BooksCommon PREFIX
+!insertmacro BooksRefusalSupport "${PREFIX}"
 Function ${PREFIX}BooksEnsurePayload
   ${If} $BooksPayloadReady != "1"
     ReadEnvStr $BooksMaintenanceParent "TEMP"
@@ -142,9 +156,12 @@ Function ${PREFIX}BooksRunHelper
   StrCmp $8 0 books_helper_temp_failed
   System::Call 'kernel32::SetEnvironmentVariableW(w "BOOKS_WORK_TEMP", w "$PLUGINSDIR\books-work") i .r8'
   StrCmp $8 0 books_helper_temp_failed
+  ReadINIStr $BooksLastHelperAction "$BooksRequest" "request" "action"
   nsExec::ExecToStack /TIMEOUT=600000 '"$PLUGINSDIR\books-lifecycle\python\python.exe" -I -B "$PLUGINSDIR\books-lifecycle\backend\storage_lifecycle.py" --wizard-request "$BooksRequest" --wizard-response "$BooksResponse"'
   Pop $0
   Pop $1
+  StrCpy $BooksLastHelperExit $0
+  StrCpy $BooksLastHelperOutput $1
   ReadINIStr $2 "$BooksResponse" "result" "ok"
   ${If} $0 != "0"
     StrCpy $2 "0"
@@ -165,10 +182,14 @@ Function ${PREFIX}BooksRefuse
   ${If} $3 == ""
     StrCpy $3 "Books Arranger could not verify that its work has stopped. Choose Quit in Books Arranger and wait for its work to finish, then try again."
   ${EndIf}
+  Call ${PREFIX}BooksPersistRefusal
   ${IfNot} ${Silent}
     MessageBox MB_OK|MB_ICONEXCLAMATION "$3"
   ${EndIf}
   SetErrorLevel 20
+  ${If} $BooksRefusalStatus == "failed"
+    SetErrorLevel 21
+  ${EndIf}
   Quit
 FunctionEnd
 
@@ -191,6 +212,28 @@ Function ${PREFIX}BooksCheckRunning
   ${EndIf}
 FunctionEnd
 !macroend
+
+!ifndef BUILD_UNINSTALLER
+!macro BooksReadReviewedRegistration ROOT
+  ReadRegStr $R1 ${ROOT} "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ReadRegStr $R2 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  ReadRegStr $R3 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" "DisplayName"
+  ReadRegStr $R4 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+!macroend
+
+!macro customInit
+  StrCpy $BooksReviewedPerUser "0"
+  ${If} $installMode == "CurrentUser"
+  ${AndIf} $hasPerMachineInstallation != "1"
+    StrCpy $BooksReviewedPerUser "1"
+  ${EndIf}
+  Call BooksApplyReviewedSelection
+  ${If} $BooksReviewedCommand != ""
+    !insertmacro BooksReadReviewedRegistration SHELL_CONTEXT
+    Call BooksValidateReviewedSelection
+  ${EndIf}
+!macroend
+!endif
 
 ; This supported hook is checked BEFORE electron-builder's default FIND/KILL
 ; implementation, including early silent un.onInit. customUnInit is too late.
@@ -225,7 +268,12 @@ FunctionEnd
       ${If} $2 != "1"
         Call BooksRefuse
       ${EndIf}
+      ${If} $BooksReviewedCommand != ""
+        !insertmacro BooksReadReviewedRegistration SHELL_CONTEXT
+        Call BooksValidateReviewedSelection
+      ${EndIf}
       ${If} ${isUpdated}
+        ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
         Call BooksPrepareLegacyUpdate
       ${EndIf}
     !endif
@@ -236,6 +284,72 @@ FunctionEnd
   !insertmacro BooksCommon "un."
 !else
   !insertmacro BooksCommon ""
+
+Function BooksApplyReviewedSelection
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "--books-reviewed-plan" $1
+  ${If} ${Errors}
+    ClearErrors
+    ${GetOptions} $0 "--books-reviewed-sha256" $1
+    ${If} ${Errors}
+      ${If} ${Silent}
+      ${AndIfNot} ${isUpdated}
+        Call BooksRefuse
+      ${EndIf}
+      Return
+    ${EndIf}
+  ${EndIf}
+  ${IfNot} ${Silent}
+  ${OrIf} ${isUpdated}
+  ${OrIf} $BooksReviewedPerUser != "1"
+    Call BooksRefuse
+  ${EndIf}
+  System::Call 'kernel32::GetCommandLineW() p .r0'
+  System::Call 'kernel32::lstrlenW(p r0) i .r2'
+  ${If} $2 >= ${NSIS_MAX_STRLEN}
+    Call BooksRefuse
+  ${EndIf}
+  System::Call '*$0(&w${NSIS_MAX_STRLEN} .r1)'
+  StrCpy $BooksReviewedCommand $1
+FunctionEnd
+
+Function BooksValidateReviewedSelection
+  ; The late stock hook has already captured the current registration tuple.
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  Call BooksNewRequest
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  WriteINIStr "$BooksRequest" "request" "action" "unattended-selection"
+  WriteINIStr "$BooksRequest" "request" "command_line" "$BooksReviewedCommand"
+  WriteINIStr "$BooksRequest" "request" "registered_application_dir" "$R1"
+  WriteINIStr "$BooksRequest" "request" "registered_version" "$R2"
+  WriteINIStr "$BooksRequest" "request" "registered_display_name" "$R3"
+  WriteINIStr "$BooksRequest" "request" "registered_uninstall_string" "$R4"
+  WriteINIStr "$BooksRequest" "request" "process_name" "${BOOKS_LIFECYCLE_PROCESS_NAME}"
+  Call BooksRunHelper
+  ${If} $2 != "1"
+    Call BooksRefuse
+  ${EndIf}
+  ReadINIStr $BooksPlan "$BooksResponse" "result" "plan_path"
+  ReadINIStr $BooksPlanSha "$BooksResponse" "result" "plan_sha256"
+  ReadINIStr $INSTDIR "$BooksResponse" "result" "application_dir"
+  ReadINIStr $BooksProfile "$BooksResponse" "result" "profile_dir"
+  ReadINIStr $BooksReviewedOldVersion "$BooksResponse" "result" "old_package_version"
+  ReadINIStr $BooksReviewedOldApplication "$BooksResponse" "result" "old_application"
+  ${If} $BooksPlan == ""
+  ${OrIf} $BooksPlanSha == ""
+  ${OrIf} $INSTDIR == ""
+  ${OrIf} $BooksReviewedOldVersion != "0.28.1"
+  ${OrIf} $BooksReviewedOldApplication == ""
+    Call BooksRefuse
+  ${EndIf}
+FunctionEnd
 
 Function BooksNormalizeDirectory
   ; Same substring search as the pinned stock StrContains helper, without
@@ -266,10 +380,15 @@ Function BooksPrepareLegacyUpdate
   ${If} $BooksPlan != ""
     Return
   ${EndIf}
+  Push $R2
   Call BooksNewRequest
+  Pop $R2
   WriteINIStr "$BooksRequest" "request" "action" "legacy-update-plan"
   WriteINIStr "$BooksRequest" "request" "application_dir" "$INSTDIR"
-  ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  ${If} $BooksSourceApplication == ""
+    StrCpy $BooksSourceApplication $INSTDIR
+  ${EndIf}
+  WriteINIStr "$BooksRequest" "request" "source_application_dir" "$BooksSourceApplication"
   WriteINIStr "$BooksRequest" "request" "version" "$R2"
   WriteINIStr "$BooksRequest" "request" "process_name" "${BOOKS_LIFECYCLE_PROCESS_NAME}"
   Call BooksRunHelper
@@ -277,9 +396,25 @@ Function BooksPrepareLegacyUpdate
     Call BooksRefuse
   ${EndIf}
   ReadINIStr $0 "$BooksResponse" "result" "existing_bootstrap"
-  ${If} $0 != "True"
+  ReadINIStr $1 "$BooksResponse" "result" "plan_path"
+  ${If} $1 != ""
     ReadINIStr $BooksPlan "$BooksResponse" "result" "plan_path"
     ReadINIStr $BooksPlanSha "$BooksResponse" "result" "plan_sha256"
+  ${EndIf}
+  ${If} $0 == "True"
+    ; A recognized installation keeps its exact catalog and saved preferences.
+    ; The lifecycle helper owns the reviewed portable-storage migration plan.
+    ReadINIStr $BooksDatabase "$BooksResponse" "result" "database"
+    ReadINIStr $BooksProfile "$BooksResponse" "result" "profile_dir"
+    StrCpy $BooksExistingDatabase $BooksDatabase
+    StrCpy $BooksMode "existing"
+    StrCpy $BooksAutomaticUpgrade "1"
+    ${If} $BooksPlan == ""
+    ${OrIf} $BooksPlanSha == ""
+    ${OrIf} $BooksDatabase == ""
+    ${OrIf} $BooksProfile == ""
+      Call BooksRefuse
+    ${EndIf}
   ${EndIf}
 FunctionEnd
 
@@ -436,6 +571,33 @@ Function BooksDatabasePage
     Abort
   ${EndIf}
   Call BooksNormalizeDirectory
+  StrCpy $BooksAutomaticUpgrade "0"
+  StrCpy $BooksAutomaticNew "0"
+  ${GetParent} "$INSTDIR" $0
+  StrCpy $BooksSourceApplication $INSTDIR
+  IfFileExists "$0\books-arranger-installation.json" books_database_recognized
+  ; Choosing another drive still upgrades the registered catalog automatically.
+  ; Only the helper can validate and preserve the old installation's bindings.
+  ReadRegStr $BooksSourceApplication SHELL_CONTEXT "${BOOKS_INSTALL_REGISTRY_KEY}" "InstallLocation"
+  StrCmp $BooksSourceApplication "" books_database_manual
+  ${GetParent} "$BooksSourceApplication" $0
+  IfFileExists "$0\books-arranger-installation.json" books_database_recognized books_database_manual
+books_database_recognized:
+  ; Inspect the selected installation again when returning from the directory
+  ; page, rather than retaining a plan for a previously selected folder.
+  StrCpy $BooksPlan ""
+  StrCpy $BooksPlanSha ""
+  ReadRegStr $R2 SHELL_CONTEXT "${BOOKS_UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  Call BooksPrepareLegacyUpdate
+  ${If} $BooksAutomaticUpgrade != "1"
+    Call BooksRefuse
+  ${EndIf}
+  Abort
+books_database_manual:
+  Call BooksTryFreshSelection
+  ${If} $BooksAutomaticNew == "1"
+    Abort
+  ${EndIf}
   !insertmacro MUI_HEADER_TEXT "Database" "Keep an existing catalog or create a separate new one."
   nsDialogs::Create 1018
   Pop $BooksDialog
@@ -486,6 +648,50 @@ Function BooksDatabasePage
   nsDialogs::Show
 FunctionEnd
 
+Function BooksTryFreshSelection
+  ; Only an unambiguous fresh installation gets automatic private storage.
+  ; A known installation or old data/settings always retain assisted selection.
+  ReadRegStr $1 HKCU "${BOOKS_INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ${If} $1 != ""
+    Return
+  ${EndIf}
+  ReadRegStr $1 HKLM "${BOOKS_INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ${If} $1 != ""
+    Return
+  ${EndIf}
+  ${GetParent} "$INSTDIR" $0
+  IfFileExists "$0\Data" books_fresh_not_new
+  IfFileExists "$0\Profile" books_fresh_not_new
+  IfFileExists "$0\Storage" books_fresh_not_new
+  IfFileExists "$APPDATA\Books Arranger\desktop-settings.json" books_fresh_not_new
+  IfFileExists "$LOCALAPPDATA\Books Arranger\data\inventory.sqlite3" books_fresh_not_new
+  StrCpy $BooksNewFolderValue "$0\Data"
+  StrCpy $BooksProfile "$0\Profile"
+  Call BooksNewRequest
+  WriteINIStr "$BooksRequest" "request" "action" "selection"
+  WriteINIStr "$BooksRequest" "request" "mode" "new"
+  WriteINIStr "$BooksRequest" "request" "location" "$BooksNewFolderValue"
+  WriteINIStr "$BooksRequest" "request" "application_dir" "$INSTDIR"
+  WriteINIStr "$BooksRequest" "request" "profile_dir" "$BooksProfile"
+  Call BooksRunHelper
+  ${If} $2 != "1"
+    Call BooksRefuse
+  ${EndIf}
+  ReadINIStr $BooksPlan "$BooksResponse" "result" "plan_path"
+  ReadINIStr $BooksPlanSha "$BooksResponse" "result" "plan_sha256"
+  ReadINIStr $BooksDatabase "$BooksResponse" "result" "database"
+  ReadINIStr $BooksProfile "$BooksResponse" "result" "profile_dir"
+  ${If} $BooksPlan == ""
+  ${OrIf} $BooksPlanSha == ""
+  ${OrIf} $BooksDatabase == ""
+  ${OrIf} $BooksProfile == ""
+    Call BooksRefuse
+  ${EndIf}
+  StrCpy $BooksMode "new"
+  StrCpy $BooksAutomaticNew "1"
+books_fresh_not_new:
+FunctionEnd
+
 Function BooksValidateDatabase
   Call BooksNewRequest
   WriteINIStr "$BooksRequest" "request" "action" "selection"
@@ -523,6 +729,10 @@ Function BooksValidateChanged
 FunctionEnd
 
 Function BooksDatabaseLeave
+  ${If} $BooksAutomaticUpgrade == "1"
+  ${OrIf} $BooksAutomaticNew == "1"
+    Return
+  ${EndIf}
   Call BooksValidateDatabase
   ${If} $2 != "1"
     Abort
@@ -533,9 +743,23 @@ Function BooksReviewPage
   ${If} ${isUpdated}
     Abort
   ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "Ready to install" "Review the application and retained-data locations."
+  !insertmacro MUI_HEADER_TEXT "Ready to install" "Your library and saved work will be preserved."
   nsDialogs::Create 1018
   Pop $BooksDialog
+  ${If} $BooksAutomaticNew == "1"
+    nsDialogs::CreateControl "EDIT" "${DEFAULT_STYLES}|${WS_TABSTOP}|${ES_MULTILINE}|${ES_AUTOVSCROLL}|${ES_READONLY}|${WS_VSCROLL}|${WS_HSCROLL}" "${WS_EX_CLIENTEDGE}" 0 0 100% 100% "Application folder: $INSTDIR$\r$\n$\r$\nBooks Arranger will keep its internal data and settings beside the app.$\r$\n$\r$\nChoose your input libraries and output folder in Books Arranger after setup. Existing libraries will not be changed."
+    Pop $0
+    SendMessage $0 ${EM_SETREADONLY} 1 0
+    nsDialogs::Show
+    Return
+  ${EndIf}
+  ${If} $BooksAutomaticUpgrade == "1"
+    nsDialogs::CreateControl "EDIT" "${DEFAULT_STYLES}|${WS_TABSTOP}|${ES_MULTILINE}|${ES_AUTOVSCROLL}|${ES_READONLY}|${WS_VSCROLL}|${WS_HSCROLL}" "${WS_EX_CLIENTEDGE}" 0 0 100% 100% "Application folder: $INSTDIR$\r$\n$\r$\nYour existing library, settings and queued jobs will be kept. Books Arranger will keep its internal data beside the app, so it no longer needs the old project folder.$\r$\n$\r$\nYour input and output folders will not change. Paused jobs will stay paused. Old source files will not be deleted."
+    Pop $0
+    SendMessage $0 ${EM_SETREADONLY} 1 0
+    nsDialogs::Show
+    Return
+  ${EndIf}
   ReadINIStr $0 "$BooksResponse" "result" "data_dir"
   ReadINIStr $1 "$BooksResponse" "result" "profile_confirmed"
   ${If} $BooksMode == "existing"
@@ -575,6 +799,14 @@ Function BooksCommitSelection
     ; Silent fresh installation cannot invent a data selection.
     Call BooksRefuse
   ${EndIf}
+  StrCpy $BooksMigrationSteps 0
+  DetailPrint "Preparing your library and saved settings..."
+books_commit_next_phase:
+  IntOp $BooksMigrationSteps $BooksMigrationSteps + 1
+  ${If} $BooksMigrationSteps > 16
+    WriteINIStr "$BooksResponse" "result" "message" "Setup could not finish moving the internal data. Your files were kept. Run this installer again to finish setup."
+    Call BooksRefuse
+  ${EndIf}
   Call BooksNewRequest
   WriteINIStr "$BooksRequest" "request" "action" "commit-selection"
   WriteINIStr "$BooksRequest" "request" "plan_path" "$BooksPlan"
@@ -587,10 +819,33 @@ Function BooksCommitSelection
   Call BooksRunHelper
   ${If} $2 != "1"
     ${IfNot} ${Silent}
-      MessageBox MB_OK|MB_ICONEXCLAMATION "Application binaries were installed, but the retained-data settings were not switched. Existing data was kept."
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Setup could not finish updating the internal data. Your files were kept. Run this installer again to finish setup."
     ${EndIf}
     Call BooksRefuse
   ${EndIf}
+  ReadINIStr $0 "$BooksResponse" "result" "pending"
+  ${If} $0 == "True"
+    ReadINIStr $1 "$BooksResponse" "result" "message"
+    DetailPrint "$1"
+    Goto books_commit_next_phase
+  ${EndIf}
+  ReadINIStr $1 "$BooksResponse" "result" "outcome"
+  ${If} $0 == "False"
+    ${If} $1 == "portable_selection_committed"
+    ${OrIf} $1 == "portable_selection_kept"
+      Return
+    ${EndIf}
+  ${ElseIf} $0 == ""
+    ; Old nonstaged commits have an explicit terminal result. An absent or
+    ; malformed staged status must never finalize an unfinished migration.
+    ${If} $1 == "selection_committed"
+    ${OrIf} $1 == "selection_updated"
+    ${OrIf} $1 == "existing_selection_kept"
+      Return
+    ${EndIf}
+  ${EndIf}
+  WriteINIStr "$BooksResponse" "result" "message" "Setup has not confirmed that the data update finished. Your files were kept. Run this installer again to finish setup."
+  Call BooksRefuse
 FunctionEnd
 
 !macro customPageAfterChangeDir

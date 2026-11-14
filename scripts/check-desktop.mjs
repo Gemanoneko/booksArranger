@@ -83,6 +83,7 @@ patterns.push('test_gap_fill.py');  // 0.22.1: approval on local identity at onc
 patterns.push('test_folder_structure.py');  // 0.22.1: items 9 and 10, Sergei's folder structure, clean file-name order, number-titled books
 patterns.push('test_desktop_update.py');  // 0.22.1: the fail-less updater's engine fence, the busy-engine matrix (ruling 27)
 patterns.push('test_startup_loading.py');  // 0.22.1: the engine answers at once and loads in the background (ruling 28)
+patterns.push('test_storage_admission_progress.py');  // full native admission telemetry, cooperative budget and owned-pipe cancellation
 patterns.push('test_action_queue.py');  // 0.22.1: queued Retry, Repair and Delete book (backlog 2 and 3; Judy section 1)
 patterns.push('test_identity_0222.py');  // 0.22.2: W17, W18, «Призрак дома на холме», «Джек из Тени», m-14, ruling 33
 patterns.push('test_catalog_busy.py');  // 0.22.2: a busy catalog never stops a run (cache reads never write, presync, busy is a wait)

@@ -44,9 +44,9 @@ def catalog_lock(database, roots):
                     from storage_relocation_native import current
                     relocation=current()
                     activation=nullcontext()
-                    if relocation and not relocation.manifest.permitted(str(database)):
+                    if relocation and not relocation.permitted(str(database)):
                         raise RuntimeError('Selected storage relocation does not authorize this catalog location')
-                    if relocation and relocation.manifest.permitted(str(database)):
+                    if relocation and relocation.permitted(str(database)):
                         if relocation.database is None:
                             if Path(database).name!='inventory.sqlite3':
                                 raise RuntimeError('Relocated index work requires its owned main catalog')

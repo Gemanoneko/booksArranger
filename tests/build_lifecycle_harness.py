@@ -96,6 +96,8 @@ InstallDir "@OUT@\\Application"
 !define BOOKS_LIFECYCLE_PROCESS_NAME "@BUSY@"
 !define BOOKS_LIFECYCLE_PAYLOAD "@PAYLOAD@"
 !define isUpdated '0 == 1'
+Var installMode
+Var hasPerMachineInstallation
 !macro BooksLifecycleVerifyPayload ROOT
 @VERIFY@
 !macroend

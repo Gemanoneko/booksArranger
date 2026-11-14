@@ -5,6 +5,7 @@ import ntpath
 from pathlib import Path
 import re
 import sqlite3
+import uuid
 
 from storage_relocation import RelocationRefused,_inside,_key
 
@@ -15,11 +16,52 @@ def require_catalog_scope(scopes,catalog_relative):
         raise RelocationRefused('Only the exact selected catalog parent is a managed state scope; source/Git/shared ancestors are protected')
 
 
-def catalog_state_membership(database,*,logical_root=None,physical_root=None,immutable=False):
+def _canonical_uuid(value):
+    try:
+        return str(uuid.UUID(value)) == value
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def _history_marker(db, tables, row, marker_manifest):
+    """Bind a superseded marker to an exact completed producer, without granting disposal."""
+    from working_lifecycle import digest
+
+    job_id = row['job_id']
+    if row['state'] != 'completed' or not _canonical_uuid(job_id) or not isinstance(marker_manifest, dict):
+        return None
+    if marker_manifest.get('job_id') != job_id:
+        return None
+    if 'working_attempts' in tables:
+        attempts = db.execute(
+            "SELECT * FROM working_attempts WHERE job_id=? AND state='retired' AND producer='closed'", (job_id,))
+        matches = [a for a in attempts if _canonical_uuid(a['attempt_id'])
+                   and a['manifest_hash'] == digest(marker_manifest) and json.loads(a['manifest']) == marker_manifest]
+        if len(matches) == 1:
+            return matches[0]['attempt_id']
+        if len(matches) > 1:
+            return None
+    if 'source_cleanup' not in tables or not _canonical_uuid(row['attempt_id']):
+        return None
+    cleanup = db.execute("SELECT id,intent FROM source_cleanup WHERE job_id=? AND state='completed'", (job_id,)).fetchall()
+    if len(cleanup) != 1:
+        return None
+    intent = json.loads(cleanup[0]['intent'])
+    output = intent.get('output', {})
+    validation = output.get('validation', {})
+    artifacts = validation.get('staging_artifacts', {})
+    if (intent.get('id') == cleanup[0]['id'] and intent.get('job_id') == job_id
+            and intent.get('manifest') == marker_manifest and output.get('job_id') == job_id
+            and validation.get('passed') is True and artifacts.get('attempt_id', row['attempt_id']) == row['attempt_id']):
+        return row['attempt_id']
+    return None
+
+
+def catalog_state_membership(database,*,logical_root=None,physical_root=None,immutable=False,relocation_history=False):
     """Read before fencing/census; hashes are checked through census handles."""
     database=Path(database).absolute();root=Path(logical_root or database.parent)
     physical=Path(physical_root or root)
-    owned={};markers=set();directories={'merge-cache','merge-cache/covers','merge-cache/audio-staging',
+    owned={};markers=set();retained={};directories={'merge-cache','merge-cache/covers','merge-cache/audio-staging',
         'source-recovery','replacement-recovery','chapter-repairs','openlibrary-index'}
     protected=[]
     from runtime_disposition_ledger import closed_ledger_members
@@ -71,7 +113,9 @@ def catalog_state_membership(database,*,logical_root=None,physical_root=None,imm
                     protected.extend(r[0] for r in db.execute('SELECT DISTINCT '+column+' FROM '+table)
                         if isinstance(r[0],str) and ntpath.isabs(r[0]))
         if 'audio_jobs' in tables:
-            for row in db.execute('SELECT job_id,manifest,output FROM audio_jobs'):
+            job_columns={r[1] for r in db.execute('PRAGMA table_info(audio_jobs)')}
+            attempt_column='attempt_id' if 'attempt_id' in job_columns else 'NULL AS attempt_id'
+            for row in db.execute('SELECT job_id,manifest,output,state,'+attempt_column+' FROM audio_jobs'):
                 manifest=json.loads(row['manifest']);output=json.loads(row['output']) if row['output'] else {}
                 protected.extend(v for v in [manifest.get('root'),output.get('final_path'),
                     *(s.get('path') for s in manifest.get('sources',[]) if isinstance(s,dict))]
@@ -80,13 +124,40 @@ def catalog_state_membership(database,*,logical_root=None,physical_root=None,imm
                 marker_relative=Path('merge-cache/audio-staging')/identifier/'ownership.json'
                 marker=physical/marker_relative
                 if marker.exists():
-                    from storage_relocation_operator import pinned_receipt,digest
-                    from native_io import VerifiedFile
-                    with VerifiedFile(marker) as held:
+                    from storage_relocation_operator import digest
+                    from native_io import DirectoryBoundary, VerifiedFile
+                    from source_cleanup import single_stream
+                    with DirectoryBoundary(marker.anchor, marker.parent), VerifiedFile(marker) as held:
+                        single_stream(marker)
+                        if held.facts()['links'] != 1 or held.facts()['size'] > 16 * 1024 * 1024:
+                            raise RelocationRefused('Staging marker is not bounded unique data')
                         raw=b''.join(held.chunks())
-                        if json.loads(raw)!={'job_id':identifier,'manifest':manifest}:
+                    marker_value = json.loads(raw)
+                    if marker_value == {'job_id': identifier, 'manifest': manifest}:
+                        markers.add(str(root/marker_relative))
+                    else:
+                        historical = (isinstance(marker_value, dict) and set(marker_value) == {'job_id', 'manifest'}
+                                      and marker_value['job_id'] == identifier and relocation_history
+                                      and _history_marker(db, tables, row, marker_value['manifest']))
+                        if not historical:
                             raise RelocationRefused('Staging marker differs from its catalog producer')
-                    markers.add(str(root/marker_relative))
+                        retained[_key(str(root/marker_relative))] = (digest(raw), len(raw))
+                        attempt_dir = marker_relative.parent / historical
+                        directories.add(attempt_dir.as_posix())
+                        if 'storage_cleanup_preserved' in tables:
+                            for evidence in db.execute('SELECT path,reason FROM storage_cleanup_preserved WHERE job_id=?', (identifier,)):
+                                location = Path(evidence['path'])
+                                if (_key(str(location.parent)) != _key(str(root/attempt_dir))
+                                        or evidence['reason'] != 'Legacy evidence lacks exact producer bytes; preserved'
+                                        or not re.fullmatch(r'(?:[0-9a-f]{32}\.(?:stderr|decode-stderr|stdout)|chapters\.txt)', location.name)):
+                                    raise RelocationRefused('Historical staging retention row differs from its completed job/attempt')
+                                copy = physical/attempt_dir/location.name
+                                with DirectoryBoundary(copy.anchor, copy.parent), VerifiedFile(copy) as held:
+                                    single_stream(copy)
+                                    facts = held.facts()
+                                    if facts['links'] != 1 or facts['size'] > 8 * 1024 * 1024:
+                                        raise RelocationRefused('Historical retained evidence is not bounded unique data')
+                                    retained[_key(str(location))] = (held.sha256(), facts['size'])
                 cover=manifest.get('cover')
                 if isinstance(cover,dict):pin(cover.get('path'),cover.get('sha256'),cover.get('size'))
                 artifacts=output.get('validation',{}).get('staging_artifacts',{})
@@ -116,13 +187,15 @@ def catalog_state_membership(database,*,logical_root=None,physical_root=None,imm
     # Native index provenance is separately validated by the operator's typed
     # classifier. Only its exact admitted leaf/journal/receipt names qualify.
     return {'owned':{_key(path):value for path,value in owned.items()},
-        'markers':{_key(path) for path in markers},'directories':set(directories)}
+        'markers':{_key(path) for path in markers},'directories':set(directories),'retained':retained}
 
 
-def validate_census_ownership(source,scopes,catalog_relative,files,directories,membership,classes):
+def validate_census_ownership(source,scopes,catalog_relative,files,directories,membership,classes,*,copy_only=None):
     require_catalog_scope(scopes,catalog_relative)
     root=Path(source)/ntpath.dirname(catalog_relative);relative_root=ntpath.dirname(catalog_relative)
     allowed_dirs=set(membership['directories']);proof=[]
+    unowned=set()
+    copy_only=copy_only or {}
     index_paths={key for key,names in classes.items() if set(names)&{'index-leaf','index-journal'}}
     index_controls=set()
     for key,names in classes.items():
@@ -135,7 +208,9 @@ def validate_census_ownership(source,scopes,catalog_relative,files,directories,m
         if not _inside(record['relative'],scopes[0]):continue
         relative=ntpath.relpath(record['relative'],relative_root).replace('\\','/')
         if relative=='.':continue
-        if relative not in allowed_dirs or any(p.casefold()=='.git' for p in relative.split('/')):
+        if relative not in allowed_dirs and copy_only.get(_key(record['relative']))=='directory':
+            unowned.add(_key(record['relative']))
+        elif relative not in allowed_dirs or any(p.casefold()=='.git' for p in relative.split('/')):
             raise RelocationRefused('Unknown/source/Git directory is outside typed catalog ownership: '+record['relative'])
     for key,record in files.items():
         relative=ntpath.relpath(record['relative'],relative_root).replace('\\','/')
@@ -148,18 +223,28 @@ def validate_census_ownership(source,scopes,catalog_relative,files,directories,m
             'inventory.sqlite3-journal','inventory.sqlite3.lock','web-instance.json'} or
             re.fullmatch(r'web-instance\.(?:ended|stale|orphan)-[a-f0-9-]+\.json',relative))
         expected=membership['owned'].get(path)
+        historical=membership.get('retained',{}).get(path)
         index=key in index_paths or key in index_controls
         if relative=='openlibrary-index/import-lock.sqlite3.lock':
             import hashlib
             index=record['facts']['size'] in (0,1) and record['sha256'] in {hashlib.sha256(b'').hexdigest(),hashlib.sha256(b'0').hexdigest()}
-        if not (fixed or expected is not None or path in membership['markers'] or index):
-            raise RelocationRefused('Unknown file is outside typed catalog ownership: '+record['relative'])
+        if not (fixed or expected is not None or path in membership['markers'] or index or historical):
+            if copy_only.get(key)!='file' or key in classes:
+                raise RelocationRefused('Unknown file is outside typed catalog ownership: '+record['relative'])
+            unowned.add(key)
+        if historical and (record['sha256'],record['facts']['size'])!=historical:
+            raise RelocationRefused('Historical retained staging bytes changed: '+record['relative'])
         if expected and (record['sha256']!=expected[0] or expected[1] is not None and record['facts']['size']!=expected[1]):
             raise RelocationRefused('Typed catalog-owned bytes changed: '+record['relative'])
         proof.append({'relative':record['relative'],'sha256':record['sha256'],'kind':
+            'copy-only' if key in unowned else 'historical-staging-retained' if historical else
             'catalog-fixed' if fixed else 'catalog-row' if expected else 'index-provenance' if index else 'catalog-marker'})
-    return {'schema':'books-typed-catalog-membership-v1','catalog_relative':catalog_relative,
+    if unowned!=set(copy_only):
+        raise RelocationRefused('Preservation selection is not the exact otherwise-unowned membership')
+    result={'schema':'books-typed-catalog-membership-v1','catalog_relative':catalog_relative,
         'scope':scopes[0],'files':proof,'directories':[r['relative'] for r in directories.values()]}
+    if unowned:result['copy_only']=sorted(unowned)
+    return result
 
 
 def require_plan_membership(plan):
@@ -197,12 +282,40 @@ def validate_plan_snapshot_membership(plan,plan_path,snapshot_sha256,physical_so
             raise RelocationRefused('Pinned closed backup differs from the original logical catalog snapshot')
         logical_root=Path(plan['source_root'])/ntpath.dirname(plan['catalog_relative'])
         physical_root=Path(physical_source)/ntpath.dirname(plan['catalog_relative'])
-        membership=catalog_state_membership(expected,logical_root=logical_root,physical_root=physical_root,immutable=True)
+        membership=catalog_state_membership(expected,logical_root=logical_root,physical_root=physical_root,immutable=True,
+                                            relocation_history=True)
         classes,held_classes=classify_historical_files(expected,managed_root=plan['source_root'],
             logical_catalog=logical_root/'inventory.sqlite3',index_root=physical_root/'openlibrary-index',immutable=True)
         normalized={_key(ntpath.relpath(path,plan['source_root'])):names for path,names in classes.items() if _inside(path,plan['source_root'])}
+        plan_files={_key(r['relative']):r for r in plan['files']}
+        plan_dirs={_key(r['relative']):r for r in plan['directories']}
+        copy_only={}
+        if 'preservation_selection' in plan:
+            from storage_preservation_selection import approved_members, compare_member
+            from storage_relocation_operator import Security, _scan
+            selected=approved_members(plan['preservation_selection'],plan['source_root'],plan['target_root'],plan['scopes'][0])
+            with contextlib.ExitStack() as census:
+                dirs,files,handles=_scan(Path(physical_source),tuple(plan['scopes']),census,hash_files=False)
+                security=Security()
+                source_security={_key(row['relative']):row for row in plan['security']}
+                for key,row in selected.items():
+                    item=handles[key]
+                    directory=row['kind']=='directory'
+                    actual=(plan_dirs if directory else plan_files)[key]
+                    live=(dirs if directory else files)[key]
+                    if directory:
+                        if item.facts['identity']!=actual['identity']:
+                            raise RelocationRefused('Preserved source directory identity changed')
+                        # Its exact pre-fence facts were captured in the plan.
+                        facts=plan['preservation_facts'][key]
+                    else:
+                        if live['facts']!=actual['facts'] or item.sha256()!=actual['sha256']:
+                            raise RelocationRefused('Preserved source file changed')
+                        facts=None
+                    compare_member(row,actual,row['kind'],source_security[key]['original_security'],facts)
+                    copy_only[key]=row['kind']
         proof=validate_census_ownership(Path(plan['source_root']),plan['scopes'],plan['catalog_relative'],
-            {_key(r['relative']):r for r in plan['files']},{_key(r['relative']):r for r in plan['directories']},membership,normalized)
+            plan_files,plan_dirs,membership,normalized,copy_only=copy_only)
         if proof!=plan['owned_state']:
             raise RelocationRefused('Frozen source catalog does not establish the reviewed app-state membership')
 
