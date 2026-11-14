@@ -1,0 +1,41 @@
+{
+  "release_url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.28.12",
+  "source_commit": "5f2c04eb5ac78481b383acdfdf9a509a40450847",
+  "version": "0.28.12",
+  "artifact_manifest_sha256": "2960986540475e86b8011711b0bea5556837327acce66a3ee9757e21a626cae4",
+  "assets": [
+    {
+      "name": "Books-Arranger-Setup-0.28.12.exe",
+      "sha256": "ced3c7a95005fb734655717356ed74aa2866775f7ff971e1b293acd046375f6d",
+      "size": 208980797,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.28.12/Books-Arranger-Setup-0.28.12.exe"
+    },
+    {
+      "name": "Books-Arranger-Setup-0.28.12.exe.blockmap",
+      "sha256": "f86c21d58023512e749f91ff6aad7175edfe3ce5d5cd0931602fe2e8e9f49ee2",
+      "size": 218908,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.28.12/Books-Arranger-Setup-0.28.12.exe.blockmap"
+    },
+    {
+      "name": "latest.yml",
+      "sha256": "7e557d858dceceac075e1b1ec71228f6f5ded4a8db3a9213f5fbe8234a029d27",
+      "size": 363,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.28.12/latest.yml"
+    }
+  ],
+  "verification": "Public release, uploaded asset sizes and GitHub SHA256 digests equal exact local manifest; remote tag equals built source.",
+  "qa": "User reported working and explicitly requested release without tests or postbuild QA. No full QA clearance claimed.",
+  "local_build_cleanup": {
+    "removed_files": 1227,
+    "removed_logical_size": "983.71 MB",
+    "targets": [
+      "dist/builds/9e57a499-771a-4250-a711-1c3160806a77",
+      "build-cache/builds/2279c908-db3e-441c-bc54-4fd82533fe70",
+      "dist/release-artifacts.json",
+      "build-cache/runtime-pointer.json"
+    ],
+    "absence_verified": true,
+    "held_targets": 0,
+    "source_and_rebuild_dependencies_preserved": true
+  }
+}
