@@ -179,7 +179,8 @@ def legacy_update_plan(application_dir,version,*,process_name='Books Arranger.ex
             value.get('application_dir')==str(app),'legacy_update_requires_assisted_setup',bootstrap)
         chosen=selection_plan('existing',str(Path(value['data_dir'])/'inventory.sqlite3'),
             application_dir=str(app),profile_dir=value['profile_dir'],
-            config_paths=[str(Path(value['profile_dir'])/'desktop-settings.json')])
+            config_paths=[str(Path(value['profile_dir'])/'desktop-settings.json')],
+            reviewed_profile_authority=_profile_source_authority(value['profile_dir'],reviewed_bootstrap=bootstrap))
         return dict(existing_bootstrap=True,plan=chosen)
     if source_application_dir and _absolute(source_application_dir)!=app:
         source_app=_absolute(source_application_dir);source_bootstrap=source_app.parent/BOOTSTRAP

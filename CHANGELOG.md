@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.8] - Unreleased
+
+### Fixed
+
+- Use the reviewed existing-profile authority when upgrading in the same application folder, matching the verified cross-drive upgrade path.
+
 ## [v0.28.7] - Unreleased
 
 ### Added
