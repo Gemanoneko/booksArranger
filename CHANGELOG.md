@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.11] - Unreleased
+
+### Fixed
+
+- Recognize authenticated retained-file location history during startup after portable storage migration without relaxing file identity protection.
+
 ## [v0.28.10] - Unreleased
 
 ### Fixed

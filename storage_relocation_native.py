@@ -645,6 +645,35 @@ def ancestry_match(boundary, expected, *, operation_path, prefix=False):
     return bool(_context and _context.ancestry_match(boundary, expected, operation_path,prefix))
 
 
+def retained_current_read_path(path, *, directory=False):
+    """Current location of an immutable retained member, for observation only.
+
+    This grants neither producer closure nor disposal authority. Callers retain
+    the original path in every historical record and validate fresh native facts.
+    """
+    original=str(path)
+    if not _context or not _context.namespace:return original
+    _context.require_normal_operation()
+    namespace=_context.namespace
+    current=namespace.current_path(original)
+    if directory:
+        relative=ntpath.relpath(current,namespace.data)
+        key='' if relative=='.' else _key(relative)
+        _need(key in namespace.value['directories'],'Retained directory has no portable binding')
+    else:_need(namespace.file_binding(original) is not None,'Retained file has no portable binding')
+    return current
+
+
+def retained_location_match(current, historical, *, directory=False):
+    """Compare only location; every other retained-proof field stays exact."""
+    if current==historical:return True
+    if not _context or not _context.namespace:return False
+    try:
+        return _key(str(current))==_key(retained_current_read_path(historical,directory=directory))
+    except RelocationRefused:
+        return False
+
+
 def retained_observation_match(actual,expected,boundary,*,operation_path):
     """Typed location bridge for an ALREADY validated retained-proof record.
 
@@ -659,14 +688,16 @@ def retained_observation_match(actual,expected,boundary,*,operation_path):
     _context.require_normal_operation()
     keys={'schema','ownership_authority','catalog','stage','ancestry','marker_sha256','files'}
     if not isinstance(expected,dict) or set(actual)!=keys or set(expected)!=keys:return False
-    if any(actual[k]!=expected[k] for k in ('schema','ownership_authority','stage','marker_sha256')):return False
+    if any(actual[k]!=expected[k] for k in ('schema','ownership_authority','marker_sha256')):return False
+    if not retained_location_match(actual['stage'],expected['stage'],directory=True):return False
     if actual['schema']!='books-unadopted-attempt-fence-v1' or actual['ownership_authority'] is not False:return False
     if not _context.catalog_identity_match(actual['catalog'],expected['catalog']):return False
     if not ancestry_match(boundary,expected['ancestry'],operation_path=operation_path):return False
     if not isinstance(expected['files'],list) or len(actual['files'])!=len(expected['files']):return False
     for now,old in zip(actual['files'],expected['files']):
         if not isinstance(old,dict) or set(now)!=set(old) or set(now)!={'name','path','facts','sha256'}:return False
-        if any(now[k]!=old[k] for k in ('name','path','sha256')):return False
+        if any(now[k]!=old[k] for k in ('name','sha256')):return False
+        if not retained_location_match(now['path'],old['path']):return False
         if not facts_match(now['path'],now['facts'],old['facts'],receipt_class='retained-source'):return False
     return True
 
