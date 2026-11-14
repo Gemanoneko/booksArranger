@@ -1610,7 +1610,7 @@ def owned_instance_record(path, health):
             single_stream(path)
             current.dispose()
 
-def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create_data=True):
+def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create_data=True, admission=None, before_mutation=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database',default=str(BASE / 'data' / 'inventory.sqlite3'))
     parser.add_argument('--roots-json',help='Optional local fixture roots; not exposed through HTTP')
@@ -1640,10 +1640,15 @@ def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create
     # Existing mode cannot create missing ancestry. Explicit new mode alone may
     # create the selected empty folder; the final guard runs before lock/schema.
     with DirectoryBoundary(database_path.anchor, database_path.parent, create=create_data):
-        if startup_guard is not None:startup_guard(database_path, guard_roots, port)
+        # New-folder emptiness must precede creating its lock. Existing-folder
+        # inspection is WAL-aware and therefore follows relocation admission.
+        if create_data and startup_guard is not None:startup_guard(database_path, guard_roots, port)
         with catalog_lock(args.database,guard_roots):
             from storage_relocation_native import require_normal_operation
             require_normal_operation(database_path)
+            if not create_data and startup_guard is not None:startup_guard(database_path, guard_roots, port)
+            if admission is not None:admission.complete()
+            if before_mutation is not None:before_mutation()
             from runtime_disposition_owners import admit_catalog
             admit_catalog(database_path)
             if before_start is not None:before_start(database_path, guard_roots, port)

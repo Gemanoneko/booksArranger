@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.5] - 2026-11-14
+
+### Fixed
+
+- Show startup storage-admission progress in the loading view instead of timing out a duplicate preliminary check. Complete the full admission before catalog mutation or normal workers start.
+
 ## [v0.28.4] - 2026-11-14
 
 ### Added

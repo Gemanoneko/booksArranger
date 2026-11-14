@@ -89,6 +89,8 @@ def retained_target_lease(target, records):
     guards={}
     items={}
     security=Security()
+    from storage_admission_progress import report
+    report('retained',0,len(records))
     with ExitStack() as stack:
         for key,record in records.items():
             checkpoint()
@@ -110,4 +112,5 @@ def retained_target_lease(target, records):
             if not valid or security.capture(item)['sha256']!=record['security_sha256']:
                 raise RelocationRefused('Retained target identity, bytes or permissions changed: '+relative)
             items[key]=item
+            report('retained',len(items),len(records))
         yield items

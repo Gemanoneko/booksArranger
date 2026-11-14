@@ -231,6 +231,12 @@ function startBackend(config) {
     while ((end = state.hostOutput.indexOf('\n')) !== -1) {
       const line = state.hostOutput.slice(0, end).trim();
       state.hostOutput = state.hostOutput.slice(end + 1);
+      if(line.startsWith('BOOKS_STORAGE_ADMISSION ')){
+        if(generation===state.generation&&state.owner&&state.backend===child){
+          try{if(state.startup.admission(JSON.parse(line.slice('BOOKS_STORAGE_ADMISSION '.length))))pushStartup();}catch{}
+        }
+        continue;
+      }
       if (!line.startsWith('BOOKS_ENGINE_OWNER ')) continue;
       try {
         const proof = JSON.parse(line.slice('BOOKS_ENGINE_OWNER '.length));
@@ -385,6 +391,7 @@ function launchEngine(config, { fresh = true } = {}) {
   state.ready = false; state.loaded = false; state.verdict = 'working';
   state.output = '';
   if (fresh) state.startup.launch(); // a Restart engine started its launch (and its clock) at the press
+  if(config.storageRelocation)state.startup.beginAdmission();
   pushStartup(); loadTip(loadState.trayTooltip({ state: 'working' }, null, false));
   startBackend(config); // first: the watch reads this launch's exit flag, never the last launch's
   return watchEngine(state.generation);
@@ -409,6 +416,8 @@ function relaunchConfig(config) {
 }
 async function restartEngine(config) {
   if (state.loaded || state.quit !== 'none' || state.restarting) return false;
+  const admission=state.startup?.value.admission;
+  if(admission&&admission.state!=='complete'&&(!state.backendExited||admission.verification_required))return false;
   state.restarting = true;
   config = relaunchConfig(config);
   try {
@@ -821,7 +830,8 @@ if (!app.requestSingleInstanceLock()) {
     try {
       config = configuration();
       currentConfig=config;
-      if(config.storageRelocation)await runReadOnlyPython(config,'desktop_storage_admission.py',['--database',path.join(config.dataDir,'inventory.sqlite3')]);
+      // The owned engine performs full storage admission before catalog recovery
+      // and workers, and reports it to the first frame. Do not run it twice.
       if(config.requiresSetup)await chooseCatalog();
       else startConfigured(config); // the engine's own failures show in the window's load strip (Stopped)
     } catch (error) {

@@ -38,6 +38,8 @@ _DEADLINE = contextvars.ContextVar('books_relocation_operator_deadline', default
 
 
 def checkpoint():
+    from storage_admission_progress import report
+    report()
     deadline = _DEADLINE.get()
     need(deadline is None or time.monotonic() < deadline, 'Offline relocation exceeded its 600-second operation bound')
 
@@ -170,7 +172,10 @@ class NativeItem:
     def sha256(self):
         need(not self.directory, 'Directory has no content hash')
         value = hashlib.sha256()
-        for block in self.view.chunks():checkpoint(); value.update(block)
+        for block in self.view.chunks():
+            checkpoint(); value.update(block)
+            from storage_admission_progress import report
+            report(byte_count=len(block))
         return value.hexdigest()
 
     def revalidate(self):
@@ -555,6 +560,8 @@ class SourceFenceLease:
             need(isinstance(records, list) and 0 < len(records) <= MAX_FILES,
                  'Source fence item count invalid')
             seen = set(); security = Security()
+            from storage_admission_progress import report
+            report('source',0,len(records))
             for record in records:
                 checkpoint()
                 need(isinstance(record, dict) and set(record) == {'relative', 'kind', 'identity',
@@ -574,11 +581,13 @@ class SourceFenceLease:
                 need(fenced or restored,
                      'Original source write fence is no longer installed')
                 self.items.append((item, record))
+                report('source',len(self.items),len(records))
             for scope in scopes:
                 need(_key(scope) in seen, 'Managed source root has no write fence')
             # The receipt covers every namespace entry, not just named files.
             # Unknown entries can never remain writable outside the source fence.
             with contextlib.ExitStack() as census:
+                report('namespace',0)
                 directories, files, _ = _scan(self.root, scopes, census, hash_files=False)
                 namespace = set(files) | {key for key in directories if
                     any(_inside(key, scope) for scope in scopes)}

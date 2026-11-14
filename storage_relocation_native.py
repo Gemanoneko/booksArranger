@@ -244,6 +244,8 @@ class NativeContext:
             # for the entire catalog owner lifetime. UUIDs copied inside another
             # database are insufficient authority for this native file.
             self.catalog_binding=binding
+            from storage_admission_progress import report
+            report('database',0)
             self.catalog_handle=kernel.CreateFileW(self.database,0x81,3,None,3,0x00200000,None)
             if self.catalog_handle==ctypes.c_void_p(-1).value:
                 self.catalog_handle=None
@@ -316,6 +318,7 @@ class NativeContext:
                         _need(proof.get('complete') is True and not proof.get('held_classes'),
                               'Independent storage verification has unresolved obligations')
                     self.verification_record=registration
+                report('database',0)
                 self._activation()
                 yield self
         finally:

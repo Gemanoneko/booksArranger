@@ -22,6 +22,7 @@
   return s<3600?`${Math.floor(s/60)}:${two(s%60)}`:`${Math.floor(s/3600)}:${two(Math.floor(s%3600/60))}:${two(s%60)}`;
  }
  function stepOf(loading){
+  if(loading?.admission)return {id:'admission',n:1,of:4,words:'Checking data folder'};
   // Before the engine's first answer the shell's step is the only one: Step 1, the process is launching.
   if(!loading)return {id:'engine',n:1,of:4,words:STEPS.engine};
   const of=Number.isInteger(loading.of)&&loading.of>0?loading.of:4,n=Number.isInteger(loading.n)&&loading.n>0?Math.min(loading.n,of):1;
@@ -69,6 +70,10 @@
  // The state line (3.4): the state word, the step, the state's own sentence.
  function stateLine(verdict,loading,{portPid=null}={}){
   const step=stepOf(loading),head=`Step ${step.n} of ${step.of}: ${step.words}`,x=duration(verdict.quiet),named=cause(loading);
+  if(loading?.admission){
+   if(verdict.state==='stopped')return {word:'Stopped',text:loading.verification_required?'Data folder needs verification.':'Data folder check failed.'};
+   if(verdict.state==='waiting'||verdict.state==='stuck')return {word:verdict.state==='stuck'?'Stuck':'Waiting',text:head+(verdict.signal==='answer'?`. No check update for ${x}.`:`. No progress for ${x}.`)};
+  }
   switch(verdict.state){
    case 'stopped':return portPid?{word:'Stopped',text:`Another copy of Books Arranger is running (process ${portPid}). Quit it from the tray, then try again.`}
     :{word:'Stopped',text:'The engine stopped while loading. Your files are not touched.'};
@@ -84,6 +89,7 @@
  }
  // The detail line (3.3): parts wrap between, never inside.
  function detailParts(t,at,loading,lastLoadMs){
+  if(loading?.admission)return [`running ${running(at-loading.startedAt)}`,loading.updatedAt===null?'no check update yet':`check updated ${Math.floor(Math.max(0,at-loading.updatedAt)/1000)} s ago`,`check budget ${duration(loading.limit_ms)}`];
   const parts=[];
   if(loading){
    const unit=UNITS.has(loading.unit)?loading.unit:'items';
@@ -102,6 +108,7 @@
  }
  // aria-valuetext: "Step 3 of 4, Checking the last session, 24%" (no percentage when the step cannot count).
  function valueText(loading){
+  if(loading?.admission)return `Step 1 of 4, Checking data folder, ${admissionPhase(loading)}`;
   const step=stepOf(loading),f=fraction(loading);
   return `Step ${step.n} of ${step.of}, ${step.words}${f===null?'':`, ${Math.round(f*100)}%`}`;
  }
@@ -119,7 +126,11 @@
   return !!loading.parts&&['library','status','books','attention','jobs'].every(name=>loading.parts[name]===true)&&loading.took_ms!==null&&loading.took_ms!==undefined;
  }
  function part(answer,name){const loading=answer&&answer.loading;return !loading||!!(loading.parts&&loading.parts[name]===true);}
- const api=Object.freeze({THRESHOLDS,STEPS,duration,running,stepOf,createTracker,evaluate,stateLine,detailParts,readyLine,fraction,valueText,trayTooltip,loaded,part});
+ function admissionPhase(loading){
+  const label={records:'Checking installation records',database:'Checking the database',source:'Checking folder access',namespace:'Checking folder access',retained:'Checking retained source files'}[loading.phase]||'Checking installation and data folder…';
+  return label+(Number.isFinite(loading.total)&&loading.total>0?` · ${count(loading.done)} of ${count(loading.total)} ${loading.phase==='retained'?'files':'items'}`:'');
+ }
+ const api=Object.freeze({THRESHOLDS,STEPS,duration,running,stepOf,createTracker,evaluate,stateLine,detailParts,readyLine,fraction,valueText,trayTooltip,loaded,part,admissionPhase});
  root.booksLoadState=api;
  if(typeof module==='object'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
