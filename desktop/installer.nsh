@@ -829,7 +829,7 @@ books_commit_next_phase:
     DetailPrint "$1"
     Goto books_commit_next_phase
   ${EndIf}
-  ReadINIStr $1 "$BooksResponse" "result" "result"
+  ReadINIStr $1 "$BooksResponse" "result" "outcome"
   ${If} $0 == "False"
     ${If} $1 == "portable_selection_committed"
     ${OrIf} $1 == "portable_selection_kept"

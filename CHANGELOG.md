@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.10] - Unreleased
+
+### Fixed
+
+- Read the installer commit outcome correctly so a completed storage switch continues to custom uninstall registration without a false failure message.
+
 ## [v0.28.9] - Unreleased
 
 ### Fixed
