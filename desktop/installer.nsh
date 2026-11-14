@@ -12,6 +12,10 @@
 !include LogicLib.nsh
 !include FileFunc.nsh
 !include "${__FILEDIR__}\installer-refusal.nsh"
+; This custom include is parsed before electron-builder's multiUser.nsh.
+; Use its canonical keys with the builder's command-line identity defines.
+!define BOOKS_INSTALL_REGISTRY_KEY "Software\${APP_GUID}"
+!define BOOKS_UNINSTALL_REGISTRY_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}"
 !ifdef DELETE_APP_DATA_ON_UNINSTALL
   !undef DELETE_APP_DATA_ON_UNINSTALL
 !endif
@@ -574,7 +578,7 @@ Function BooksDatabasePage
   IfFileExists "$0\books-arranger-installation.json" books_database_recognized
   ; Choosing another drive still upgrades the registered catalog automatically.
   ; Only the helper can validate and preserve the old installation's bindings.
-  ReadRegStr $BooksSourceApplication SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ReadRegStr $BooksSourceApplication SHELL_CONTEXT "${BOOKS_INSTALL_REGISTRY_KEY}" "InstallLocation"
   StrCmp $BooksSourceApplication "" books_database_manual
   ${GetParent} "$BooksSourceApplication" $0
   IfFileExists "$0\books-arranger-installation.json" books_database_recognized books_database_manual
@@ -583,7 +587,7 @@ books_database_recognized:
   ; page, rather than retaining a plan for a previously selected folder.
   StrCpy $BooksPlan ""
   StrCpy $BooksPlanSha ""
-  ReadRegStr $R2 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  ReadRegStr $R2 SHELL_CONTEXT "${BOOKS_UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
   Call BooksPrepareLegacyUpdate
   ${If} $BooksAutomaticUpgrade != "1"
     Call BooksRefuse
@@ -647,11 +651,11 @@ FunctionEnd
 Function BooksTryFreshSelection
   ; Only an unambiguous fresh installation gets automatic private storage.
   ; A known installation or old data/settings always retain assisted selection.
-  ReadRegStr $1 HKCU "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ReadRegStr $1 HKCU "${BOOKS_INSTALL_REGISTRY_KEY}" "InstallLocation"
   ${If} $1 != ""
     Return
   ${EndIf}
-  ReadRegStr $1 HKLM "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ReadRegStr $1 HKLM "${BOOKS_INSTALL_REGISTRY_KEY}" "InstallLocation"
   ${If} $1 != ""
     Return
   ${EndIf}
