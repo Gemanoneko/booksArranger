@@ -71,8 +71,8 @@ def _junction_target(handle):
 
 
 class NativeContext:
-    def __init__(self, manifest_path, expected_sha256):
-        from native_io import DirectoryBoundary, VerifiedFile, kernel
+    def __init__(self, manifest_path, expected_sha256, *, receipt_rename_parent=None):
+        from native_io import DirectoryBoundary, VerifiedFile, kernel, receipt_boundary
         from source_cleanup import single_stream
         self.stack = contextlib.ExitStack()
         self.database = None
@@ -95,9 +95,10 @@ class NativeContext:
         self.retained_jobs = frozenset()
         self.retained_items = {}
         self.manifest_path = Path(manifest_path).absolute()
+        self.receipt_rename_parent = Path(receipt_rename_parent).absolute() if receipt_rename_parent is not None else None
         self._closed = False
         try:
-            self.stack.enter_context(DirectoryBoundary(self.manifest_path.anchor, self.manifest_path.parent))
+            self.stack.enter_context(receipt_boundary(self.manifest_path,self.receipt_rename_parent))
             descriptor = self.stack.enter_context(VerifiedFile(self.manifest_path))
             _need(descriptor.facts()['links'] == 1 and descriptor.facts()['size'] <= 64 * 1024 * 1024,
                   'Selected storage descriptor is not an ordinary bounded unique file')
@@ -257,13 +258,13 @@ class NativeContext:
                 detached=self.pending_detach
                 if detached:
                     from storage_source_detach import verify_runtime_receipt
-                    evidence.enter_context(verify_runtime_receipt(self.manifest_path,self.manifest,detached))
+                    evidence.enter_context(verify_runtime_receipt(self.manifest_path,self.manifest,detached,receipt_rename_parent=self.receipt_rename_parent))
                     fence=None
                 elif finalization:
                     from storage_source_finalization import verify_source_finalization
-                    fence=evidence.enter_context(verify_source_finalization(finalization[4],finalization[5],database=self.database))
+                    fence=evidence.enter_context(verify_source_finalization(finalization[4],finalization[5],database=self.database,receipt_rename_parent=self.receipt_rename_parent))
                 else:
-                    fence=evidence.enter_context(verify_source_fence(str(self.manifest_path)+'.source-fence.json',row[6]))
+                    fence=evidence.enter_context(verify_source_fence(str(self.manifest_path)+'.source-fence.json',row[6],receipt_rename_parent=self.receipt_rename_parent))
                 if fence is not None:
                     receipt=fence.receipt
                     _need(receipt.get('generation')==self.manifest.generation and
@@ -276,7 +277,7 @@ class NativeContext:
                 self.activation_row=tuple(row)
                 if row[4]=='active':
                     registration=self.pending_verification
-                    proof=evidence.enter_context(pinned_receipt(registration[3],registration[4]))
+                    proof=evidence.enter_context(pinned_receipt(registration[3],registration[4],receipt_rename_parent=self.receipt_rename_parent))
                     _need(proof.get('schema')=='books-storage-target-verification-v1' and
                           proof.get('catalog_id')==self.manifest.catalog_id and
                           proof.get('generation')==self.manifest.generation and
@@ -295,7 +296,7 @@ class NativeContext:
                               and len(proof.get('held_classes') or ())==1 and
                               proof['held_classes'][0].get('class')=='preservation-only',
                               'Retained runtime requires the exact copy verification hold')
-                        record=evidence.enter_context(pinned_receipt(retention[4],retention[5]))
+                        record=evidence.enter_context(pinned_receipt(retention[4],retention[5],receipt_rename_parent=self.receipt_rename_parent))
                         _need(record.get('schema')==SCHEMA and retention[:4]==tuple(
                             record.get(name) for name in ('catalog_id','generation','manifest_sha256','verification_sha256'))
                             and record.get('scope') in self.manifest.scopes,
@@ -395,11 +396,11 @@ class NativeContext:
             self._closed = True
 
 
-def configure(manifest_path, expected_sha256):
+def configure(manifest_path, expected_sha256, *, receipt_rename_parent=None):
     global _context
     with _lock:
         _need(_context is None, 'A different storage relocation is already selected')
-        result = NativeContext(manifest_path, expected_sha256)
+        result = NativeContext(manifest_path, expected_sha256, receipt_rename_parent=receipt_rename_parent)
         _context = result
         return result
 
@@ -456,7 +457,7 @@ def configure_from_environment(environment=None):
 
 
 @contextlib.contextmanager
-def selected_catalog_relocation(selection):
+def selected_catalog_relocation(selection, *, receipt_rename_parent=None):
     """Temporarily retain an explicit descriptor without changing work temp."""
     global _context
     prior=current()
@@ -465,11 +466,13 @@ def selected_catalog_relocation(selection):
         yield None
         return
     if prior is not None:
+        requested=Path(receipt_rename_parent).absolute() if receipt_rename_parent is not None else None
+        _need(prior.receipt_rename_parent==requested,'Storage receipt lease capability differs from retained context')
         _need(str(prior.manifest_path)==str(Path(selection['manifest']).absolute()) and
               prior.manifest.digest==selection['sha256'],'Storage selection differs from retained context')
         yield prior
         return
-    selected=configure(selection['manifest'],selection['sha256'])
+    selected=configure(selection['manifest'],selection['sha256'],receipt_rename_parent=receipt_rename_parent)
     try:
         yield selected
     finally:

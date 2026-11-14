@@ -28,11 +28,11 @@ def receipt_path(manifest_path):
 
 
 @contextmanager
-def verify_runtime_receipt(path,manifest,row):
+def verify_runtime_receipt(path,manifest,row,*,receipt_rename_parent=None):
     from storage_relocation_operator import need,pinned_receipt
     expected=receipt_path(path)
     need(Path(row[6])==expected,'Source detach receipt must be the exact operation sibling')
-    with pinned_receipt(expected,row[7]) as proof:
+    with pinned_receipt(expected,row[7],receipt_rename_parent=receipt_rename_parent) as proof:
         need(proof.get('schema')==SCHEMA and tuple(proof.get(field) for field in FIELDS)==row[:6] and
              proof.get('target_root')==manifest.target_root and
              proof.get('target_identity')==list(manifest.directories[''].target) and

@@ -524,19 +524,20 @@ def classify_historical_files(database, *, managed_root=None,logical_catalog=Non
 
 class SourceFenceLease:
     """Retained original-source read fence, bound to its renamed physical root."""
-    def __init__(self, path, expected_sha256, *, allow_restored=False):
+    def __init__(self, path, expected_sha256, *, allow_restored=False, receipt_rename_parent=None):
         self.path = Path(path).absolute()
         self.expected_sha256 = expected_sha256
         self.stack = contextlib.ExitStack()
         self.items = []
         self.live = False
         self.allow_restored = allow_restored
+        self.receipt_rename_parent = receipt_rename_parent
 
     def __enter__(self):
-        from native_io import DirectoryBoundary, VerifiedFile
+        from native_io import DirectoryBoundary, VerifiedFile, receipt_boundary
         from source_cleanup import single_stream
         try:
-            self.stack.enter_context(DirectoryBoundary(self.path.anchor, self.path.parent))
+            self.stack.enter_context(receipt_boundary(self.path,self.receipt_rename_parent))
             self.descriptor = self.stack.enter_context(VerifiedFile(self.path))
             need(self.descriptor.facts()['links'] == 1 and self.descriptor.facts()['size'] <= MAX_RECEIPT,
                  'Source fence receipt is linked/oversized')
@@ -622,9 +623,9 @@ class SourceFenceLease:
         return self.stack.__exit__(*unused)
 
 
-def verify_source_fence(path, expected_sha256):
+def verify_source_fence(path, expected_sha256, *, receipt_rename_parent=None):
     """Caller retains this context manager through its active target owner lease."""
-    return SourceFenceLease(path, expected_sha256)
+    return SourceFenceLease(path, expected_sha256,receipt_rename_parent=receipt_rename_parent)
 
 
 @contextlib.contextmanager
@@ -999,11 +1000,11 @@ def prepare_source(source_root, target_root, scopes, catalog_relative, workspace
 
 
 @contextlib.contextmanager
-def pinned_receipt(path, expected_sha256):
-    from native_io import DirectoryBoundary, VerifiedFile
+def pinned_receipt(path, expected_sha256, *, receipt_rename_parent=None):
+    from native_io import VerifiedFile, receipt_boundary
     from source_cleanup import single_stream
     path = Path(path).absolute()
-    with DirectoryBoundary(path.anchor, path.parent), VerifiedFile(path) as held:
+    with receipt_boundary(path,receipt_rename_parent), VerifiedFile(path) as held:
         need(held.facts()['links'] == 1 and held.facts()['size'] <= MAX_RECEIPT,
              'Receipt is linked/oversized')
         single_stream(path)

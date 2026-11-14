@@ -76,7 +76,10 @@ class CurrentPackageProducerTests(unittest.TestCase):
 
     def test_every_live_wizard_variable_has_a_declaration_in_each_build_branch(self):
         desktop=Path(__file__).resolve().parents[1]/'desktop'
-        lines=(desktop/'installer.nsh').read_text('utf8').splitlines()
+        source=(desktop/'installer.nsh').read_text('utf8')
+        include='!include "${__FILEDIR__}\\installer-refusal.nsh"'
+        self.assertEqual(source.count(include),1)
+        lines=source.replace(include,(desktop/'installer-refusal.nsh').read_text('utf8')).splitlines()
         for uninstaller in (False,True):
             stack=[];active=True;declared=set();used=set()
             for line in lines:

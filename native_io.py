@@ -97,14 +97,34 @@ def ordinary(path):
         raise BoundaryError('Special/device-shaped destination or source path is rejected')
     return Path(os.path.abspath(value))
 
+def receipt_boundary(path, rename_parent=None):
+    """Pin receipt ancestry while permitting one explicit sibling metadata rename.
+
+    Files remain read-only pinned by the caller; directory DELETE sharing is
+    never enabled. Unrelated evidence retains the default sharing contract.
+    """
+    path=ordinary(path)
+    target=ordinary(rename_parent) if rename_parent is not None else None
+    if target is not None and target==Path(target.anchor):
+        raise BoundaryError('Receipt rename parent must not be a drive root')
+    if target==path.parent:
+        return DirectoryBoundary(path.anchor,path.parent,rename_destination=True)
+    ancestor=target if target is not None and path.parent.is_relative_to(target) else None
+    return DirectoryBoundary(path.anchor,path.parent,rename_ancestor=ancestor)
+
+
 class DirectoryBoundary:
     """Hold ancestor directory handles without write/delete sharing during publication."""
-    def __init__(self,root,parent,create=False,*,writable_parent=False,rename_destination=False):
+    def __init__(self,root,parent,create=False,*,writable_parent=False,rename_destination=False,rename_ancestor=None):
         if type(writable_parent) is not bool:raise BoundaryError('Writable parent capability must be explicit')
         if type(rename_destination) is not bool:raise BoundaryError('Rename destination capability must be explicit')
         if rename_destination and writable_parent:raise BoundaryError('Rename destination capability is separate from writable publication')
         self.writable_parent=writable_parent;self.rename_destination=rename_destination
         self.root=ordinary(root);self.parent=ordinary(parent);self.create=create
+        self.rename_ancestor=ordinary(rename_ancestor) if rename_ancestor is not None else None
+        if self.rename_ancestor is not None and (self.rename_ancestor==self.parent or
+                self.rename_ancestor==Path(self.parent.anchor) or not self.parent.is_relative_to(self.rename_ancestor)):
+            raise BoundaryError('Rename ancestor must be an exact non-root strict ancestor')
         self.handles=[];self.identities=[]
         self.alias_handles=[];self.alias_contexts=[]
         try:self.parent.relative_to(self.root)
@@ -124,6 +144,9 @@ class DirectoryBoundary:
                 from storage_relocation_native import current as relocation_context
                 relocation=relocation_context()
                 selected_alias=bool(relocation and relocation.is_alias(current,self.parent))
+                if selected_alias and (current==self.rename_ancestor or
+                        self.rename_destination and index==len(parts)-1):
+                    raise BoundaryError('Rename ancestor must be an ordinary directory')
                 if (current.is_symlink() or os.path.isjunction(current)) and not selected_alias:
                     raise BoundaryError('Destination ancestor is a symlink or junction')
                 # OPEN_REPARSE_POINT prevents transparently following a swapped reparse entry.
@@ -131,9 +154,9 @@ class DirectoryBoundary:
                 # checks. LIST_DIRECTORY makes deny-delete sharing effective.
                 access=0x81 | (0x40000000 if self.writable_parent and index==len(parts)-1 else 0)
                 # Win32 absolute rename opens the destination leaf for directory writes.
-                # Only this explicit rename leaf shares WRITE; every ancestor and
-                # every default/copy guard still denies WRITE and DELETE.
-                share=3 if self.rename_destination and index==len(parts)-1 else 1
+                # Only the explicit rename leaf/receipt ancestor shares WRITE.
+                # Defaults and all DELETE-sharing fences remain unchanged.
+                share=3 if (self.rename_destination and index==len(parts)-1) or current==self.rename_ancestor else 1
                 handle=kernel.CreateFileW(str(current),access,share,None,3,0x02000000|0x00200000,None)
                 if handle==ctypes.c_void_p(-1).value:
                     raise BoundaryError(f'Destination directory cannot be protected: {ctypes.WinError(ctypes.get_last_error())}')

@@ -38,6 +38,12 @@ class LifecycleTests(unittest.TestCase):
         environment.start();self.addCleanup(environment.stop)
         registrations=patch.object(lifecycle,'registered_bootstraps',side_effect=lambda:self.bootstraps)
         registrations.start();self.addCleanup(registrations.stop)
+        # Installer fixtures must not enumerate a live or concurrently changing
+        # terminal-cleanup namespace from this Windows account.
+        import terminal_cleanup_journal
+        pending=patch.object(terminal_cleanup_journal,'BASE',
+            'Software\\BooksArrangerLifecycleFixtures\\'+str(uuid.uuid4()))
+        pending.start();self.addCleanup(pending.stop)
 
     def catalog(self, name='catalog'):
         folder = self.base / name; folder.mkdir()

@@ -958,12 +958,12 @@ def _copy_profile(source,destination,settings_path,settings_facts,settings_sha25
 
 
 @contextlib.contextmanager
-def _selection_catalog(chosen, relocation):
+def _selection_catalog(chosen, relocation, *, receipt_rename_parent=None):
     from catalog_owner import catalog_lock
     from storage_relocation_native import logical_catalog_location, selected_catalog_relocation
     _need(relocation==chosen.get('storage_relocation'),'invalid_relocation_selection')
     _need(not chosen.get('verification_required'),'relocation_verification_required',chosen['database'])
-    with selected_catalog_relocation(relocation) as context:
+    with selected_catalog_relocation(relocation,receipt_rename_parent=receipt_rename_parent) as context:
         database=logical_catalog_location(chosen['resolved_database'])
         with catalog_lock(database,{}):
             if context is not None:context.require_normal_operation()
@@ -1140,7 +1140,7 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
         if (existing.get('data_dir')==chosen['data_dir'] and existing.get('profile_dir')==str(profile) and mode=='existing'):
             check=inspect_existing(chosen['database'])
             _need(check['state']=='available' and check['facts']==chosen['database_facts'],'selection_changed',chosen['database'])
-            with _selection_catalog(chosen,storage_relocation):
+            with _selection_catalog(chosen,storage_relocation,receipt_rename_parent=root):
                 if existing.get('storage_relocation')==storage_relocation and not require_package and existing.get('maintenance_temp_dir'):
                     return {'ok':True,'bootstrap':str(bootstrap),'result':'existing_selection_kept','database':chosen['database']}
                 changed=dict(existing)
@@ -1187,7 +1187,7 @@ def commit_selection(plan, expected_plan_sha256, *, installation_id=None, storag
         _need(again['existing']==chosen['existing'],'selection_changed',chosen['data_dir'])
     with contextlib.ExitStack() as stack:
         if mode=='existing':
-            stack.enter_context(_selection_catalog(chosen,storage_relocation))
+            stack.enter_context(_selection_catalog(chosen,storage_relocation,receipt_rename_parent=root))
         else:
             data=_absolute(chosen['data_dir'])
             with DirectoryBoundary(data.anchor,data,create=True):pass

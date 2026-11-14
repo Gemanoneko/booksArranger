@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.28.6] - Unreleased
+
+### Fixed
+
+- Allow the retained-data install record switch while keeping receipt identity, catalog and delete protections held. Limit parent write sharing to the installation folder.
+- Correct the installer declaration audit and isolate lifecycle test registry fixtures.
+
 ## [v0.28.5] - 2026-11-14
 
 ### Fixed
