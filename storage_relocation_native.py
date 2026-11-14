@@ -86,6 +86,8 @@ class NativeContext:
         self.pending_verification = None
         self.finalization_record = None
         self.pending_finalization = None
+        self.detach_record = None
+        self.pending_detach = None
         self.retention_record = None
         self.pending_retention = None
         self.retained = None
@@ -177,6 +179,12 @@ class NativeContext:
             retention=db.execute('SELECT catalog_id,generation,manifest_sha256,verification_sha256,receipt_path,receipt_sha256 '
                 'FROM storage_relocation_retention').fetchall() if db.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_relocation_retention'").fetchone() else []
+            from storage_source_detach import registration,receipt_path
+            detached=registration(db)
+            if detached is None:
+                try:receipt_path(self.manifest_path).lstat()
+                except FileNotFoundError:pass
+                else:raise RelocationRefused('Unregistered source detach receipt requires explicit recovery')
         _need(len(rows) == 1, 'Exactly one active catalog storage generation is required')
         row = rows[0]
         _need(row[:4] == (self.manifest.catalog_id, self.manifest.generation, self.manifest.digest,
@@ -210,6 +218,12 @@ class NativeContext:
                   'Retained runtime registration belongs to a different generation')
         if initializing:self.pending_retention=retained
         else:_need(self.retention_record==retained,'Retained runtime registration changed during catalog ownership')
+        if detached:
+            _need(retained and not finalized and detached[:6]==(
+                *row[:3],row[6],verification[0][4],retained[5]),
+                'Source detach belongs to a different retained catalog')
+        if initializing:self.pending_detach=detached
+        else:_need(self.detach_record==detached,'Source detach registration changed during catalog ownership')
         return row
 
     def require_normal_operation(self):
@@ -238,17 +252,24 @@ class NativeContext:
             from storage_relocation_operator import verify_source_fence,pinned_receipt
             with contextlib.ExitStack() as evidence:
                 finalization=self.pending_finalization
-                if finalization:
+                detached=self.pending_detach
+                if detached:
+                    from storage_source_detach import verify_runtime_receipt
+                    evidence.enter_context(verify_runtime_receipt(self.manifest_path,self.manifest,detached))
+                    fence=None
+                elif finalization:
                     from storage_source_finalization import verify_source_finalization
                     fence=evidence.enter_context(verify_source_finalization(finalization[4],finalization[5],database=self.database))
                 else:
                     fence=evidence.enter_context(verify_source_fence(str(self.manifest_path)+'.source-fence.json',row[6]))
-                receipt=fence.receipt
-                _need(receipt.get('generation')==self.manifest.generation and
+                if fence is not None:
+                    receipt=fence.receipt
+                    _need(receipt.get('generation')==self.manifest.generation and
                       receipt.get('catalog_id')==self.manifest.catalog_id and
                       receipt.get('source_snapshot_sha256')==self.manifest.source_snapshot_sha256,
                       'Source write fence belongs to a different storage generation')
                 self.source_fence=fence
+                self.detach_record=detached
                 self.finalization_record=finalization
                 self.activation_row=tuple(row)
                 if row[4]=='active':
@@ -305,6 +326,7 @@ class NativeContext:
             self.owner = self.database = self.owner_file = self.source_fence = self.activation_row = None
             self.verification_record=self.pending_verification=None
             self.finalization_record=self.pending_finalization=None
+            self.detach_record=self.pending_detach=None
             self.retention_record=self.pending_retention=self.retained=None
             self.retained_members={}
             self.retained_jobs=frozenset()

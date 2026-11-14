@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.28.4] - 2026-11-14
+
+### Added
+
+- Verify and detach a migrated catalog from its old source while retaining protected recovery evidence.
+
 ## [v0.28.3] - 2026-11-14
 
 ### Fixed
