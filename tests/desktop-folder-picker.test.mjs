@@ -2,9 +2,12 @@
 // the window are fakes: no real dialog, window or focus change.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { choose, register } = require('../desktop/folder-picker.js');
+const { choose, register, existingFolder } = require('../desktop/folder-picker.js');
 
 function fakeDialog(answer) {
   const calls = [];
@@ -127,4 +130,152 @@ test('manual pickers distinguish cancellation from wrong extensions and incomple
   pick={filePaths:['\\foo\\story.mp3']};destination={filePath:'C:story.m4b'};
   await assert.rejects(files({}), /absolute paths/);
   await assert.rejects(save({}), /absolute path/);
+});
+
+// Sergei 2026-11-16: the manual pickers open where they were last used. The page sends the remembered folder as
+// `remembered`; the shell opens it only if it still is a folder (stat is a fake here: no real drive or network lookup).
+const SOURCE = 'Z:\\Audiobooks\\Unsorted\\Ужасы и трэшатинка. Сборник рассказов\\Сборник 2';
+const PARENT = 'Z:\\Audiobooks\\Unsorted\\Ужасы и трэшатинка. Сборник рассказов';
+const EXPORT = 'Z:\\Audiobooks Sorted\\Сборники\\Пять Вечеров';
+function remembering({ folders = [], hang = () => false, startCheckMs } = {}) {
+  const handlers = {}, calls = [], stats = [];
+  const stat = folder => {
+    stats.push(folder);
+    if (hang(folder)) return new Promise(() => {});
+    if (folders.includes(folder)) return Promise.resolve({ isDirectory: () => true });
+    return Promise.reject(Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' }));
+  };
+  const dialog = {
+    showOpenDialog: async (...args) => { calls.push(args); return { canceled: true, filePaths: [] }; },
+    showSaveDialog: async (...args) => { calls.push(args); return { canceled: true }; },
+  };
+  register({ ipcMain: { handle: (c, fn) => { handlers[c] = fn; } }, dialog, sender: () => 'app', window: () => ({}), stat, startCheckMs });
+  const options = () => calls.at(-1)[1];
+  return { handlers, calls, stats, options };
+}
+
+test('Folder mode opens one level up, at the remembered folder\'s parent; Files mode opens inside it; Cyrillic exact', async () => {
+  const t = remembering({ folders: [SOURCE, PARENT, 'Z:\\Audiobooks\\Unsorted', 'Z:\\Audiobooks', 'Z:\\'] });
+  await t.handlers['books:choose-folder']({}, { title: 'Choose a source folder', defaultPath: '', buttonLabel: 'Choose folder', remembered: SOURCE });
+  assert.equal(t.options().defaultPath, PARENT, 'the next sibling (Сборник 3) is one click away');
+  assert.equal(t.options().buttonLabel, 'Choose folder');
+  await t.handlers['books:choose-audio-files']({}, { remembered: SOURCE });
+  assert.equal(t.options().defaultPath, SOURCE);
+  assert.deepEqual(t.options().properties, ['openFile', 'multiSelections', 'dontAddToRecent']);
+  // Files mode remembers the folder holding the files with a trailing separator; its parent is the same one.
+  await t.handlers['books:choose-folder']({}, { defaultPath: '', remembered: SOURCE + '\\' });
+  assert.equal(t.options().defaultPath, PARENT);
+});
+
+test('Folder mode falls back to the nearest existing ancestor, then the Windows default', async () => {
+  const t = remembering({ folders: ['Z:\\Audiobooks', 'Z:\\'] });
+  await t.handlers['books:choose-folder']({}, { defaultPath: '', remembered: SOURCE });
+  assert.equal(t.options().defaultPath, 'Z:\\Audiobooks');
+  assert.equal(t.stats.includes(SOURCE), false, 'the remembered folder itself is never the start');
+  const root = remembering({ folders: ['Z:\\', SOURCE] });
+  await root.handlers['books:choose-folder']({}, { defaultPath: '', remembered: SOURCE });
+  assert.equal(root.options().defaultPath, 'Z:\\');
+  const none = remembering({ folders: [SOURCE] });
+  await none.handlers['books:choose-folder']({}, { defaultPath: '', remembered: SOURCE });
+  assert.equal('defaultPath' in none.options(), false);
+});
+
+test('a remembered drive or share root opens at the root itself', async () => {
+  const t = remembering({ folders: ['Z:\\', '\\\\nas\\Audiobooks'] });
+  await t.handlers['books:choose-folder']({}, { defaultPath: '', remembered: 'Z:\\' });
+  assert.equal(t.options().defaultPath, 'Z:\\');
+  await t.handlers['books:choose-folder']({}, { defaultPath: '', remembered: '\\\\nas\\Audiobooks' });
+  assert.equal(t.options().defaultPath, '\\\\nas\\Audiobooks');
+  const offline = remembering({ folders: [] });
+  await offline.handlers['books:choose-folder']({}, { defaultPath: '', remembered: 'Z:\\' });
+  assert.equal('defaultPath' in offline.options(), false);
+});
+
+test('the folder already in Folder path comes first, used as it is; the remembered parent when it is gone', async () => {
+  const typed = 'D:\\Другая книга';
+  const t = remembering({ folders: [SOURCE, PARENT, typed] });
+  await t.handlers['books:choose-folder']({}, { defaultPath: typed, remembered: SOURCE });
+  assert.equal(t.options().defaultPath, typed);
+  const gone = remembering({ folders: [SOURCE, PARENT] });
+  await gone.handlers['books:choose-folder']({}, { defaultPath: typed, remembered: SOURCE });
+  assert.equal(gone.options().defaultPath, PARENT);
+});
+
+test('a missing remembered folder silently leaves the picker at the Windows default', async () => {
+  const t = remembering({ folders: [] });
+  assert.equal(await t.handlers['books:choose-folder']({}, { defaultPath: '', remembered: SOURCE }), null);
+  assert.equal('defaultPath' in t.options(), false);
+  assert.equal(await t.handlers['books:choose-audio-files']({}, { remembered: SOURCE }), null);
+  assert.equal('defaultPath' in t.options(), false);
+  assert.equal(t.calls.length, 2);
+});
+
+test('an offline drive that never answers is given up after the bound, and the picker still opens', async () => {
+  const t = remembering({ hang: folder => folder.startsWith('Z:'), startCheckMs: 20 });
+  const started = Date.now();
+  await t.handlers['books:choose-audio-files']({}, { remembered: SOURCE });
+  await t.handlers['books:choose-folder']({}, { defaultPath: '', remembered: SOURCE });
+  assert.ok(Date.now() - started < 2000, 'the ancestors are checked together within one bound');
+  assert.equal(t.calls.length, 2);
+  assert.equal('defaultPath' in t.calls[0][1], false);
+  assert.equal('defaultPath' in t.calls[1][1], false);
+});
+
+test('a remembered value that is not an absolute folder is never looked up', async () => {
+  const t = remembering({ folders: ['relative\\folder'] });
+  for (const remembered of ['', 'relative\\folder', 'C:folder', '\\rooted', 'Z:\\bad\u0000name', 'Z:\\' + 'x'.repeat(1001)]) {
+    await t.handlers['books:choose-audio-files']({}, { remembered });
+    assert.equal('defaultPath' in t.options(), false);
+  }
+  assert.deepEqual(t.stats, []);
+});
+
+test('a picker request without `remembered` (Choose folder… on a book row) is unchanged and never looked up', async () => {
+  const t = remembering({ folders: [] });
+  await t.handlers['books:choose-folder']({}, { title: 'Choose a folder for X', defaultPath: 'Z:\\Audiobooks Sorted\\Без автора' });
+  assert.equal(t.options().defaultPath, 'Z:\\Audiobooks Sorted\\Без автора');
+  await t.handlers['books:choose-audio-files']({}, {});
+  assert.equal('defaultPath' in t.options(), false);
+  await t.handlers['books:choose-audiobook-output']({}, { suggestedName: 'Книга.m4b' });
+  assert.equal(t.options().defaultPath, 'Книга.m4b');
+  assert.deepEqual(t.stats, []);
+});
+
+test('Save As opens in the remembered export folder with the suggested name when the draft has no export path', async () => {
+  const t = remembering({ folders: [EXPORT, SOURCE] });
+  await t.handlers['books:choose-audiobook-output']({}, { defaultPath: undefined, suggestedName: 'Сборник 2.m4b', remembered: EXPORT });
+  assert.equal(t.options().defaultPath, EXPORT + '\\Сборник 2.m4b');
+  assert.deepEqual(t.options().filters[0].extensions, ['m4b']);
+  // The export folder is its own: with none remembered, the picker keeps today's suggested name only.
+  const none = remembering({ folders: [SOURCE] });
+  await none.handlers['books:choose-audiobook-output']({}, { suggestedName: 'Сборник 2.m4b', remembered: '' });
+  assert.equal(none.options().defaultPath, 'Сборник 2.m4b');
+});
+
+test('Save As keeps the export path the draft already has; if its folder is gone the remembered folder takes its name', async () => {
+  const chosen = 'D:\\Готово\\Мой сборник.m4b';
+  const kept = remembering({ folders: ['D:\\Готово', EXPORT] });
+  await kept.handlers['books:choose-audiobook-output']({}, { defaultPath: chosen, suggestedName: 'Other.m4b', remembered: EXPORT });
+  assert.equal(kept.options().defaultPath, chosen);
+  const moved = remembering({ folders: [EXPORT] });
+  await moved.handlers['books:choose-audiobook-output']({}, { defaultPath: chosen, suggestedName: 'Other.m4b', remembered: EXPORT });
+  assert.equal(moved.options().defaultPath, EXPORT + '\\Мой сборник.m4b');
+  const offline = remembering({ folders: [] });
+  await offline.handlers['books:choose-audiobook-output']({}, { defaultPath: chosen, suggestedName: 'Other.m4b', remembered: EXPORT });
+  assert.equal(offline.options().defaultPath, 'Мой сборник.m4b');
+});
+
+test('existingFolder reads the real filesystem: a Unicode folder is found, a removed folder and a file are not', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'books-picker-'));
+  try {
+    const folder = path.join(dir, 'Ужасы и трэшатинка. Сборник рассказов', 'Сборник 2');
+    fs.mkdirSync(folder, { recursive: true });
+    const file = path.join(folder, '01 Глава.mp3');
+    fs.writeFileSync(file, '');
+    assert.equal(await existingFolder(folder), true);
+    assert.equal(await existingFolder(folder + '\\'), true);
+    assert.equal(await existingFolder(file), false);
+    fs.rmSync(folder, { recursive: true, force: true });
+    assert.equal(await existingFolder(folder), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

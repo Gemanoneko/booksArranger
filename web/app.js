@@ -5496,6 +5496,24 @@ function setupManualConversion(){
     const stem=title(editor.data).replace(/[<>:"/\\|?*\x00-\x1f]/g,' ').trim().replace(/[. ]+$/g,'').slice(0,160);
     return (stem || 'Audiobook')+'.m4b';
   }
+  // Sergei 2026-11-16: Browse… (Folder and Files) and Save As open where they were last used, across restarts. One
+  // remembered folder for the source (the chosen folder, or the folder holding the chosen files) and one for the export,
+  // kept in this page's localStorage like the decision recovery above. The shell opens one only if it still exists.
+  const PICKER_PLACES='books-picker-places-v1';
+  function pickerPlace(kind){
+    try{const value=JSON.parse(globalThis.localStorage?.getItem(PICKER_PLACES)||'{}');return typeof value?.[kind]==='string'?value[kind]:'';}
+    catch{return '';}
+  }
+  function rememberPickerPlace(kind,folder){
+    try{
+      if(!globalThis.localStorage || typeof folder!=='string' || !folder || folder.length>1000)return;
+      let value={};
+      try{value=JSON.parse(globalThis.localStorage.getItem(PICKER_PLACES)||'{}');}catch{}
+      if(!value || typeof value!=='object' || Array.isArray(value))value={};
+      value[kind]=folder;
+      globalThis.localStorage.setItem(PICKER_PLACES,JSON.stringify(value));
+    }catch{}
+  }
   async function choose(kind,button){
     const editor=active;
     if(!editor || button.disabled || editor.picker)return;
@@ -5504,14 +5522,14 @@ function setupManualConversion(){
     try{
       const desktop=globalThis.booksDesktop;
       if(kind==='output'){
-        const path=await desktop.chooseAudiobookOutput({defaultPath:editor.data.destination,suggestedName:suggestedName(editor)});
-        if(path){editor.data.destination=path;editor.outputNote='';changed(editor);}
+        const path=await desktop.chooseAudiobookOutput({defaultPath:editor.data.destination,suggestedName:suggestedName(editor),remembered:pickerPlace('export')});
+        if(path){editor.data.destination=path;editor.outputNote='';rememberPickerPlace('export',folderOf(path));changed(editor);}
       }else if(kind==='folder'){
-        const path=await desktop.chooseFolder({title:'Choose a source folder',defaultPath:editor.path,buttonLabel:'Choose folder'});
-        if(path){editor.path=path;await loadFolder(editor);}
+        const path=await desktop.chooseFolder({title:'Choose a source folder',defaultPath:editor.path,buttonLabel:'Choose folder',remembered:pickerPlace('source')});
+        if(path){editor.path=path;rememberPickerPlace('source',path);await loadFolder(editor);}
       }else{
-        const paths=await desktop.chooseAudioFiles();
-        if(paths)await inspect(editor,{kind:'files',paths});
+        const paths=await desktop.chooseAudioFiles({remembered:pickerPlace('source')});
+        if(paths){rememberPickerPlace('source',folderOf(paths[0]));await inspect(editor,{kind:'files',paths});}
       }
     }catch(error){
       const text=String(error.message || 'Couldn’t open the picker. Try again.').replace(/^Error invoking remote method '[^']+': Error: /,'');
