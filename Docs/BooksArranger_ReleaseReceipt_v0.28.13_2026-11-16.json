@@ -42,8 +42,43 @@
   },
   "waiver": "5 known test failures were waived by Sergei's route-B authorisation. No packaged-build smoke test was run by Sully; Sergei installs the build himself.",
   "release_pruning": {
-    "kept": ["v0.28.13", "v0.28.12", "v0.28.6", "v0.28.1"],
-    "deleted_releases_and_remote_tags": ["v0.28.0", "v0.27.0", "v0.26.0", "v0.25.0"],
-    "stale_local_tags_pruned": ["v0.24.5", "v0.25.0", "v0.26.0", "v0.27.0", "v0.28.0"]
+    "kept": [
+      "v0.28.13",
+      "v0.28.12",
+      "v0.28.6",
+      "v0.28.1"
+    ],
+    "deleted_releases_and_remote_tags": [
+      "v0.28.0",
+      "v0.27.0",
+      "v0.26.0",
+      "v0.25.0"
+    ],
+    "stale_local_tags_pruned": [
+      "v0.24.5",
+      "v0.25.0",
+      "v0.26.0",
+      "v0.27.0",
+      "v0.28.0"
+    ]
+  },
+  "local_build_cleanup": {
+    "removed_files": 407,
+    "removed_directories": 9,
+    "removed_logical_bytes": 800555169,
+    "removed_logical_size": "763.5 MiB",
+    "method": "studio-disk-hygiene planner (manifest sha256 d3b9e0ed67ddacd3026673891ae0628c5698ad4277e44f726b25522655cd78cf), 13 hash-checked batches, literal rm/rmdir",
+    "targets": [
+      "dist/builds/edf9a2b8-6bca-41bc-b353-c2c738006762",
+      "dist/release-artifacts.json",
+      "dist/release-artifacts.json.previous-a8cea996-c516-4584-a612-e63c4b9dbd27"
+    ],
+    "absence_verified": true,
+    "held_targets": [
+      "build-cache/builds/a8162f92-a942-4e1a-b277-52158480f694 (planner refused: protected path shell/node_modules; kept, not forced)",
+      "build-cache/runtime-pointer.json (names the kept runtime)"
+    ],
+    "kept_for_next_pack": "build-cache runtime, pointer files, downloads, npm-cache, pack-inputs and QA folders (about 751 MB), source and lockfile",
+    "source_and_rebuild_dependencies_preserved": true
   }
 }
