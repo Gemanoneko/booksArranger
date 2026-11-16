@@ -12,6 +12,7 @@ import application_publication as publication
 from storage_relocation_operator import NativeItem,packed,digest
 from storage_relocation import RelocationRefused
 from directory_retention import retain_directory_no_replace,DirectoryRetentionRefused
+from scratch_area import remove_own_area
 
 
 @unittest.skipUnless(os.name=='nt','Native Windows publication')
@@ -19,6 +20,7 @@ class PublicationTests(unittest.TestCase):
     def setUp(self):
         parent=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))
         self.area=parent/('application-publication-'+uuid.uuid4().hex);self.area.mkdir(parents=True)
+        remove_own_area(self,self.area,'application-publication-')  # direct runs only
         self.target=self.area/'Application';self.transaction=self.area/'transaction.json'
         self.package=self.area/'current-package.json'
         self.payload={'Books Arranger.exe':b'new private exe','resources/app.bin':b'new payload',

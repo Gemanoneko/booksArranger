@@ -18,6 +18,7 @@ from native_io import VerifiedFile,kernel
 from storage_relocation_operator import Security,digest,security_equivalent
 from storage_relocation import RelocationRefused
 import runtime_file_disposition as runtime
+from scratch_area import remove_own_area
 
 
 @unittest.skipUnless(os.name=='nt','Native Windows runtime disposition')
@@ -25,6 +26,7 @@ class RuntimeDispositionTests(unittest.TestCase):
     def setUp(self):
         base=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))
         self.area=base/('runtime-disposition-'+uuid.uuid4().hex);self.area.mkdir(parents=True)
+        remove_own_area(self,self.area,'runtime-disposition-')  # direct runs only; runs after tearDown closes the handles
         self.owner_path=self.area/'catalog.lock';self.owner_path.write_bytes(b'actual unique owner')
         self.owner=VerifiedFile(self.owner_path,writable=True).__enter__()
         self.context=runtime.DispositionContext(self.area/'ledger',scopes=[self.area],owner_handle=self.owner.handle,

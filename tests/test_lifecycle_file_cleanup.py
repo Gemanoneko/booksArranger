@@ -10,6 +10,7 @@ from unittest.mock import patch
 from storage_relocation import RelocationRefused
 from storage_relocation_operator import NativeItem,Security
 import lifecycle_file_cleanup as cleanup
+from scratch_area import remove_own_area
 
 
 @unittest.skipUnless(os.name=='nt','Native Windows file cleanup')
@@ -17,6 +18,7 @@ class FileCleanupTests(unittest.TestCase):
     def setUp(self):
         root=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))
         self.area=root/('lifecycle-file-'+uuid.uuid4().hex);self.area.mkdir(parents=True)
+        remove_own_area(self,self.area,'lifecycle-file-')  # direct runs only
         self.path=self.area/'owned.bin';self.path.write_bytes(b'owned bytes');self.receipt=self.area/'disposal.json'
         with NativeItem(self.path) as item:self.facts=item.facts;self.sha=item.sha256()
     def apply(self):return cleanup.dispose_owned_file(self.path,self.facts,self.sha,receipt_path=self.receipt)
