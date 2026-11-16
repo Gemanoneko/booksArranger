@@ -116,7 +116,7 @@ class Counting:
         counter=self
         def counted_enter(handle):counter.opened.append(str(handle.path));return enter(handle)
         def counted_sha(handle):counter.hashed.append(str(handle.path));return sha(handle)
-        def counted_dispose(handle):counter.disposed.append(str(handle.path));return dispose(handle)
+        def counted_dispose(handle,**options):counter.disposed.append(str(handle.path));return dispose(handle,**options)
         self.patches=[patch.object(VerifiedFile,'__enter__',counted_enter),patch.object(VerifiedFile,'sha256',counted_sha),patch.object(VerifiedFile,'dispose',counted_dispose)]
     def __enter__(self):
         for item in self.patches:item.start()

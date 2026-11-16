@@ -229,9 +229,9 @@ class DuplicateCleanupOwnersTests(unittest.TestCase):
     def test_partial_failure_resumes_only_remaining_child_and_never_parent_staging(self):
         child=self.completed();cleanup_id=self.source.enroll(child,{})
         second=self.child['sources'][1]['path'];real=VerifiedFile.dispose
-        def refuse(file):
+        def refuse(file,**options):
             if str(file.path)==second:raise BoundaryError('Private second-source refusal')
-            return real(file)
+            return real(file,**options)
         with patch.object(VerifiedFile,'dispose',refuse),self.assertRaisesRegex(BoundaryError,'second-source'):self.source.run(cleanup_id)
         self.assertFalse(Path(self.child['sources'][0]['path']).exists());self.assertTrue(Path(second).exists())
         with connect(self.db) as db:self.assertEqual(db.execute('SELECT count(*) FROM source_retirements WHERE job_id=?',(self.child['job_id'],)).fetchone()[0],1)

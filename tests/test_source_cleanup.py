@@ -296,8 +296,8 @@ class OutputIdentityRetryTests(unittest.TestCase):
             hashed=[];real_hash=VerifiedFile.sha256;real_dispose=VerifiedFile.dispose;disposed=[]
             required={s['path'] for s in f.sources}|{str(p) for p in (f.base/'recovery'/f.id).glob('*.mp3')}|{f.job['output']['final_path']}
             def hash_file(h):hashed.append(str(h.path));return real_hash(h)
-            def dispose(h):
-                self.assertTrue(required<=set(hashed),'all fresh byte proofs precede every new source disposal');disposed.append(str(h.path));return real_dispose(h)
+            def dispose(h,**options):
+                self.assertTrue(required<=set(hashed),'all fresh byte proofs precede every new source disposal');disposed.append(str(h.path));return real_dispose(h,**options)
             with patch.object(VerifiedFile,'sha256',hash_file),patch.object(VerifiedFile,'dispose',dispose):self.retry(f)
             self.assertEqual(set(disposed),{s['path'] for s in f.sources});self.assertEqual(f.worker.status('test')['state'],'completed');self.assertEqual(f.worker.status('test')['removed'],2)
             self.assertIsNone(f.worker.status('test')['identity_retry'])
@@ -331,7 +331,10 @@ class OutputIdentityRetryTests(unittest.TestCase):
 
     def test_missing_original_after_removal_intent_remains_unknown_not_adopted(self):
         with self.fixture() as f:
-            self.hold_at_second_output_check(f,legacy=True);Path(f.sources[0]['path']).unlink()
+            # Senua M1: a refused check after the intent is now withdrawn; an intent left by a crash before the delete
+            # is not, so the hold models that crash.
+            with patch.object(CleanupJobs,'_withdraw_intent',lambda *args:False):self.hold_at_second_output_check(f,legacy=True)
+            Path(f.sources[0]['path']).unlink()
             self.retry(f);self.assertTrue(Path(f.sources[1]['path']).is_file());self.assertEqual(f.worker.status('test')['removed'],0);self.assertIn('unknown outcome',f.worker.status('test')['reason'])
 
     def test_explicit_retry_is_single_owner_and_pause_keeps_the_checkpoint(self):

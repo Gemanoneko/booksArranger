@@ -17,6 +17,55 @@ class FileRemovalRetained(BoundaryError):
         self.native_reason=str(diagnostic)
         super().__init__('Safe removal of “'+str(path)+'” could not be verified. The file was kept.')
 
+# Which method removed a file (VerifiedFile.disposition_method), recorded for audit by source cleanup.
+HARDENED_LOCAL='hardened_local'
+NAS_LEGACY='nas_legacy'
+# Prefix of a removal refusal caused by the disposition journal/owner location, never by the file's own volume.
+OWNER_LOCATION_REFUSAL='Disposition journal/owner location refused (not this file\'s volume): '
+
+WNNC_NET_SMB=0x00020000  # FILE_REMOTE_PROTOCOL_INFO.Protocol of an SMB redirector handle
+REMOTE_PROTOCOL_FLAG_LOOPBACK=0x1  # FILE_REMOTE_PROTOCOL_INFO.Flags: the SMB connection is to this same PC
+
+def remote_protocol(handle):
+    """(protocol, flags) of FileRemoteProtocolInfo for this exact open handle, or None when it is not a redirected
+    (remote) handle; a local volume refuses the query."""
+    class RemoteProtocol(ctypes.Structure):
+        _fields_=[('version',wintypes.USHORT),('size',wintypes.USHORT),('protocol',wintypes.ULONG),
+                  ('major',wintypes.USHORT),('minor',wintypes.USHORT),('revision',wintypes.USHORT),('reserved',wintypes.USHORT),
+                  ('flags',wintypes.ULONG),('generic',wintypes.ULONG*8),('specific',wintypes.ULONG*16)]
+    kernel.GetFileInformationByHandleEx.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+    kernel.GetFileInformationByHandleEx.restype=wintypes.BOOL
+    info=RemoteProtocol()
+    if not kernel.GetFileInformationByHandleEx(handle,13,ctypes.byref(info),ctypes.sizeof(info)):return None
+    return info.protocol,info.flags
+
+def remote_handle(handle,path):
+    """Positive proof that this exact open handle is an SMB handle to another machine, on a remote drive.
+
+    FileRemoteProtocolInfo succeeds only for a redirected (remote) handle; a local volume refuses it. Senua m1
+    (2026-11-16): its protocol must be SMB (WNNC_NET_SMB; other redirectors may delete by name at close), and an SMB
+    connection back to this PC (loopback flag: its disk is local) is refused. The drive of the opened path must also
+    report DRIVE_REMOTE. Anything else, including an unverifiable local volume, is False.
+    """
+    if os.name!='nt' or not handle:return False
+    found=remote_protocol(handle)
+    if found is None:return False
+    protocol,flags=found
+    if protocol!=WNNC_NET_SMB or flags&REMOTE_PROTOCOL_FLAG_LOOPBACK:return False
+    kernel.GetDriveTypeW.argtypes=[wintypes.LPCWSTR];kernel.GetDriveTypeW.restype=wintypes.UINT
+    anchor=Path(path).anchor
+    return bool(anchor) and kernel.GetDriveTypeW(anchor)==4
+
+def remote_drive(path):
+    """Whether this path's drive is a network drive (a mapped share or a UNC path, loopback included): DRIVE_REMOTE.
+
+    Senua M2 (2026-11-16): chooses only how a publishing caller shares the folder it holds for a no-replace rename
+    (an SMB server opens that folder itself to rename). It grants no removal authority; remote_handle is the proof."""
+    if os.name!='nt':return False
+    kernel.GetDriveTypeW.argtypes=[wintypes.LPCWSTR];kernel.GetDriveTypeW.restype=wintypes.UINT
+    anchor=Path(path).anchor
+    return bool(anchor) and kernel.GetDriveTypeW(anchor)==4
+
 def identity_diagnostic(path,code,api):
     return {'path':str(path),'windows_error':code,'windows_message':ctypes.FormatError(code).strip() if code else '', 'api':api}
 
@@ -238,8 +287,12 @@ def publish_no_replace(temporary,destination,boundary,expected_sha256=None,expec
         status=StatusBlock();result=nt.NtSetInformationFile(handle,ctypes.byref(status),ctypes.byref(rename),ctypes.sizeof(rename),10)
         if result<0:
             error=nt.RtlNtStatusToDosError(result)
-            if error in {80,183}:raise FileExistsError('Destination collision; existing file was preserved')
-            raise BoundaryError(f'Handle-bound no-replace publication failed: {ctypes.WinError(error)}')
+            failure=(FileExistsError('Destination collision; existing file was preserved') if error in {80,183}
+                     else BoundaryError(f'Handle-bound no-replace publication failed: {ctypes.WinError(error)}'))
+            # Senua M2: the rename call's own answer, so a caller can tell a refusal from an unknown outcome
+            # (a network error may follow a rename the server did; v0.24.0 D1r4). Same types and messages as before.
+            failure.rename_status=error
+            raise failure
     finally:kernel.CloseHandle(handle)
 
 class RenamePostconditionError(BoundaryError):
@@ -442,6 +495,18 @@ class VerifiedFile:
         if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(self.info)):
             code=ctypes.get_last_error();raise ProtectedIdentityUnavailable(self.path,code)
         return self.facts()
+    def delete_pending(self):
+        """Whether a removal is pending on this exact held handle's file (FileStandardInfo.DeletePending, local or SMB).
+        Raises when it cannot be read, so a caller never takes an unread state as 'not pending'."""
+        class Standard(ctypes.Structure):
+            _fields_=[('allocation',ctypes.c_longlong),('end',ctypes.c_longlong),('links',wintypes.DWORD),
+                      ('pending',wintypes.BOOLEAN),('directory',wintypes.BOOLEAN)]
+        kernel.GetFileInformationByHandleEx.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+        kernel.GetFileInformationByHandleEx.restype=wintypes.BOOL
+        value=Standard()
+        if not self.handle or not kernel.GetFileInformationByHandleEx(self.handle,1,ctypes.byref(value),ctypes.sizeof(value)):
+            raise BoundaryError('Cannot read the pending-removal state of the exact file')
+        return bool(value.pending)
     def flush(self):
         if not self.writable:raise BoundaryError('Recovery durability requires its owned write-capable handle')
         kernel.FlushFileBuffers.argtypes=[wintypes.HANDLE];kernel.FlushFileBuffers.restype=wintypes.BOOL
@@ -453,17 +518,37 @@ class VerifiedFile:
         kernel.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD];kernel.SetFileInformationByHandle.restype=wintypes.BOOL
         if not kernel.SetFileInformationByHandle(self.handle,0,ctypes.byref(value),ctypes.sizeof(value)):raise BoundaryError('Cannot preserve recovery timestamps/attributes')
         if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(self.info)):raise BoundaryError('Cannot verify restored filesystem metadata')
-    def dispose(self,*,fence=None):
+    def dispose(self,*,fence=None,remote_legacy=None):
+        """Hardened removal through the runtime disposition guard (local NTFS).
+
+        remote_legacy (Sergei, 2026-11-16): an optional callable(held) that repeats the caller's own last checks.
+        Only when the guard refuses THIS handle's volume as remote/unverifiable, and the handle is positively a
+        network-redirector handle on a remote drive, the pre-0.28 exact-handle method removes it instead, right
+        after that callable passes. The write-during-delete race this leaves open on the NAS is accepted. Every
+        other refusal, and every local volume, behaves as before. disposition_method records the method used.
+        """
         if not self.delete:raise BoundaryError('File was not opened for exact-handle removal')
-        if getattr(self,'_disposition',None):raise BoundaryError('File disposition was already prepared')
+        if getattr(self,'_disposition',None) or getattr(self,'disposition_method',None):raise BoundaryError('File disposition was already prepared')
         if fence is not None:
             from fenced_file_disposition import FencedFileDisposition
             if type(fence) is not FencedFileDisposition:raise BoundaryError('Invalid finite disposition capability')
             guard=fence
         else:
             from runtime_disposition_owners import context_for
-            from runtime_file_disposition import prepare_disposition
-            try:guard=prepare_disposition(self,context_for(self.path))
+            from runtime_file_disposition import prepare_disposition,RemoteProviderRefused
+            # The owner/context is resolved apart from the target so that only a refusal of this file's own
+            # volume (never of the journal/owner location) can lead to the NAS method.
+            try:context=context_for(self.path)
+            except Exception as error:
+                if isinstance(error,RemoteProviderRefused):
+                    # Senua m3: the journal/owner location refused as remote is not this file's own refusal. A distinct
+                    # reason, so source cleanup's startup revival of NAS holds can never match it.
+                    owner=BoundaryError(OWNER_LOCATION_REFUSAL+str(error));owner.__cause__=error;error=owner
+                self._raise_retained(error)
+            try:guard=prepare_disposition(self,context)
+            except RemoteProviderRefused as error:
+                if remote_legacy is None:self._raise_retained(error)
+                return self._dispose_remote_legacy(remote_legacy,error)
             except Exception as error:
                 self._raise_retained(error)
             self._disposition=guard
@@ -481,6 +566,22 @@ class VerifiedFile:
                 if not guard.kernel_success:self._raise_retained(error)
                 raise BoundaryError('Removal could not be confirmed for “'+str(self.path)+'”. Keep this operation on hold and review its recovery record.') from error
             raise
+        if fence is None:self.disposition_method=HARDENED_LOCAL
+    def _dispose_remote_legacy(self,verify,refusal):
+        """Sergei, 2026-11-16: the pre-0.28 exact-handle removal (v0.5.0, 2e898f9; unchanged through v0.27.0) for a
+        positively remote volume. The caller's checks run first, through this same held handle."""
+        if not remote_handle(self.handle,self.path):
+            self._raise_retained(BoundaryError(str(refusal)+'; not a verified network volume, so the NAS removal method was not used'))
+        verify(self)
+        kernel.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+        kernel.SetFileInformationByHandle.restype=wintypes.BOOL
+        value=wintypes.BOOL(True)
+        # Senua m9: recorded before the call. Over SMB a failed answer does not prove the delete was not set (a lost
+        # reply), and the client may answer later checks from its cache, so nothing may read this file as untouched.
+        self.delete_issued=True
+        if not kernel.SetFileInformationByHandle(self.handle,4,ctypes.byref(value),ctypes.sizeof(value)):
+            raise BoundaryError(f'Exact-handle removal is unsupported or denied: {ctypes.WinError(ctypes.get_last_error())}')
+        self.disposition_method=NAS_LEGACY
     def _raise_retained(self,error):
         try:
             facts=self.refresh()
@@ -497,6 +598,15 @@ class VerifiedFile:
         if self.handle is not None:
             if not kernel.CloseHandle(self.handle):raise BoundaryError('Exact file native close failed')
             self.handle=None
+
+def created_facts(path,stream):
+    """VerifiedFile.facts() of a file the caller has just created, read through the caller's own still-open creating
+    stream (never by name), so a later cleanup can prove it removes exactly that file. The handle stays the caller's."""
+    import msvcrt
+    view=VerifiedFile(path);view.handle=msvcrt.get_osfhandle(stream.fileno());view.info=FileInfo()
+    if not kernel.GetFileInformationByHandle(view.handle,ctypes.byref(view.info)):
+        raise ProtectedIdentityUnavailable(path,ctypes.get_last_error())
+    return view.facts()
 
 class DirectoryNotEmptyError(BoundaryError):pass
 class DirectoryDispositionUnsupported(BoundaryError):pass

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 from scanner import connect
 from sqlite_retry import transaction
-from native_io import DirectoryBoundary, VerifiedFile, BoundaryError, FileRemovalRetained, ordinary, publish_no_replace
+from native_io import DirectoryBoundary, VerifiedFile, BoundaryError, FileRemovalRetained, ordinary, publish_no_replace, remote_drive, created_facts
 
 # SQLite's fixed text for SQLITE_BUSY. Before v0.16.5 a cleanup that hit a busy catalog stored it as
 # its reason; startup turns exactly that legacy shape into a paused cleanup (CleanupJobs.__init__).
@@ -31,8 +31,13 @@ class OutputIdentityUnavailable(BoundaryError):
         self.diagnostic=dict(error.diagnostic);super().__init__(str(error))
 
 LEGACY_BUSY='database is locked'
+# The reason a cleanup carries when its remaining originals were positively kept (CleanupJobs.hold).
+RETAINED_HOLD='The audiobook is verified, but safe removal of the remaining originals could not be verified. The remaining originals were kept.'
 # Seconds to wait before the second and third attempt of a cleanup run that hit a busy catalog.
 RETRY_WAITS=(5,15)
+# Senua M2: answers of the no-replace rename call itself that prove it did not rename (access denied, sharing or lock
+# violation, name collision). A network error is not one: the server may have renamed and lost the reply (v0.24.0 D1r4).
+RENAME_REFUSED=frozenset({5,32,33,80,183})
 
 
 def catalog_busy(error):
@@ -59,6 +64,9 @@ def setup(db):
     db.execute('CREATE TABLE IF NOT EXISTS cleanup_members(cleanup_id TEXT,path TEXT,backup TEXT,facts TEXT,state TEXT,PRIMARY KEY(cleanup_id,path))')
     if 'restore_intent' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN restore_intent TEXT NOT NULL DEFAULT ''")
     if 'backup_facts' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN backup_facts TEXT NOT NULL DEFAULT ''")
+    # Audit (Sergei, 2026-11-16): which method removed each original, hardened_local or nas_legacy ('' = not recorded:
+    # removed before this column, renamed into its output, or not removed).
+    if 'removal_method' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN removal_method TEXT NOT NULL DEFAULT ''")
     db.execute('CREATE TABLE IF NOT EXISTS recovery_completion(cleanup_id TEXT PRIMARY KEY,job_id TEXT UNIQUE,completed_at TEXT NOT NULL)')
     db.execute('CREATE TABLE IF NOT EXISTS source_retirements(root TEXT,path TEXT,cleanup_id TEXT,job_id TEXT,source_hash TEXT,size INTEGER,modified TEXT,state TEXT,PRIMARY KEY(root,path,cleanup_id))')
     db.execute('CREATE TABLE IF NOT EXISTS source_zone_marker_intents(cleanup_id TEXT,path TEXT,marker_sha256 TEXT,receipt TEXT NOT NULL,created TEXT NOT NULL,PRIMARY KEY(cleanup_id,path,marker_sha256))')
@@ -105,6 +113,7 @@ class CleanupJobs:
             setup(db)
             db.execute("UPDATE source_cleanup SET state='paused' WHERE state IN ('checking','removing','pausing')")
             self._reclassify_legacy_busy(db)
+            self._reclassify_remote_provider_holds(db)
     @staticmethod
     def _reclassify_legacy_busy(db):
         """Startup, database only: no file is opened and no work starts.
@@ -126,6 +135,32 @@ class CleanupJobs:
             now=stamp()
             if db.execute("UPDATE source_cleanup SET state='paused',reason='',updated=? WHERE id=? AND state='needs_attention' AND reason=?",(now,row['id'],LEGACY_BUSY)).rowcount==1:
                 db.execute('INSERT OR IGNORE INTO source_cleanup_holds VALUES(?,?,?,?,?)',(row['id'],now,'needs_attention',LEGACY_BUSY,'legacy catalog busy'))
+    def _reclassify_remote_provider_holds(self,db):
+        """Startup, database only: no file is opened and no work starts (Sergei, 2026-11-16).
+
+        Before the NAS ruling, the hardened provider refused every NAS original as a remote/unverifiable volume and
+        the cleanup was held with its originals kept. Exactly that hold (latest cause: originals positively kept for
+        that refusal; a completed book; no restore started; not a retained migrated job) becomes an ordinary paused
+        cleanup, as _reclassify_legacy_busy does. The next Start or Resume runs it through run(), which repeats every
+        check (output, recovery copies, reviewed hashes) before the NAS method removes anything; a failed check holds
+        it again with its own reason. Holds for any other reason are untouched.
+        """
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return
+        rows=db.execute("SELECT id,job_id FROM source_cleanup WHERE state='needs_attention' AND reason=?",(RETAINED_HOLD,)).fetchall()
+        if not rows:return
+        from runtime_file_disposition import REMOTE_PROVIDER_REFUSAL
+        from storage_relocation_native import retained_job
+        for row in rows:
+            last=db.execute('SELECT cause FROM source_cleanup_holds WHERE cleanup_id=? ORDER BY at DESC LIMIT 1',(row['id'],)).fetchone()
+            try:cause=json.loads(last['cause']) if last else None
+            except (TypeError,ValueError):continue
+            if not isinstance(cause,dict) or cause.get('kind')!='originals_positively_retained' or cause.get('diagnostic')!=REMOTE_PROVIDER_REFUSAL:continue
+            job=db.execute('SELECT state FROM audio_jobs WHERE job_id=?',(row['job_id'],)).fetchone()
+            if not job or job['state']!='completed' or retained_job(self.database,row['job_id']):continue
+            if db.execute("SELECT 1 FROM cleanup_members WHERE cleanup_id=? AND (state IN ('restore_intended','restored') OR COALESCE(restore_intent,'')!='') LIMIT 1",(row['id'],)).fetchone():continue
+            now=stamp()
+            if db.execute("UPDATE source_cleanup SET state='paused',reason='',updated=? WHERE id=? AND state='needs_attention' AND reason=?",(now,row['id'],RETAINED_HOLD)).rowcount==1:
+                db.execute('INSERT OR IGNORE INTO source_cleanup_holds VALUES(?,?,?,?,?)',(row['id'],now,'needs_attention',RETAINED_HOLD,'remote provider hold; retried with the NAS removal method (Sergei, 2026-11-16)'))
     def hold(self,id,error,attempt=None,record=True):
         """The single place a failed cleanup records its state; returns that state.
 
@@ -139,7 +174,7 @@ class CleanupJobs:
         cause=busy_cause(error,attempt) if busy and record else packed({'kind':'output_identity_unavailable','reason':reason,'diagnostic':error.diagnostic}) if isinstance(error,OutputIdentityUnavailable) else None
         if isinstance(error,FileRemovalRetained) and getattr(error,'retained_members',None):
             cause=packed({'kind':'originals_positively_retained','members':error.retained_members,'diagnostic':error.native_reason})
-            reason='The audiobook is verified, but safe removal of the remaining originals could not be verified. The remaining originals were kept.'
+            reason=RETAINED_HOLD
         def write(db):
             prior=db.execute('SELECT state,reason FROM source_cleanup WHERE id=?',(id,)).fetchone()
             if prior is None:return
@@ -512,7 +547,7 @@ class CleanupJobs:
                 if not self.guard(db,intent):raise BoundaryError('Completed book review changed')
             if out['validation'].get('publication_mode')=='in_place' and not duplicate:return self._retire_moved(id,intent,manifest,out)
             self._sorted(final,BoundaryError,manifest)  # before any copy or marker change; again before each disposal below
-            self._set(id,'checking');held=[];self.phases[id]='Checking original files'
+            self._set(id,'checking');held=[];backups={};self.phases[id]='Checking original files'
             required=sum(s['size'] for s in manifest['sources'])
             if shutil.disk_usage(self.root).free<required+1024*1024:raise BoundaryError('Insufficient recovery space; originals retained')
             for index,source in enumerate(manifest['sources']):
@@ -561,7 +596,7 @@ class CleanupJobs:
                 backup_handle.flush() # Also required for reused backup_pending copies, after timestamp updates.
                 if backup_handle.facts()['size']!=source['size'] or backup_handle.sha256()!=source['sha256']:raise BoundaryError('Recovery copy failed full byte verification; originals retained')
                 with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='backup_verified',backup_facts=? WHERE cleanup_id=? AND path=?",(packed(backup_handle.facts()),id,str(path)))
-                held.append((source,original,facts))
+                held.append((source,original,facts));backups[source['path']]=backup_handle
             # All recovery copies are durable and protected BEFORE the first dispose.
             self.checked.pop(id,None)
             self.phases[id]='Removing originals';self._set(id,'removing')
@@ -577,26 +612,33 @@ class CleanupJobs:
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before removal')
                     db.execute("UPDATE cleanup_members SET state='removal_intended' WHERE cleanup_id=? AND path=?",(id,source['path']))
                     db.commit() # Intent must survive a crash before native disposition.
-                    db.execute('BEGIN IMMEDIATE')
-                    if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
-                    if self.output_location_guard and not self.output_location_guard(db,intent['output'],intent.get('_location_envelope'),require_transaction=True):raise BoundaryError('Current output location changed before source disposition')
-                    self._sorted(final,BoundaryError,manifest)
-                    self._output_present(output,out,final)
-                    single_stream(source['path'])
-                    try:original.dispose()
-                    except FileRemovalRetained as error:
-                        retained=[]
-                        try:
-                            for remaining_source,remaining_handle,remaining_facts in held:
-                                if remaining_handle.handle is None:continue
-                                if remaining_handle.refresh()!=remaining_facts or remaining_handle.sha256()!=remaining_source['sha256']:
-                                    raise BoundaryError('Remaining original evidence changed')
-                                retained.append({'path':remaining_source['path'],'facts':remaining_facts,'sha256':remaining_source['sha256']})
-                        except Exception:retained=[]
-                        if retained:error.retained_members=retained
+                    try:
+                        db.execute('BEGIN IMMEDIATE')
+                        if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
+                        if self.output_location_guard and not self.output_location_guard(db,intent['output'],intent.get('_location_envelope'),require_transaction=True):raise BoundaryError('Current output location changed before source disposition')
+                        self._sorted(final,BoundaryError,manifest)
+                        self._output_present(output,out,final)
+                        single_stream(source['path'])
+                        try:original.dispose(remote_legacy=lambda handle,source=source,facts=facts:self._nas_checks(handle,source,facts,backups[source['path']]))
+                        except FileRemovalRetained as error:
+                            retained=[]
+                            try:
+                                for remaining_source,remaining_handle,remaining_facts in held:
+                                    if remaining_handle.handle is None:continue
+                                    if remaining_handle.refresh()!=remaining_facts or remaining_handle.sha256()!=remaining_source['sha256']:
+                                        raise BoundaryError('Remaining original evidence changed')
+                                    retained.append({'path':remaining_source['path'],'facts':remaining_facts,'sha256':remaining_source['sha256']})
+                            except Exception:retained=[]
+                            if retained:error.retained_members=retained
+                            raise
+                    except Exception:
+                        # Senua M1 (2026-11-16): a check or refusal after the intent commit, before any delete was set
+                        # (NAS re-hash, read error, recovery copy, denied delete; hardened refusals and the re-checks
+                        # above too), must not leave this member in removal_intended while its original is in place.
+                        self._withdraw_intent(db,id,source,original,facts)
                         raise
                     marked.pop(str(ordinary(source['path'])),None)
-                    db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))
+                    db.execute("UPDATE cleanup_members SET state='disposition_set',removal_method=? WHERE cleanup_id=? AND path=?",(getattr(original,'disposition_method','unrecorded'),id,source['path']))
                     original.__exit__(None,None,None)
                     if Path(source['path']).exists():raise BoundaryError('Disposition did not remove the verified name; no weaker deletion attempted')
                     db.commit() # Keep the location-generation reservation through native closure and absence.
@@ -611,6 +653,76 @@ class CleanupJobs:
             raise
         if now['size']!=out['size'] or now['links']<1 or not os.path.lexists(final) or out.get('identity') is not None and now['identity']!=out['identity']:
             raise BoundaryError('Validated output changed or is gone before source removal; originals retained')
+    @staticmethod
+    def _nas_checks(handle,source,facts,backup):
+        """Sergei, 2026-11-16: run by VerifiedFile.dispose right before the NAS (pre-0.28) removal method, through the
+        same held handles. The original is the same unchanged file, its bytes re-hash to the reviewed SHA-256, and its
+        verified recovery copy is still in place. Any failure keeps the original."""
+        if handle.refresh()!=facts:raise BoundaryError('Original source file identity or facts changed; originals retained')
+        if handle.sha256()!=source['sha256']:raise BoundaryError('Original bytes differ from reviewed sources')
+        kept=backup.refresh()
+        if kept['size']!=source['size'] or kept['links']!=1:raise BoundaryError('Recovery copy is not in place; originals retained')
+    @staticmethod
+    def _withdraw_intent(db,id,source,original,facts):
+        """Senua M1 (2026-11-16): return a member whose removal failed before any delete was set to backup_verified,
+        the state it had before its removal intent, so its state matches the original still on disk and Restore never
+        reads it as a collision. Returns whether it did.
+
+        Proof, through the exact handle still held (no FILE_SHARE_DELETE, so nothing else can delete or rename it): no
+        delete was recorded as set by either method, the NAS method never issued its delete call (Senua m9: over SMB a
+        failed answer can follow a delete the server applied, and the cached answers below could still pass), the handle
+        still names the stored native identity with one link, the kernel reports no pending delete, and the name is
+        present. Bytes may differ (a NAS writer, caught by the re-hash): the member is still not removed. Anything
+        unproven or failing leaves removal_intended, which the next run re-checks and Restore reads through
+        _never_removed. Never replaces the caller's error.
+        """
+        try:
+            guard=getattr(original,'_disposition',None)
+            if (original.handle is None or getattr(original,'disposition_method',None) or getattr(original,'delete_issued',False)
+                    or guard is not None and guard.kernel_success):return False
+            now=original.refresh()
+            if any(now.get(k)!=facts.get(k) for k in ('identity','identity_method','dev','ino')) or now['links']!=1:return False
+            if original.delete_pending() is not False or not os.path.lexists(source['path']):return False
+            db.rollback()  # Whatever the failed attempt began is discarded, as the with-block exit would.
+            db.execute('BEGIN IMMEDIATE')
+            changed=db.execute("UPDATE cleanup_members SET state='backup_verified' WHERE cleanup_id=? AND path=? AND state='removal_intended'",(id,source['path'])).rowcount
+            db.commit()
+            return changed==1
+        except Exception:
+            with contextlib.suppress(Exception):db.rollback()
+            return False
+    @staticmethod
+    def _never_removed(path,source,member):
+        """Senua M1 (c), for Restore: a removal_intended member (a failure that could not be withdrawn at the time, a
+        crash before the delete, or a 0.28.x leftover) whose original is still at its path as the very file that was
+        checked: stored native identity, one link, reviewed size, timestamp and full SHA-256. Reads only."""
+        stored=json.loads(member['facts']) if member['facts'] else {}
+        with VerifiedFile(path) as present:
+            now=present.facts()
+            if not stored or any(now.get(k)!=stored.get(k) for k in ('identity','identity_method','dev','ino')) or now['links']!=1:return False
+            if now['size']!=source['size'] or now['modified']!=int(source['modified']):return False
+            return present.sha256()==source['sha256']
+    @staticmethod
+    def _discard_restore_temporary(temp,path,identity):
+        """Senua M2: remove one Restore temporary and nothing else: a '.books-restore-*.partial' name beside the original,
+        only while that name is still the exact file Restore created (its native identity, one link, ordinary). A file
+        with one link has one name, so a temporary that was renamed into place can never be reached here. Local volumes
+        use the hardened removal; a NAS the NAS method, after the same proof through the held handle. Returns whether it
+        was removed. Any doubt or failure keeps the file, and never replaces the caller's error."""
+        def same(handle):
+            now=handle.refresh()
+            if list(now['identity'])!=list(identity) or now['links']!=1 or now['attributes']&(0x400|0x10):
+                raise BoundaryError('Restore temporary is not the file this Restore created; kept')
+        try:
+            temp=ordinary(temp)
+            if temp.parent!=ordinary(path).parent or not temp.name.startswith('.books-restore-') or temp.suffix!='.partial':return False
+            if not os.path.lexists(temp):return False
+            with VerifiedFile(temp,delete=True) as owned:
+                same(owned)
+                owned.dispose(remote_legacy=same)
+            return not os.path.lexists(temp)
+        except Exception:
+            return False
     def _retire_moved(self,id,intent,manifest,out):
         """0.21.0 in-place edit: the original WAS the output (verified in full above). Its journaled no-copy rename is
         its retirement; there is no recovery copy and no deletion. A file at the old name is preserved and blocks."""
@@ -660,29 +772,53 @@ class CleanupJobs:
             for member in self._rows("SELECT * FROM cleanup_members WHERE cleanup_id=? AND state IN ('removed','removal_intended','disposition_set','restore_intended')",(id,)):
                 source=next(s for s in intent['manifest']['sources'] if s['path']==member['path']);path=ordinary(source['path']);backup=ordinary(member['backup'])
                 if backup.parent!=self.root/id or not path.is_relative_to(root):raise BoundaryError('Recovery mapping is outside its owned boundary')
-                with DirectoryBoundary(self.root.anchor,backup.parent) as rb,VerifiedFile(backup) as held,DirectoryBoundary(root,path.parent) as boundary:
+                # Senua M2: an SMB server opens the library folder itself to do the rename, which a held folder handle
+                # that denies WRITE sharing refuses (WinError 32). On a network drive the folder is held sharing WRITE;
+                # DELETE stays denied and the rename stays no-replace. Local volumes are held exactly as before.
+                with DirectoryBoundary(self.root.anchor,backup.parent) as rb,VerifiedFile(backup) as held,\
+                     DirectoryBoundary(root,path.parent,rename_destination=remote_drive(path)) as boundary:
                     from storage_relocation_native import ancestry_match
                     if not ancestry_match(rb,intent['recovery_identity'],operation_path=backup,prefix=True):raise BoundaryError('Persisted recovery ancestry changed')
                     if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery ancestor identity drifted before restoration')
                     if held.facts()['size']!=source['size'] or held.sha256()!=source['sha256']:raise BoundaryError('Recovery copy changed')
                     if path.exists():
                         saved=json.loads(member['restore_intent']) if member['restore_intent'] else None
+                        if not saved and member['state']=='removal_intended' and self._never_removed(path,source,member):
+                            # Senua M1 (c): never removed, so nothing to restore; record what is true and go on.
+                            with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='backup_verified' WHERE cleanup_id=? AND path=? AND state='removal_intended'",(id,member['path']))
+                            continue
                         if not saved:raise FileExistsError('Restore collision; existing file preserved')
                         with VerifiedFile(path) as restored:
                             if restored.facts()['identity']!=saved['identity'] or restored.sha256()!=source['sha256'] or restored.facts()['modified']!=int(source['modified']):raise FileExistsError('Restore collision; unrelated replacement preserved')
                         self._restored(id,str(path));continue
+                    saved=json.loads(member['restore_intent']) if member['restore_intent'] else None
+                    if saved and saved.get('temporary') and saved.get('identity'):
+                        # Senua M2: an earlier attempt's rename had an unknown outcome and the original's name is still
+                        # free, so its temporary was never renamed if it is still there as that exact file.
+                        self._discard_restore_temporary(saved['temporary'],path,saved['identity'])
                     temp=path.parent/('.books-restore-'+str(uuid.uuid4())+'.partial')
                     with connect(self.database) as db:db.execute('INSERT INTO owned_artifacts VALUES(?,?,?,?,?)',(str(temp),intent['job_id'],'temporary',source['sha256'],source['size']))
-                    with open(temp,'xb') as dest:
-                        for block in held.chunks():dest.write(block)
-                        dest.flush();os.fsync(dest.fileno())
-                    facts=json.loads(member['facts'])
-                    with VerifiedFile(temp,writable=True) as temporary:
-                        temporary.restore_metadata(facts['modified'],facts['attributes']);temporary.flush()
-                    def intent_before_rename(native):
-                        native.update(temporary=str(temp),destination=str(path))
-                        with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='restore_intended',restore_intent=? WHERE cleanup_id=? AND path=?",(packed(native),id,str(path)))
-                    publish_no_replace(temp,path,boundary,source['sha256'],source['size'],intent_before_rename)
+                    made=None;issued=[]
+                    try:
+                        with open(temp,'xb') as dest:
+                            try:made=created_facts(temp,dest)['identity']
+                            except Exception:made=None  # unproven: this temporary is never removed, as before
+                            for block in held.chunks():dest.write(block)
+                            dest.flush();os.fsync(dest.fileno())
+                        facts=json.loads(member['facts'])
+                        with VerifiedFile(temp,writable=True) as temporary:
+                            temporary.restore_metadata(facts['modified'],facts['attributes']);temporary.flush()
+                        def intent_before_rename(native):
+                            native.update(temporary=str(temp),destination=str(path))
+                            with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='restore_intended',restore_intent=? WHERE cleanup_id=? AND path=?",(packed(native),id,str(path)))
+                            issued.append(True)  # the rename call follows
+                        publish_no_replace(temp,path,boundary,source['sha256'],source['size'],intent_before_rename)
+                    except Exception as error:
+                        # Senua M2: a failed Restore removes its own temporary when the rename provably did not happen:
+                        # the failure came before the rename call, or the call itself refused. Never on an unknown outcome.
+                        if made is not None and (not issued or getattr(error,'rename_status',None) in RENAME_REFUSED):
+                            self._discard_restore_temporary(temp,path,made)
+                        raise
                     self._restored(id,str(path))
             self._set(id,'needs_attention','Originals restored; recovery copies retained. Cleanup is not automatically repeated.')
     def _restored(self,id,path):

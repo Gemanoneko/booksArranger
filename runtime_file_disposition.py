@@ -13,13 +13,21 @@ import re
 import threading
 import uuid
 
-from storage_relocation import _inside
+from storage_relocation import _inside,RelocationRefused
 from storage_relocation_operator import (Security,need,local_root,packed,digest,create_new,
     pinned_receipt,security_equivalent,bounded_json)
 from lifecycle_fence_security import _delete_relaxed
 
 SCHEMA='books-runtime-file-disposition-v1'
 MAX_RECORD=256*1024
+REMOTE_PROVIDER_REFUSAL='Unsupported disposition provider: remote/unverifiable native volume'
+
+
+class RemoteProviderRefused(RelocationRefused):
+    """The exact handle's volume has no local volume-GUID path (remote or unverifiable).
+
+    Same refusal and message as before; typed so source cleanup can apply
+    Sergei's 2026-11-16 NAS ruling (native_io.VerifiedFile.dispose)."""
 
 
 def _publish_record(path,record):
@@ -50,9 +58,9 @@ def _local_provider(handle):
     final=kernel.GetFinalPathNameByHandleW
     final.argtypes=[wintypes.HANDLE,wintypes.LPWSTR,wintypes.DWORD,wintypes.DWORD];final.restype=wintypes.DWORD
     path=ctypes.create_unicode_buffer(32768);size=final(handle,path,len(path),1)
-    need(size and size<len(path) and path.value.startswith('\\\\?\\Volume{') and
-         len(path.value)>49 and path.value[47:49]=='}\\',
-         'Unsupported disposition provider: remote/unverifiable native volume')
+    if not (size and size<len(path) and path.value.startswith('\\\\?\\Volume{') and
+            len(path.value)>49 and path.value[47:49]=='}\\'):
+        raise RemoteProviderRefused(REMOTE_PROVIDER_REFUSAL)
 
 
 def _load(path):

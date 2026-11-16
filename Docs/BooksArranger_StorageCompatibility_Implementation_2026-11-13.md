@@ -76,6 +76,8 @@ Copied closed-ledger marker/history plus new-generation work/restart passed a re
 
 Sergei explicitly chose safe new publication with NAS originals retained. The approved private `Z:\Books Arranger\Engineering\retention-publication-b0a0e739061f4010b38d2e31131f29e9` fixture proved original/default/named-stream bytes and native facts unchanged on refusal, no runtime deletion intent created, successful new no-replace output and collision preservation. Its private evidence is under the corresponding I: engineering folder. These tiny outputs remain held for review/sanctioned cleanup; no existing library was used.
 
+**Sergei, 2026-11-16:** this supersedes "NAS originals retained" for source cleanup. NAS originals (an SMB share on another machine; SMB loopback to this PC does not qualify) are removed again with the pre-0.28 exact-handle method once the output, recovery-copy and reviewed-hash checks pass. Any failure keeps every original not yet removed, and Restore brings back tracks already removed. The write-during-delete race is accepted. Local NTFS keeps the hardened path. Held cleanups are retried at the next Start after app start. Details: `BooksArranger_RuntimeDisposition_Contract_2026-11-13.md` (NAS paragraph and failed removal state).
+
 The PA-1 fixture now supplies the same required early installation bootstrap as a normal installed candidate, including isolated data/profile/temp/download/log roots. Its close/Quit commands preserve that exact bootstrap without conflicting `--shell-profile`. Legacy command behavior remains tested. This is fixture adaptation, not evidence that the final native candidate has run.
 
 ### Real existing database compatibility
