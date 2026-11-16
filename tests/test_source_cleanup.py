@@ -289,7 +289,10 @@ class OutputIdentityRetryTests(unittest.TestCase):
 
     def test_legacy_intent_retry_reopens_and_verifies_every_copy_before_first_delete(self):
         with self.fixture() as f:
-            self.hold_at_second_output_check(f,legacy=True)
+            # Senua M1 (ad28ff9): a refused check after the intent is now withdrawn, so this hold alone leaves both members
+            # backup_verified. A legacy intent (a 0.28.x leftover or a crash before the delete) is not withdrawn, so the
+            # hold models it, as test_missing_original_after_removal_intent_remains_unknown_not_adopted does.
+            with patch.object(CleanupJobs,'_withdraw_intent',lambda *args:False):self.hold_at_second_output_check(f,legacy=True)
             cap=f.worker.status('test')['identity_retry'];self.assertTrue(cap['allowed']);self.assertIsNone(cap['diagnostic']);self.assertEqual(cap['output_path'],f.job['output']['final_path'])
             with connect(f.db) as db:states=[r[0] for r in db.execute('SELECT state FROM cleanup_members WHERE cleanup_id=?',(f.id,))]
             self.assertEqual(sorted(states),['backup_verified','removal_intended'])
