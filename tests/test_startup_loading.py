@@ -244,6 +244,60 @@ class ConstructionTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_startup_resumes_admitted_audiobooks_and_respects_user_pause(self):
+        from merge_service import MergeService
+        from pause_state import jobs_active
+
+        root=Path(self.temp.name)
+        for origin in ('closing','update',None,'user','hold'):
+            with self.subTest(origin=origin):
+                before=MergeService(self.inventory,root/'merge-cache')
+                item=manifest()
+                before.jobs.enqueue(item)
+                entered=threading.Event()
+                release=threading.Event()
+                def parked():
+                    entered.set()
+                    release.wait(5)
+                try:
+                    with patch.object(before.jobs,'_work',side_effect=parked):
+                        before.resume()
+                        self.assertTrue(entered.wait(5))
+                        if origin=='closing':
+                            before.drain()
+                        elif origin is None:
+                            before.jobs._update(item['job_id'],state='running',stage='checking sources')
+                        elif origin=='hold':
+                            before.jobs._hold_queue()
+                        else:
+                            before.pause_work(origin=origin)
+                        release.set()
+                        before.jobs._thread.join(5)
+                finally:
+                    release.set()
+                    before.close()
+
+                with scanner.connect(self.database) as db:
+                    self.assertEqual(jobs_active(db),origin not in ('user','hold'))
+                def finish_queue(queue):
+                    queue._update(item['job_id'],state='needs attention',stage='queued',reason='Private fixture reached worker')
+                with patch.object(AudioJobs,'_work',autospec=True,side_effect=finish_queue) as worker, \
+                     patch.object(web_server.BrowserServer,'_start_background'):
+                    server=web_server.BrowserServer(('127.0.0.1',0),self.inventory,defer=True)
+                    try:
+                        server.start_loading().join(10)
+                        self.assertTrue(server.loading.finished,server.loading.error)
+                        if origin in ('user','hold'):
+                            worker.assert_not_called()
+                            self.assertIsNone(server.merge.jobs._thread)
+                        else:
+                            server.merge.jobs._thread.join(5)
+                            worker.assert_called_once_with(server.merge.jobs)
+                            self.assertEqual(server.merge.jobs._rows('SELECT state FROM audio_jobs WHERE job_id=?',(item['job_id'],))[0]['state'],
+                                             'needs attention')
+                    finally:
+                        server.server_close()
+
     def test_server_background_failure_closes_constructed_merge_owner(self):
         from merge_service import MergeService
         made=[]

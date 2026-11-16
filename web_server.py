@@ -322,6 +322,17 @@ class BrowserServer(ThreadingHTTPServer):
         # Published-book hashing reads every finished book from the library share; it must not delay health.
         if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()
 
+    def _restore_saved_work(self, merge):
+        from storage_relocation_native import retained_runtime
+        if self.closing or retained_runtime(self.inventory.database):
+            return
+        restore=getattr(merge,'restore_work_after_restart',None)
+        if restore is not None:
+            try:restore()
+            except Exception as error:
+                # Recovery admission can refuse independently of a successful catalog load.
+                print(f'Books Arranger could not resume saved work: {error}', file=sys.stderr, flush=True)
+
     # ------------------------------------------------------------------ startup loader (ruling 28, 0.22.1)
     # Sergei 2026-10-25: "Show me the screen and load whatever you want after." The engine used to open the whole
     # catalog before it answered anything: 1 min 40 s on the 706 MB catalog with no window. Now it answers at once and
@@ -369,6 +380,7 @@ class BrowserServer(ThreadingHTTPServer):
             # once loading ends: it changes the catalog and reads the library share, which the first status needs too.
             self._start_background()
             loading.finish()
+            self._restore_saved_work(merge)
         except LoadAborted:
             return
         except BaseException as error:
@@ -1156,7 +1168,8 @@ class Handler(BaseHTTPRequestHandler):
             if data: raise ValueError('Audiobook job controls require an empty object')
             # Ruling 35: Resume while a Pause or an earlier start is still settling is kept and made when it settles.
             merge=self.server.merge
-            self.response(200,(merge.automatic.stop() if hasattr(merge,'automatic') and merge.automatic.status()['state'] in ('Running','Stopping') else merge.pause()) if path.endswith('/pause') else
+            pause_jobs=getattr(getattr(merge,'automatic',None),'pause_jobs',merge.pause)
+            self.response(200,pause_jobs() if path.endswith('/pause') else
                           merge.resume_press() if hasattr(merge,'resume_press') else merge.resume())
             return
         if path=='/api/audiobook/resume-cancel':
