@@ -488,6 +488,9 @@ class AudioJobs:
             # Start over (book_restart): a set-aside job is kept as it is but is no longer its book's current job.
             import book_restart
             db.execute(book_restart.SET_ASIDE)
+            from pause_state import ensure_jobs_intent
+            interrupted=db.execute("SELECT 1 FROM audio_jobs WHERE state='running' LIMIT 1").fetchone()
+            ensure_jobs_intent(db, interrupted is not None)
         self._recover()
 
     def _db(self):
@@ -1217,12 +1220,28 @@ class AudioJobs:
                     return answer('paused')
                 if self._thread and self._thread.is_alive():return answer('running')
                 self._apply_unchanged(changes)
+                self._save_run_intent(True)
                 self._thread=threading.Thread(target=self._work,name='BooksArrangerAudioJobs',daemon=False)
                 self._thread.start()
         finally:
             with self._lock:
                 self._resuming=False;self._resuming_token=None;self._check_progress=None
         return answer('started')
+
+    def _save_run_intent(self, active):
+        import pause_state
+        with self._db() as db:
+            pause_state.set_jobs_active(db, active)
+            if active:
+                pause_state.clear(db, 'jobs')
+
+    def _hold_queue(self):
+        with self._lock:
+            self._stop.set()
+            import pause_state
+            with self._db() as db:
+                pause_state.set_jobs_active(db, False)
+                pause_state.record(db, 'jobs', 'interrupted', 'Audiobook jobs stopped at a safety hold')
 
     def pause(self):
         self.pause_work()
@@ -1315,7 +1334,11 @@ class AudioJobs:
                 self.report_priority({'state':'blocked','job_id':None,'reason':str(error) or type(error).__name__})
                 priority = None # Durable requests are kept; expose the actual failed admission.
             pending = self._pending_unreserved(priority)
-            if not pending: return
+            if not pending:
+                with self._lock:
+                    if not self._stop.is_set() and not self._drain.is_set():
+                        self._save_run_intent(False)
+                return
             row = pending[0]
             claim = self._claim(row)
             if claim == 'gone':continue  # taken out meanwhile (a Save set it aside)
@@ -1327,7 +1350,7 @@ class AudioJobs:
                 with boundary:proceed=self._work_attempt(row)
             except destination_admission.DestinationReviewNeeded as error:
                 if not self._hold_destination(row,error.observation):
-                    self._stop.set();return
+                    self._hold_queue();return
                 if self._stop.is_set() or self._drain.is_set():return
                 continue
             except JobWorkingHold as error:
@@ -1335,7 +1358,7 @@ class AudioJobs:
                 continue
             except Exception as error:
                 self._update(row['job_id'],state='needs attention',reason='Working cleanup requires attention: '+str(error))
-                self._stop.set()
+                self._hold_queue()
                 if self.on_working_hold:self.on_working_hold()
                 return
             finally:
@@ -1460,7 +1483,7 @@ class AudioJobs:
         except Exception as error:
             self._update(job_id,state='needs attention',reason='Working cleanup requires attention: '+str(error))
             if isinstance(error,JobWorkingHold):return True
-            self._stop.set()
+            self._hold_queue()
             if self.on_working_hold:self.on_working_hold()
             return False # No new attempt or source copy exists before admission.
         attempt = str(uuid.uuid4())
@@ -1542,7 +1565,7 @@ class AudioJobs:
                     journal['failure'] = _failure_details(exc, failure_stage)
                     self._update(job_id,state='needs attention',journal=json.dumps(journal),reason=str(exc) or type(exc).__name__)
                     if isinstance(exc,OSError) and exc.errno==errno.ENOSPC:
-                        self._stop.set()
+                        self._hold_queue()
                         if self.on_space_hold:self.on_space_hold()
                         return False # Preserve the rest of the queue without producing more attempts.
         finally:
@@ -1553,7 +1576,7 @@ class AudioJobs:
                     attempt_closed=True
                 except Exception as cleanup_error:
                     if not isinstance(cleanup_error,JobWorkingHold):
-                        self._stop.set()
+                        self._hold_queue()
                         if self.on_working_hold:self.on_working_hold()
                     latest=self._rows('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,))
                     if latest and latest[0]['state'] in {'pending','needs attention'}:

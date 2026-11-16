@@ -1,4 +1,4 @@
-"""Recorded stop attribution. Missing history stays unknown; display never controls work."""
+"""Saved stop attribution and the audiobook queue's admitted restart intent."""
 import json
 import datetime
 
@@ -18,6 +18,24 @@ def read(db, scope):
 def clear(db, scope):
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pause_attribution'").fetchone():
         db.execute('DELETE FROM pause_attribution WHERE scope=?',(scope,))
+
+
+def ensure_jobs_intent(db, interrupted_work):
+    """Infer intent on upgrade only from an actual running job with no saved pause."""
+    db.execute('CREATE TABLE IF NOT EXISTS audiobook_run_intent (id INTEGER PRIMARY KEY CHECK(id=1), active INTEGER NOT NULL)')
+    db.execute('INSERT OR IGNORE INTO audiobook_run_intent VALUES(1,?)',
+               (int(interrupted_work and read(db, 'jobs') is None),))
+
+
+def jobs_active(db):
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audiobook_run_intent'").fetchone():return False
+    row=db.execute('SELECT active FROM audiobook_run_intent WHERE id=1').fetchone()
+    return bool(row and row[0])
+
+
+def set_jobs_active(db, active):
+    if active or jobs_active(db):
+        db.execute('UPDATE audiobook_run_intent SET active=? WHERE id=1 AND active<>?', (int(active),int(active)))
 
 
 def record_shutdown(db, trigger):
