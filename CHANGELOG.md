@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.28.13] - 2026-11-16
+
+### Added
+
+- NAS delete for Z: (the delete/replace race is a known, accepted risk).
+- Restore works over SMB.
+- File and folder pickers remember the last folder.
+
+### Fixed
+
+- Held NAS cleanups are revived on Start.
+
 ## [v0.28.12] - 2026-11-15
 
 ### Fixed

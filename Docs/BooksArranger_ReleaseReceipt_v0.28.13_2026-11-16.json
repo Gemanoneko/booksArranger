@@ -1,0 +1,49 @@
+{
+  "release_url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.28.13",
+  "source_commit": "fac11dbb0f64bb0c1d4cb6971c94fa6c79713135",
+  "tag": "v0.28.13",
+  "tag_object": "ce645101fc06453adbd308ebbe0994280f6edb75",
+  "tag_target_commit": "0659c226c38df6f745763500f6e78b3391f54408",
+  "tag_target_note": "Tag sits on the QA-report doc commit; the product tree is unchanged from source_commit fac11db.",
+  "version": "0.28.13",
+  "artifact_manifest_sha256": "3580c221437edbddd3f686ac68f39f307957a741b3b2a0e8cb42eb2157e952d0",
+  "build_id": "edf9a2b8-6bca-41bc-b353-c2c738006762",
+  "assets": [
+    {
+      "name": "Books-Arranger-Setup-0.28.13.exe",
+      "sha256": "685956687fbd7998f4da0248edcbd103c45332fadb6bc2e5b27a939f09a1de4c",
+      "size": 209025500,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.28.13/Books-Arranger-Setup-0.28.13.exe"
+    },
+    {
+      "name": "Books-Arranger-Setup-0.28.13.exe.blockmap",
+      "sha256": "2415711a9d7b82f2372fe6b24c309a5a23a2b7b95a2b4e0bc856cd2bcd84b8b6",
+      "size": 218967,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.28.13/Books-Arranger-Setup-0.28.13.exe.blockmap"
+    },
+    {
+      "name": "latest.yml",
+      "sha256": "51d30813a5042f9418193c68612856fc800e4657536af6ab0ebc9d07e7283e22",
+      "size": 363,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.28.13/latest.yml"
+    }
+  ],
+  "verification": "Public release (not a draft). Local installer, blockmap and latest.yml SHA-256 re-computed before upload; uploaded asset sizes and GitHub API SHA256 digests equal the local files. Remote tag v0.28.13 equals the local annotated tag.",
+  "release_route": "B - manual release bypassing the release script's checks, explicitly authorised by Sergei in chat on 2026-11-16 (his answer 'B'). Same route as 0.28.12. Named-tag push only.",
+  "code_review": {
+    "doc": "Docs/BooksArranger_CodeReview_v0.28.13_2026-11-16.md",
+    "reviewer": "Senua",
+    "verdict": "RELEASE CLEAR"
+  },
+  "qa": {
+    "doc": "Docs/BooksArranger_QA_v0.28.13_2026-11-16.md",
+    "reviewer": "Futaba",
+    "verdict": "GO"
+  },
+  "waiver": "5 known test failures were waived by Sergei's route-B authorisation. No packaged-build smoke test was run by Sully; Sergei installs the build himself.",
+  "release_pruning": {
+    "kept": ["v0.28.13", "v0.28.12", "v0.28.6", "v0.28.1"],
+    "deleted_releases_and_remote_tags": ["v0.28.0", "v0.27.0", "v0.26.0", "v0.25.0"],
+    "stale_local_tags_pruned": ["v0.24.5", "v0.25.0", "v0.26.0", "v0.27.0", "v0.28.0"]
+  }
+}
