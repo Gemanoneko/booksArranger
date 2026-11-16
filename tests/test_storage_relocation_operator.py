@@ -79,6 +79,19 @@ class OperatorNativeTests(unittest.TestCase):
                 with NativeItem(path, directory=entry['kind'] == 'directory', writable_security=True) as held:
                     self.assertEqual(held.facts['identity'], entry['identity'])
                     Security().restore(held, entry['original_security'])
+        # The registered fixture restores (copy_source_security) run now, so the check below sees their result.
+        self.doCleanups()
+        # A fence left on a fixture blocks the studio cleanup (Everyone denied write/delete), so none may outlive the test.
+        self.assertEqual(self.fenced_fixture_items(), [], 'fixture items still carry a write fence after teardown')
+
+    def fenced_fixture_items(self):
+        security = Security(); fenced = []
+        for root in dict.fromkeys(r for r in (self.area, self.source, self.backup) if r is not None):
+            if not root.exists():continue
+            for path in [root, *sorted(root.rglob('*'))]:
+                with NativeItem(path, directory=path.is_dir()) as item:
+                    if security.has_write_fence(item):fenced.append(str(path))
+        return fenced
 
     def args(self):
         return (self.source, self.target, ['data'], 'data/inventory.sqlite3', self.work)
@@ -192,11 +205,24 @@ class OperatorNativeTests(unittest.TestCase):
     def copy_source_security(self, prepared):
         # shutil.copy2 omits Windows ACLs. A cross-volume migration must copy
         # the reviewed fence too, rather than authorize arbitrary inherited ACLs.
+        # The receipts restore only source_original, and a refused seal leaves this copied fence on the
+        # target, so each target item's own ACL and identity are recorded first and put back at cleanup.
         fence = json.loads(Path(prepared['source_fence']).read_text('utf8'))
-        for entry in fence['items']:
-            with NativeItem(self.target/entry['relative'], directory=entry['kind']=='directory',
-                            writable_security=True) as item:
+        copied = []; self.addCleanup(self.restore_copied_security, copied)
+        for entry in sorted(fence['items'], key=lambda e: (e['relative'].count('\\'), e['relative'])):
+            path, directory = self.target/entry['relative'], entry['kind']=='directory'
+            with NativeItem(path, directory=directory, writable_security=True) as item:
+                copied.append((path, directory, item.facts['identity'], Security().capture(item)))
                 Security().restore(item, entry['applied_security'])
+
+    def restore_copied_security(self, copied):
+        """Fixture cleanup only: parents first, an item that is still the same object and still fenced
+        (a completed seal has already restored the others) gets its recorded ACL back."""
+        for path, directory, identity, original in copied:
+            if not path.exists():continue
+            with NativeItem(path, directory=directory, writable_security=True) as item:
+                if item.facts['identity'] == identity and Security().has_write_fence(item):
+                    Security().restore(item, original)
 
     def test_initial_seal_foreign_acl_refuses_before_any_restore(self):
         args = self.pending_copy()
@@ -351,11 +377,7 @@ class OperatorNativeTests(unittest.TestCase):
 
     def test_copied_source_fence_acl_is_removed_only_on_owned_target(self):
         prepared = self.prepare(); shutil.copytree(self.source, self.target)
-        fence = json.loads(Path(prepared['source_fence']).read_text('utf8'))
-        for entry in sorted(fence['items'], key=lambda e: (e['relative'].count('\\'), e['relative'])):
-            with NativeItem(self.target / entry['relative'], directory=entry['kind'] == 'directory',
-                            writable_security=True) as item:
-                Security().restore(item, entry['applied_security'])
+        self.copy_source_security(prepared)
         with self.assertRaises(PermissionError):(self.target / 'data/owned.bin').write_bytes(b'forbidden')
         self.backup = self.source.with_name(self.source.name + '-original'); self.source.rename(self.backup)
         sealed = seal_target(prepared['source_plan'], prepared['source_plan_sha256'],

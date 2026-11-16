@@ -9,6 +9,9 @@
 import fs from 'node:fs';import path from 'node:path';
 
 const present=p=>{try{fs.lstatSync(p);return true;}catch{return false;}};
+// EPERM/EACCES is Windows' access denied. It has two causes the code cannot tell apart: a deny ACL (2026-11-16: one a
+// relocation fixture left) and a program in the entry that is still running. Other codes (EBUSY) mean a file is open.
+const removalRefusal=error=>{const code=error.code||error.message;return code+(code==='EPERM'||code==='EACCES'?', access denied (permissions, or a file in it still in use)':', a file in it may still be in use');};
 
 // Remove one claimed entry: every link in it is removed as a link first (its target is never entered), then Node's own
 // recursive removal. Returns null when it is gone, else why it is still there.
@@ -22,7 +25,7 @@ export function removeGateEntry(root){
   for(const entry of entries){const p=path.join(dir,entry.name);let st;try{st=fs.lstatSync(p);}catch{continue;}if(entry.isSymbolicLink()||st.isSymbolicLink())links.push(p);else if(st.isDirectory())stack.push(p);}
  }
  for(const link of links){try{fs.rmdirSync(link);}catch{try{fs.unlinkSync(link);}catch(error){return 'could not unlink '+link+' ('+error.code+')';}}}
- try{fs.rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:200});}catch(error){return (error.code||error.message)+', a file in it may still be in use';}
+ try{fs.rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:200});}catch(error){return removalRefusal(error);}
  return present(root)?'still present after removal':null;
 }
 

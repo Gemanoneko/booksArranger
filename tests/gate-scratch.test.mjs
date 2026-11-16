@@ -5,7 +5,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawn,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {trackGateScratch} from '../scripts/gate-scratch.mjs';
+import {trackGateScratch,removeGateEntry} from '../scripts/gate-scratch.mjs';
 import {PYTHON_WORKERS} from '../scripts/python-check-batches.mjs';
 
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -67,6 +67,20 @@ test('an entry still in use is reported, not hidden',{skip:!IS_WIN&&'needs a Win
   const r=s.finish(false);
   assert.deepEqual(r.left.map(x=>x.name),['7']);assert.ok(r.lines.some(l=>l.startsWith('Gate scratch NOT removed: '+path.join(root,'scratch','7'))),r.lines.join('\n'));
  }finally{const gone=new Promise(r=>held.once('exit',r));held.kill();await gone;}
+});
+
+// 2026-11-16: a relocation fixture left Everyone-deny ACLs, and the report named only a file "still in use". Windows
+// answers access denied for both a deny ACL and a running image, so that answer names both.
+test('an entry refused for permissions says access denied, an in-use one still says in use',t=>{
+ const root=sandbox(t),entry=path.join(root,'scratch','8');put(path.join(entry,'fenced.bin'));
+ const refuse=code=>t.mock.method(fs,'rmSync',()=>{throw Object.assign(Error(code+': simulated'),{code});});
+ const reasons={};
+ try{for(const code of ['EPERM','EACCES','EBUSY']){refuse(code);reasons[code]=removeGateEntry(entry);t.mock.restoreAll();}}
+ finally{t.mock.restoreAll();}
+ assert.equal(reasons.EPERM,'EPERM, access denied (permissions, or a file in it still in use)');
+ assert.equal(reasons.EACCES,'EACCES, access denied (permissions, or a file in it still in use)');
+ assert.equal(reasons.EBUSY,'EBUSY, a file in it may still be in use');
+ assert.ok(fs.existsSync(path.join(entry,'fenced.bin')),'a refused removal leaves the entry in place');
 });
 
 // The real gate in a throwaway root. Its pinned Python executes an inert
