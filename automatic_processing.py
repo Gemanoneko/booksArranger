@@ -1,5 +1,5 @@
 """One explicitly started, checkpointed public-source Audiobooks pass.
-Construction and reconnect never start inventory, approval or conversion.
+Construction/reconnect/restart never starts inventory, approval or conversion.
 """
 import contextlib
 import datetime as dt
@@ -114,16 +114,9 @@ class AutomaticProcessing:
                 failure_reason='Automatic processing error' if candidate_job_exists(db,failed) else RESEARCH_FAILURE
                 db.execute("UPDATE automatic_candidates SET state='Needs attention',result=?,retry_at=NULL WHERE id=? AND state='Researching'",
                     (json.dumps({'reasons':[failure_reason,MISSING_FAILURE_DETAILS],'failure_run_id':prior['id']}),failed))
-            import pause_state
-            pause=pause_state.read(db,'automatic')
             if prior and prior['state'] in ('Running','Stopping'):
-                if not pause:
-                    pause_state.record(db,'automatic','interrupted','Automatic processing was interrupted before its saved stop checkpoint')
-                eligible=prior['state']=='Running' or prior['restart_paused'] or (pause or {}).get('origin') in ('closing','update')
-                db.execute("UPDATE automatic_runs SET state='Paused',reason='Paused after server restart — saved work kept',restart_paused=? WHERE id=?",
-                           (int(eligible and (pause or {}).get('origin')!='user'),prior['id']))
-            elif prior and prior['state']=='Paused' and (pause or {}).get('origin') in ('closing','update'):
-                db.execute('UPDATE automatic_runs SET restart_paused=1 WHERE id=?',(prior['id'],))
+                __import__('pause_state').record(db,'automatic','interrupted','Automatic processing was interrupted before its saved stop checkpoint')
+            db.execute("UPDATE automatic_runs SET state='Paused',reason='Paused after server restart — start to continue saved work',restart_paused=1 WHERE state IN ('Running','Stopping')")
             db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
     def _run_row(self):
         with connect(self.database) as db:
@@ -347,13 +340,11 @@ class AutomaticProcessing:
                 from audio_jobs import StartRefused
                 raise StartRefused('busy','A previous start is still reaching its pause checkpoint. Retry Start after it stops.')
             try:
-                with connect(self.database) as db:
-                    if not run or run['state']=='Completed' or run['state']=='Needs attention' and not research_retry(run):
-                        id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
-                        db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
-                    else:
-                        db.execute("UPDATE automatic_runs SET state='Running',reason='',restart_paused=0,updated=? WHERE id=?",(stamp(),run['id']))
-                    __import__('pause_state').clear(db,'automatic')
+                if not run or run['state']=='Completed' or run['state']=='Needs attention' and not research_retry(run):
+                    id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
+                    with connect(self.database) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
+                else:self._update(run['id'],state='Running',reason='',restart_paused=0)
+                with connect(self.database) as db:__import__('pause_state').clear(db,'automatic')
                 self._stop_generation+=1
                 self._stop_origin=None;self.stop_event.clear();self.start_pending=None;self._closing_run=False
             finally:pause_lock.release()
@@ -416,21 +407,6 @@ class AutomaticProcessing:
                 return {'action':'pending','pending_kind':kind,'reason':reason}
             return {'action':'blocked','reason':reason or str(error)}
         return {'action':'continued' if continuing else 'started'}
-
-    def restore_after_restart(self):
-        """Resume a previously active pass through ordinary start admission."""
-        with self.lock:
-            run=self._run_row()
-            if not run or run['state']!='Paused' or not run['restart_paused']:
-                return False
-            with connect(self.database) as db:
-                attribution=__import__('pause_state')
-                if (attribution.read(db,'automatic') or {}).get('origin')=='user':
-                    return False
-                if (attribution.read(db,'jobs') or {}).get('origin') in ('user','interrupted'):
-                    return False
-            result=self.request_start()
-            return result['action'] in ('running','continued','pending')
     def _current_block(self,server_closing=False):
         run=self._run_row()
         snapshot=getattr(self.merge,'status_snapshot',None)
@@ -453,9 +429,6 @@ class AutomaticProcessing:
         """Cancel automatic start: the pending start ends; books keep waiting for a press."""
         with self.lock:
             cancelled=self.start_pending is not None;self.start_pending=None
-            run=self._run_row()
-            if cancelled and run and run['state']=='Paused' and run['restart_paused']:
-                self._cancel_restart(run['id'])
         self._pending_wake.set();self._changed()
         return self.status()|{'cancelled':cancelled}
     def _pending_loop(self):
@@ -492,11 +465,6 @@ class AutomaticProcessing:
         self.stop_work(force=force,origin=origin)
         return self.status()
 
-    def pause_jobs(self):
-        if self.stop_work(origin='user'):
-            return self.status()
-        return self.merge.pause()
-
     def stop_work(self,force=False,origin=None):
         """Stop, Quit (not forced) and the app's own safety stops (disk full, working-file hold: forced). Each also ends
         a pending start (O12): a start the app or Sergei has just stopped must never come back by itself. The rows and
@@ -506,27 +474,13 @@ class AutomaticProcessing:
             cancelled=self.start_pending is not None;self.start_pending=None
             run=self._run_row()
             active=force or bool(run and run['state'] in ('Running','Stopping'))
-            if run and origin not in ('closing','update') and run['state']=='Paused' and run['restart_paused']:
-                self._cancel_restart(run['id'],origin)
             if active:
-                if run and run['state']=='Running':
-                    self._update(run['id'],state='Stopping',reason='Stopping automatic processing — saving pending work',
-                                 restart_paused=int(origin in ('closing','update')))
-                elif run and run['state']=='Stopping' and origin not in ('closing','update') and run['restart_paused']:
-                    self._update(run['id'],restart_paused=0)
-                if origin in ('closing','update') and self._stop_origin not in (None,'closing','update'):
-                    origin=self._stop_origin
+                if run and run['state']=='Running':self._update(run['id'],state='Stopping',reason='Stopping automatic processing — saving pending work')
                 # Publish the press before waking the worker, including while its durable write waits.
                 generation=self._stop_generation;self._stop_origin=origin;self.stop_event.set();self.next_retry_at=None
         if cancelled:
             self._pending_wake.set();self._changed()
         if active:self._pause_stopped(generation)
-        return active
-
-    def _cancel_restart(self,id,origin='user'):
-        with connect(self.database) as db:
-            db.execute('UPDATE automatic_runs SET restart_paused=0 WHERE id=?',(id,))
-            __import__('pause_state').record(db,'automatic',origin,'Automatic processing stays paused')
     def _pause_stopped(self,generation):
         # Never hold self.lock while entering scanner/merge locks. Serialize the
         # durable origin and queue pause together; a later press is read when its

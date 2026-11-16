@@ -713,58 +713,7 @@ class AutoTests(unittest.TestCase):
         entered=threading.Event();release=threading.Event()
         def lookup(row,root,stop,progress):entered.set();release.wait(2);return {'reasons':[]}
         auto,merge,inv=self.fake_merge(lookup);auto.start();self.assertTrue(entered.wait(2));self.assertEqual(auto.stop()['state'],'Stopping');release.set();self.assertEqual(self.wait_auto(auto)['state'],'Paused');merge.approve_automatic.assert_not_called()
-        second=AutomaticProcessing(merge,auto.research);self.assertEqual(second.status()['state'],'Paused')
-        self.assertFalse(second.restore_after_restart());self.assertIsNone(second.thread);merge.resume.assert_not_called()
-        auto.close();second.close()
-
-    def test_active_checkpoint_resumes_after_reopen_update_or_interruption(self):
-        for origin in ('closing','update',None):
-            with self.subTest(origin=origin):
-                auto,merge,inv=self.fake_merge(lambda *_:{'reasons':['Uncertain'],'wait':
-                    {'source':'Private fixture','reason':'Unavailable','retry_at':time.time()+3600}})
-                entered=threading.Event()
-                with patch.object(auto,'_work',side_effect=lambda _:entered.set() or auto.stop_event.wait(5)):
-                    auto.start()
-                    self.assertTrue(entered.wait(3))
-                    run_id=auto._run_row()['id']
-                    if origin is not None:
-                        auto.stop_work(origin=origin)
-                        auto._paused_checkpoint(run_id,{'pending':['saved-book'],'done':['done-book']})
-                    else:
-                        auto._update(run_id,phase='research',checkpoint=json.dumps({'pending':['saved-book'],'done':['done-book']}))
-                        auto.stop_event.set()  # Simulate a process loss without a saved stop.
-                    auto.thread.join(5)
-                second=AutomaticProcessing(merge,auto.research)
-                self.controllers.append(second)
-                self.assertIsNone(second.thread, 'loading the catalog must not start work')
-                with patch.object(second,'_work') as work:
-                    self.assertTrue(second.restore_after_restart())
-                    second.thread.join(3)
-                    work.assert_called_once_with(run_id)
-                    self.assertEqual(json.loads(second._run_row()['checkpoint'])['pending'],['saved-book'])
-                second.stop_work(origin='user')
-                second._paused_checkpoint(run_id,{'pending':[]})
-
-    def test_restart_waits_for_scan_and_then_starts_saved_pass(self):
-        auto,merge,inv=self.fake_merge()
-        run_id=str(uuid.uuid4())
-        with connect(self.db) as db:
-            db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Running','research','{}','','1','1'))
-        second=AutomaticProcessing(merge,auto.research)
-        self.controllers.append(second)
-        scan=threading.Event()
-        scan.set()
-        inv.worker=SimpleNamespace(is_alive=scan.is_set)
-        with patch.object(second,'_work') as work:
-            self.assertTrue(second.restore_after_restart())
-            self.assertEqual(second.status()['start_pending']['kind'],'scan')
-            work.assert_not_called()
-            scan.clear()
-            second._pending_wake.set()
-            second._pending_thread.join(3)
-            self.assertFalse(second._pending_thread.is_alive())
-            second.thread.join(3)
-            work.assert_called_once_with(run_id)
+        second=AutomaticProcessing(merge,auto.research);self.assertEqual(second.status()['state'],'Paused');self.assertIsNone(second.thread);merge.resume.assert_not_called();auto.close();second.close()
     def test_unsaved_manual_draft_lease_blocks_only_candidate(self):
         auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');finish_scan(inv);candidate=inv.candidates('Audiobooks')['rows'][0]
         auto.draft(candidate['id'],candidate['revision'],True);self.assertTrue(auto.manual_draft(candidate));auto.start();self.wait_auto(auto)

@@ -920,8 +920,6 @@ class MergeService:
             origin=origin or ('update' if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set() else 'closing' if self.__dict__.get('_closing') else 'user')
             attribution=__import__('pause_state')
             with connect(self.inventory.database) as db:
-                if origin not in ('closing','update'):
-                    attribution.set_jobs_active(db,False)
                 if origin not in ('update','closing') or not already_paused or not attribution.read(db,'jobs'):
                     attribution.record(db,'jobs',origin,'Audiobook jobs paused')
         finally:
@@ -957,8 +955,7 @@ class MergeService:
             if not self._start_allowed(generation):raise StartRefused('stale','Start was superseded by Pause or closing.')
             self._automatic_cleanup_generation=generation
             self._maintenance_paused=False
-            if not self.jobs._stop.is_set():
-                with connect(self.inventory.database) as db:__import__('pause_state').clear(db,'jobs')
+            with connect(self.inventory.database) as db:__import__('pause_state').clear(db,'jobs')
 
     def resume(self,*,start_generation=None,pending_owner=None,recheck=True):
         """Admit pending work promptly. Finished-book checks belong to idle maintenance.
@@ -972,31 +969,6 @@ class MergeService:
             wake=getattr(self,'_retention_wake',None)
             if wake is not None:wake.set()
         return result
-
-    def restore_work_after_restart(self):
-        """Schedule only catalog work with saved intent, after the startup gates have opened."""
-        if self.automatic.restore_after_restart():
-            return
-        import pause_state
-        try:
-            generation=self._capture_start_generation()
-        except StartRefused:
-            return
-        with _BULK_LOCK, connect(self.inventory.database) as db:
-            if not self._start_allowed(generation) or not pause_state.jobs_active(db):
-                return
-        if not self.jobs.has_unfinished() and not self._pending_replacement_postprocessing():
-            return
-        try:
-            self.resume(start_generation=generation)
-        except StartRefused as error:
-            if error.start_state=='busy':
-                try:
-                    self.start_when_settled(start_generation=generation)
-                except StartRefused:
-                    pass  # A later Pause or shutdown superseded this restore.
-            elif error.start_state not in ('closing','stale'):
-                self._record_start_failure(error)
 
     def _recheck_finished(self,generation,pending_owner=None):
         """Compatibility entry: schedule housekeeping, never perform it on Start."""
@@ -1031,13 +1003,7 @@ class MergeService:
                 if isinstance(value,dict) and value.get('state')=='waiting':return {'start_admission':value}  # kept until it settles (ruling 35)
                 return {'start_admission':{'state':getattr(error,'start_state','blocked'),'reason':str(error)}}
         if historical:started=self.cleanup.resume(historical,follow_audio=False,admission_check=allow,admission_token=generation)
-        elif pending:
-            if self.jobs.has_unfinished():
-                # The audio worker does not exist yet while cleanup owns the handoff.
-                with _BULK_LOCK, connect(self.inventory.database) as db:
-                    if not allow():raise StartRefused('stale','This start was superseded by Pause or closing.')
-                    __import__('pause_state').set_jobs_active(db,True)
-            started=self.cleanup.resume(admission_check=allow,after_drain=handoff,admission_token=generation)
+        elif pending:started=self.cleanup.resume(admission_check=allow,after_drain=handoff,admission_token=generation)
         else:started=self.jobs.resume(admission_check=allow,admission_token=generation,settle=recheck)
         if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','Startup was superseded by Pause or closing; saved retry requests are retained.')
         self._authorize_automatic_cleanup(generation)
