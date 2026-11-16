@@ -396,7 +396,7 @@ The baseline failures are the same pre-existing set as in the first review (lega
 - Total Major: 1 open (M2, new). M1 is closed.
 - Total Minor: 7 open (m2, m4, m5, m6 partly, m8, m9 new, m10 new). m1, m3 and m7 are closed.
 
-Re-review verdict: RELEASE CLEAR. Superseded; the single live verdict line is at the end of re-review 2 below.
+Re-review verdict: RELEASE CLEAR. Superseded; the single live verdict line is at the end of the restart-intent review below.
 
 Advisory: before Sergei runs the first post-update Start on the held NAS backlog, do two things:
 1. Run one Restore on a private Z: fixture (M2). That is the population in which a mid-book failure leaves earlier tracks removed, and in-app recovery for it is unproven.
@@ -565,8 +565,216 @@ These are the same pre-existing failing sets as in the first review and re-revie
 - Total Major: 0 open. M1 and M2 are closed.
 - Total Minor: 7 open (m2, m4, m5 wider, m6 partly, m8, m10 partly, m11 new). m1, m3, m7 and m9 are closed.
 
-**Verdict:** RELEASE CLEAR
+Re-review 2 verdict: RELEASE CLEAR. Superseded; the single live verdict line is at the end of the restart-intent review below.
 
 Advisory:
 1. Get Sergei's answer on the `.partial` NAS-method question above before commit.
 2. Before the first post-update Start on the held NAS backlog, run one Restore on a private Z: fixture. Writing on Z: needs Sergei's go-ahead. Restore over SMB is now proven against Windows' own SMB server, but never against the Samba NAS. If it fails there, the fix leaves no `.partial` behind, but in-app recovery for NAS books would still be unproven.
+
+---
+
+## Restart-intent review 2026-11-16 (9522858)
+
+**Status: not in 0.28.13.** Sergei took this work out of the release. On main, 0125c57 reverts 9522858, and 55b98aa bumps the version to 0.28.13. The work stays on branch `feature/restart-intent` (head 9522858) for the next version. Every R- finding below applies to that branch, not to 0.28.13. The 0.28.13 verdict is at the end of this section.
+
+```
+Reviewer: Senua (Code Reviewer)
+Date: 2026-11-16
+Commit reviewed: 9522858 "feat(restart): restore saved work after restart from persisted run intent" (parent 01a1901),
+  now the head of feature/restart-intent
+Files: pause_state.py, audio_jobs.py, automatic_processing.py, merge_service.py, web_server.py,
+  tests/test_automatic_processing.py (+2 tests), tests/test_startup_loading.py (+1 test); +259 / -20
+Stand-down dimensions: Electron security N/A for 9522858 (Python backend only)
+```
+
+### Summary
+
+What changed: the app now saves whether the audiobook queue and automatic processing were running. After a restart, it starts them again by itself. Before this, a restart never started anything; Sergei pressed Start.
+
+- **No Critical findings.**
+  - Explicit stops hold. Pause, Stop and Cancel start each record "user", and nothing they stopped comes back after a restart.
+  - Safety holds (disk full, working-file hold, destination review) stay held.
+  - The new table is additive and idempotent, and 0.28.12 ignores it.
+  - The restore can't crash startup or start a second worker.
+- **Four Majors.**
+  - Two concern the first launch of the version that ships this branch: it can start automatic processing by itself (R-M1), and that start can be the first run of the NAS backlog that ad28ff9 re-opened (R-M2).
+  - One is a rollback hole (R-M3).
+  - One is release hygiene: the commit breaks two existing tests, so a build of this branch fails its full-suite entry check until they are updated (R-M4).
+- **Product note for Jane.** This reverses a written rule. The Brief says "Server restart never starts an automatic run: Start resumes saved work." (`Docs/BooksArranger_Brief.md:489`). Sergei chose to ship the commit, so the code is now the rule, but the Brief still states the old one (R-m4).
+
+### Focus questions — answers
+
+1. **Does work Sergei paused stay paused? Yes, within this version. Does it ever auto-start something he stopped? Nothing he explicitly stopped. It does start work he left paused under 0.28.12 (R-M1), and after a rollback it can start a queue he paused (R-M3).**
+   - **Pause audiobook jobs:** `merge.pause_work` clears the intent and records "user" in one transaction (`merge_service.py:924`). The startup test's `user` subtest pins this; the `nopauseclr` mutation fails it.
+   - **Pause while automatic processing runs:** the endpoint now calls `automatic.pause_jobs`, which runs `stop_work(origin='user')`, then `_pause_stopped`, then `merge.pause()`. Same result as above.
+   - **Stop, Cancel start, or Pause while a restored start is still pending:** `_cancel_restart` clears `restart_paused` and records "user" (`automatic_processing.py:458`, `:510`, `:526`).
+     - Probe P2: a restored start is pending on a scan, then Stop. Result: `restart_paused=0`, origin user, pending start gone, and the next launch does not restore.
+     - This is correct, but no test pins it (the `nocancel` mutation passes everything; see R-m2).
+   - **Safety holds:** `_hold_queue` clears the intent and records "interrupted", and automatic restore refuses on a jobs "interrupted". The `hold` subtest pins this; the `oldhold` mutation fails it.
+   - **`stop_work` with no origin:** before any check, the origin is set to closing (after `close()`), interrupted (a forced safety stop) or user (the Stop button) (`automatic_processing.py:504`). So `close()` after a Quit keeps the restart flag, and the Stop button counts as Sergei's. Probe P1 confirmed both.
+   - **What restarts by itself:** a queue that was running when the app closed, updated or crashed, and an automatic run stopped by Quit, update or a crash. A Windows restart counts, because session end is a Quit.
+2. **DB migration (`audiobook_run_intent`).**
+   - **Idempotent:** `CREATE TABLE IF NOT EXISTS` plus `INSERT OR IGNORE` of one row, inside AudioJobs' existing construction transaction.
+   - **Upgrade inference:** it reads `running` rows before `_recover` resets them, and sets 1 only when no jobs pause is saved. The 0.28.12 "Restart to update" path records "update", so it infers 0.
+   - **Safe on the live catalog:** one tiny table, and no existing rows are rewritten. The `restart_paused` column already existed.
+   - **Rollback to 0.28.12 is safe to open.** 0.28.12 never reads the table, and every whole-schema check in the tree is a subset check (for example `desktop_catalog.py:41`).
+   - **Coming back after a rollback is not safe.** 0.28.12 never writes the row, so a stale `active=1` survives the round trip, and the next upgrade resumes a queue Sergei paused under 0.28.12 (R-M3).
+   - **Automatic processing gets no migration at all:** legacy `restart_paused=1` rows and legacy "closing"/"update" pauses take on the new meaning (R-M1).
+3. **Transactions and locks in start and cancel-restart.**
+   - **`start()`:** the run update and the attribution clear are now one transaction, which is good. The continue path lost `_update`'s busy retry (`sqlite_retry.transaction`). It is now a plain `connect()`, as the new-run INSERT already was (R-m1).
+   - **`stop_work`:** `restart_paused` is written in the same guarded update as Stopping (`AND state='Running'`), so a worker that already wrote Paused is never overwritten. If a Quit loses that race, the run is left at `restart_paused=0`, and init's `elif` then sets it from the "closing" attribution on the next launch.
+   - **`cancel_start` / `_cancel_restart`:** one transaction under `self.lock`. If the attribution write fails, the flag clear rolls back with it.
+   - **New `with _BULK_LOCK, connect(...)` blocks** (`merge_service.py:985`, `:1037`) do catalog I/O under the global lock, which is not re-entrant.
+     - No re-entry path found: `allow()`, `_start_allowed` and `pause_state` take no merge lock. This matches the existing `_authorize_automatic_cleanup` pattern.
+     - A busy catalog can hold `_BULK_LOCK` for up to the 10 s busy timeout, and Pause waits behind it (R-m1).
+4. **`_restore_saved_work` at startup.**
+   - **Crash:** no new path. `restore()` runs inside `try/except Exception`. The `retained_runtime()` call before it is outside the try, but `_start_background()` makes the same call one line earlier, so the exposure is not new (R-m5).
+   - **Double start:** no. The loader calls the restore once.
+     - The queue keeps one worker: `_thread.is_alive()` and the `_resuming` token, both checked under `jobs._lock`.
+     - Automatic `start()` checks its own thread under `self.lock`.
+     - A press that races the restore gets "busy" and is kept (`start_when_settled`).
+     - A Pause or Quit that races the restore wins, through the start generation (`_start_allowed`), the `self.closing` check and `_server_closing()`.
+   - **NAS reclassification (ad28ff9):** no race. `_reclassify_remote_provider_holds` runs inside `CleanupJobs.__init__`, during MergeService construction on the same loader thread, before `_restore_saved_work`. The order is fixed, and that order is the problem: the restore can be the first start of the re-opened NAS backlog (R-M2, probe P5).
+5. **Error swallowing.**
+   - `_restore_saved_work` prints any failure to stderr only, and the page shows Paused with no reason. That is the safe direction (nothing starts), but Sergei can't see it (R-m5).
+   - `restore_work_after_restart` drops "closing"/"stale" refusals, which is correct. It records any other refusal through `_record_start_failure`, which is good. Exceptions other than `StartRefused` reach the print above.
+   - The opposite problem also exists: `_hold_queue` now writes to the catalog between `_stop.set()` and the safety callback. If that write fails, the error escapes and `on_working_hold`/`on_space_hold` is skipped (R-m1).
+
+### New findings
+
+- **[Major] R-M1 — The first launch of the version that ships this branch can start automatic processing by itself, from a state that 0.28.x meant as "wait for Start".** Code: `automatic_processing.py:117-126` (init) with `:420-433` (`restore_after_restart`).
+  - The jobs side infers intent on upgrade only from a running job with no saved pause. Automatic processing gets no such rule, so two legacy states take on the new meaning:
+    1. A run that 0.28.12 left Paused by Quit or by Restart to update (attribution "closing"/"update", `restart_paused=0`). The new init sets `restart_paused=1`, and the restore starts the run. **Probe P3** confirms this. It includes the very "Restart to update" that installs this release, if automatic processing is running when Sergei clicks it.
+    2. A run that 0.28.12 marked restart-paused after a crash (`restart_paused=1`, "Paused after server restart — start to continue saved work"). It is restored as it is. **Probe P4** confirms this.
+  - In both cases Sergei may have looked at "Paused" for several sessions and chosen not to press Start. 0.28.12's contract told him nothing would start without that press.
+  - Neither case is a stop he made. A run he stopped records "user" and is never restored.
+  - **Fix:** a one-time upgrade step that mirrors the jobs rule. On the first launch with the new table, clear legacy `restart_paused` on Paused runs, and skip the "closing/update" `elif` unless the run was Running/Stopping at that launch. Or Sergei decides this is what he wants, and the release note says so.
+- **[Major] R-M2 — The startup restore removes the human Start in front of the re-opened NAS backlog.**
+  - Code: `merge_service.py:1025-1040`. `_resume_guarded` runs every `waiting`/`paused` cleanup before the queue.
+  - Three paths reach it:
+    - the jobs restore (`merge_service.py:976`);
+    - the restored automatic worker's `_resume_queue` (`automatic_processing.py:661-666`);
+    - each later approval's `resume(recheck=False)`.
+  - ad28ff9 turns held NAS cleanups into ordinary paused cleanups at construction, to run "on the next Start or Resume". Until now, every start traced back to a press. With this commit, the app's own launch is one.
+  - **Probe P5:** saved jobs intent, one unfinished job and one paused cleanup. The startup restore called `CleanupJobs.resume` with the jobs handoff, with no press.
+  - **When it fires on the first launch:** in R-M1's automatic cases, or after a 0.28.12 crash mid-conversion (a running row with no saved pause gives intent 1). After that, it fires after any restart with saved intent, including a Windows restart.
+  - **Why it is not Critical:** the deletions are the reviewed NAS path. `run()` repeats every check, and the recovery copies are kept. Only the trigger changed.
+  - **What it changes:** advisory 2 of re-review 2 said "Before the first post-update Start on the held NAS backlog, run one Restore on a private Z: fixture". That can no longer wait for Sergei's first Start. Two ways out:
+    - run that check before Sergei installs a build of this branch;
+    - or have Ender keep the restore away from cleanups: the queue restarts, and cleanups wait for a press. This is a product call for Sergei.
+- **[Major] R-M3 — After a rollback to 0.28.12 and back, a queue Sergei paused restarts by itself.** Code: `merge_service.py:976-999` (`restore_work_after_restart` checks only `jobs_active`), `pause_state.py:23-38`.
+  - 0.28.12 records a user Pause in `pause_attribution`, but never touches `audiobook_run_intent`. A row left at 1 by this version survives the round trip.
+  - **Probes P6 / P6b:** `active=1` plus a saved "user" jobs pause. The startup restore started the cleanup backlog (P6). Without a backlog, it started the queue worker (P6b).
+  - Automatic restore already refuses on a "user" jobs pause (`automatic_processing.py:430`); the jobs path does not.
+  - **Fix (one line):** in `restore_work_after_restart`, return when `pause_state.read(db,'jobs')` has origin "user" or "interrupted". Add a test.
+- **[Major] R-M4 — The commit breaks two existing tests, so a build of this branch fails its full-suite entry check.** Both pass on 01a1901 and fail on 9522858, in the same export and environment:
+  - `test_backend_242.PauseAndMembershipTests.test_cancel_reports_whether_any_pending_start_existed` errors with `AttributeError: 'AutomaticProcessing' object has no attribute 'database'`. The test builds the object with `__new__`, and `cancel_start` now reads the run row.
+  - `test_merge_http.MergeHTTPTests.test_automatic_controls_draft_token_shape_and_scanner_owner` fails. It expects `/api/audiobook/pause` to call `automatic.stop()`, which now calls `automatic.pause_jobs` (a Mock attribute) instead.
+  - Both are stale fixtures for intended changes, not product bugs. The fix is test-only and needs no re-review. The commit message says "Tests cover automatic restore and startup loading", but these two existing tests fail on it.
+
+- **[Minor] R-m1 — New catalog writes on stop and start paths have no busy retry.**
+  - **`_hold_queue`** (`audio_jobs.py:1238`) writes between `_stop.set()` and `on_working_hold`/`on_space_hold`. Before, nothing there could fail.
+    - A busy or full catalog skips the callback, so automatic processing is not force-stopped.
+    - When the write fails inside `_work_attempt`'s `finally` (`:1579`), the new error also replaces the original one.
+    - The outer `_work` handler catches the error and calls `_hold_queue` again, so one 5 s busy spell is survived. Two in a row are not.
+    - Disk full (ENOSPC) is exactly when a write can fail: the merge-cache sits next to the catalog.
+  - **`_save_run_intent(True)`** adds a write to every queue start, under `jobs._lock`, with a 5 s timeout and no retry. A busy catalog now fails a Start with a raw sqlite error instead of starting.
+  - **`start()`'s continue path** lost `_update`'s retry.
+  - **Fix:** call the safety callback first and make the record best-effort (log on failure), or use `sqlite_retry.transaction`, as `_update` does in automatic processing.
+- **[Minor] R-m2 — Two of the new guards are untested.** Two mutations pass all of `test_automatic_processing`, `test_startup_loading` and `test_backend_242`, apart from the R-M4 error, which fails in every tree:
+  - `nocancel`: the user's Stop/Pause no longer cancels a Paused restart run. Probe P2 shows the current code is right, but nothing pins it.
+  - `nojobattr`: automatic restore no longer refuses on a "user"/"interrupted" jobs pause.
+  - Also untested: R-M1's legacy states, and that the restore reaches cleanups (R-M2).
+- **[Minor] R-m3 — A restore that finds nothing to do leaves the intent at 1.** A Quit during the last book drains without clearing it: `_work` clears the intent only on an empty queue with no stop or drain. This is harmless until pending work appears that no press started. Clear the intent in `restore_work_after_restart` when there is nothing to resume.
+- **[Minor] R-m4 — Doc/code drift.**
+  - `Docs/BooksArranger_Brief.md:489`, "Server restart never starts an automatic run: Start resumes saved work.", is now false.
+  - `audio_jobs.py:566` and `:1562` set the row reason "Interrupted book restarts on explicit resume". The book now restarts by itself when an intent is saved.
+  - No CHANGELOG entry describes the new behaviour yet.
+- **[Minor] R-m5 — Restore failures are invisible.**
+  - `_restore_saved_work` prints to stderr only. The page shows "Paused." with the previous session's attribution.
+  - Nothing starts, so this is safe. But Sergei can't tell a refused restore from a deliberate pause.
+  - Also: the non-deferred `BrowserServer` path (`web_server.py:279`) never restores. No app uses that path today.
+- **[Minor] R-m6 — After Resume, "Paused by you." stays on screen while cleanup owns the start.**
+  - `_authorize_automatic_cleanup` now clears the jobs attribution only when `jobs._stop` is clear (`merge_service.py:960`).
+  - After a user Pause, `_stop` stays set until the queue worker starts. So while a Resume is in its cleanup phase, the toolbar still reads "Paused by you." (`web/app.js:672`). For as long as that attribution stays, an automatic run paused by Quit will not restore.
+  - This affects the display and restore eligibility only. Confirm the intent of the guard with Ender.
+
+### 01a1901 — safety floor and a light read (ships in 0.28.13)
+
+This commit ships in 0.28.13, so the verdict below has to cover it. Files: `desktop/folder-picker.js`, `desktop/preload.js`, `web/app.js`, two test files and the Brief. No Critical finding and no safety-floor violation:
+- **No new IPC channel.** `preload.js` adds one string field (`remembered`) to two existing channels. The sender is still checked as the app window (`sender(event) !== 'app'`).
+- **The main process only runs `stat` on that folder.** The path must be in drive or UNC form, with no control characters and at most 1000 characters, and the check is bounded at 1.5 s. No write, no delete, no shell.
+- **A UNC path reaching the main process is not new:** the renderer already passed `defaultPath` straight to the Windows dialog before this commit.
+- **Main-process errors cannot crash the shell.** Bad or missing values fall back to Windows' default folder. Anything that throws inside `ipcMain.handle` rejects that one invoke, and `picking` is reset in `finally`.
+- **Renderer side (`web/app.js`).** Every localStorage read and write is in try/catch. Only folder strings of at most 1000 characters are stored, in the Electron profile. A failure there leaves the picker at its default.
+
+Not done: a line-by-line review, and running its tests (`desktop-folder-picker.test.mjs`, `test_picker_memory_frontend.js`). The candidate's full-suite entry check runs those tests.
+
+### Targeted test spot-check
+
+How the tests were run:
+- Private exports of 9522858 (`cur`) and 01a1901 (`base`), made with git archive with Docs excluded, under `WIP/Books Arranger/scratch/s9r/`.
+- A private TEMP and BOOKS_QA_FIXTURE_ROOT under the same entry.
+- A 590 s limit and one process per module.
+- The working tree was never touched.
+
+| Module | cur (9522858) | base (01a1901) | Same failing set |
+|---|---|---|---|
+| test_automatic_processing | OK, 72 | OK, 70 | n/a: the 2 new tests pass |
+| test_startup_loading | 14, 1 F | 13, 1 F | yes. The failure is `ColdServePendingPageTests.test_real_page_failure_…` ("Safe removal of …web-instance.json could not be verified"), environmental. The new test passes |
+| test_backend_242 | 29, 1 E | OK | **no (R-M4)** |
+| test_merge_http | 24, 1 F | OK | **no (R-M4)** |
+| test_attempt_working_lifecycle | 39, 4 F / 10 E | same | yes ("Exact file removal requires one admitted native catalog owner") |
+| test_attention_actions | 22, 1 F | same | yes |
+| test_working_lifecycle | 8, 2 F | same | yes |
+| test_blocked_retry, test_desktop_update, test_sqlite_busy, test_start_over, test_working_precision | OK (21, 27, 16, 32, 18) | not run | n/a |
+
+Mutations: each was applied by a script that requires its replacement to match exactly once. Each was run against test_automatic_processing, test_startup_loading and test_backend_242.
+
+| Mutation | Change | Caught by |
+|---|---|---|
+| nopauseclr | user Pause no longer clears the intent | startup test, `origin='user'` |
+| oldhold | `_hold_queue` back to a bare `_stop.set()` | startup test, `origin='hold'` |
+| nocancel | user Stop/Pause no longer cancels a Paused restart run | **nothing** (R-m2) |
+| nojobattr | automatic restore ignores a user/interrupted jobs pause | **nothing** (R-m2) |
+
+### Probes (reviewer-only, private fixtures, removed after the run)
+
+| Probe | Setup | Result |
+|---|---|---|
+| P1 | Automatic run stopped by Quit (origin closing), now Paused; then `close()` with no origin | `close()` returns normally. `restart_paused` stays 1, origin closing. The next launch restores. |
+| P2 | Restored start pending on a scan, then the Stop endpoint (`automatic.stop()`) | Pending start ended; `restart_paused=0`, origin user. The next launch does not restore. |
+| P3 | 0.28.12 state: run Paused, origin "closing", `restart_paused=0` | First launch: restore True, worker started (R-M1). |
+| P4 | 0.28.12 state: run Paused after a crash, `restart_paused=1`, origin "interrupted" | First launch: restore True, worker started (R-M1). |
+| P5 | Real MergeService and BrowserServer: intent 1, one pending job, one paused cleanup (cleanup resume stubbed) | The startup restore called `CleanupJobs.resume` with the jobs handoff, with no press (R-M2). |
+| P6 / P6b | Leftover intent 1, plus a saved "user" jobs pause (what 0.28.12 records) | The restore started the cleanup (P6) and, without a backlog, the queue worker (P6b) (R-M3). |
+
+### Status of this section's findings
+
+All of R-M1 to R-M4 and R-m1 to R-m6 are **open on `feature/restart-intent`**, for the next version. None of them is in 0.28.13. Before that branch merges:
+1. Update the two stale tests (R-M4).
+2. Add the one-line guard and its test (R-M3).
+3. Get Sergei's answers on R-M1 (should the first launch pick up a run 0.28.12 left paused?) and R-M2 (should a restart restart cleanups, including NAS removal?).
+4. Rewrite the Brief rule at `:489` (R-m4).
+5. Ask Senua to re-review the branch's delta.
+
+### Verdict (v0.28.13)
+
+**0.28.13 is v0.28.12 (bce9e94) .. 55b98aa.** Every commit in it was checked as follows:
+
+| Commit | What it is | How it was checked |
+|---|---|---|
+| bce9e94 | docs only | no code |
+| ad28ff9 | NAS delete, retry of held NAS cleanups, Restore over SMB | first review, re-review 1 and re-review 2 above. The commit matches the reviewed tree: test_nas_source_removal.py has 745 lines and 35 tests, and native_io.py, source_cleanup.py and runtime_file_disposition.py are unchanged since |
+| 01a1901 | picker remembers its last folder | safety floor and a light read (above) |
+| 9522858 + 0125c57 | restart-intent work, then its revert | revert verified: `git diff 01a1901 0125c57 -- . ':!Docs'` is empty. 0125c57 touches exactly 9522858's 7 files, +20 / -259, the inverse of 9522858's +259 / -20 |
+| 55b98aa | version bump | only the `version` fields of package.json and package-lock.json, 0.28.12 to 0.28.13 |
+
+Totals for 0.28.13:
+- **Critical:** 0. The safety floor is intact.
+- **Major:** 0 open. The NAS review's M1 and M2 are closed. R-M1 to R-M4 do not ship.
+- **Minor:** 7 open, all from the NAS review: m2, m4, m5 (wider), m6 (partly), m8, m10 (partly) and m11. R-m1 to R-m6 do not ship.
+
+**Verdict:** RELEASE CLEAR
+
+Advisory for 0.28.13: re-review 2's advisory stands as written. With the restart work out, only Sergei's own Start or Resume runs the re-opened NAS backlog. So "before the first post-update Start, run one Restore on a private Z: fixture" still works, and writing on Z: needs his go-ahead.
