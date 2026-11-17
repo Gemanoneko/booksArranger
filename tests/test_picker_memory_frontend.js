@@ -99,6 +99,25 @@ const last=()=>requests.at(-1);
   assert.deepEqual(last(),['files',{remembered:''}]);
   storageBroken=false;
   assert.deepEqual(places(),{source:folder});
+  // Futaba O-r2-3: Files mode pre-ticks Light novel for files from a Light Novels folder, as Folder mode does; files from
+  // an ordinary folder are not ticked. O-r2-4: Save As then starts in Audiobooks Sorted\Light Novels, with Audiobooks
+  // Sorted as the shell's fallback while Light Novels does not exist yet.
+  run('state={...(state || {}),audiobook_output_root:"Z:\\\\Audiobooks Sorted",source_roots:["Z:\\\\Audiobooks"]}');
+  const novel='Z:\\Audiobooks\\Light Novels\\Ayatsuji Yukito\\Иная';
+  click('manual-new');await flush();
+  pickKind('files');filesAnswer=tracksIn;
+  await click('manual-files-choose');await flush();
+  assert.equal(get('manual-meta-light_novel').checked,false,'positive control: an ordinary folder is not ticked');
+  click('manual-new');await flush();
+  pickKind('files');filesAnswer=[novel+'\\01.mp3',novel+'\\02.mp3'];
+  await click('manual-files-choose');await flush();
+  assert.equal(get('manual-meta-light_novel').checked,true,'files from Light Novels are ticked');
+  assert.equal(get('manual-light-help').hidden,false,'with "Light novel from the folder name."');
+  outputAnswer=null;
+  await click('manual-output-choose');await flush();
+  assert.equal(last()[0],'output');
+  assert.equal(last()[1].defaultPath,'Z:\\Audiobooks Sorted\\Light Novels\\Сборник 2.m4b');
+  assert.equal(last()[1].remembered,'Z:\\Audiobooks Sorted','the shell falls back to the library, never Windows\' own start');
   console.log('Picker memory renderer passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

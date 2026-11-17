@@ -5627,7 +5627,9 @@ function setupManualConversion(){
       if(element.value!==value)element.value=value;
     }
     $('manual-meta-anthology').checked=data.metadata.anthology===true;
-    if(data.source && data.metadata.light_novel===undefined && data.metadata.anthology!==true && lightFolder(editor.path || data.source?.path || data.source)){data.metadata.light_novel=true;editor.lightFromFolder=true;}
+    // Files mode has no source path: the first chosen file's folders count (Futaba O-r2-3: only Folder mode pre-ticked).
+    const lightSource=data.source?.kind==='files'?(included(data)[0]?.path || data.tracks[0]?.path):(editor.path || data.source?.path);
+    if(data.source && data.metadata.light_novel===undefined && data.metadata.anthology!==true && lightFolder(lightSource)){data.metadata.light_novel=true;editor.lightFromFolder=true;}
     if($('manual-meta-light_novel'))$('manual-meta-light_novel').checked=data.metadata.light_novel===true;
     if($('manual-light-help'))$('manual-light-help').hidden=!(editor.lightFromFolder && data.metadata.light_novel===true);
     line('manual-match',editor.matchNote);
@@ -5836,8 +5838,11 @@ function setupManualConversion(){
       const desktop=globalThis.booksDesktop;
       if(kind==='output'){
         // 0.29.0 item 4: while Light novel is ticked and no export path is chosen yet, Save As opens in Audiobooks Sorted\Light Novels.
-        const lightStart=!editor.data.destination && editor.data.metadata?.light_novel===true && state?.audiobook_output_root?String(state.audiobook_output_root).replace(/[\\/]+$/,'')+'\\Light Novels\\'+suggestedName(editor):'';
-        const path=await desktop.chooseAudiobookOutput({defaultPath:editor.data.destination || lightStart,suggestedName:suggestedName(editor),remembered:lightStart?'':pickerPlace('export')});
+        const outputRoot=state?.audiobook_output_root?String(state.audiobook_output_root).replace(/[\\/]+$/,''):'';
+        const lightStart=!editor.data.destination && editor.data.metadata?.light_novel===true && outputRoot?outputRoot+'\\Light Novels\\'+suggestedName(editor):'';
+        // Futaba O-r2-4: before his first light novel, Light Novels does not exist yet; Save As then opens in Audiobooks
+        // Sorted itself (the shell's fallback folder), never at Windows' own start. Nothing is created here.
+        const path=await desktop.chooseAudiobookOutput({defaultPath:editor.data.destination || lightStart,suggestedName:suggestedName(editor),remembered:lightStart?outputRoot:pickerPlace('export')});
         if(path){editor.data.destination=path;editor.outputNote='';rememberPickerPlace('export',folderOf(path));changed(editor);}
       }else if(kind==='folder'){
         const path=await desktop.chooseFolder({title:'Choose a source folder',defaultPath:editor.path,buttonLabel:'Choose folder',remembered:pickerPlace('source')});

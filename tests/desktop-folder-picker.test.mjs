@@ -265,6 +265,21 @@ test('Save As keeps the export path the draft already has; if its folder is gone
   assert.equal(offline.options().defaultPath, 'Мой сборник.m4b');
 });
 
+test('Save As for a light novel opens in Light Novels, or in Audiobooks Sorted until that folder exists (Futaba O-r2-4)', async () => {
+  // The page sends Audiobooks Sorted\Light Novels\<name> with Audiobooks Sorted as the fallback folder (web/app.js).
+  const SORTED = 'Z:\\Audiobooks Sorted', start = SORTED + '\\Light Novels\\Иная.m4b';
+  const request = { defaultPath: start, suggestedName: 'Иная.m4b', remembered: SORTED };
+  const there = remembering({ folders: [SORTED + '\\Light Novels', SORTED] });
+  await there.handlers['books:choose-audiobook-output']({}, request);
+  assert.equal(there.options().defaultPath, start);
+  const first = remembering({ folders: [SORTED] });
+  await first.handlers['books:choose-audiobook-output']({}, request);
+  assert.equal(first.options().defaultPath, SORTED + '\\Иная.m4b', 'his first light novel starts in his library, nothing created');
+  const away = remembering({ folders: [] });
+  await away.handlers['books:choose-audiobook-output']({}, request);
+  assert.equal(away.options().defaultPath, 'Иная.m4b', 'drive away: Windows\' own start, with the name');
+});
+
 test('existingFolder reads the real filesystem: a Unicode folder is found, a removed folder and a file are not', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'books-picker-'));
   try {
