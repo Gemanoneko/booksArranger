@@ -362,6 +362,36 @@ class BrowserServer(ThreadingHTTPServer):
             self._check_sources(merge, **options)
         threading.Thread(target=run, name='books-source-check', daemon=True).start()
 
+    RETURN_RETRY_SECONDS = 15
+    RETURN_TRIES = 8
+
+    def _check_sources_returned(self, roots):
+        """A root that answers again (Check again, the page's 30 s re-check): its pass, on its own thread, waiting for a pass
+        already running (wait=True). Senua D-m3: the route records the root as answering before this pass runs, so the page
+        stops asking about it; a pass that was skipped (a scan ran, then was stopped: a stopped scan runs no pass) or failed
+        is tried again, RETURN_RETRY_SECONDS apart, at most RETURN_TRIES more times, until a pass has checked the root
+        (this one, or a finished scan's). Never while a scan runs: its own end runs a pass for every root."""
+        merge = self.merge
+        asked = time.monotonic()
+
+        def checked():
+            stamps = merge.__dict__.get('_source_checked_at') or {}
+            import source_presence
+            return all(stamps.get(source_presence._key(root), float('-inf')) >= asked for root in roots)
+
+        def run():
+            for attempt in range(self.RETURN_TRIES + 1):
+                if attempt:
+                    time.sleep(self.RETURN_RETRY_SECONDS)
+                if self.closing or checked():
+                    return
+                worker = getattr(self.inventory, 'worker', None)
+                if worker is not None and worker.is_alive():
+                    continue
+                if self._check_sources(merge, roots=roots, wait=True) is not None:
+                    return
+        threading.Thread(target=run, name='books-source-check', daemon=True).start()
+
     def _check_sources_after_scan(self):
         """0.29.0 (Judy section 0): a finished scan runs the check pass. The scan calls this on its own worker thread, and a
         pass refuses while a scan worker is alive (check_sources), so the pass waits for that worker to end (Futaba M-2,
@@ -1067,7 +1097,7 @@ class Handler(BaseHTTPRequestHandler):
                 merge._source_report=dict(report,roots=[dict(known.get(source_presence._key(s['path']),{}),**s) for s in states])
             # No report yet (the start pass did not run): every root that answers is the one that came back.
             back=[s['path'] for s in states if source_presence.answers(s) and (known is None or not source_presence.answers(known.get(source_presence._key(s['path']))))]
-            if back:self.server._check_sources_later(roots=back,wait=True)
+            if back:self.server._check_sources_returned(back)  # retried if skipped or failed (Senua D-m3)
             self.response(200,{'source_check':merge.source_check_view() if hasattr(merge,'source_check_view') else None,'checking':bool(back)});return
         if path=='/api/sources/rows':
             # Window focus (Judy section 0): stale rows only, at most once per 30 s; never books, never folders (Futaba m-1).

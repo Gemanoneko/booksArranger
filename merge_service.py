@@ -1059,7 +1059,7 @@ class MergeService:
         try:
             worker=getattr(self.inventory,'worker',None)
             if worker is not None and worker.is_alive():return None
-            self._source_checking=True;started=int(time.time()*1000)
+            self._source_checking=True;started=int(time.time()*1000);begun=time.monotonic()
             # 0.29.0 item 7 (Judy section 7): the jobs panel names the pass while it runs ("Checking source folders",
             # "120 of 412 books"), then "Removing source folders" while watched folders are checked.
             self._source_progress={'phase':'checking','done':0,'total':0,'started':started}
@@ -1073,6 +1073,10 @@ class MergeService:
         previous=self.__dict__.get('_source_report') or {'roots':[],'removed':[],'folders':[],'files':[],'cleared':[]}
         states={source_presence._key(r['path']):r for r in previous['roots']}
         for state in report['roots']:states[source_presence._key(state['path'])]=state
+        # Senua D-m3: when each root was last checked by a pass that ran to its end (its start time: a pass that began
+        # before a drive came back proves nothing about it). A drive-return pass that was skipped is tried again until then.
+        checked=self.__dict__.setdefault('_source_checked_at',{})
+        for state in report['roots']:checked[source_presence._key(state['path'])]=begun
         def once(before,now,key):
             seen={item[key] for item in before}
             return before+[item for item in now if item[key] not in seen and not seen.add(item[key])]

@@ -70,22 +70,64 @@ class MergeHTTPTests(unittest.TestCase):
         self.inventory.source_roots=lambda library:['Z:\\Audiobooks','Y:\\Books']
         self.merge.source_check_view=Mock(return_value={'roots':[]})
         probed=[{'path':'Z:\\Audiobooks','available':False,'empty':False},{'path':'Y:\\Books','available':True,'empty':False}]
-        self.server._check_sources_later.reset_mock()
+        self.server._check_sources_later.reset_mock();self.server._check_sources_returned=Mock()
         with patch.object(source_presence,'probe_roots',return_value=probed):
             status,body=self.call('/api/sources/check',{})[:2]
         self.assertEqual((status,body['checking']),(200,True))
-        self.server._check_sources_later.assert_called_once_with(roots=['Y:\\Books'],wait=True)  # no report yet: every answering root
+        self.server._check_sources_returned.assert_called_once_with(['Y:\\Books'])  # no report yet: every answering root
         # Senua S-M3: with a report, only a root that did not answer then and answers now is checked (folders included);
         # a root that answered all along is left alone, every 30 s.
         self.merge._source_report={'roots':[{'path':'Z:\\Audiobooks','available':False,'empty':False},{'path':'Y:\\Books','available':True,'empty':False}],'removed':[],'folders':[],'cleared':[]}
-        self.server._check_sources_later.reset_mock()
+        self.server._check_sources_returned.reset_mock()
         with patch.object(source_presence,'probe_roots',return_value=probed):
             self.assertFalse(self.call('/api/sources/check',{})[1]['checking'])
-        self.server._check_sources_later.assert_not_called()
+        self.server._check_sources_returned.assert_not_called();self.server._check_sources_later.assert_not_called()
         both=[dict(probed[0],available=True),probed[1]]
         with patch.object(source_presence,'probe_roots',return_value=both):
             self.assertTrue(self.call('/api/sources/check',{})[1]['checking'])
-        self.server._check_sources_later.assert_called_once_with(roots=['Z:\\Audiobooks'],wait=True)
+        self.server._check_sources_returned.assert_called_once_with(['Z:\\Audiobooks'])
+
+    def test_a_skipped_or_failed_drive_return_pass_is_tried_again_d_m3(self):
+        # Senua D-m3: the route records the root as answering before its pass runs, so the page stops asking. A pass that
+        # was skipped (a scan ran and was then stopped: no pass at its end) or that failed is tried again until a pass has
+        # checked the root; a finished scan's own pass counts. Never while a scan runs; at most RETURN_TRIES more tries.
+        import time
+        import source_presence
+        import web_server
+        class Now:  # the pass thread, run in place
+            def __init__(self,target,name,daemon):self.target=target
+            def start(self):self.target()
+        waits=[];then={'after':lambda:None}
+        clock=SimpleNamespace(monotonic=time.monotonic,sleep=lambda seconds:(waits.append(seconds),then['after']()))
+        root='Z:\\Audiobooks';report={'roots':[{'path':root,'available':True,'empty':False}]}
+        def returned():
+            self.server._check_sources_returned([root])
+            return self.merge.check_sources.call_count
+        with patch.object(web_server,'threading',SimpleNamespace(Thread=Now)),patch.object(web_server,'time',clock), \
+             patch('storage_relocation_native.retained_runtime',return_value=False),patch('sys.stderr'):
+            self.merge.check_sources=Mock(return_value=report)
+            self.assertEqual(returned(),1,'positive control: one pass, nothing tried again')
+            self.merge.check_sources.assert_called_once_with(roots=[root],wait=True)  # waits for a pass already running
+            self.merge.check_sources=Mock(side_effect=[None,report])
+            self.assertEqual(returned(),2,'skipped (a scan was alive at its start): tried again')
+            self.assertEqual(waits[-1],web_server.BrowserServer.RETURN_RETRY_SECONDS)
+            self.merge.check_sources=Mock(side_effect=[RuntimeError('catalog busy'),report])
+            self.assertEqual(returned(),2,'failed: tried again')
+            # A scan runs: no try while it does. It ends with its own pass (that root checked after the request): done.
+            alive=[True];self.inventory.worker=SimpleNamespace(is_alive=lambda:alive[0])
+            def scan_ends():
+                alive[0]=False;self.merge._source_checked_at={source_presence._key(root):time.monotonic()}
+            then['after']=scan_ends;self.merge.check_sources=Mock(return_value=report)
+            self.assertEqual(returned(),0,'the finished scan\'s pass checked the root')
+            # The scan is stopped instead (no pass at its end): the retry runs the pass.
+            alive[0]=True;self.merge._source_checked_at={}
+            then['after']=lambda:alive.__setitem__(0,False)
+            self.assertEqual(returned(),1)
+            # Bounded: a pass that never runs is tried RETURN_TRIES more times, then left to the next scan or launch.
+            then['after']=lambda:None;self.merge.check_sources=Mock(return_value=None)
+            self.assertEqual(returned(),web_server.BrowserServer.RETURN_TRIES+1)
+            self.server.closing=True;self.merge.check_sources=Mock(return_value=None)
+            self.assertEqual(returned(),0,'nothing once the app closes')
 
     def test_automatic_controls_draft_token_shape_and_scanner_owner(self):
         automatic=SimpleNamespace(status=Mock(return_value={'state':'Idle'}),start=Mock(return_value={'state':'Running'}),stop=Mock(return_value={'state':'Stopping'}),pause_jobs=Mock(return_value={'state':'Stopping'}),draft=Mock(return_value={'protected':True}))

@@ -241,6 +241,10 @@ class RealServerTests(ApproveFixture):
             self.assertEqual(counts, {}, 'scan %d: the gone book left Needs attention' % scan)
             self.assertEqual((check['removed'], [item['title'] for item in check['removed_list']]), (1, ['Утро снайпера']), 'scan %d: listed once in Details' % scan)
         self.assertEqual(self.service.needs_you(), {})
+        # Senua D-m3: the scan's pass records when it checked the root, so a drive-return pass waiting to be tried again
+        # knows the root is done.
+        import source_presence
+        self.assertIn(source_presence._key(str(self.audio)), self.service.__dict__.get('_source_checked_at', {}))
 
     def scan(self):
         status, answer = self.call('/api/scan/start', {'library': 'Audiobooks'})
