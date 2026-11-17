@@ -241,6 +241,44 @@ class RealServerTests(ApproveFixture):
             self.assertEqual((check['removed'], [item['title'] for item in check['removed_list']]), (1, ['Утро снайпера']), 'scan %d: listed once in Details' % scan)
         self.assertEqual(self.service.needs_you(), {})
 
+    def scan(self):
+        status, answer = self.call('/api/scan/start', {'library': 'Audiobooks'})
+        self.assertIn(status, (200, 202), answer)
+        self.settle()
+
+    def test_a_book_whose_files_come_back_unchanged_is_listed_again_d_m1(self):
+        # Senua D-M1 (probe P5): the folder goes away and comes back with the same bytes and times (a Recycle Bin restore,
+        # a folder moved back, a short drive drop): the real scanner hashes it to the fingerprint the pass recorded, so only
+        # the pass testing the paths again can list it again. Both ways: no scan while it was away, and a scan meanwhile.
+        [tone(self.audio / 'Unsorted' / 'Утро снайпера' / ('%02d.mp3' % n), self.cover, album='Утро снайпера', title='Глава %d' % n, track='%d/2' % n) for n in (1, 2)]
+        self.serve()
+        row = self.row('Утро снайпера')
+        self.service.automatic._record(row, 'Held', dict(self.research(row), reasons=['fixture hold']))
+        self.assertEqual(self.attention()[0], {'title_author': 1}, 'positive control: listed in Needs attention')
+        folder, away = self.audio / 'Unsorted' / 'Утро снайпера', self.base / 'away'
+        # 1. Away, the pass runs with no scan (a launch while the drive was briefly gone); back; the next scan's pass.
+        os.rename(folder, away)
+        self.assertEqual([item['id'] for item in self.service.check_sources()['removed']], [row['id']])
+        self.assertEqual(self.attention()[0], {}, 'off the list while the files are away')
+        os.rename(away, folder)
+        self.scan()
+        self.assertEqual(self.row('Утро снайпера')['fingerprint'], row['fingerprint'], 'the scan sees the very same files')
+        self.assertEqual(self.attention()[0], {'title_author': 1}, 'listed again after the files came back unchanged')
+        # 2. Away across a scan (its files marked missing), back, the next scan's pass.
+        os.rename(folder, away)
+        self.scan()
+        self.assertEqual(self.attention()[0], {}, 'the scan and its pass take it off')
+        os.rename(away, folder)
+        self.scan()
+        # The two scans moved its revision, so automatic processing researches it again first: not hidden, still checking.
+        self.assertEqual(self.service.todo_coverage(), {'listed': 0, 'still_checking': 1, 'removed': 0, 'with_job': 0})
+        again = self.row('Утро снайпера')
+        self.assertEqual(again['fingerprint'], row['fingerprint'])
+        self.service.automatic._record(again, 'Held', dict(self.research(again), reasons=['fixture hold']))
+        self.assertEqual(self.attention()[0], {'title_author': 1}, 'listed again once the files are back')
+        _counts, state = self.attention()
+        self.assertEqual(state['source_check']['removed'], 0, 'a book listed again is not counted as removed')
+
 
 if __name__ == '__main__':
     unittest.main()

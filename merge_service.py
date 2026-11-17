@@ -1075,7 +1075,8 @@ class MergeService:
         def once(before,now,key):
             seen={item[key] for item in before}
             return before+[item for item in now if item[key] not in seen and not seen.add(item[key])]
-        self._source_report={'roots':list(states.values()),'removed':once(previous['removed'],report['removed'],'id'),
+        back={item['id'] for item in report.get('returned') or []}  # Senua D-M1: listed again, so no longer "removed"
+        self._source_report={'roots':list(states.values()),'removed':[item for item in once(previous['removed'],report['removed'],'id') if item['id'] not in back],
                              'folders':once(previous['folders'],report['folders'],'path'),'files':previous.get('files',[])+report.get('files',[]),'cleared':report['cleared']}
         self.invalidate_status() if hasattr(self,'invalidate_status') else None
         return report

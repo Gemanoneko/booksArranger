@@ -178,6 +178,47 @@ class CheckPassTests(unittest.TestCase):
         with connect(self.database) as db:
             self.assertEqual(db.execute('SELECT count(*) FROM source_gone').fetchone()[0], 0, 'a record that no longer applies goes')
 
+    def test_files_back_unchanged_list_the_book_again_d_m1(self):
+        # Senua D-M1: files restored unchanged (Recycle Bin, a folder moved back, a short drive drop) hash to the recorded
+        # fingerprint, so only testing the paths again can tell "back" from "still gone".
+        folder, paths = self.book('back', ['01.mp3', '02.mp3'])
+        away = Path(self.temp.name) / 'away'
+        os.rename(folder, away)
+        self.assertEqual([item['id'] for item in self.run_pass()['removed']], ['back'])
+        self.assertEqual(self.dismissed(), {'back'})
+        self.assertEqual(self.run_pass()['returned'], [], 'positive control: still away, still off')
+        os.rename(away, folder)  # back with the same bytes: the catalog row and its fingerprint never changed
+        report = self.run_pass()
+        self.assertEqual((report['returned'], report['removed']), ([{'id': 'back', 'title': 'back'}], []))
+        with connect(self.database) as db:
+            self.assertEqual((source_presence.still_gone(db), db.execute('SELECT count(*) FROM source_gone').fetchone()[0]), (set(), 0))
+        self.assertEqual(self.dismissed(), set(), 'the Remove-from-list record the pass wrote goes with it')
+        self.assertEqual(self.run_pass()['returned'], [], 'released once')
+
+    def test_files_back_after_a_scan_marked_them_missing_list_the_book_again_d_m1(self):
+        folder, paths = self.book('scanned', ['01.mp3'])
+        os.remove(paths[0])
+        self.assertEqual([item['id'] for item in self.run_pass()['removed']], ['scanned'])
+        with connect(self.database) as db:
+            missing = {'title_clue': 'scanned', 'members': [{'path': paths[0], 'missing': True}]}
+            db.execute("UPDATE book_groups SET fingerprint='fp-missing',revision=2,evidence=? WHERE id='scanned'", (json.dumps(missing),))
+        Path(paths[0]).write_bytes(b'x' * 10)  # back before the next scan: the catalog still says missing
+        self.assertEqual([item['id'] for item in self.run_pass()['returned']], ['scanned'])
+        self.assertEqual(self.dismissed(), set())
+        # A record dropped because a scan saw a file again takes its Remove-from-list record too, so files that later
+        # hash to the old fingerprint again are not hidden by it.
+        _folder, paths = self.book('partial', ['01.mp3', '02.mp3'])
+        for path in paths:
+            os.remove(path)
+        self.run_pass()
+        with connect(self.database) as db:
+            back = {'title_clue': 'partial', 'members': [{'path': paths[0], 'missing': False}, {'path': paths[1], 'missing': True}]}
+            db.execute("UPDATE book_groups SET fingerprint='fp-partial',revision=2,evidence=? WHERE id='partial'", (json.dumps(back),))
+        Path(paths[0]).write_bytes(b'x' * 10)  # the file that scan found
+        self.assertEqual(self.dismissed(), {'partial'}, 'positive control: the pass wrote its Remove-from-list record')
+        self.run_pass()
+        self.assertEqual(self.dismissed(), set())
+
     def test_needs_attention_drops_a_gone_book_from_every_group_at_once_s_m2(self):
         # Senua S-M2 (probe P2): a Name taken book whose files Sergei deleted since the last scan left the list only after
         # a scan marked them missing; the pass's record now takes it off every group at once.

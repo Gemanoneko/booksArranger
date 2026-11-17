@@ -6,9 +6,13 @@ Sergei 2026-11-17: "If the folder/file is not available, I probably deleted it. 
   list at once: the pass writes the record Remove from list writes (attention_dismissals) and its own (source_gone, the
   book's fingerprint and file paths). Needs attention skips a book in source_gone in every group, not only Missing files
   (Senua S-M2), while the catalog still says the same: the same fingerprint (no scan since), or, after a scan, the same
-  files all marked missing (the scan changes the fingerprint; Futaba M-3: the book came back). A scan that finds any of
-  its files again lists it again. No file is touched. A book with any audiobook job (queued, converting, converted,
-  stopped) is never a candidate: a converted book stays in the converted list. No mass-drop guard (Sergei: no).
+  files all marked missing (the scan changes the fingerprint; Futaba M-3: the book came back). Every pass tests the files
+  of these books again (their root answering) and lists again any book with a file back, also when the files came back
+  unchanged (a Recycle Bin restore, a folder moved back, a short drive drop at startup; Senua D-M1: their fingerprint is
+  the recorded one, so the catalog alone cannot tell "still gone" from "back"); a scan that finds a file again does too.
+  Listing again drops both records the pass wrote. No file is touched. A book with any audiobook job (queued,
+  converting, converted, stopped) is never a candidate: a converted book stays in the converted list. No mass-drop
+  guard (Sergei: no).
 - Unavailable root: a root that does not answer, or answers with an empty listing (a failed mount until proven otherwise),
   keeps every book and folder under it. The page says so per root; the pass runs for it once it answers again.
 - Item 5: the source folders of the books this pass found gone are watched. A watched folder with no audio left loses
@@ -126,22 +130,38 @@ def still_gone(db, have=None):
     return found
 
 
+def _forget(db, ids):
+    """The book is listed again: its source_gone record goes, and so does the Remove-from-list record the pass wrote with
+    it (same book, the fingerprint the record keeps). Left behind, that record hid the book again once its files hashed
+    to that fingerprint again (Senua D-M1)."""
+    have = _tables(db)
+    if 'source_gone' not in have:
+        return
+    for identity in ids:
+        row = db.execute('SELECT fingerprint FROM source_gone WHERE candidate_id=?', (identity,)).fetchone()
+        if row is None:
+            continue
+        if 'attention_dismissals' in have:
+            db.execute('DELETE FROM attention_dismissals WHERE candidate_id=? AND fingerprint=?', (identity, row[0]))
+        db.execute('DELETE FROM source_gone WHERE candidate_id=?', (identity,))
+
+
 def _books(database, roots):
     """[{id, revision, fingerprint, root, title, paths}] of every current book under these roots, with the set of books
     that have an audiobook job, the (candidate, fingerprint) pairs already off the list, and the books an earlier pass
     found gone that are still gone (still_gone). A source_gone record that no longer applies (a scan found the files
-    again) is dropped here, so it never hides the book later."""
+    again) is dropped here with its Remove-from-list record (_forget), so neither hides the book later."""
     with connect(database) as db:
         have = _tables(db)
         if 'book_groups' not in have:
             return [], set(), set(), set()
         jobs = {r[0] for r in db.execute("SELECT DISTINCT json_extract(manifest,'$.candidate_id') FROM audio_jobs")} if 'audio_jobs' in have else set()
-        dismissed = {(r[0], r[1]) for r in db.execute('SELECT candidate_id,fingerprint FROM attention_dismissals')} if 'attention_dismissals' in have else set()
         gone = still_gone(db, have)
         if 'source_gone' in have:
-            stale = [(r[0],) for r in db.execute('SELECT candidate_id FROM source_gone') if r[0] not in gone]
+            stale = [r[0] for r in db.execute('SELECT candidate_id FROM source_gone') if r[0] not in gone]
             if stale:
-                db.executemany('DELETE FROM source_gone WHERE candidate_id=?', stale)
+                _forget(db, stale)
+        dismissed = {(r[0], r[1]) for r in db.execute('SELECT candidate_id,fingerprint FROM attention_dismissals')} if 'attention_dismissals' in have else set()
         rows = db.execute('SELECT id,revision,fingerprint,root,scope,evidence FROM book_groups WHERE superseded=0').fetchall()
     keys = {_key(root): str(root) for root in roots}
     books = []
@@ -322,7 +342,7 @@ def run(merge, *, roots=None, folders=True, books=True, progress=None, now=None,
     inventory = merge.inventory
     database = inventory.database
     now = time.time() if now is None else now
-    report = {'roots': [], 'removed': [], 'folders': [], 'files': [], 'cleared': []}
+    report = {'roots': [], 'removed': [], 'returned': [], 'folders': [], 'files': [], 'cleared': []}
     if not books:
         report['cleared'] = recheck_rows(merge, [], {})
         return report
@@ -330,6 +350,21 @@ def run(merge, *, roots=None, folders=True, books=True, progress=None, now=None,
     chosen = [r for r in every if roots is None or _key(r) in {_key(x) for x in roots}]
     states = {_key(s['path']): s for s in probe_roots(chosen)}
     listed, jobs, dismissed, gone = _books(database, chosen)
+    # Senua D-M1: the books an earlier pass took off are tested again, their root answering; any with a file back is listed
+    # again. Files that came back unchanged hash to the recorded fingerprint, so nothing else would ever release them. A
+    # file must be seen to exist: a path that cannot be read now keeps the book off (the safe direction).
+    back = []
+    for book in listed:
+        if stop is not None and stop.is_set():
+            break
+        if book['id'] in gone and answers(states.get(_key(book['root']))) and not _gone(book['paths']):
+            back.append(book)
+    if back:
+        with connect(database) as db:
+            _forget(db, [book['id'] for book in back])
+        gone -= {book['id'] for book in back}
+        dismissed -= {(book['id'], book['fingerprint']) for book in back}
+        report['returned'] = [{'id': book['id'], 'title': book['title']} for book in back]
     listed = [b for b in listed if b['id'] not in gone]  # already off the list: never reported twice (Futaba M-3)
     counts = {}
     for book in listed:
@@ -371,7 +406,7 @@ def run(merge, *, roots=None, folders=True, books=True, progress=None, now=None,
                     gone_folders.append((folder, book['root'], book['id']))
         if gone_folders:
             _watch(database, gone_folders)
-    if report['removed']:
+    if report['removed'] or report['returned']:
         merge.__dict__.pop('_needs_cache', None)
     if folders:
         if on_phase is not None:
