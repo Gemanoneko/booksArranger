@@ -291,6 +291,30 @@ class CheckPassTests(unittest.TestCase):
                                                             source_presence.folder_verdict(str(other))[0]), (False, ['info.txt']))
         self.assertTrue(other.is_dir(), 'a folder that is no longer the one listed is never removed')
 
+    def test_a_leftover_named_after_the_first_check_is_kept_d_m1(self):
+        # Senua D-m1: an Approve whose job names a leftover lands while the folder's leftovers are going. The guards run
+        # again just before each file goes, so that file stays, and so does the folder.
+        folder, paths = self.book('racing', ['01.mp3'])
+        os.remove(paths[0])
+        for name in ('a-notes.txt', 'cover.jpg'):
+            (folder / name).write_bytes(b'left')
+        self.run_pass(now=0.0)
+        real, named = source_presence.remove_leftover, []
+
+        def remove(path, root, size):
+            if not named:  # the first file goes; meanwhile a new job names the other one
+                other = next(str(p) for p in folder.iterdir() if str(p) != str(path))
+                named.append(other)
+                with connect(self.database) as db:
+                    db.execute("INSERT INTO audio_jobs(job_id,manifest,state) VALUES('job-new',?,'pending')", (json.dumps({'candidate_id': 'new', 'sources': [], 'cover': {'path': other}}),))
+            return real(path, root, size)
+        with patch.object(source_presence, 'remove_leftover', side_effect=remove):
+            report = self.run_pass(now=10_000.0)
+        self.assertEqual(report['folders'], [])
+        self.assertTrue(Path(named[0]).exists(), 'the file the new job names is kept')
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(len(report['files']), 1, 'the file that went before is reported (S-m7)')
+
     def test_files_removed_from_a_folder_that_stayed_are_reported_s_m7(self):
         # Senua S-m7: the leftovers went, the folder's rmdir then failed: the line must not say "No files were touched".
         folder, paths = self.book('stays', ['01.mp3'])

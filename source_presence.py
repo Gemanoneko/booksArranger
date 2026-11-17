@@ -332,6 +332,10 @@ def _remove_folder(database, watched, leftovers):
         return False, []
     removed = []
     for item in leftovers:
+        # Senua D-m1: the guards again just before each file goes, as the reviewed cleanup does (storage_cleanup, per item):
+        # an Approve that names a leftover after the check above keeps it, and the folder.
+        if _held(database, folder, watched['candidate_id'], [item]):
+            return False, removed
         row = _record(database, folder, watched['candidate_id'], item, 'removing')
         failed = remove_leftover(item['path'], root, item['size'])
         _record(database, folder, watched['candidate_id'], row, 'not_removed' if failed else 'removed', failed or '')
