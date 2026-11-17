@@ -403,13 +403,7 @@ def run(merge, *, roots=None, folders=True, books=True, progress=None, now=None,
     if found:
         # Senua S-m4: a drive that stopped answering during the pass makes every later book look gone. Its root is probed
         # again; a root that does not answer now decides nothing (its books stay, its state says so).
-        again = {_key(s['path']): s for s in probe_roots(sorted({b['root'] for b in found}))}
-        for key, state in again.items():
-            if not answers(state):
-                states[key] = state
-                for entry in report['roots']:
-                    if _key(entry['path']) == key:
-                        entry.update(available=state['available'], empty=state['empty'])
+        _probe_again({b['root'] for b in found}, states, report)
         gone_folders = []
         for book in found:
             if not answers(states.get(_key(book['root']))):
@@ -426,13 +420,14 @@ def run(merge, *, roots=None, folders=True, books=True, progress=None, now=None,
     if folders:
         if on_phase is not None:
             on_phase('folders')  # the jobs panel's "Removing source folders" row (Judy section 7)
+        vanished = []
         for watched in _watched(database):
             if stop is not None and stop.is_set():
                 break
             if not answers(states.get(_key(watched['root']))):
                 continue  # its root is not checked now or does not answer: nothing is decided
             if not os.path.isdir(watched['folder']):
-                _set_watch(database, watched['folder'], drop=True)
+                vanished.append(watched)  # dropped below, once its root still answers
                 continue
             verdict = folder_verdict(watched['folder'])
             if verdict is None:
@@ -454,8 +449,26 @@ def run(merge, *, roots=None, folders=True, books=True, progress=None, now=None,
                 report['folders'].append({'path': watched['folder'], 'files': [item['name'] for item in leftovers]})
             elif removed:
                 report['files'].append({'path': watched['folder'], 'files': removed})  # the folder stayed; these files went
+        if vanished:
+            # Senua D-m4: a folder that looks gone because its drive left after the probe would never be watched again (its
+            # book is already recorded) and its leftovers would stay. Its root is probed again first, as for books (S-m4);
+            # a root that does not answer now keeps every watch under it.
+            _probe_again({w['root'] for w in vanished}, states, report)
+            for watched in vanished:
+                if answers(states.get(_key(watched['root']))):
+                    _set_watch(database, watched['folder'], drop=True)
     report['cleared'] = recheck_rows(merge, chosen, states)
     return report
+
+
+def _probe_again(roots, states, report):
+    """The roots probed once more; a root that does not answer now is recorded so in states and the report's roots."""
+    for key, state in {_key(s['path']): s for s in probe_roots(sorted(roots))}.items():
+        if not answers(state):
+            states[key] = state
+            for entry in report['roots']:
+                if _key(entry['path']) == key:
+                    entry.update(available=state['available'], empty=state['empty'])
 
 
 def recheck_rows(merge, roots, states):

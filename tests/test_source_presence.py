@@ -1,6 +1,7 @@
 """0.29.0 items 1, 3 and 5: the check pass (source_presence) on private fixture folders only. No library, no Z:."""
 import json
 import os
+import shutil
 from pathlib import Path
 import sqlite3
 import sys
@@ -314,6 +315,35 @@ class CheckPassTests(unittest.TestCase):
         self.assertTrue(Path(named[0]).exists(), 'the file the new job names is kept')
         self.assertTrue(folder.is_dir())
         self.assertEqual(len(report['files']), 1, 'the file that went before is reported (S-m7)')
+
+    def test_a_folder_whose_drive_left_mid_phase_stays_watched_d_m4(self):
+        # Senua D-m4: the folder phase dropped a watch whenever the folder looked absent, also when the drive had left after
+        # the probe; that folder was then never checked again. Now its root is probed again first.
+        folder, paths = self.book('watched', ['01.mp3'])
+        os.remove(paths[0])
+        (folder / 'cover.jpg').write_bytes(b'jpg')
+        self.run_pass(now=0.0)
+        watched = lambda: [w['folder'] for w in source_presence._watched(str(self.database))]
+        self.assertEqual(watched(), [str(folder)])
+        away = Path(self.temp.name) / 'away'
+        os.rename(folder, away)  # the folder cannot be seen, as when the drive drops after the probe
+        answering = {'path': str(self.root), 'available': True, 'empty': False}
+        gone = {'path': str(self.root), 'available': False, 'empty': False}
+        with patch.object(source_presence, 'probe_roots', side_effect=[[answering], [gone]]):
+            report = self.run_pass(now=10_000.0)
+        self.assertEqual(watched(), [str(folder)], 'the root no longer answers: the watch stays')
+        self.assertEqual(report['roots'][0]['available'], False, 'and the page is told so')
+        os.rename(away, folder)
+        self.assertEqual([item['path'] for item in self.run_pass(now=20_000.0)['folders']], [str(folder)], 'checked again once it is back')
+        # Positive control: a folder really gone while its root answers loses its watch.
+        other, other_paths = self.book('deleted', ['01.mp3'])
+        os.remove(other_paths[0])
+        (other / 'cover.jpg').write_bytes(b'jpg')
+        self.run_pass(now=30_000.0)
+        shutil.rmtree(other)
+        with patch.object(source_presence, 'probe_roots', side_effect=[[answering], [answering]]):
+            self.run_pass(now=40_000.0)
+        self.assertEqual(watched(), [])
 
     def test_files_removed_from_a_folder_that_stayed_are_reported_s_m7(self):
         # Senua S-m7: the leftovers went, the folder's rmdir then failed: the line must not say "No files were touched".
