@@ -140,7 +140,7 @@
           <label>Ebook main genre<select name="genre"><option value="">Choose if this is an ebook</option></select></label>
           <label>Nonfiction topic<input name="topic" maxlength="1000"></label>
         </div>
-        <div class="audio-only names-input"><label class="check"><input name="anthology" type="checkbox" title="Name this collection with its cycle or universe and Short Stories." aria-describedby="anthology-help">Short-story collection</label><p id="anthology-help" class="field-help">Place it directly in its applicable cycle or universe folder.</p></div>
+        <div class="audio-only names-input"><label class="check"><input name="anthology" type="checkbox" title="Name this collection with its cycle or universe and Short Stories." aria-describedby="anthology-help">Short-story collection</label><p id="anthology-help" class="field-help">Place it directly in its applicable cycle or universe folder.</p></div><div class="audio-only names-input"><label class="check"><input name="light_novel" type="checkbox" title="File this book under Light Novels, then by author and series as usual. Use it for light novels.">Light novel</label></div>
         <label class="check"><input name="multi_author" type="checkbox" title="Place this cycle at the library root, or inside its shared universe." aria-describedby="multi-author-help">Cycle has multiple authors</label>
         <p id="multi-author-help" class="field-help">Cycle author scope controls the folder; author metadata remains separate.</p>
         <p class="field-help" id="routing-preview-label">Output folder</p><p id="routing-preview-path" class="path" aria-live="polite"></p>
@@ -194,6 +194,7 @@
             <label>Genre<input id="manual-meta-genre" type="text" maxlength="1000" title="Enter the genre for the audiobook tag."></label>
           </div>
           <label class="check"><input id="manual-meta-anthology" type="checkbox" title="Mark this audiobook as a collection of short stories.">Short-story collection</label>
+          <label class="check"><input id="manual-meta-light_novel" type="checkbox" title="Mark this audiobook as a light novel. Save As starts in Audiobooks Sorted\Light Novels.">Light novel</label><p id="manual-light-help" class="field-help" hidden>Light novel from the folder name.</p>
           <p id="manual-match" class="field-help" role="status"></p>
         </fieldset>
         <section id="manual-export" aria-labelledby="manual-export-title" hidden>

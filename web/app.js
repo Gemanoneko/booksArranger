@@ -56,7 +56,7 @@ function queueRoutingPreview(){
   if(routingPreviewTimer!==null)clearTimeout(routingPreviewTimer);const seq=++routingPreviewSequence;
   if(selectedRow?.kind!=='candidate')return;
   const original=selectedRow,library=selectedLibrary,review={};for(const field of fields)review[field]=form.elements.namedItem(field).value.trim();
-  review.multi_author=form.elements.namedItem('multi_author').checked;review.anthology=form.elements.namedItem('anthology').checked;
+  review.multi_author=form.elements.namedItem('multi_author').checked;review.anthology=form.elements.namedItem('anthology').checked;review.light_novel=!!form.elements.namedItem('light_novel')?.checked && !review.anthology;
   $('routing-preview-label').textContent='Unsaved destination preview';$('routing-preview-path').textContent='Checking destination…';
   routingPreviewTimer=setTimeout(async()=>{routingPreviewTimer=null;try{const response=await request('/api/candidate/routing-preview',{library,id:original.id,revision:original.revision,review});if(seq!==routingPreviewSequence||selectedRow?.id!==original.id)return;$('routing-preview-path').textContent=response.preview?.path || response.preview?.reason || 'Confirm the cycle or universe';}catch(error){if(seq===routingPreviewSequence&&selectedRow?.id===original.id)$('routing-preview-path').textContent=error.message;}},250);
 }
@@ -359,7 +359,7 @@ async function loadDecisionPanel(row,library){
       const p=d.payload,has=domain=>d.active_effects.includes(domain);
       if((has('review') || has('file_review')) && !dirty && editSeq===seq && !form.contains?.(document.activeElement)){
         const values={...p.review};if(p.names_row_only)for(const key of NAME_INPUTS)delete values[key];
-        for(const key of [...fields,'multi_author','anthology'])if(Object.hasOwn(values,key)){const input=form.elements.namedItem(key);if(['multi_author','anthology'].includes(key))input.checked=!!values[key];else input.value=values[key] ?? '';}
+        for(const key of [...fields,'multi_author','anthology','light_novel'])if(Object.hasOwn(values,key)){const input=form.elements.namedItem(key);if(!input)continue;if(['multi_author','anthology','light_novel'].includes(key))input.checked=!!values[key];else input.value=values[key] ?? '';}
         reviewRow={...selectedRow,review:{...selectedRow.review,...values}};
         setText('review-note',decisionLine({body:{action:d.action,payload:d.payload},title:decisionName(row)},d));
       }
@@ -776,7 +776,7 @@ function select(row, reset) {
     const kept=metaSaveResult?.retained,values=kept && kept.path===row.path && kept.revision===row.revision && kept.fingerprint===row.fingerprint && kept.size===row.size && kept.modified===row.modified && kept.seq===editSeq?{...row.review,...kept.values}:row.review;
     for (const field of fields) form.elements.namedItem(field).value=values?.[field] || (field==='original_language' ? 'Unknown' : '');
     form.elements.namedItem('multi_author').checked=!!values?.multi_author;
-    form.elements.namedItem('anthology').checked=!!values?.anthology;
+    form.elements.namedItem('anthology').checked=!!values?.anthology;if(form.elements.namedItem('light_novel'))form.elements.namedItem('light_novel').checked=values?.light_novel===true;
     dirty=false;
     reviewRow={...row,review:values};
     $('review-note').textContent=kept?metaSaveResult.text:'Saved only in the local catalog.';
@@ -1133,6 +1133,8 @@ function metadataReview(){
   const review={};for(const field of fields)review[field]=locked && NAME_INPUTS.includes(field)?String(saved[field] ?? '').trim():form.elements.namedItem(field).value.trim();
   review.multi_author=form.elements.namedItem('multi_author').checked;
   review.anthology=['audiobook','candidate'].includes(selectedRow.kind) && (locked?saved.anthology===true:form.elements.namedItem('anthology').checked);
+  // 0.29.0 item 4: Light novel beside Short-story collection; one or the other. The key is sent only when ticked.
+  if(['audiobook','candidate'].includes(selectedRow.kind) && !review.anthology && (locked?saved.light_novel===true:!!form.elements.namedItem('light_novel')?.checked))review.light_novel=true;else delete review.light_novel;
   if(!['audiobook','candidate'].includes(selectedRow.kind)){review.canonical_author='';review.narrator='';}
   return review;
 }
@@ -1504,7 +1506,7 @@ function updateActivity(view,now){
 let candidateFailure=null;
 async function candidateRequest(route,extra={},options={}){candidateFailure=null;if(busy || ended || selectedRow?.kind!=='candidate')return;const original=selectedRow,library=selectedLibrary;busy=true;controls();try{const result=await request(route,{library,id:original.id,revision:original.revision,...extra});if(selectedRow?.id===original.id && selectedLibrary===library && result.row){const updated={...result.row,path:result.row.id,kind:'candidate',library};if(dirty)reviewRow=updated;select(updated,false);}lastKey=null;await refresh(true);return result;}catch(error){candidateFailure=error;if(!options.quiet)message(error.message);}finally{busy=false;controls();}}
 let metadataChoiceState=null;
-function metadataChoiceValues(){const values={};for(const name of fields)values[name]=form.elements.namedItem(name)?.value || '';for(const name of ['multi_author','anthology'])values[name]=!!form.elements.namedItem(name)?.checked;return values;}
+function metadataChoiceValues(){const values={};for(const name of fields)values[name]=form.elements.namedItem(name)?.value || '';for(const name of ['multi_author','anthology','light_novel'])values[name]=!!form.elements.namedItem(name)?.checked;return values;}
 function metadataChoiceFieldLabel(field){return ({title:'Title',canonical_author:'Author',original_language:'Original language',series:'Cycle',number:'Number in cycle',universe:'Universe',genre:'Genre',topic:'Topic',narrator:'Reader / narrator'})[field] || field.replaceAll('_',' ');}
 function metadataChoiceDirtyReason(){
   const saved=metadataChoiceState;if(!saved)return '';
@@ -3924,10 +3926,12 @@ function confirmMoveBack(id){destConfirm.delete(id);const entry=destRows.get(id)
 // and approves. Values load when the editor opens (one read for one row). The draft lives in memory per book and survives
 // polls, paging and chip changes. Ruling 35: Save is accepted whatever is happening and queued when it must wait (the book
 // converting, loading); the row shows it with Cancel.
-const NAMES_FIELDS=['title','author','series','number','universe','collection'];
-const NAMES_LABELS={title:'Title',author:'Author',series:'Series',number:'Number',universe:'Universe',collection:'Collection of stories'};
+const NAMES_FIELDS=['title','author','series','number','universe','collection','light_novel'];
+const NAMES_BOOL=new Set(['collection','light_novel']);  // yes/no fields (0.29.0: Light novel beside Collection of stories)
+const NAMES_LABELS={title:'Title',author:'Author',series:'Series',number:'Number',universe:'Universe',collection:'Collection of stories',light_novel:'Light novel'};
 const NAMES_TIPS={series:'The series this book belongs to. Leave empty for a standalone book.',number:'The book\'s number in its series. Needed when a series is set.',
   universe:'The shared universe this book belongs to, such as Warhammer 40,000. Leave empty if none.',collection:'File this book under Сборники. Use it for story collections by several authors.',
+  light_novel:'File this book under Light Novels, then by author and series as usual. Use it for light novels.',
   title:'The title this book is filed under.',author:'The author this book is filed under. Leave empty to use Без автора.'};
 const NAMES_EDIT_TIP='Correct this book\'s title, author, series or universe. Nothing is converted or moved.';
 const NAMES_SAVE_TIP='Save these values and remember them for other scans of these files. Nothing is converted or moved.';
@@ -3937,7 +3941,7 @@ function namesOpen(id){return !!namesState.get(id)?.open;}
 function namesAny(){for(const value of namesState.values())if(value.open)return true;return false;}
 function namesDropped(id){namesState.delete(id);namesRows.delete(id);}
 function namesData(id){return namesState.get(id)?.data || null;}
-function namesProposal(id,field){const row=rows.find(row=>row.id===id),value=namesData(id)?.fields?.[field]?.proposal ?? (['series','number'].includes(field)?(row?.ask?.fields?.[field]?.proposal ?? row?.place?.[field]):undefined);return field==='collection'?value===true:typeof value==='string'?value:'';}
+function namesProposal(id,field){const row=rows.find(row=>row.id===id),value=namesData(id)?.fields?.[field]?.proposal ?? (['series','number'].includes(field)?(row?.ask?.fields?.[field]?.proposal ?? row?.place?.[field]):undefined);return NAMES_BOOL.has(field)?value===true:typeof value==='string'?value:'';}
 // The values shown: the draft over what the editor read; Title and Author of a question row are its ask draft (one draft).
 function namesValue(row,field){
   const state=namesState.get(row.id),draft=state?.draft || {};
@@ -3946,7 +3950,7 @@ function namesValue(row,field){
   if(Object.hasOwn(draft,field))return draft[field];
   return namesProposal(row.id,field);
 }
-function namesValues(row){const values={};for(const field of NAMES_FIELDS)values[field]=field==='collection'?namesValue(row,field)===true:String(namesValue(row,field) ?? '').trim();return values;}
+function namesValues(row){const values={};for(const field of NAMES_FIELDS)values[field]=NAMES_BOOL.has(field)?namesValue(row,field)===true:String(namesValue(row,field) ?? '').trim();return values;}
 // What Approve and its preview carry while the editor is open (the four fields beside Title and Author).
 function namesFor(row){
   if(!row)return null;
@@ -3955,20 +3959,21 @@ function namesFor(row){
     return series || number || typeof d.series==='string' || typeof d.number==='string'?{series,number}:null;
   }
   if(!namesOpen(row.id) || !namesData(row.id))return null;
-  const v=namesValues(row);return {series:v.series,number:v.number,universe:v.universe,collection:v.collection};
+  const v=namesValues(row);return {series:v.series,number:v.number,universe:v.universe,collection:v.collection,light_novel:v.light_novel};
 }
-function namesChanged(row){if(!namesData(row.id))return false;const v=namesValues(row);return NAMES_FIELDS.some(field=>field==='collection'?v[field]!==namesProposal(row.id,field):v[field]!==String(namesProposal(row.id,field)).trim());}
+function namesChanged(row){if(!namesData(row.id))return false;const v=namesValues(row);return NAMES_FIELDS.some(field=>NAMES_BOOL.has(field)?v[field]!==namesProposal(row.id,field):v[field]!==String(namesProposal(row.id,field)).trim());}
 // Why Save does nothing yet ('' when it works), Judy 1.6.
 function namesInert(row){return saveBlock(row).text;}  // 0.22.3: the cause the line under Save shows (Judy 3)
 // The Place line (Judy 2): a collection in a series, or a universe book; parts in order and only when set.
 function placeText(place){
   if(!place || typeof place!=='object')return '';
   const series=place.series && place.number?[`Series: ${place.series}`,`No. ${place.number}`]:[];
+  if(place.light_novel===true)return ['Light novel',...(place.universe?[`Universe: ${place.universe}`]:[]),...series].join(' · ');  // 0.29.0 item 4
   if(place.universe)return [`Universe: ${place.universe}`,...series].join(' · ');
   if(place.collection===true && series.length)return ['Collection',...series].join(' · ');
   return series.join(' · ');  // Judy 0.23.1 section 4.2, line 3: a plain series prints too
 }
-function enteredText(fields){const list=(Array.isArray(fields)?fields:[]).filter(field=>Object.hasOwn(NAMES_LABELS,field));return list.length?`Entered by you: ${list.map(field=>field==='collection'?'collection':field).join(', ')}.`:'';}
+function enteredText(fields){const list=(Array.isArray(fields)?fields:[]).filter(field=>Object.hasOwn(NAMES_LABELS,field));return list.length?`Entered by you: ${list.map(field=>field==='light_novel'?'light novel':field).join(', ')}.`:'';}
 // Edit names on the row (Judy 1.6): inert only while a retry, repair or delete is queued for it (one queued action per
 // row) and when no file is left. Ruling 35: a converting book is no reason (its Save waits for the conversion).
 function namesButtonInert(row){
@@ -4094,7 +4099,13 @@ function buildNamesBlock(row,td){
   }
   const check=node('label','','check ask-radio'),box2=node('input');box2.type='checkbox';box2.checked=namesValue(row,'collection')===true;box2.title=NAMES_TIPS.collection;box2.setAttribute('aria-label',NAMES_LABELS.collection+': '+askName(row));
   check.append(box2,node('span',NAMES_LABELS.collection));namesGuard(row,check);namesGuard(row,box2);entry.inputs.collection=box2;
-  box2.addEventListener('change',()=>namesChangedField(row,'collection',box2.checked));grid.append(check);
+  // 0.29.0 item 4 (Sergei: same logic as Short Stories, one or the other): Light novel, directly after Collection of stories.
+  const light=node('label','','check ask-radio'),box3=node('input');box3.type='checkbox';box3.checked=namesValue(row,'light_novel')===true;box3.title=NAMES_TIPS.light_novel;box3.setAttribute('aria-label',NAMES_LABELS.light_novel+': '+askName(row));
+  light.append(box3,node('span',NAMES_LABELS.light_novel));namesGuard(row,light);namesGuard(row,box3);entry.inputs.light_novel=box3;
+  const lightHelp=node('p','','field-help');lightHelp.hidden=!(box3.checked && data.fields?.light_novel?.basis==='folder_name');lightHelp.textContent='Light novel from the folder name.';
+  box2.addEventListener('change',()=>{if(box2.checked && box3.checked){box3.checked=false;namesChangedField(row,'light_novel',false);}namesChangedField(row,'collection',box2.checked);});
+  box3.addEventListener('change',()=>{if(box3.checked && box2.checked){box2.checked=false;namesChangedField(row,'collection',false);}lightHelp.hidden=true;namesChangedField(row,'light_novel',box3.checked);});
+  grid.append(check,light,lightHelp);
   box.append(grid,namesList(id,'series',data.series),namesList(id,'universes',data.universes));
   entry.scope=node('p','','field-help names-scope');box.append(entry.scope,place,entered);
   insert(box);
@@ -4110,7 +4121,7 @@ function buildNamesBlock(row,td){
   if(remembered.length){
     after.append(node('p','Remembered for this book','field-help ask-list-label'));
     for(const item of remembered){
-      const line=node('p','','field-help names-remembered'),label=NAMES_LABELS[item.field] || item.field,to=item.field==='collection'?(item.to==='true'?'Yes':'No'):item.to;
+      const line=node('p','','field-help names-remembered'),label=NAMES_LABELS[item.field] || item.field,to=NAMES_BOOL.has(item.field)?(item.to==='true'?'Yes':'No'):item.to;
       line.append(node('span',item.from?`${label}: «${item.from}» → «${to}»`:`${label}: «${to}»`));
       const forget=node('button','Forget','quiet row-retry');forget.type='button';forget.title='Take this correction back. Nothing is renamed or moved.';forget.setAttribute('aria-label',`Forget: ${label}: ${askName(row)}`);
       forget.addEventListener('click',event=>{event.stopPropagation();namesForget(id,item.id);});forget.addEventListener('keydown',event=>event.stopPropagation());
@@ -4383,7 +4394,7 @@ function renderNamesInputs(){
 }
 function factText(field,data){
   const value=data?.fields?.[field]?.proposal;
-  if(field==='collection')return value===true?'Yes':'No';
+  if(NAMES_BOOL.has(field))return value===true?'Yes':'No';
   if(field==='series'){const series=String(value || '').trim(),number=String(data?.fields?.number?.proposal || '').trim();return series?series+(number?` · No. ${number}`:''):'None';}
   if(field==='universe')return String(value || '').trim() || 'None';
   return String(value || '').trim();
@@ -5286,7 +5297,11 @@ function setupManualConversion(){
   if(!panel || !manualTab || !libraryTab || preEngine)return null;
   const base='/api/manual-conversion', list=$('manual-books');
   const textFields=['title','author','series','number','universe','collection','narrator','genre'];
-  const fields=[...textFields,'anthology'];
+  const fields=[...textFields,'anthology','light_novel'];
+  // 0.29.0 item 4: Light novel pre-ticks from a source folder named Light Novels or Ранобэ below the library root; his
+  // untick is kept with the draft and wins on reload. Save As then starts in Audiobooks Sorted\Light Novels.
+  function lightFolder(path){const roots=Array.isArray(state?.source_roots)?state.source_roots:[];const text=String(path || ''),root=roots.find(r=>text.toLowerCase().startsWith(String(r).toLowerCase().replace(/[\\/]+$/,'')+'\\'));
+    const rest=root?text.slice(String(root).replace(/[\\/]+$/,'').length+1):text.replace(/^[A-Za-z]:[\\/]*/,'');return rest.split(/[\\/]/).slice(0,-1).some(part=>['light novels','ранобэ'].includes(part.toLowerCase()));}
   const saved=new Map(), editors=new Map(), entries=new Map();
   const labels={draft:'Draft',queued:'Queued',running:'Converting',cleanup:'Source cleanup',failed:'Needs attention',converted:'Converted'};
   const timeout=30000;
@@ -5488,6 +5503,9 @@ function setupManualConversion(){
       if(element.value!==value)element.value=value;
     }
     $('manual-meta-anthology').checked=data.metadata.anthology===true;
+    if(data.source && data.metadata.light_novel===undefined && data.metadata.anthology!==true && lightFolder(editor.path || data.source?.path || data.source)){data.metadata.light_novel=true;editor.lightFromFolder=true;}
+    if($('manual-meta-light_novel'))$('manual-meta-light_novel').checked=data.metadata.light_novel===true;
+    if($('manual-light-help'))$('manual-light-help').hidden=!(editor.lightFromFolder && data.metadata.light_novel===true);
     line('manual-match',editor.matchNote);
     $('manual-export').hidden=!data.source;
     $('manual-output-choose').hidden=!editing;
@@ -5693,7 +5711,9 @@ function setupManualConversion(){
     try{
       const desktop=globalThis.booksDesktop;
       if(kind==='output'){
-        const path=await desktop.chooseAudiobookOutput({defaultPath:editor.data.destination,suggestedName:suggestedName(editor),remembered:pickerPlace('export')});
+        // 0.29.0 item 4: while Light novel is ticked and no export path is chosen yet, Save As opens in Audiobooks Sorted\Light Novels.
+        const lightStart=!editor.data.destination && editor.data.metadata?.light_novel===true && state?.audiobook_output_root?String(state.audiobook_output_root).replace(/[\\/]+$/,'')+'\\Light Novels\\'+suggestedName(editor):'';
+        const path=await desktop.chooseAudiobookOutput({defaultPath:editor.data.destination || lightStart,suggestedName:suggestedName(editor),remembered:lightStart?'':pickerPlace('export')});
         if(path){editor.data.destination=path;editor.outputNote='';rememberPickerPlace('export',folderOf(path));changed(editor);}
       }else if(kind==='folder'){
         const path=await desktop.chooseFolder({title:'Choose a source folder',defaultPath:editor.path,buttonLabel:'Choose folder',remembered:pickerPlace('source')});
@@ -5759,6 +5779,7 @@ function setupManualConversion(){
       if(body.metadata){
         for(const field of textFields)body.metadata[field]=String(body.metadata[field] ?? '').trim();
         body.metadata.anthology=body.metadata.anthology===true;
+        if(body.metadata.light_novel!==undefined)body.metadata.light_novel=body.metadata.light_novel===true && !body.metadata.anthology;
         body.metadata_touched=[...editor.touched].sort();
         if(editor.inspections.length)body.inspections=[...editor.inspections];
       }
@@ -5842,7 +5863,9 @@ function setupManualConversion(){
     element.addEventListener('input',()=>{
       if(!active)return;
       active.touched.add(field);
-      active.data.metadata[field]=field==='anthology'?element.checked:element.value;
+      active.data.metadata[field]=['anthology','light_novel'].includes(field)?element.checked:element.value;
+      if(field==='light_novel'){active.lightFromFolder=false;if(element.checked){active.data.metadata.anthology=false;active.touched.add('anthology');}}
+      if(field==='anthology' && element.checked && active.data.metadata.light_novel===true){active.data.metadata.light_novel=false;active.touched.add('light_novel');}
       changed(active);renderEditor();
     });
   }

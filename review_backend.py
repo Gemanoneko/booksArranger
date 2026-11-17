@@ -383,6 +383,8 @@ class CandidateReviewService:
                        'collection':review.get('anthology') is True or isinstance(facts,dict) and bool((facts.get('collection') or {}).get('kind'))}
                 for field in ('universe','series','number','collection'):
                     if field in saved:place[field]=saved[field] if field=='collection' else str(saved[field])
+                # 0.29.0 item 4: the Place line's "Light novel" lead, only when it is one (his saved value wins).
+                if saved.get('light_novel',review.get('light_novel') is True) is True:place['light_novel']=True
                 if not (place['series'] and place['number']):place['series']=place['number']=''
                 row['place']=place
                 row['entered']=entered_names.entered(saved)
@@ -584,7 +586,7 @@ class CandidateReviewService:
         with self.lock:
             row=self._row(library,id,revision)
             if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid preview metadata')
-            if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology'}:raise ValueError('Unknown preview field')
+            if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology','light_novel'}:raise ValueError('Unknown preview field')
             draft=copy.deepcopy(review)
             for field in TEXT_FIELDS:
                 value=draft.setdefault(field,'')
@@ -595,6 +597,9 @@ class CandidateReviewService:
                 for field in TEXT_FIELDS:
                     if field in ROW_NAME_FIELDS or not draft[field].strip():draft[field]=names.get(field) if isinstance(names.get(field),str) else ''
                 draft['anthology']=names.get('anthology') is True
+                if names.get('light_novel') is True:draft['light_novel']=True
+                else:draft.pop('light_novel',None)
+            if type(draft.get('light_novel',False)) is not bool:raise ValueError('Routing choices must be explicit booleans')
             draft['organization_policy']='books-hierarchy-v2'
             return propose(row['members'][0]['path'],self._output_root(row,draft,library),'audiobook',row['metadata'],draft,automatic_facts=facts if isinstance(names,dict) else self._context(row).get('metadata_facts'))
 
@@ -620,7 +625,11 @@ class CandidateReviewService:
             if automatic_pending is not None:
                 if not private or not approve or not isinstance(automatic_pending,dict) or set(automatic_pending)!={'matcher_version','work_id'} or not all(isinstance(v,str) and v for v in automatic_pending.values()):raise ValueError('Invalid private automatic approval checkpoint')
                 ctx['automatic_pending']=copy.deepcopy(automatic_pending)
-            if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology','organization_policy'}:raise ValueError('Unknown canonical metadata field')
+            if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology','light_novel','organization_policy'}:raise ValueError('Unknown canonical metadata field')
+            if 'light_novel' in review:
+                import light_novels
+                light_novels.check(review['light_novel'],review.get('anthology'))
+                if review['light_novel'] is False:review.pop('light_novel')  # the key is set only when True
             for field in TEXT_FIELDS:
                 value=review.setdefault(field,'')
                 if not isinstance(value,str) or len(value)>2000:raise ValueError('Canonical metadata fields must be bounded text')

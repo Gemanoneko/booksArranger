@@ -144,7 +144,7 @@ def _track_paths(tracks):
 
 
 def _metadata(values):
-    if not isinstance(values, dict) or set(values) - {*TEXT_FIELDS, 'anthology'}:
+    if not isinstance(values, dict) or set(values) - {*TEXT_FIELDS, 'anthology', 'light_novel'}:
         raise ValueError('Invalid manual metadata fields')
     result = {}
     for field in TEXT_FIELDS:
@@ -155,6 +155,11 @@ def _metadata(values):
     if type(values.get('anthology', False)) is not bool:
         raise ValueError('Invalid short-story collection choice')
     result['anthology'] = values.get('anthology', False)
+    # 0.29.0 item 4: Light novel, stored with the draft like Short stories; one or the other.
+    import light_novels
+    light_novels.check(values.get('light_novel', False), result['anthology'])
+    if 'light_novel' in values:
+        result['light_novel'] = values['light_novel']  # his untick is his value: it wins over the folder pre-tick on reload
     return result
 
 

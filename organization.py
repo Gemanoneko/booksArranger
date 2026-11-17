@@ -26,16 +26,27 @@ def _plan(output_root,review,*,collection_fallback='legacy',facts=None):
     title=text('title');author=text('author') or text('canonical_author')
     cycle=text('series');universe=text('universe');number=text('number')
     collection=review.get('anthology',False);multi=review.get('multi_author',False)
+    # 0.29.0 item 4 (Sergei 2026-11-17): a light novel files under Light Novels, then the usual hierarchy. Never both a
+    # light novel and a short-story collection (his answer 2). The key is absent on every older review (no change there).
+    light=review.get('light_novel',False)
+    if type(light) is not bool:raise ValueError('Routing choices must be explicit booleans')
+    if light and collection is True:
+        from light_novels import BOTH
+        raise ValueError(BOTH)
+    if light:
+        from light_novels import FOLDER
+        base=os.path.join(output_root,FOLDER)
+    else:base=output_root
     from shared_routing import resolve
     shared=resolve(review,facts)['multi_author_series']
     if type(collection)is not bool or type(multi)is not bool:raise ValueError('Routing choices must be explicit booleans')
     if not author:raise ValueError('Confirm the author credit')
     if not title and not (collection and (cycle or universe)):raise ValueError('Confirm the book title')
     if author==NO_AUTHOR and not collection:
-        destination=os.path.join(output_root,NO_AUTHOR,safe_name(title)+'.m4b')
+        destination=os.path.join(base,NO_AUTHOR,safe_name(title)+'.m4b')
         if len(destination)>240:raise ValueError('Verified metadata exceeds the supported Windows output path length')
         return {'policy_version':POLICY,'root':output_root,'path':destination,'relative_path':os.path.relpath(destination,output_root),
-                'accepted_routing':{'author':author,'cycle':'','universe':'','number':'','collection':False,'multi_author_cycle':False}}
+                'accepted_routing':{'author':author,'cycle':'','universe':'','number':'','collection':False,'multi_author_cycle':False,**({'light_novel':True} if light else {})}}
     if multi and not (cycle or universe or collection):raise ValueError('Confirm the cycle or universe')
     if collection and cycle and number and title and not universe and not multi:
         # 0.22.2 (Sergei 2026-10-26, «Протоколы SCP»; Brief: "Сборники/Series for a series of collections"): a collection
@@ -66,10 +77,10 @@ def _plan(output_root,review,*,collection_fallback='legacy',facts=None):
     else:
         if cycle and not number:raise ValueError('Confirm series position; do not invent a number')
         stem=' - '.join(safe_name(v) for v in ([cycle,number,title,author] if cycle else [title,author]))
-    destination=append_recording_suffix(os.path.join(output_root,*folders,stem+'.m4b'),review,facts)
+    destination=append_recording_suffix(os.path.join(base,*folders,stem+'.m4b'),review,facts)
     if len(destination)>240:raise ValueError('Verified metadata exceeds the supported Windows output path length')
     return {'policy_version':POLICY,'root':output_root,'path':destination,'relative_path':os.path.relpath(destination,output_root),
-            'accepted_routing':{'author':author,'cycle':cycle,'universe':universe,'number':number,'collection':collection,'multi_author_cycle':multi or shared}}
+            'accepted_routing':{'author':author,'cycle':cycle,'universe':universe,'number':number,'collection':collection,'multi_author_cycle':multi or shared,**({'light_novel':True} if light else {})}}
 
 
 def chosen_folder(planned,facts):

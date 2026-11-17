@@ -586,6 +586,23 @@ class PublicResearch:
         import local_identity
         siblings,index=self._siblings(row,root)
         return local_identity.identify(row,root,siblings,index['readers'] if index else None,index,self.rules()),index
+    def light_novel(self,result,row,root,typed=None):
+        """0.29.0 item 4: the review files under Light Novels when Sergei says so (typed now, else saved in Edit names), else
+        when the book's files are in a source folder named Light Novels or Ранобэ. A collection is never one. The key is set
+        only when True, so an older review reads exactly as before."""
+        review=result.get('review') if isinstance(result,dict) else None
+        if not isinstance(review,dict):return result
+        import light_novels,entered_names
+        value=bool(typed['light_novel']) if isinstance(typed,dict) and 'light_novel' in typed else None
+        database=getattr(getattr(self,'client',None),'database',None)
+        if value is None and database:
+            saved=entered_names.book_values(database,row)
+            if 'light_novel' in saved:value=bool(saved['light_novel'])
+        if value is None:value=light_novels.from_row(row,root)
+        if review.get('anthology') is True:value=False
+        if value:review['light_novel']=True
+        else:review.pop('light_novel',None)
+        return result
     def names_read(self,row,root,local=None):
         """(read, scope, record): the values the app reads for the editor (Judy 0.22.2 section 1) before Sergei's corrections,
         where a name fix from this book reaches (entered_names.scope_of), and the identity record. A collection's author
@@ -595,8 +612,10 @@ class PublicResearch:
         shown=local_identity.shown(record)
         series=record.get('series') or {}
         collection=bool(shown['collection'])
+        import light_novels
         read={'title':shown['title'],'author':local_identity.COLLECTION_LABEL if collection else shown['author'],'series':series.get('name','') if series.get('number') else '',
               'number':series.get('number','') if series.get('name') else '','universe':record.get('universe',''),'collection':collection}
+        if light_novels.from_row(row,root) and not collection:read['light_novel']=True  # 0.29.0: the folder pre-tick
         return read,entered_names.scope_of(row,shown['author'],collection),record
     def with_names(self,row,root,local,typed=None):
         """The identity record with Sergei's saved names (Edit names, entered_names) and any values typed now (typed:
@@ -656,7 +675,7 @@ class PublicResearch:
         import local_identity
         from organization import NO_AUTHOR
         record,index=self.identity(row,root)
-        typed_names={field:value for field,value in (names or {}).items() if field in ('series','number','universe','collection')}
+        typed_names={field:value for field,value in (names or {}).items() if field in ('series','number','universe','collection','light_novel')}
         record=self.with_names(row,root,record,typed=typed_names)
         shown=local_identity.shown(record)
         retained_fields=retained_gap_fields(row,record,retained)
@@ -700,7 +719,7 @@ class PublicResearch:
                             # Ruling 74b (Sergei 2026-10-31, the follow-up): the numbers disagree and nothing he typed or saved says
                             # the series: an Approve answering another question keeps its answer and "Number unclear" is asked next.
                             'number_question':bool(mismatch) and not settled.get('series') and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)))}
-        return attach_shared_routing(result)
+        return attach_shared_routing(self.light_novel(result,row,root,typed_names))
     def _english_original(self,record,title,mismatch=None):
         """Ruling 49: the catalog record the research cache holds for this book (no request: the same cache-only gap fill
         automatic filing uses, asked as automatic filing asks: with the identity's author, after Sergei's rules, «Grossman
@@ -861,6 +880,7 @@ class PublicResearch:
                 result['identity_hold']=hold;result['wait']=None
         self._held_translation(row,root,result,stop or threading.Event())
         if result.get('review'):result['review']['organization_policy']='books-hierarchy-v2'
+        self.light_novel(result,row,root)
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
         result=attach_shared_routing(result)

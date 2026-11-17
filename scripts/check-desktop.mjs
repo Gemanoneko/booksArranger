@@ -94,7 +94,7 @@ patterns.push('test_no_evidence.py','test_ruling35.py');  // 0.22.2: ruling 36 (
 patterns.push('test_set_release.py');  // 0.22.3: ruling 53 through the real automatic run (Futaba M-1, Senua M10)
 patterns.push('test_destination_override.py','test_book_move.py');  // 0.24.0: rulings 69, 70 and 71h-k (chosen folder, moving a finished book)
 patterns.push('test_start_over.py','test_restart_242.py','test_backend_242.py','test_integration_242.py','test_cleanup_242.py','test_shared_routing.py','test_series_identity_242.py','test_terminal_chapters.py');  // 0.24.2 changed contracts, including all three private native terminal-chapter cases
-patterns.push('test_source_presence.py');  // 0.29.0 items 1, 3, 5: the check pass (gone books, leftover-only folders, stale rows)
+patterns.push('test_source_presence.py','test_light_novels.py');  // 0.29.0 items 1, 3, 5: the check pass (gone books, leftover-only folders, stale rows)
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])

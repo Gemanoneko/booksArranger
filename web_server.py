@@ -1646,7 +1646,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def review_data(self,review):
         names = {'title','author','original_language','series','number','genre','topic','multi_author'}
-        additions = {'anthology','canonical_author','narrator','universe'}
+        additions = {'anthology','light_novel','canonical_author','narrator','universe'}
         if not isinstance(review,dict) or not names.issubset(review) or set(review)-names-additions:
             raise ValueError('Review fields are incomplete or unknown')
         review = {'anthology':False,'canonical_author':'','narrator':'','universe':''} | review
@@ -1654,6 +1654,12 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('Review text must be bounded strings')
         if type(review['multi_author']) is not bool or type(review['anthology']) is not bool or review['original_language'] not in {'Unknown','Russian','Other'} or review['genre'] not in {'',*GENRES}:
             raise ValueError('Invalid original language, genre or series flag')
+        if 'light_novel' in review:
+            # 0.29.0 item 4: Light novel, beside Short-story collection; one or the other.
+            import light_novels
+            light_novels.check(review['light_novel'],review['anthology'])
+            if source['kind']!='audiobook' and review['light_novel']:raise ValueError('Audiobook role and anthology fields do not apply to ebooks')
+            if not review['light_novel']:review.pop('light_novel')
         return review
 
 def read_instance_record(path):

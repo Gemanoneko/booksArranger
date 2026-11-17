@@ -3184,7 +3184,7 @@ class MergeService:
         title,author=bounded(title,'title'),bounded(author,'author')
         if names is not None:
             import entered_names
-            names={field:value for field,value in names.items() if field in ('series','number','universe','collection')}
+            names={field:value for field,value in names.items() if field in ('series','number','universe','collection','light_novel')}
             entered_names.check(names)
         row=self.reviews._row('Audiobooks',id,revision)
         shown=self._number_unclear(row)
@@ -3377,8 +3377,10 @@ class MergeService:
     @staticmethod
     def _place(review):
         """The Place line's values (Judy 0.22.2 section 2): {universe, series, number, collection}, the planner's."""
-        return {'universe':str(review.get('universe') or ''),'series':str(review.get('series') or ''),'number':str(review.get('number') or ''),
+        place={'universe':str(review.get('universe') or ''),'series':str(review.get('series') or ''),'number':str(review.get('number') or ''),
                 'collection':review.get('anthology') is True}
+        if review.get('light_novel') is True:place['light_novel']=True  # 0.29.0 item 4: the Place line's lead
+        return place
 
     def _names_job(self,identity):
         """The book's current job as Edit names sees it (Judy 1.3, 1.4): {'state': 'none' | 'pending' | 'running' | 'stopped' |
@@ -3462,10 +3464,10 @@ class MergeService:
         shown=local_identity.shown(record)
         series=record.get('series') or {}
         guessed={'title':shown.get('title_basis') or '','author':shown.get('author_basis') or '','series':'folder_name' if series.get('folder') else '','number':'folder_name' if series.get('folder') else '',
-                 'universe':'','collection':''}
+                 'universe':'','collection':'','light_novel':'folder_name' if read.get('light_novel') else ''}
         fields={}
         for field in entered_names.FIELDS:
-            value=now[field]['value'] if field in now else read[field]
+            value=now[field]['value'] if field in now else read.get(field,False) if field in entered_names.BOOL_FIELDS else read[field]
             fields[field]={'proposal':value,'basis':'entered' if field in now else guessed[field]}
         universes,names=self._names_lists()
         try:
@@ -3475,7 +3477,7 @@ class MergeService:
             # including the current confirmed trilogy decision. Saved entries
             # remain authoritative; raw file names stay separately in read.
             proposed={'title':preview.get('title'),'author':preview.get('author'),
-                      'universe':place.get('universe'),'collection':place.get('collection')}
+                      'universe':place.get('universe'),'collection':place.get('collection'),'light_novel':place.get('light_novel') is True}
             if preview.get('series'):
                 proposed.update(series=preview['series']['name'],number=preview['series']['number'])
             for field,value in proposed.items():
@@ -3483,10 +3485,10 @@ class MergeService:
                 from tolkien_trilogy import superseded_series,DECISION
                 superseded=(field=='series' and preview.get('names_decision')==DECISION and
                     superseded_series({'fields':['series'],'saved_utc':{'series':now['series'].get('saved')}} if field in now else {},fields[field]['proposal']))
-                if (field not in now or superseded) and (isinstance(value,str) if field!='collection' else type(value)is bool):fields[field]['proposal']=value
+                if (field not in now or superseded) and (isinstance(value,str) if field not in ('collection','light_novel') else type(value)is bool):fields[field]['proposal']=value
         except (ValueError,OSError) as error:
             place,destination=self._place({'universe':fields['universe']['proposal'],'series':fields['series']['proposal'],'number':fields['number']['proposal'],
-                                           'anthology':fields['collection']['proposal']}),{'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
+                                           'anthology':fields['collection']['proposal'],'light_novel':fields['light_novel']['proposal']}),{'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
         job=self._names_job(row['id'])
         return {'fields':fields,'read':read,'remembered':entered_names.remembered(self.inventory.database,row,read,scope),'universes':universes,'series':names,
                 'job':job['state'],'place':place,'destination':destination,'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row)),'applies':1}
@@ -4087,7 +4089,7 @@ class MergeService:
     def _approve_values(self,id,revision,title,author,without_missing,choice,path,names,approval):
         if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
         import entered_names
-        values={field:value for field,value in names.items() if field in ('series','number','universe','collection')}
+        values={field:value for field,value in names.items() if field in ('series','number','universe','collection','light_novel')}
         if title is not None and str(title).strip():values['title']=title
         if author is not None and str(author).strip():values['author']=author
         entered_names.check(values)

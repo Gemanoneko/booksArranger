@@ -27,7 +27,9 @@ import uuid
 
 from scanner import connect
 
-FIELDS = ('title', 'author', 'series', 'number', 'universe', 'collection')
+FIELDS = ('title', 'author', 'series', 'number', 'universe', 'collection', 'light_novel')
+# Yes/no fields, stored as 'true'/'false' (0.29.0: light_novel, Sergei's Light Novels type, beside collection).
+BOOL_FIELDS = ('collection', 'light_novel')
 FIXED = ('title', 'series', 'universe')  # the names a fix may reach other books with
 FILES = 'files'  # the scope of a book entry that sets a field back to what the files say (no correction)
 TABLE = ('CREATE TABLE IF NOT EXISTS names_entries(entry_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN (\'book\',\'fix\',\'forget\')), '
@@ -126,7 +128,7 @@ def effective(database, row, read, scope, rows=None):
             if _files(r):
                 files.add(r['field'])  # set back to what the files say: no correction, no fix (M2)
                 continue
-            value = r['value'] == 'true' if r['field'] == 'collection' else r['value']
+            value = r['value'] == 'true' if r['field'] in BOOL_FIELDS else r['value']
             found[r['field']] = {'value': value, 'entry': r['entry_id'], 'source': r['source'], 'saved': r['saved_utc']}
     for r in live:
         if r['kind'] != 'fix' or r['field'] in found or r['field'] in files:
@@ -186,7 +188,7 @@ def book_values(database, row, rows=None):
     found = {}
     for r in _live(_rows(database) if rows is None else rows):
         if r['kind'] == 'book' and r['book_key'] == key and r['field'] in FIELDS and not _files(r):
-            found[r['field']] = r['value'] == 'true' if r['field'] == 'collection' else r['value']
+            found[r['field']] = r['value'] == 'true' if r['field'] in BOOL_FIELDS else r['value']
     return found
 
 
@@ -203,7 +205,7 @@ def in_use(database, field):
 def remembered(database, row, read, scope):
     """[{id, field, from, to}] the corrections in force for this book, for the editor's list (Judy 1.5)."""
     values = effective(database, row, read, scope)
-    return [{'id': item['entry'], 'field': field, 'from': item.get('source', ''), 'to': item['value'] if field != 'collection' else ('true' if item['value'] else 'false')}
+    return [{'id': item['entry'], 'field': field, 'from': item.get('source', ''), 'to': item['value'] if field not in BOOL_FIELDS else ('true' if item['value'] else 'false')}
             for field, item in sorted(values.items(), key=lambda pair: FIELDS.index(pair[0]))]
 
 
@@ -230,11 +232,14 @@ def check(values):
     for field, value in values.items():
         if field not in FIELDS:
             raise ValueError('Unknown name field')
-        if field == 'collection':
+        if field in BOOL_FIELDS:
             if type(value) is not bool:
-                raise ValueError('Collection must be an explicit boolean')
+                raise ValueError(('Collection' if field == 'collection' else 'Light novel') + ' must be an explicit boolean')
         elif not isinstance(value, str) or len(value) > 1000 or any(c in value for c in '\x00\r\n'):
             raise ValueError('The ' + field + ' must be one line of text')
+    if values.get('collection') is True and values.get('light_novel') is True:
+        from light_novels import BOTH
+        raise ValueError(BOTH)
     if 'title' in values and not _text(values['title']):
         raise ValueError('Type a title first.')
     series, number = _text(values.get('series', '')), _text(values.get('number', ''))
@@ -256,18 +261,18 @@ def plan(row, values, read, scope, now=None):
     for field in FIELDS:
         if field not in values:
             continue
-        new = bool(values[field]) if field == 'collection' else _text(values[field])
-        old = bool(read.get(field)) if field == 'collection' else _text(read.get(field, ''))
+        new = bool(values[field]) if field in BOOL_FIELDS else _text(values[field])
+        old = bool(read.get(field)) if field in BOOL_FIELDS else _text(read.get(field, ''))
         current = now[field]['value'] if field in now else old
-        current = bool(current) if field == 'collection' else _text(current)
+        current = bool(current) if field in BOOL_FIELDS else _text(current)
         if new == current:
             continue
-        stored = ('true' if new else 'false') if field == 'collection' else new
+        stored = ('true' if new else 'false') if field in BOOL_FIELDS else new
         if new == old:
             # Typed back to the files' own text (M2): it used to forget only the newest entry, so an older one came back.
-            entries.append(('book', field, stored, '' if field == 'collection' else old, FILES, ''))
+            entries.append(('book', field, stored, '' if field in BOOL_FIELDS else old, FILES, ''))
             continue
-        entries.append(('book', field, stored, '' if field == 'collection' else old, '', ''))
+        entries.append(('book', field, stored, '' if field in BOOL_FIELDS else old, '', ''))
         if field in FIXED and old and new and new != old:
             word = _word_fix(old, new)
             entries.append(('fix', field, word[1] if word else new, word[0] if word else old, scope, ''))

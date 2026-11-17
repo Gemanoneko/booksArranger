@@ -249,7 +249,7 @@ class EditNamesTests(ApproveFixture):
         self.scp();row=self.row('1')
         editor=self.service.names_editor(row['id'],row['revision'])
         fields={name:value['proposal'] for name,value in editor['fields'].items()}
-        self.assertEqual(fields,{'title':'Пртоколы SCP. Сейф №1','author':'Разные авторы','series':'','number':'','universe':'','collection':True})
+        self.assertEqual(fields,{'title':'Пртоколы SCP. Сейф №1','author':'Разные авторы','series':'','number':'','universe':'','collection':True,'light_novel':False})  # 0.29.0: the Light novel box
         self.assertEqual((editor['job'],editor['remembered'],editor['entered'],editor['applies']),('none',[],[],1))
         self.assertEqual(editor['destination']['path'],str(Path('Сборники')/'Пртоколы SCP. Сейф №1 - Разные авторы.m4b'),'positive control: filed as a collection today')
         self.assertEqual(editor['place'],{'universe':'','series':'','number':'','collection':True})
