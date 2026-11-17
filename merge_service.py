@@ -1018,7 +1018,10 @@ class MergeService:
                 return
             # Senua R-M3: a Pause or safety hold saved by a version that never clears the intent (0.28.12, after a
             # rollback) wins over an intent left from before it. The intent ends with it.
-            if (pause_state.read(db,'jobs') or {}).get('origin') in ('user','interrupted'):
+            # Senua S-m8: a jobs pause an older version saved (no writer stamp) wins too, whatever its origin: that version
+            # never resumes work after a restart.
+            saved=pause_state.read(db,'jobs')
+            if saved and (saved.get('origin') in ('user','interrupted') or not pause_state.own(saved)):
                 pause_state.set_jobs_active(db,False)
                 return
         if not self.jobs.has_unfinished() and not self._pending_replacement_postprocessing():

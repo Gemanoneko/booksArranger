@@ -2,11 +2,22 @@
 import json
 import datetime
 
+# Senua S-m8: every record this version writes carries its writer, so a launch after a rollback round trip (0.29 -> 0.28.13
+# -> 0.29) tells a Quit or update pause the older version saved (no restart intent in its contract: "a server restart never
+# starts an automatic run") from one of its own.
+WRITER = 'restart-intent-v1'
+
+
+def own(value):
+    """True for a record this version (restart intent) wrote."""
+    return isinstance(value, dict) and value.get('writer') == WRITER
+
+
 def record(db, scope, origin, reason):
     if scope not in ('jobs','automatic') or origin not in ('user','update','closing','interrupted'):
         raise ValueError('Invalid pause attribution')
     db.execute('CREATE TABLE IF NOT EXISTS pause_attribution(scope TEXT PRIMARY KEY, data TEXT NOT NULL)')
-    value={'origin':origin,'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'reason':str(reason)}
+    value={'origin':origin,'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'reason':str(reason),'writer':WRITER}
     db.execute('INSERT OR REPLACE INTO pause_attribution VALUES(?,?)',(scope,json.dumps(value)))
     return value
 

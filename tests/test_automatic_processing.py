@@ -793,6 +793,34 @@ class AutoTests(unittest.TestCase):
             self.assertTrue(second.restore_after_restart());second.thread.join(3)
             work.assert_called_once_with(run_id)
 
+    def test_a_rollback_round_trip_restores_nothing_the_older_version_paused_s_m8(self):
+        # Senua S-m8: 0.29 -> 0.28.13 -> 0.29. The marker table survives the rollback, so the one-time clear does not run
+        # again; what 0.28.13 saved must still start nothing: its Quit pause (a "closing" record without this version's
+        # writer) and its crash restart (restart_paused=1 with its own reason).
+        import pause_state
+        older_record=json.dumps({'origin':'closing','at':'2026-11-17T10:00:00+00:00','reason':'Automatic processing stopped'})  # as 0.28.13 writes it
+        cases=(('Paused',0,'0.28.12 reason',older_record),('Paused',1,'Paused after server restart — start to continue saved work',None))
+        for state,restart_paused,reason,record in cases:
+            with self.subTest(restart_paused=restart_paused):
+                auto,merge,inv=self.fake_merge()
+                run_id=str(uuid.uuid4());created=str(time.time_ns())
+                with connect(self.db) as db:
+                    db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,?)',(run_id,state,'research','{"pending":["saved-book"]}',reason,created,created,restart_paused))
+                    db.execute('CREATE TABLE IF NOT EXISTS pause_attribution(scope TEXT PRIMARY KEY, data TEXT NOT NULL)')
+                    if record:db.execute('INSERT OR REPLACE INTO pause_attribution VALUES(?,?)',('automatic',record))
+                    else:db.execute("DELETE FROM pause_attribution WHERE scope='automatic'")
+                    self.assertIsNotNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='automatic_restart_intent'").fetchone(),'the marker is there')
+                second=AutomaticProcessing(merge,auto.research);self.controllers.append(second)
+                with patch.object(second,'_work') as work:
+                    self.assertFalse(second.restore_after_restart());work.assert_not_called()
+                self.assertEqual(second._run_row()['restart_paused'],0)
+        # Positive control: the same Quit saved by this version (pause_state.record carries its writer) is restored.
+        second,merge,run_id=self.saved_run('Paused',0,'closing',older_version=False)
+        with connect(self.db) as db:self.assertTrue(pause_state.own(pause_state.read(db,'automatic')))
+        with patch.object(second,'_work') as work:
+            self.assertTrue(second.restore_after_restart());second.thread.join(3)
+            work.assert_called_once_with(run_id)
+
     def test_stop_or_cancel_ends_a_restart_and_no_later_launch_restores_it_r_m2(self):
         for press in ('stop','cancel'):
             with self.subTest(press=press):

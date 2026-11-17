@@ -119,13 +119,16 @@ class AutomaticProcessing:
                     (json.dumps({'reasons':[failure_reason,MISSING_FAILURE_DETAILS],'failure_run_id':prior['id']}),failed))
             import pause_state
             pause=pause_state.read(db,'automatic')
+            # Senua S-m8: a Quit or update pause counts as restart intent only when this version saved it (pause_state.own);
+            # one an older version saved after a rollback round trip starts nothing, as that version promised.
+            ours=pause_state.own(pause)
             if prior and prior['state'] in ('Running','Stopping'):
                 if not pause:
                     pause_state.record(db,'automatic','interrupted','Automatic processing was interrupted before its saved stop checkpoint')
-                eligible=prior['state']=='Running' or prior['restart_paused'] or (pause or {}).get('origin') in ('closing','update')
+                eligible=prior['state']=='Running' or prior['restart_paused'] or ours and (pause or {}).get('origin') in ('closing','update')
                 db.execute("UPDATE automatic_runs SET state='Paused',reason='Paused after server restart — saved work kept',restart_paused=? WHERE id=?",
                            (int(eligible and (pause or {}).get('origin')!='user'),prior['id']))
-            elif prior and prior['state']=='Paused' and (pause or {}).get('origin') in ('closing','update'):
+            elif prior and prior['state']=='Paused' and ours and (pause or {}).get('origin') in ('closing','update'):
                 db.execute('UPDATE automatic_runs SET restart_paused=1 WHERE id=?',(prior['id'],))
             # Senua R-M1: the first launch of the version with restart intent starts nothing the previous version left
             # waiting for Start (its contract: "Server restart never starts an automatic run"). Once per catalog: no run
@@ -135,6 +138,10 @@ class AutomaticProcessing:
                 db.execute('INSERT INTO automatic_restart_intent VALUES(1)')
                 db.execute("UPDATE automatic_runs SET restart_paused=0,reason=CASE WHEN reason='Paused after server restart — saved work kept' "
                            "THEN 'Paused after server restart — start to continue saved work' ELSE reason END WHERE restart_paused<>0")
+            # Senua S-m8: 0.28.x marks a run its restart paused with restart_paused=1 and this reason (it waits for Start). After a
+            # rollback round trip the marker table already exists, so that flag is cleared here, every launch; this version
+            # never writes the reason with the flag set.
+            db.execute("UPDATE automatic_runs SET restart_paused=0 WHERE restart_paused<>0 AND reason='Paused after server restart — start to continue saved work'")
             db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
     def _run_row(self):
         with connect(self.database) as db:
