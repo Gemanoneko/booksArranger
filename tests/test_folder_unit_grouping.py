@@ -382,6 +382,16 @@ class TagRepair(unittest.TestCase):
         self.assertEqual((tags['COMMENTS'],tags['comment_fields']),('Читает Александр Аравушкин',[{'field':'comment','value':'Читает Александр Аравушкин'}]))
         self.assertEqual(future_audio_tags({'tags':{'comment':'Ángel Béjar'}})['COMMENTS'],'Ángel Béjar','readable Latin text is never touched')
 
+    def test_the_comment_edition_lines_of_a_new_conversion_are_read_repaired_m_5(self):
+        # Futaba m-5: the audiobook's comment read "Source album: Ïîõèòèòåëü äåòåé"; the edition lines come from each
+        # source's tags (audio_pipeline.approved_tags) and now read the repaired text too.
+        from audio_pipeline import approved_tags
+        def raw(text):return text.encode('cp1251').decode('latin-1')
+        manifest={'metadata':{'title':'Похититель детей','canonical_author':'Бром Джеральд'},'comments':'',
+                  'sources':[{'metadata':{'tags':{'album':raw('Похититель детей'),'date':'2010','publisher':'Ángel Béjar'}}}]}
+        comment=approved_tags(manifest)['comment']
+        self.assertEqual(comment.splitlines(),['Source album: Похититель детей','Source date: 2010','Source publisher: Ángel Béjar'])
+
 
 class Identity(unittest.TestCase):
     def test_gene_wolfe_is_a_foreign_given_name_and_files_surname_first(self):

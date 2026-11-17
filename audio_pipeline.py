@@ -1054,7 +1054,10 @@ def approved_tags(manifest):
         source_metadata=item.get('metadata',{})
         for key,value in source_metadata.get('tags',{}).items():
             if key.casefold() in {'album','date','year','composer','publisher','copyright','language'} and value:
-                line='Source '+key+': '+str(value)
+                # Futaba m-5: the edition lines are part of the comment too; cp1251 stored as ISO-8859-1 is written as
+                # readable text (tag_text), as the chapter names and the comment's own text already are.
+                import tag_text
+                line='Source '+key+': '+(tag_text.text(value) if isinstance(value,str) else str(value))
                 if line not in edition:edition.append(line)
         if source_metadata.get('edition_language'):
             line='Recording language: '+str(source_metadata['edition_language'])
