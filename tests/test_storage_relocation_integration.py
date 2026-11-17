@@ -306,9 +306,15 @@ class RelocatedWorkingIntegrationTests(unittest.TestCase):
             backend.mkdir()
             for module in Path(__file__).resolve().parents[1].glob('*.py'):
                 shutil.copyfile(module,backend/module.name)
-            startup=subprocess.run([sys.executable,'-I','-B',str(backend/'desktop_backend.py'),
-                '--database',str(self.database),'--port','5212','--catalog-mode=existing'],
-                env=environment,capture_output=True,timeout=15,creationflags=0x08000000)
+            # An open shell pipe for the backend's stdin, as the app gives it (the gate's workers run with stdin closed, and EOF
+            # there reads as "The app closed before the data folder check finished.").
+            shell_read,shell_write=os.pipe()
+            try:
+                startup=subprocess.run([sys.executable,'-I','-B',str(backend/'desktop_backend.py'),
+                    '--database',str(self.database),'--port','5212','--catalog-mode=existing'],
+                    env=environment,capture_output=True,timeout=15,creationflags=0x08000000,stdin=shell_read)
+            finally:
+                os.close(shell_read);os.close(shell_write)
             self.assertNotEqual(startup.returncode,0)
             self.assertIn(b'offline verification',startup.stderr)
             self.assertTrue(all(p.is_file() for p in f.sources),'verification admission did not retire any private book source')

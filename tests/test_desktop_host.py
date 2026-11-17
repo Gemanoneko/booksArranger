@@ -66,7 +66,12 @@ class StartupBoundaryIntegrationTests(unittest.TestCase):
  def invoke(self,base,data,mode):
   installed=stage_private_backend(base)
   roots={name:str(base/name) for name in ('Audiobooks','Podcasts','Ebooks')};rootsfile=base/'roots.json';rootsfile.write_text(json.dumps(roots));env=os.environ.copy();env['BOOKS_ARRANGER_DESKTOP_TOKEN']='f'*64
-  return subprocess.run([sys.executable,'-I','-B',str(installed/'desktop_backend.py'),'--database',str(data/'inventory.sqlite3'),'--roots-json',str(rootsfile),'--port','5212','--catalog-mode='+mode],env=env,cwd=BASE,capture_output=True,text=True,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+  # The backend reads stdin as the app's shell pipe; EOF there means the app closed. The gate's workers run with stdin
+  # closed, so the child got EOF at once and answered "The app closed before the data folder check finished." instead of
+  # the refusal under test. An owned pipe stays open for the child's whole run, as the app's does.
+  shell_read,shell_write=os.pipe()
+  try:return subprocess.run([sys.executable,'-I','-B',str(installed/'desktop_backend.py'),'--database',str(data/'inventory.sqlite3'),'--roots-json',str(rootsfile),'--port','5212','--catalog-mode='+mode],env=env,cwd=BASE,capture_output=True,text=True,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),stdin=shell_read)
+  finally:os.close(shell_read);os.close(shell_write)
  def test_actual_saved_existing_missing_folder_is_not_recreated(self):
   with tempfile.TemporaryDirectory(dir=AREA) as temp:
    base=Path(temp);data=base/'missing-existing';result=self.invoke(base,data,'existing')
