@@ -1392,7 +1392,9 @@ function renderWaitingForYou(shown,jobs){
   if(line.dataset.key!==key){line.dataset.key=key;const strong=node('strong','Waiting for you:');line.replaceChildren(strong,node('span',` ${plural(n,'book needs','books need')} attention. The app can't do more until you review them.`));}
 }
 // Progress rows (ProgressRows spec): one row per running activity, fixed order, updated in place.
-const activityOrder=['admission','chapter','conversion','cleanup','identity','series','scan','maintenance'],activityRows=new Map();let activityTimer=null;
+// 0.29.0 (Judy section 7): conversion, cleanup, source folders, move/action, identity, series, scan/research, checks.
+const activityOrder=['admission','chapter','conversion','cleanup','sources','move','action','identity','series','scan','checks','maintenance'],activityRows=new Map();let activityTimer=null;
+const ACTION_LABELS={cleanup:'Retry cleanup',retry:'Retry',repair:'Repair',delete:'Delete',approve:'Approve',copy:'Remove copy',convert:"Convert what's there"};
 function checkActivities(list,jobs){
   const result=list.filter(row=>!['admission','maintenance'].includes(row?.kind));
   const add=(kind,value)=>{
@@ -1403,6 +1405,19 @@ function checkActivities(list,jobs){
   const checking=rows.find(row=>activeChapterCheck(row));
   if(checking)result.push({kind:'chapter',state:'running',subject:checking.chapter_check.file || checking.title_clue || '',step:'Checking source audio',phase_only:true,indeterminate:true});
   if(['checking','stopping'].includes(jobs?.maintenance?.state))add('maintenance',jobs.maintenance);
+  // 0.29.0 (Judy section 7): the check pass (shown once it has run 1 s), its folder phase, a move, a queued action or bulk run.
+  const pass=state?.source_check_progress,passStarted=Number.isFinite(pass?.started)?pass.started:NaN;
+  if(pass?.phase==='checking' && Date.now()-passStarted>=1000){const count=Number.isInteger(pass.done) && Number.isInteger(pass.total) && pass.total>0 && pass.done<=pass.total;
+    result.push({kind:'checks',state:'running',subject:'',step:'checks',step_text:count?`Checking ${plural(pass.total,'book','books')}`:'Checking books',done:count?pass.done:undefined,total:count?pass.total:undefined,unit:count?'books':undefined,indeterminate:!count,step_started_at:passStarted});}
+  if(pass?.phase==='folders')result.push({kind:'sources',state:'running',subject:'',step:'sources',step_text:'Checking leftovers',indeterminate:true,step_started_at:passStarted});
+  const moving=rows.find(row=>moveOf(row)?.state==='moving');
+  if(moving){const move=moveOf(moving),percent=Number(move.progress),folder=String(move.folder || folderOf(move.target) || '').split(/[\\/]/).filter(Boolean).pop() || 'its folder',measured=move.progress!==null && move.progress!=='' && Number.isFinite(percent) && percent>=0 && percent<=100;
+    result.push({kind:'move',state:'running',subject:destTitle(moving),step:'move',step_text:`Copying to ${folder}`,fraction:measured?percent/100:undefined,done:measured?percent:undefined,total:measured?100:undefined,indeterminate:!measured});}
+  const bulk=bulkRun();
+  if(bulk?.state==='running'){const count=Number.isInteger(bulk.done) && Number.isInteger(bulk.total) && bulk.total>0 && bulk.done<=bulk.total;
+    result.push({kind:'action',state:'running',subject:'',bulk:true,step:'action',step_text:'Working',done:count?bulk.done:undefined,total:count?bulk.total:undefined,unit:count?'books':undefined,indeterminate:!count});}
+  else if(queueState.running){const item=queueState.running,book=rows.find(row=>row.id===item.book_id);
+    result.push({kind:'action',state:'running',subject:book?.title_clue || item.title || '',action:item.action,step:'action',step_text:'Working',indeterminate:true});}
   return result;
 }
 const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
@@ -1417,6 +1432,10 @@ function activityLabel(row){
   if(row.kind==='cleanup')return ['originals','recovery copies'].includes(row.step)?'Removing originals':'Cleaning up';
   if(row.kind==='identity')return 'Checking finished books';
   if(row.kind==='series')return 'Metadata: Updating series';
+  if(row.kind==='checks')return 'Checking source folders';
+  if(row.kind==='sources')return 'Removing source folders';
+  if(row.kind==='move')return 'Moving';
+  if(row.kind==='action')return row.bulk?'Retrying books':ACTION_LABELS[row.action] || 'Working on a book';
   return row.step==='researching'?'Researching books':'Scanning files';
 }
 function activityStep(row,finishing){
@@ -1482,7 +1501,10 @@ function updateActivity(view,now){
   const held=row.state==='attention',label=activityLabel(row),subject=typeof row.subject==='string'?row.subject:'',step=activityStep(row,finishing),detail=held?'':activityDetail(row,finishing);
   view.bar.hidden=held;  // 0.29.0: every running row shows a bar; a row with no measure slides (Judy section 7)
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
-  writeText(view.detail,detail);writeText(view.step,step);view.step.title=step;
+  const progressKey=[row.done,row.fraction,row.step,row.subject].join('\u001f');if(view.progressKey!==progressKey){view.progressKey=progressKey;view.progressAt=now;}
+  const frozen=running && Number.isFinite(view.progressAt) && now-view.progressAt>=300000;
+  const stepShown=frozen?'No progress for 5 min':step;view.item.classList.toggle('stalled',frozen);
+  writeText(view.detail,detail);writeText(view.step,stepShown);view.step.title=stepShown;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',row.state==='attention');
   const fraction=typeof row.fraction==='number' && row.fraction>=0 && row.fraction<=1?row.fraction:row.done/row.total;
   if(determinate){const value=Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}

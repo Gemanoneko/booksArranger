@@ -1053,10 +1053,17 @@ class MergeService:
         try:
             worker=getattr(self.inventory,'worker',None)
             if worker is not None and worker.is_alive():return None
-            self._source_checking=True
-            report=source_presence.run(self,roots=roots,folders=folders,progress=progress,stop=self.__dict__.get('_retention_stop'))
+            self._source_checking=True;started=int(time.time()*1000)
+            # 0.29.0 item 7 (Judy section 7): the jobs panel names the pass while it runs ("Checking source folders",
+            # "120 of 412 books"), then "Removing source folders" while watched folders are checked.
+            self._source_progress={'phase':'checking','done':0,'total':0,'started':started}
+            def counted(done,total):
+                self._source_progress={'phase':'checking','done':done,'total':total,'started':started}
+                if progress is not None:progress(done,total)
+            def phase(name):self._source_progress={'phase':name,'started':int(time.time()*1000)}
+            report=source_presence.run(self,roots=roots,folders=folders,progress=counted,stop=self.__dict__.get('_retention_stop'),on_phase=phase)
         finally:
-            self._source_checking=False;lock.release()
+            self._source_checking=False;self._source_progress=None;lock.release()
         previous=self.__dict__.get('_source_report') or {'roots':[],'removed':[],'folders':[],'cleared':[]}
         states={source_presence._key(r['path']):r for r in previous['roots']}
         for state in report['roots']:states[source_presence._key(state['path'])]=state

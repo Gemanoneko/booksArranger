@@ -204,6 +204,22 @@ class CheckPassTests(unittest.TestCase):
         self.assertEqual(error.payload()['code'], 'drive_unavailable')
         self.assertIn('Check that this folder is available', str(FolderOpenRefused('Z:\\Audiobooks\\Unsorted', FileNotFoundError())))
 
+    def test_the_jobs_panel_sees_the_pass_and_its_folder_phase_0290_item_7(self):
+        from merge_service import MergeService
+        fake = SimpleNamespace(inventory=SimpleNamespace(worker=None))
+        seen = []
+        def run(merge, **options):
+            options['progress'](120, 412); seen.append(dict(merge._source_progress))
+            options['on_phase']('folders'); seen.append(dict(merge._source_progress))
+            return {'roots': [], 'removed': [], 'folders': [], 'cleared': []}
+        with patch.object(source_presence, 'run', side_effect=run):
+            MergeService.check_sources(fake)
+        self.assertEqual([(s['phase'], s.get('done'), s.get('total')) for s in seen], [('checking', 120, 412), ('folders', None, None)])
+        self.assertIsNone(fake._source_progress, 'gone once the pass ends')
+        import web_server
+        server = SimpleNamespace(merge=SimpleNamespace(_source_progress={'phase': 'folders', 'started': 1}, source_check_view=lambda: None))
+        self.assertEqual(web_server.BrowserServer._source_view(server), {'source_check_progress': {'phase': 'folders', 'started': 1}})
+
     def test_summary_lists_ten_then_counts_the_rest(self):
         removed = [{'id': str(i), 'title': 'T%d' % i, 'path': 'P%d' % i} for i in range(13)]
         view = source_presence.summary({'roots': [], 'removed': removed, 'folders': [], 'cleared': []})

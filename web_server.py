@@ -649,9 +649,11 @@ class BrowserServer(ThreadingHTTPServer):
 
     def _source_view(self):
         view = self.merge.source_check_view() if hasattr(self.merge, 'source_check_view') else None
+        progress = getattr(self.merge, '__dict__', {}).get('_source_progress')
+        value = {'source_check_progress': dict(progress)} if isinstance(progress, dict) else {}
         if not view:
-            return {}
-        return {'library_roots': view['roots'], 'source_check': {key: value for key, value in view.items() if key != 'roots'}}
+            return value
+        return value | {'library_roots': view['roots'], 'source_check': {key: item for key, item in view.items() if key != 'roots'}}
 
     def loading_state(self, library):
         """/api/state while loading: answered at once, with only the parts that have arrived. A part that has not

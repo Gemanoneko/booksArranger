@@ -226,7 +226,7 @@ def _remove_folder(database, watched, leftovers):
     return True
 
 
-def run(merge, *, roots=None, folders=True, progress=None, now=None, stop=None):
+def run(merge, *, roots=None, folders=True, progress=None, now=None, stop=None, on_phase=None):
     """One pass. roots: the library roots to check (default: every Audiobooks source root). folders=False: never delete a
     folder (window focus). Returns the report the page shows: roots, books removed from the list, folders deleted,
     Name-taken rows checked again."""
@@ -266,6 +266,8 @@ def run(merge, *, roots=None, folders=True, progress=None, now=None, stop=None):
     if gone_folders:
         _watch(database, gone_folders)
     if folders:
+        if on_phase is not None:
+            on_phase('folders')  # the jobs panel's "Removing source folders" row (Judy section 7)
         for watched in _watched(database):
             if stop is not None and stop.is_set():
                 break

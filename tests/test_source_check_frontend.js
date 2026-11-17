@@ -75,6 +75,22 @@ const texts=element=>element.children.map(child=>child.children.length?child.chi
   run('namesState.delete("n2")');
   assert.equal(run('keepUnderCursor([{id:"a"},{id:"c"}],kept).map(row=>row.id).join(",")'),'a,c','it leaves once the editor is closed');
   assert.equal(run('keepUnderCursor([{id:"a"}],[{id:"a"},{id:"b"}]).map(row=>row.id).join(",")'),'a','a row nobody works on leaves at once');
+  // Item 7 extras (Judy section 7): the check pass row (after 1 s), its folder phase, a move, a queued action, a stall.
+  const view=kind=>run('activityRows.get("'+kind+'")'),line=kind=>[view(kind).label.textContent,view(kind).subject.textContent,view(kind).detail.textContent,view(kind).step.textContent];
+  run('rows=[];queueState={queued:[],running:null};state={...state,source_check:null,source_check_progress:{phase:"checking",done:1,total:412,started:Date.now()}};renderJobs()');
+  assert.equal(view('checks'),undefined,'a pass under 1 s is not shown');
+  run('state={...state,source_check_progress:{phase:"checking",done:120,total:412,started:Date.now()-5000}};renderJobs()');
+  assert.deepEqual(line('checks'),['Checking source folders','','120 of 412 books','Checking 412 books']);
+  assert.match(get('jobs-status').textContent,/^Checking source folders · /);
+  run('state={...state,source_check_progress:{phase:"folders",started:Date.now()}};renderJobs()');
+  assert.deepEqual(line('sources'),['Removing source folders','','','Checking leftovers']);assert.equal(view('sources').bar.hidden,false);
+  run('state={...state,source_check_progress:null};rows=[{id:"m",kind:"candidate",title_clue:"Dune",move:{state:"moving",progress:45,target:"Z:/Sorted/Herbert/Dune.m4b"}}];renderJobs()');
+  assert.deepEqual(line('move'),['Moving: ','Dune','45%','Copying to Herbert']);
+  run('updateActivity(activityRows.get("move"),Date.now()+301000)');
+  assert.equal(view('move').step.textContent,'No progress for 5 min','a running row whose detail has not moved for 5 min says so');
+  run('rows=[{id:"b",kind:"candidate",title_clue:"Foo"}];queueState={queued:[],running:{id:"q",book_id:"b",action:"cleanup"}};renderJobs()');
+  assert.deepEqual(line('action').slice(0,2),['Retry cleanup: ','Foo']);
+  run('queueState={queued:[],running:null};rows=[];renderJobs()');
   console.log('PASS 0.29.0 source check on the page: drive lines with Check again, the removed line with Details and Dismiss, cleared rows in the strip');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
