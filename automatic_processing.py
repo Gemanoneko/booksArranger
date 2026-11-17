@@ -457,7 +457,8 @@ class AutomaticProcessing:
             except Exception:pass
     def _set_pending(self,kind,restored=False):
         with self.lock:
-            self.start_pending={'kind':kind,'restored':bool(restored)}
+            # The restart restore's own pending start is marked; a press's keeps its old shape ({'kind'}).
+            self.start_pending={'kind':kind,**({'restored':True} if restored else {})}
             if not (self._pending_thread and self._pending_thread.is_alive()):
                 self._pending_wake.clear()
                 self._pending_thread=threading.Thread(target=self._pending_loop,name='BooksArrangerPendingStart',daemon=True);self._pending_thread.start()
@@ -498,7 +499,7 @@ class AutomaticProcessing:
             with self.lock:
                 if self.start_pending is not pending:continue
                 if kind in CLEARS and kind==pending['kind']:continue
-                self.start_pending={'kind':kind,'restored':pending.get('restored',False)} if kind in CLEARS else None
+                self.start_pending={'kind':kind,**({'restored':True} if pending.get('restored') else {})} if kind in CLEARS else None
             self._changed()
             if kind not in CLEARS:return
     def stop(self,force=False,origin=None):

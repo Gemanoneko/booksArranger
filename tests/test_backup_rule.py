@@ -89,6 +89,7 @@ class HeldCleanupTests(unittest.TestCase):
         s.replacements = SimpleNamespace(rows=lambda: [{'id': 'r1', 'state': 'completed', 'replacement_job_id': 'j1'},
                                                        {'id': 'r2', 'state': 'completed', 'replacement_job_id': 'j2'}])
         s._kept_by_choice = lambda job_ids: {'j2'}
+        s._retained_relation = lambda relation: False  # this stub has no catalog; the Keep files rule is what is tested
         s._purge_replacement_recoveries()
         self.assertEqual([call.args[0]['id'] for call in s.retirement.purge_recoveries.call_args_list], ['r1'])
 
