@@ -453,10 +453,11 @@ def _empty(folder):
 
 def _remove_folder(folder, root):
     """Ruling 24a: remove one listed folder if it is empty now; True when it is gone. Its ancestors are held (no junction
-    or symlink, none renamed meanwhile), the folder itself must be an ordinary directory, never directly inside a source
-    folder (_folders) and never in Sorted (_folders), and its listing must show nothing. Then a plain rmdir, which
-    fails if anything arrived in it meanwhile: never anything recursive. Any failure keeps the folder ("1 folder
-    stayed."); the book is forgotten all the same."""
+    or symlink, none renamed meanwhile), the folder itself must be an ordinary directory, and its listing must show
+    nothing. Then a plain rmdir, which fails if anything arrived in it meanwhile: never anything recursive. Any failure
+    keeps the folder ("1 folder stayed."); the book is forgotten all the same. Which folders are offered is the caller's
+    rule: Delete book's _folders never offers one directly inside a source folder or in Sorted; the 0.29.0 check pass
+    (source_presence) may offer one directly inside a library folder (Sergei's Q6), never the library root itself."""
     try:
         target = ordinary(folder)
         with DirectoryBoundary(ordinary(root), target.parent):

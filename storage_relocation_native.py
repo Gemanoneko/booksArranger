@@ -737,9 +737,12 @@ def logical_catalog_location(database):
 def managed_read_path(path,sha256=None):
     """Explicit current-data READ location for immutable job cover references.
 
-    Never used for source retirement, user inputs/outputs, or deletion. Returning
-    a path does not confer producer/cleanup authority; the consumer still checks
-    its own manifest hash while reading/copying the bytes.
+    Never a disposal target, never a user input/output, never a deletion path.
+    Source retirement may READ through it: since 0.29.0 source cleanup reads the
+    reviewed cover at its current place (source_cleanup._run, read-only, checked
+    against the manifest hash; a refused lookup keeps every original). Returning a
+    path does not confer producer/cleanup authority; the consumer still checks its
+    own manifest hash while reading/copying the bytes.
     """
     location=Path(path).absolute();context=current()
     if not context or not context.namespace:return location
