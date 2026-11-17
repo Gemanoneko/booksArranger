@@ -973,7 +973,7 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
     // A book list requested before Retry was answered predates it and would repaint the old state.
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     acknowledgeReacquireArchives(page);
-    const before=rows;
+    const before=rows,focusedTr=globalThis.document?.activeElement?.closest?.('tr'),focusedId=focusedTr?.dataset?.path,focusedAt=before.findIndex(row=>row.path===focusedId);
     rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);listGeneration++;pruneQueueNotes();
     if(requestView==='candidates')rows=keepUnderCursor(rows,before);  // 0.29.0 item 3: never vanishes under his cursor
     if(requestView==='candidates')rows=withoutDeleted(rows,sentAt);  // Judy 0.22.2 section 5
@@ -982,6 +982,7 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
     else if(heldRow && !rows.some(item=>item.path===heldRow.path)){rows.splice(Math.min(heldRow.index,rows.length),0,heldRow.row);if(!heldRow.rechecked)recheckHeld(heldRow);}
     noteLeavers(sentAt);
     const changed=context!==paintedContext;paintedContext=context;renderRows(forceRender || changed);
+    if(focusedId && !rows.some(row=>row.path===focusedId))moveFocusAfterLeave(focusedAt);
     // S7: the answer is painted; the line goes at once.
     const now=Date.now();paintedAt=now;listAnsweredAt=now;lastListTook=now-sentAt;listAsk=null;listError=false;renderListStale(now);
     return true;
@@ -1027,6 +1028,7 @@ async function refresh(force=false) {
   const stateSent=Date.now();
   const current=await request(`/api/state?library=${encodeURIComponent(library)}`,undefined,STATE_TIMEOUT);  // ruling 75a: a time limit
   deletedCounts(current,stateSent);  // Judy 0.22.2 section 5: a status from before a delete still counts that book
+  leavingCounts(current);  // 0.29.0 item 3: a row kept under his cursor still counts until it leaves
   observeLoad(current);  // any answer counts, whatever happens to it below (Judy 3.4)
   if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
   const libraryWasMissing=!state || !partReady('library');
@@ -1416,7 +1418,7 @@ function checkActivities(list,jobs){
   const bulk=bulkRun();
   if(bulk?.state==='running'){const count=Number.isInteger(bulk.done) && Number.isInteger(bulk.total) && bulk.total>0 && bulk.done<=bulk.total;
     result.push({kind:'action',state:'running',subject:'',bulk:true,step:'action',step_text:'Working',done:count?bulk.done:undefined,total:count?bulk.total:undefined,unit:count?'books':undefined,indeterminate:!count});}
-  else if(queueState.running){const item=queueState.running,book=rows.find(row=>row.id===item.book_id);
+  else if(queueState.running && !result.some(row=>['conversion','cleanup'].includes(row.kind) && row.state!=='attention')){const item=queueState.running,book=rows.find(row=>row.id===item.book_id);
     result.push({kind:'action',state:'running',subject:book?.title_clue || item.title || '',action:item.action,step:'action',step_text:'Working',indeterminate:true});}
   return result;
 }
@@ -2988,6 +2990,13 @@ function keepUnderCursor(next,before){
     next.splice(Math.min(index,next.length),0,kept);
   });
   return next;
+}
+// Judy section 3: a focused row that leaves hands focus to the next row's first control, else the previous row's, else the
+// Needs attention shortcut. Focus is never moved by a pass otherwise.
+function moveFocusAfterLeave(index){
+  const trs=[...($('inventory')?.children || [])],target=trs[Math.min(Math.max(index,0),trs.length-1)];
+  const control=target?.querySelector?.('button,input,select,a[href]');
+  if(control?.focus)control.focus({preventScroll:true});else $('attention-shortcut')?.focus?.({preventScroll:true});
 }
 const LEAVING_LINES={name_free:'The name is free now. This row leaves the list when you close this editor.',gone:'This row leaves the list when you close this editor.'};
 function candidateStatus(row){
@@ -5166,6 +5175,11 @@ function withoutDeleted(list,sentAt){
     else if(sentAt>=entry.at)deletedBooks.delete(id);
   }
   return kept;
+}
+// 0.29.0 item 3 (Judy section 3): "Needs attention · N" and the chip drop when the row leaves the page, never before.
+function leavingCounts(value){
+  const counts=value?.audiobook_jobs?.attention_counts;if(!counts)return;
+  for(const row of leavingRows.values())if(row.leaving==='name_free' && Number.isInteger(counts.name_taken))counts.name_taken++;
 }
 // A status answer sent before a delete still counts the deleted book in its chip.
 function deletedCounts(value,sentAt){

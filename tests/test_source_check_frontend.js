@@ -90,7 +90,14 @@ const texts=element=>element.children.map(child=>child.children.length?child.chi
   assert.equal(view('move').step.textContent,'No progress for 5 min','a running row whose detail has not moved for 5 min says so');
   run('rows=[{id:"b",kind:"candidate",title_clue:"Foo"}];queueState={queued:[],running:{id:"q",book_id:"b",action:"cleanup"}};renderJobs()');
   assert.deepEqual(line('action').slice(0,2),['Retry cleanup: ','Foo']);
-  run('queueState={queued:[],running:null};rows=[];renderJobs()');
+  // One row per piece of work: while the engine shows the cleanup itself, the queued Retry cleanup is not a second row.
+  run('state={...state,activities:[{id:"cleanup",kind:"cleanup",subject:"Foo",step:"originals",state:"running",done:1,total:4,unit:"files"}]};renderJobs()');
+  assert.equal(view('action'),undefined);assert.equal(view('cleanup').subject.textContent,'Foo');
+  run('state={...state,activities:[]};queueState={queued:[],running:null};rows=[];renderJobs()');
+  // The counts keep a leaving row until it leaves the page.
+  run('leavingRows.set("n9",{id:"n9",leaving:"name_free"});globalThis.counted={audiobook_jobs:{attention_counts:{name_taken:2}}};leavingCounts(counted)');
+  assert.equal(run('counted.audiobook_jobs.attention_counts.name_taken'),3);
+  run('leavingRows.delete("n9")');
   console.log('PASS 0.29.0 source check on the page: drive lines with Check again, the removed line with Details and Dismiss, cleared rows in the strip');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

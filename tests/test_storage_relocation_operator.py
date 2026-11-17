@@ -39,7 +39,10 @@ class OperatorNativeTests(unittest.TestCase):
         default = Path(__file__).resolve().parents[1] / 'scratch'
         area = Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT', str(default)))
         area.mkdir(parents=True, exist_ok=True)
-        source_area = Path(os.environ.get('BOOKS_OPERATOR_C_ROOT', str(area)))
+        # Only the cross-drive case takes the C: source root (Sergei's one exception, 2026-11-17); every other operator case
+        # keeps its source beside its target, as before.
+        cross = self._testMethodName == 'test_cross_drive_content_only_copy_refuses_without_acl_mutation'
+        source_area = Path(os.environ.get('BOOKS_OPERATOR_C_ROOT', str(area))) if cross else area
         source_area.mkdir(parents=True, exist_ok=True)
         self.tag = 'storage-operator-' + uuid.uuid4().hex
         self.area = area / self.tag; self.area.mkdir()
