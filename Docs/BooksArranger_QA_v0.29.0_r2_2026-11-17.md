@@ -32,7 +32,7 @@ Why NO-GO and not "GO with a Major": the studio vocabulary calls only a broken c
 | Check | Expected | Found | Result |
 |---|---|---|---|
 | Repo HEAD | `6e3de5f81f24b5857907283941d11d59a76d3fbc` | same (`git rev-parse HEAD`), branch `ender/0.29.0` | match |
-| Entry log `I:\AI Projects\Worktrees\Books Arranger\qa-6e3de5f\ender-entry.log` | SHA-256 `0fe798a0ff48d8bce7ff28ee0b298bc54969d31a9e834b90071db74004780992` | same (`sha256sum`) | match |
+| Entry log `(superseded evidence folder, removed)\ender-entry.log` | SHA-256 `0fe798a0ff48d8bce7ff28ee0b298bc54969d31a9e834b90071db74004780992` | same (`sha256sum`) | match |
 | Receipt line (line 8 of the log, verbatim start) | `… @ 6e3de5f… (dirty: N) … check pass …` | `Entry-check receipt v2: books-arranger v0.28.13 @ 6e3de5f81f24b5857907283941d11d59a76d3fbc (dirty: N) [source:0389389a…; harness:98263df0…; runtime:9485d78c…; checker:4bae2cde…] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a; personal-folders clean (5 subfolder notes)` | match |
 | Snapshot | the committed files | `git archive HEAD` (committed content only; the tool repo has no change of mine) | match |
 | Runtime | the entry-check runtime | `build-cache\builds\a8162f92…\runtime`: python.exe `434b361f…`, ffmpeg.exe `a3bf949b…`, ffprobe.exe `fe818a56…` equal `runtime-pointer.json` | match |
@@ -106,7 +106,7 @@ Still not verified: the moved-cover hold, a real On hold block («Похитит
 
 - Backends (ports 5292 and 5293, including the 0.28.13 runs) stopped through their own shutdown route, each confirmed by PID; no listener left on 5292, 5293 or (not mine) 5210. Headless leases `0ee0da67e3c0` and `795f9e499256` stopped, `list` shows none. No installer, no Electron process of mine.
 - Scratch folder `I:\AI Projects\Studio Illuminati\WIP\Books Arranger\scratch\futaba-0290r\` (snapshots of 0.29.0 and 0.28.13, fixtures, catalogs, probes, tools): removal with `node scripts/studio-sweep.mjs --apply --path <that literal path>` after this report, confirmed in my reply.
-- **Superseded evidence:** this pass supersedes the first report's evidence citation of `I:\AI Projects\Worktrees\Books Arranger\qa-50ce63c` and `qa-9d05455.sweep-62492-1794936066900`; those two folders can be released. `qa-6e3de5f` is the entry log this report cites; keep it until the verdict is acted on.
+- **Superseded evidence:** this pass supersedes the first report's evidence citation of `(superseded evidence folder, removed)` and `(superseded evidence folder, removed)`; those two folders can be released. `(superseded evidence folder, removed)` is the entry log this report cites; keep it until the verdict is acted on.
 - Personal-folder listings, copied verbatim, list only, nothing deleted or moved by me:
 
 ```

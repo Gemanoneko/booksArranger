@@ -33,7 +33,7 @@ Effect for Sergei: he cannot save a name change from Edit names at all, and cann
 | Check | Expected | Found | Result |
 |---|---|---|---|
 | Repo HEAD | `50ce63c37a0e4a3bf2502922c79e46686a370dff` | same (`git rev-parse HEAD`), branch `ender/0.29.0`; the tool repo had no change of mine (only Senua's untracked review file appeared during my pass; I did not open it) | match |
-| Entry log `I:\AI Projects\Worktrees\Books Arranger\qa-50ce63c\ender-entry.log` | SHA-256 `e2dc43373e388bb143175c35bd161de9ae5a2f8c1092d6a7ff773756bf6214b0` | same (`sha256sum`) | match |
+| Entry log `(superseded evidence folder, removed)\ender-entry.log` | SHA-256 `e2dc43373e388bb143175c35bd161de9ae5a2f8c1092d6a7ff773756bf6214b0` | same (`sha256sum`) | match |
 | Receipt line (line 3 of the log, verbatim start) | `… @ 50ce63c… (dirty: N) … check pass …` | `Entry-check receipt v2: books-arranger v0.28.13 @ 50ce63c37a0e4a3bf2502922c79e46686a370dff (dirty: N) [source:fc37370c…; harness:e895fb43…; runtime:9485d78c…; checker:4bae2cde…] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a; personal-folders clean` | match |
 | My snapshot of HEAD | the committed files | `git archive HEAD`, 2816 files = `sourceFiles` in the entry `context.log`. 2769 equal their git blob hash; the other 47 differ only by line endings (`core.autocrlf` on export; equal after removing CR) | match |
 | Runtime used | the entry-check runtime | embedded Python and FFmpeg from `build-cache\builds\a8162f92…\runtime`; python.exe, ffmpeg.exe, ffprobe.exe SHA-256 equal `runtime-pointer.json` | match |
@@ -165,7 +165,7 @@ Item 1 drive notices, Check again, Q4, startup, converted-stay, list-only, layou
 ## 7. Cleanup and personal folders
 
 - Backends (ports 5290, 5291) stopped through their own shutdown route; no listener left; the lock helper released its handle. No installer, no Electron process of mine.
-- Scratch folder `I:\AI Projects\Studio Illuminati\WIP\Books Arranger\scratch\futaba-0290\` (snapshots of 0.29.0 and 0.28.13, fixtures, catalogs, probes, screenshots): removed with `node scripts/studio-sweep.mjs --apply --path <that literal path>` (dry run first: exactly one item planned; applied: `REMOVED 258.26 MB`), and confirmed gone (`ls` finds nothing). Headless leases: `list` shows none. The tool repo shows only two untracked files, Senua's review and this report; I committed nothing and did not switch the branch. One unrelated leftover seen in the sweep, not mine: `I:\AI Projects\Worktrees\Books Arranger\qa-9d05455.sweep-62492-1794936066900` reported STUCK (needs an ACL fix or administrator).
+- Scratch folder `I:\AI Projects\Studio Illuminati\WIP\Books Arranger\scratch\futaba-0290\` (snapshots of 0.29.0 and 0.28.13, fixtures, catalogs, probes, screenshots): removed with `node scripts/studio-sweep.mjs --apply --path <that literal path>` (dry run first: exactly one item planned; applied: `REMOVED 258.26 MB`), and confirmed gone (`ls` finds nothing). Headless leases: `list` shows none. The tool repo shows only two untracked files, Senua's review and this report; I committed nothing and did not switch the branch. One unrelated leftover seen in the sweep, not mine: `(superseded evidence folder, removed)` reported STUCK (needs an ACL fix or administrator).
 - The browser's personal-folder check ended `clean (7 folders, 11 drive roots)` in all runs but one. The one that listed something (run `futaba-0290-you`, 19:53:22 to 19:57:27), copied verbatim, list only, nothing deleted or moved by me:
 
 ```
