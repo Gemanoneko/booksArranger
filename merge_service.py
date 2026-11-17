@@ -194,15 +194,28 @@ def operation(method):
 
 class FolderOpenRefused(ValueError):
     """A guarded, known navigation refusal; never an inferred drive failure."""
-    def __init__(self,directory,cause):
+    def __init__(self,directory,cause,drive=None):
         self.folder=str(directory)
         code=getattr(cause,'winerror',None) or getattr(cause,'errno',None)
         self.fix='Check your access to this folder, then try again.' if code in (5,13) else 'Check that this folder is available, then try again.'
         self.code='folder_access_denied' if code in (5,13) else 'folder_unavailable'
+        if drive:
+            # 0.29.0 (Judy section 1, row side): its library root does not answer, so the drive is what to check.
+            self.fix='Check that the drive is connected.';self.code='drive_unavailable'
+            super().__init__(str(drive)+' isn’t available. '+self.fix);return
         super().__init__('Couldn’t open '+self.folder+'. '+self.fix)
 
     def payload(self):return {'error':str(self),'code':self.code,'folder':self.folder,'fix':self.fix}
 
+
+
+def unavailable_root(merge,directory):
+    """The library root this folder is in when the last check pass found it not answering (or empty), else None."""
+    import source_presence
+    for root in (getattr(merge,'__dict__',{}).get('_source_report') or {}).get('roots') or []:
+        if not source_presence.answers(root) and (source_presence._inside(directory,root['path']) or source_presence._key(directory)==source_presence._key(root['path'])):
+            return root['path']
+    return None
 
 
 def hold_cause(reason):
@@ -1029,6 +1042,41 @@ class MergeService:
         if not self._start_allowed(generation):raise StartRefused('stale','Start checks stopped. Pending work is kept.')
         wake=getattr(self,'_retention_wake',None)
         if wake is not None:wake.set()
+
+    def check_sources(self,*,roots=None,folders=True,progress=None):
+        """0.29.0 items 1, 3 and 5: one check pass (source_presence.run). None when another pass or a scan runs (the scan's
+        end runs one). The per-root states are replaced as roots are checked; removed books and deleted folders add up
+        until Dismiss or the next start (Judy section 1)."""
+        import source_presence
+        lock=self.__dict__.setdefault('_source_check_lock',threading.Lock())
+        if not lock.acquire(blocking=False):return None
+        try:
+            worker=getattr(self.inventory,'worker',None)
+            if worker is not None and worker.is_alive():return None
+            self._source_checking=True
+            report=source_presence.run(self,roots=roots,folders=folders,progress=progress,stop=self.__dict__.get('_retention_stop'))
+        finally:
+            self._source_checking=False;lock.release()
+        previous=self.__dict__.get('_source_report') or {'roots':[],'removed':[],'folders':[],'cleared':[]}
+        states={source_presence._key(r['path']):r for r in previous['roots']}
+        for state in report['roots']:states[source_presence._key(state['path'])]=state
+        self._source_report={'roots':list(states.values()),'removed':previous['removed']+report['removed'],'folders':previous['folders']+report['folders'],'cleared':report['cleared']}
+        self.invalidate_status() if hasattr(self,'invalidate_status') else None
+        return report
+
+    def source_check_view(self):
+        """/api/state's library_roots and source_check (Judy 0.29.0 section 1), or None before the first pass."""
+        import source_presence
+        report=self.__dict__.get('_source_report')
+        if report is None:return None
+        value=source_presence.summary(report);value['checking']=bool(self.__dict__.get('_source_checking'))
+        return value
+
+    def dismiss_source_report(self):
+        """Dismiss: the removed-books line goes; the per-root states stay."""
+        report=self.__dict__.get('_source_report')
+        if report is not None:self._source_report=dict(report,removed=[],folders=[],cleared=[])
+        return self.source_check_view()
 
     def report_restore_failure(self,error):
         """Senua R-m5: a restart restore that failed says so on the jobs line instead of only in the engine log."""
@@ -5594,7 +5642,7 @@ class MergeService:
                 directory=item['path']
             if view=='candidates' and not os.path.isdir(directory):
                 try:return dict(self.open_folder(library,view,identity,'output'),fallback='output')
-                except ValueError:raise FolderOpenRefused(directory,FileNotFoundError()) from None
+                except ValueError:raise FolderOpenRefused(directory,FileNotFoundError(),unavailable_root(self,directory)) from None
         elif folder_kind=='output' and view=='candidates':
             self._source_directories(library,view,identity)  # catalog-only identity check; navigation never regroups
             try:
@@ -5618,8 +5666,9 @@ class MergeService:
         if hasattr(self.inventory,'source_root_for_path'):root=self.inventory.source_root_for_path(directory,library)
         try:
             with DirectoryBoundary(root,directory):self.dispatch_folder(directory)
-        except (ValueError,OSError) as error:raise FolderOpenRefused(directory,error) from error
+        except (ValueError,OSError) as error:raise FolderOpenRefused(directory,error,unavailable_root(self,directory)) from error
         return {'opened':True}
+
 
     @staticmethod
     def dispatch_folder(directory):

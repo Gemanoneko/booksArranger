@@ -4,7 +4,8 @@
 (function(root){
  // The thresholds live here only (3.4): retune them without touching the copy.
  const THRESHOLDS=Object.freeze({answerWaiting:3000,answerStuck:10000,progressWaiting:10000,progressStuck:30000,sleepGap:5000});
- const STEPS=Object.freeze({engine:'Starting the engine',catalog:'Opening the catalog',session:'Checking the last session',books:'Loading your books'});
+ const STEPS=Object.freeze({engine:'Starting the engine',catalog:'Opening the catalog',session:'Checking the last session',sources:'Checking source folders',books:'Loading your books'});
+ const STEP_COUNT=5;  // 0.29.0: Checking source folders became step 4 of 5
  const UNITS=new Set(['files','books','items']);
  const CAUSES={drive:root=>root?`the source drive ${root} to answer`:'the source drive to answer',file_lock:()=>'another program to release the catalog'};
  const HINTS={drive:'Check that the drive is connected. Loading continues by itself when it answers.',file_lock:'Close other programs that use the catalog. Loading continues by itself when it lets go.'};
@@ -22,10 +23,10 @@
   return s<3600?`${Math.floor(s/60)}:${two(s%60)}`:`${Math.floor(s/3600)}:${two(Math.floor(s%3600/60))}:${two(s%60)}`;
  }
  function stepOf(loading){
-  if(loading?.admission)return {id:'admission',n:1,of:4,words:'Checking data folder'};
+  if(loading?.admission)return {id:'admission',n:1,of:STEP_COUNT,words:'Checking data folder'};
   // Before the engine's first answer the shell's step is the only one: Step 1, the process is launching.
-  if(!loading)return {id:'engine',n:1,of:4,words:STEPS.engine};
-  const of=Number.isInteger(loading.of)&&loading.of>0?loading.of:4,n=Number.isInteger(loading.n)&&loading.n>0?Math.min(loading.n,of):1;
+  if(!loading)return {id:'engine',n:1,of:STEP_COUNT,words:STEPS.engine};
+  const of=Number.isInteger(loading.of)&&loading.of>0?loading.of:STEP_COUNT,n=Number.isInteger(loading.n)&&loading.n>0?Math.min(loading.n,of):1;
   return {id:loading.step,n,of,words:STEPS[loading.step]||'Loading…'};
  }
  // The clocks: the last engine answer, and the last progress (the engine reports its age; an age, so a clock change
@@ -108,7 +109,7 @@
  }
  // aria-valuetext: "Step 3 of 4, Checking the last session, 24%" (no percentage when the step cannot count).
  function valueText(loading){
-  if(loading?.admission)return `Step 1 of 4, Checking data folder, ${admissionPhase(loading)}`;
+  if(loading?.admission)return `Step 1 of ${STEP_COUNT}, Checking data folder, ${admissionPhase(loading)}`;
   const step=stepOf(loading),f=fraction(loading);
   return `Step ${step.n} of ${step.of}, ${step.words}${f===null?'':`, ${Math.round(f*100)}%`}`;
  }

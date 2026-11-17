@@ -1251,7 +1251,7 @@ function renderJobs(){
   const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved`:'Book candidate totals unavailable');
   const acts=checkActivities(Array.isArray(state.activities)?state.activities:[],jobs);
   text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[admissionLine(jobs) || jobsFirstPart(jobs,acts),queuedPart(jobs),`${attentionTotal(jobs)} need attention`,counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:''].filter(Boolean).join(' · '));
-  renderActivities(acts,jobs);
+  renderActivities(acts,jobs);renderSourceCheck();
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
   $('resume-jobs').title=cleanup?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.';
@@ -1297,6 +1297,78 @@ function renderHold(held){
 }
 // Item 1 (Judy section 1): each library root and whether it answers ({path, available, empty, books}), from the engine.
 function libraryNotices(){return Array.isArray(state?.library_roots)?state.library_roots.filter(item=>item && typeof item.path==='string'):[];}
+// One line per root that does not answer (or answers empty), under the Source lines; its books stay. Check again probes the
+// roots now; the page also checks by itself every 30 s while a line shows. A root that answers again loses its line at once.
+const sourceChecks=new Set(),sourceStill=new Set();let sourceTimer=null,sourceDetailsOpen=false,sourceClearedSeen=new Set(),sourceKey='';
+function rootBooks(root){return Number.isInteger(root.books) && root.books>0?`Its ${plural(root.books,'book','books')} stay on the list.`:'Its books stay on the list.';}
+function rootLine(root){
+  if(sourceChecks.has(root.path))return `Checking ${root.path}…`;
+  if(sourceStill.has(root.path))return `${root.path} still isn't available. ${rootBooks(root)}`;
+  return root.empty?`${root.path} answers but is empty. ${rootBooks(root)} Check that the drive is connected.`:`${root.path} isn't available. ${rootBooks(root)} Check that the drive is connected.`;
+}
+async function checkSourcesAgain(path){
+  const roots=libraryNotices().filter(root=>!root.available || root.empty).map(root=>root.path),checking=path?[path]:roots;if(!checking.length || ended)return;
+  for(const root of checking)sourceChecks.add(root);renderLibraryNotices();
+  try{const answer=await request('/api/sources/check',{});const after=Array.isArray(answer?.source_check?.roots)?answer.source_check.roots:null;
+    if(after && state)state={...state,library_roots:after};
+    for(const root of checking){const now=(after || []).find(item=>item.path===root);if(!now || !now.available || now.empty)sourceStill.add(root);else sourceStill.delete(root);}}
+  catch(error){for(const root of checking)sourceStill.add(root);}
+  finally{for(const root of checking)sourceChecks.delete(root);renderLibraryNotices();}
+}
+function renderLibraryNotices(){
+  const box=$('library-notices');if(!box)return;
+  const away=libraryNotices().filter(root=>!root.available || root.empty);
+  for(const root of [...sourceStill])if(!away.some(item=>item.path===root))sourceStill.delete(root);
+  const shown=away.slice(0,3),key=JSON.stringify(shown.map(root=>[root.path,rootLine(root)]))+away.length;
+  box.hidden=!away.length;
+  if(key!==sourceKey){
+    sourceKey=key;box.replaceChildren();
+    for(const root of shown){
+      const line=node('p','','library-notice'),text=node('span',rootLine(root)),button=node('button','Check again','quiet');button.type='button';
+      button.title=`Check whether ${root.path} answers now. Nothing is removed while it doesn't.`;
+      if(sourceChecks.has(root.path))button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+      button.addEventListener('click',()=>{if(!sourceChecks.has(root.path))checkSourcesAgain(root.path);});line.append(text,button);box.append(line);
+    }
+    if(away.length>3){const more=node('p',`+${away.length-3} more`,'field-help');more.title=away.slice(3).map(root=>rootLine(root)).join('\n');box.append(more);}
+  }
+  if(away.length && sourceTimer===null && typeof setInterval==='function')sourceTimer=setInterval(()=>checkSourcesAgain(),30000);
+  if(!away.length && sourceTimer!==null && typeof clearInterval==='function'){clearInterval(sourceTimer);sourceTimer=null;}
+}
+// What the last check pass removed (Judy section 1): one line, Details and Dismiss; never a toast, never one line per book.
+function sourceRemovedText(check){
+  const books=Number.isInteger(check?.removed)?check.removed:0,folders=Number.isInteger(check?.folders)?check.folders:0;
+  const parts=[];if(books)parts.push(`Removed ${plural(books,'book','books')} whose files are gone.`);
+  if(folders)parts.push(`Deleted ${plural(folders,'source folder','source folders')} that held only leftover files.`);
+  else if(books)parts.push('No files were touched.');
+  return parts.join(' ');
+}
+function renderSourceCheck(){
+  renderLibraryNotices();
+  const check=state?.source_check,block=$('source-removed');if(!block)return;
+  const text=sourceRemovedText(check);block.hidden=!text;writeText($('source-removed-line'),text);
+  const list=$('source-details-list');list.hidden=!(text && sourceDetailsOpen);
+  if(text && sourceDetailsOpen){
+    const items=[];for(const book of check.removed_list || [])items.push(node('li',`${book.title} — ${book.path}`));
+    if(check.removed_more>0)items.push(node('li',`+ ${check.removed_more} more`));
+    for(const folder of check.folder_list || [])items.push(node('li',`${folder.path} — ${(folder.files || []).join(', ') || 'empty'}`));
+    if(check.folders_more>0)items.push(node('li',`+ ${check.folders_more} more`));
+    list.replaceChildren(...items);
+  }
+  // Item 3 (Judy section 3): rows whose problem no longer applies left the list; the Needs attention strip says why.
+  const cleared=(Array.isArray(check?.cleared)?check.cleared:[]).filter(item=>item && typeof item.id==='string' && !sourceClearedSeen.has(item.id));
+  if(cleared.length){
+    for(const item of cleared)sourceClearedSeen.add(item.id);
+    if(view==='candidates' && filters.candidates==='output_attention'){
+      if(cleared.length===1){askNote(`«${cleared[0].title || 'The book'}» left this list: ${cleared[0].cause==='name_taken'?'the name is free now':'the problem no longer applies'}. The book is checked again.`);stripShow={id:cleared[0].id,title:cleared[0].title};renderStripShow();}
+      else askNote(`${plural(cleared.length,'book','books')} left this list: their problem no longer applies. They are checked again.`);
+    }
+  }
+}
+$('source-details')?.addEventListener('click',()=>{sourceDetailsOpen=!sourceDetailsOpen;renderSourceCheck();});
+$('source-dismiss')?.addEventListener('click',async()=>{sourceDetailsOpen=false;try{const answer=await request('/api/sources/dismiss',{});if(state)state={...state,source_check:answer?.source_check?{...answer.source_check,roots:undefined}:null};}catch(error){message(error.message);}renderSourceCheck();});
+// Window focus (Judy section 0): rows whose cause depends on the outside world are checked again, at most once per 30 s.
+let sourceRowsAt=0;
+globalThis.addEventListener?.('focus',()=>{if(ended || loadingActive || Date.now()-sourceRowsAt<30000)return;sourceRowsAt=Date.now();request('/api/sources/rows',{}).catch(()=>{});});
 // The Waiting line (Judy section 7): what the app waits for and when; the queued actions are named, not only counted.
 function waitingLine(){
   const parts=[],automatic=state?.automatic_processing;

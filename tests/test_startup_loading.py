@@ -116,7 +116,7 @@ class LoadingServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         loading = state['loading']
         self.assertIn(loading['step'], ('catalog', 'session'))
-        self.assertEqual(loading['of'], 4)
+        self.assertEqual(loading['of'], 5)  # 0.29.0: Checking source folders is step 4 of 5
         self.assertEqual(loading['parts'], {'library': True, 'status': True, 'books': False, 'attention': False, 'jobs': False})
         self.assertIsNone(loading['took_ms'])
         self.assertTrue(loading['restart_safe'])
@@ -307,6 +307,25 @@ class ConstructionTests(unittest.TestCase):
             merge.jobs._hold_queue()
             self.assertTrue(merge.jobs._stop.is_set())
             merge.jobs._save_run_intent(True)  # best effort: no raw sqlite error reaches Start
+
+    def test_startup_runs_the_check_pass_as_step_4_before_the_books_load_0290(self):
+        # 0.29.0 (Judy section 1): the check pass is part of loading, "Step 4 of 5: Checking source folders", so the list never
+        # shows a book whose files are gone. A failing pass never stops loading.
+        from merge_service import MergeService
+        for fails in (False,True):
+            with self.subTest(fails=fails):
+                seen=[]
+                def check(merge,**options):
+                    seen.append(server.loading.view()['step'])
+                    if fails:raise RuntimeError('drive error')
+                with patch.object(MergeService,'check_sources',autospec=True,side_effect=check),patch.object(web_server.BrowserServer,'_start_background'):
+                    server=web_server.BrowserServer(('127.0.0.1',0),self.inventory,defer=True)
+                    try:
+                        server.start_loading().join(10)
+                        self.assertTrue(server.loading.finished,server.loading.error)
+                        self.assertEqual(seen,['sources'])
+                    finally:
+                        server.server_close()
 
     def test_a_failed_restore_says_so_on_the_jobs_line_r_m5(self):
         from types import SimpleNamespace

@@ -275,6 +275,11 @@ class Inventory:
                     self.last_error='Scan stop checkpoint could not be saved: '+str(error)
                     remember_busy_failure(self,root,generation,error,self.last_error)
             else:self._run(label,root,generation)
+        # 0.29.0 (Judy section 0): a scan that finished runs the check pass (the server's hook; none in tests by default).
+        hook=getattr(self,'after_scan',None)
+        if hook is not None and not self.stop_event.is_set():
+            try:hook()
+            except Exception:pass
 
     def stop(self):
         self.stop_event.set()

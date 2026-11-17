@@ -118,7 +118,7 @@ test('the window opens at app ready with the first frame, before the engine answ
   assert.equal(t.log.spawns.length, 1, 'the engine is launched beside the window');
   await until(() => win.visible, 3000, 'the window shown');
   assert.equal(t.engine.requests.length, 0, 'nothing has answered yet');
-  assert.match(t.log.trays[0].tips.at(-1), /^Books Arranger — loading, step 1 of 4$/);
+  assert.match(t.log.trays[0].tips.at(-1), /^Books Arranger — loading, step 1 of 5$/);
   const first = await t.invoke('books:startup');
   assert.equal(first.phase, 'launching'); assert.equal(first.lastLoadMs, null, 'no last load on a first start');
   t.log.spawns[0].prove(t.engine.pid); await t.answer();

@@ -20,7 +20,7 @@ test('before the first answer the engine-silence row applies from the launch', (
   assert.equal(L.evaluate(t, 2999).state, 'working');
   assert.equal(L.evaluate(t, 3000).state, 'waiting');
   assert.equal(L.evaluate(t, 10000).state, 'stuck');
-  assert.deepEqual(L.stateLine(L.evaluate(t, 3000), null), { word: 'Waiting', text: "Step 1 of 4: Starting the engine. The engine hasn't answered for 3 s." });
+  assert.deepEqual(L.stateLine(L.evaluate(t, 3000), null), { word: 'Waiting', text: "Step 1 of 5: Starting the engine. The engine hasn't answered for 3 s." });
   assert.deepEqual(L.detailParts(t, 3000, null, null), ['running 0:03', 'no answer from the engine yet']);
 });
 

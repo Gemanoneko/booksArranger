@@ -150,7 +150,7 @@ def needs_you_only(jobs, automatic, rows, scanning, queue):
 STARTED = time.monotonic()  # the engine's own start: "Loaded in" counts from here
 # Startup (ruling 28; Judy's 0.22.1 UX spec, section 3). The shell owns step 1 (the process is launching); the engine
 # reports the rest. Parts are what the page may show, each whole: absent from /api/state until it arrives.
-LOAD_STEPS = ('engine', 'catalog', 'session', 'books')
+LOAD_STEPS = ('engine', 'catalog', 'session', 'sources', 'books')  # 'sources': the 0.29.0 check pass (items 1, 3, 5)
 LOAD_PARTS = ('library', 'status', 'books', 'attention', 'jobs')
 NOT_YET = 'Not yet: Books Arranger is still loading. This works when loading finishes.'
 # Read-only presses (View metadata, Open folder) work as soon as the books are on screen (3.6).
@@ -338,8 +338,26 @@ class BrowserServer(ThreadingHTTPServer):
             merge.move_requester=lambda move,title:self.actions.enqueue('move',move['candidate_id'],title,{'move_id':move['move_id']},always=True)
         return merge
 
+    def _check_sources(self, merge, **options):
+        """The 0.29.0 check pass, never fatal: a failure leaves every book listed and every folder in place."""
+        from storage_relocation_native import retained_runtime
+        check = getattr(merge, 'check_sources', None)
+        if check is None or self.closing or retained_runtime(self.inventory.database):
+            return None
+        try:
+            return check(**options)
+        except Exception as error:
+            print(f'Books Arranger could not check the source folders: {error}', file=sys.stderr, flush=True)
+            return None
+
+    def _check_sources_later(self, **options):
+        merge = self.merge
+        threading.Thread(target=self._check_sources, args=(merge,), kwargs=options, name='books-source-check', daemon=True).start()
+
     def _start_background(self):
         from storage_relocation_native import retained_runtime
+        # 0.29.0 (Judy section 0): a finished scan runs the check pass.
+        self.inventory.after_scan = self._check_sources_later
         if retained_runtime(self.inventory.database):return
         if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
         # Published-book hashing reads every finished book from the library share; it must not delay health.
@@ -380,7 +398,11 @@ class BrowserServer(ThreadingHTTPServer):
                 merge.close()
                 raise LoadAborted('Loading stopped')
             self.merge = merge
-            # Step 4: the first status (counted per book) and the first book page, so the page's first reads are warm.
+            # 0.29.0 (Judy section 1): the check pass is part of loading, before the list appears, so it never shows ghosts.
+            loading.begin('sources', 0, 'books')
+            self._check_sources(merge, progress=lambda done, total: loading.advance(done, total))
+            loading.checkpoint()
+            # Step 5: the first status (counted per book) and the first book page, so the page's first reads are warm.
             loading.begin('books', 0, 'books')
             warm = getattr(merge, 'warm_status', None)
             jobs = warm(progress=lambda done, total: loading.advance(done, total)) if callable(warm) else merge.state()
@@ -621,7 +643,15 @@ class BrowserServer(ThreadingHTTPServer):
             'automatic_processing': automatic, **(queue:=self.actions.view()),
             'activities': (rows:=activities(jobs, self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None,
                                      self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))),
-            'needs_you_only': needs_you_only(jobs, automatic, rows, active, queue)}
+            'needs_you_only': needs_you_only(jobs, automatic, rows, active, queue),
+            # 0.29.0 item 1 (Judy section 1): each library root's state and the last check pass's report.
+            **self._source_view()}
+
+    def _source_view(self):
+        view = self.merge.source_check_view() if hasattr(self.merge, 'source_check_view') else None
+        if not view:
+            return {}
+        return {'library_roots': view['roots'], 'source_check': {key: value for key, value in view.items() if key != 'roots'}}
 
     def loading_state(self, library):
         """/api/state while loading: answered at once, with only the parts that have arrived. A part that has not
@@ -1005,6 +1035,31 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as error:
                 self.fail(400,str(error))
             return
+        if path=='/api/sources/check':
+            # 0.29.0 (Judy section 1): Check again, and the page's 30 s re-check while a root does not answer. The roots are
+            # probed now; a pass runs (in the background) for every root that answers with content.
+            if data:raise ValueError('Check again requires an empty object')
+            import source_presence
+            merge=self.server.merge
+            roots=list(self.server.inventory.source_roots('Audiobooks')) if hasattr(self.server.inventory,'source_roots') else [self.server.inventory.roots['Audiobooks']]
+            states=source_presence.probe_roots(roots)
+            report=merge.__dict__.get('_source_report')
+            if report is not None:
+                known={source_presence._key(r['path']):r for r in report['roots']}
+                merge._source_report=dict(report,roots=[dict(known.get(source_presence._key(s['path']),{}),**s) for s in states])
+            answering=[s['path'] for s in states if source_presence.answers(s)]
+            if answering:self.server._check_sources_later(roots=answering)
+            self.response(200,{'source_check':merge.source_check_view() if hasattr(merge,'source_check_view') else None,'checking':bool(answering)});return
+        if path=='/api/sources/rows':
+            # Window focus (Judy section 0): stale rows only, at most once per 30 s; never folders.
+            if data:raise ValueError('The row check requires an empty object')
+            merge=self.server.merge;now=time.monotonic()
+            if now-merge.__dict__.get('_rows_checked_at',-1e9)>=30:
+                merge._rows_checked_at=now;self.server._check_sources_later(folders=False)
+            self.response(202,{'accepted':True});return
+        if path=='/api/sources/dismiss':
+            if data:raise ValueError('Dismiss requires an empty object')
+            self.response(200,{'source_check':self.server.merge.dismiss_source_report()});return
         if path=='/api/automatic/cancel-start':
             # Cancel automatic start (O12): the pending start ends; books keep waiting for a press.
             if data:raise ValueError('Automatic controls require an empty object; scope is Audiobooks')
@@ -1477,7 +1532,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.status_control=False
                 self.response(202,self.queue_press(path,data,always=True));return
             if path in READ_ONLY_POSTS and isinstance(data,dict) and data.get('queue') is not True:self.status_control=False  # ruling 75a: a read keeps it
-            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup/retry','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
+            merge_routes={'/api/sources/check','/api/sources/rows','/api/sources/dismiss','/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup/retry','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',

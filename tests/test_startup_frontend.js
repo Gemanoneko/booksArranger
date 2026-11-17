@@ -75,7 +75,7 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
   {
     const h=harness({protocol:'file:'});await flush();
     assert.equal(h.calls.state,0,'the first frame asks no engine');
-    assert.equal(h.node('load-word').textContent,'Working');assert.equal(h.node('load-text').textContent,'Step 1 of 4: Starting the engine');
+    assert.equal(h.node('load-word').textContent,'Working');assert.equal(h.node('load-text').textContent,'Step 1 of 5: Starting the engine');
     assert.match(h.node('load-detail').textContent,/running 0:00 · no answer from the engine yet · last load took 1 min 39 s/);
     assert.equal(h.node('filter').children.length,1);assert.equal(h.node('filter').children[0].textContent,'Loading…');
     assert.equal(h.node('version').hidden,true);assert.equal(h.node('jobs-idle').hidden,true);
@@ -93,7 +93,7 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     assert.equal(h.node('start').getAttribute('aria-disabled'),null,'pressed again: taken back');assert.equal(h.calls.scan || 0,0);
     // No answer: Waiting at 3 s, Stuck at 10 s, with Restart engine (desktop), Copy details and Technical details.
     h.advance(2600);assert.equal(h.node('load-word').textContent,'Waiting');
-    assert.equal(h.node('load-text').textContent,"Step 1 of 4: Starting the engine. The engine hasn't answered for 3 s.");
+    assert.equal(h.node('load-text').textContent,"Step 1 of 5: Starting the engine. The engine hasn't answered for 3 s.");
     for(let s=0;s<7;s++)h.advance(1000);  // one tick a second: a longer gap is a sleep (3.4)
     assert.equal(h.node('load-word').textContent,'Stuck');
     assert.equal(h.node('load-actions').hidden,false);assert.equal(h.node('load-restart').hidden,false);assert.equal(h.node('load-details').hidden,false);

@@ -57,6 +57,25 @@ class MergeHTTPTests(unittest.TestCase):
 
     def identity(self):return {'library':'Audiobooks','id':ID,'revision':1}
 
+    def test_source_check_routes_0290(self):
+        # 0.29.0 items 1 and 3 (Judy sections 0 and 1): Dismiss, the window-focus row check (at most once per 30 s, never
+        # folders) and Check again (the roots probed now; a pass only for a root that answers with content).
+        self.merge.dismiss_source_report=Mock(return_value={'removed':0})
+        self.assertEqual(self.call('/api/sources/dismiss',{})[0],200);self.merge.dismiss_source_report.assert_called_once_with()
+        self.assertEqual(self.call('/api/sources/dismiss',{'x':1})[0],400)
+        self.server._check_sources_later=Mock()
+        self.assertEqual(self.call('/api/sources/rows',{})[0],202);self.assertEqual(self.call('/api/sources/rows',{})[0],202)
+        self.server._check_sources_later.assert_called_once_with(folders=False)
+        import source_presence
+        self.inventory.source_roots=lambda library:['Z:\\Audiobooks','Y:\\Books']
+        self.merge.source_check_view=Mock(return_value={'roots':[]})
+        probed=[{'path':'Z:\\Audiobooks','available':False,'empty':False},{'path':'Y:\\Books','available':True,'empty':False}]
+        self.server._check_sources_later.reset_mock()
+        with patch.object(source_presence,'probe_roots',return_value=probed):
+            status,body=self.call('/api/sources/check',{})[:2]
+        self.assertEqual((status,body['checking']),(200,True))
+        self.server._check_sources_later.assert_called_once_with(roots=['Y:\\Books'])
+
     def test_automatic_controls_draft_token_shape_and_scanner_owner(self):
         automatic=SimpleNamespace(status=Mock(return_value={'state':'Idle'}),start=Mock(return_value={'state':'Running'}),stop=Mock(return_value={'state':'Stopping'}),pause_jobs=Mock(return_value={'state':'Stopping'}),draft=Mock(return_value={'protected':True}))
         self.merge.automatic=automatic
