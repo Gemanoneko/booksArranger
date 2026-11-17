@@ -527,6 +527,7 @@ class MergeService:
                 db.execute('BEGIN')
                 root_json=json.dumps(roots)
                 candidate_ids={r[0] for r in db.execute('SELECT id FROM book_groups WHERE root IN (SELECT value FROM json_each(?)) AND superseded=0',(root_json,))}
+                candidate_ids-=__import__('source_presence').hidden(db)  # off the list, as in All candidates (Futaba M-5)
                 rows=[dict(r) for r in db.execute("SELECT g.*,c.revision AS context_revision,c.data AS context_data FROM book_groups g JOIN candidate_context c ON c.id=g.id WHERE g.root IN (SELECT value FROM json_each(?)) AND g.superseded=0 AND json_extract(c.data,'$.metadata_approved')=1",(root_json,))]
                 signature=[(r['id'],r['revision'],r['fingerprint'],r['review'],r['context_revision'],r['context_data'],r['changed']) for r in rows]
                 if self._approved_cache is None or self._approved_cache[0]!=signature:

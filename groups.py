@@ -932,10 +932,19 @@ def render(row,root,coverage,retired=None):
       'active_members':[m for m in evidence['members'] if not m['intentionally_retired']],
       'coverage':'Scanned scope complete; recording completeness unverified' if coverage else 'Based on files scanned so far'}
 
-def page(connection,root,limit=100,offset=0,search='',status='all',coverage=False,ids=None):
-    """ids: only these candidates are rendered (the caller prefiltered them cheaply); None renders all."""
+def page(connection,root,limit=100,offset=0,search='',status='all',coverage=False,ids=None,hidden=None):
+    """ids: only these candidates are rendered (the caller prefiltered them cheaply); None renders all. hidden: candidate
+    ids left out of the rows and the total (books the check pass took off the list, Futaba M-5)."""
     sync(connection,root)
     retired=retired_sources(connection,root)
+    if hidden:
+        if ids is not None:ids=set(ids)-set(hidden)
+        else:
+            skip=json.dumps(sorted(str(identity) for identity in hidden))
+            if status=='all' and not search:
+                total=connection.execute('SELECT count(*) FROM book_groups WHERE root=? AND superseded=0 AND id NOT IN (SELECT value FROM json_each(?))',(root,skip)).fetchone()[0]
+                rows=connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 AND id NOT IN (SELECT value FROM json_each(?)) ORDER BY scope LIMIT ? OFFSET ?',(root,skip,limit,offset))
+                return {'rows':[render(row,root,coverage,retired) for row in rows],'total':total}
     if ids is not None:
         # Only the prefiltered rows are read (a full read was about 120 MB on the real catalog).
         chosen=json.dumps(sorted(str(identity) for identity in ids))
@@ -945,7 +954,7 @@ def page(connection,root,limit=100,offset=0,search='',status='all',coverage=Fals
         total=connection.execute('SELECT count(*) FROM book_groups WHERE root=? AND superseded=0',(root,)).fetchone()[0]
         rows=connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope LIMIT ? OFFSET ?',(root,limit,offset))
         return {'rows':[render(row,root,coverage,retired) for row in rows],'total':total}
-    values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope',(root,))]
+    values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope',(root,)) if not hidden or row['id'] not in hidden]
     filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
       'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] and not item['missing'] for item in row['members']),
       'changed':lambda row:row['changed']}
@@ -953,7 +962,7 @@ def page(connection,root,limit=100,offset=0,search='',status='all',coverage=Fals
     values=[row for row in values if filters[status](row) and search.casefold() in (' '.join([row['title_clue'],row['scope']]+[item['path'] for item in row['members']])).casefold()]
     return {'rows':values[offset:offset+limit],'total':len(values)}
 
-def page_sources(connection,roots,limit=100,offset=0,search='',status='all',coverage=None,ids=None):
+def page_sources(connection,roots,limit=100,offset=0,search='',status='all',coverage=None,ids=None,hidden=None):
     """All-source page from the caller's transaction, preserving source identity.
 
     Unfiltered pages render only the requested rows. Filtered pages share the
@@ -967,6 +976,9 @@ def page_sources(connection,roots,limit=100,offset=0,search='',status='all',cove
     if ids is not None:
         clause+=' AND id IN (SELECT value FROM json_each(?))'
         args+=(json.dumps(sorted(str(identity) for identity in ids)),)
+    if hidden:  # books the check pass took off the list (Futaba M-5): out of the rows and the total
+        clause+=' AND id NOT IN (SELECT value FROM json_each(?))'
+        args+=(json.dumps(sorted(str(identity) for identity in hidden)),)
     order=' ORDER BY scope COLLATE NOCASE,root,id'
     if status=='all' and not search:
         total=connection.execute('SELECT count(*) FROM book_groups WHERE '+clause,args).fetchone()[0]

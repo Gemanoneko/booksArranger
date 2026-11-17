@@ -18,6 +18,7 @@ import shutil
 import threading
 import time
 import unittest
+import urllib.parse
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -278,6 +279,37 @@ class RealServerTests(ApproveFixture):
         self.assertEqual(self.attention()[0], {'title_author': 1}, 'listed again once the files are back')
         _counts, state = self.attention()
         self.assertEqual(state['source_check']['removed'], 0, 'a book listed again is not counted as removed')
+
+
+    def listing(self, status, search=''):
+        query = urllib.parse.urlencode({'library': 'Audiobooks', 'view': 'candidates', 'status': status, 'search': search})
+        status_code, page = self.call('/api/inventory?' + query, method='GET')
+        self.assertEqual(status_code, 200, page)
+        return sorted(row['title_clue'] for row in page['rows']), page['total']
+
+    def test_a_gone_book_leaves_all_candidates_and_the_count_a_converted_one_stays_m_5(self):
+        # Futaba M-5 (Sergei: yes): a book whose source is gone leaves All candidates and the "N book candidates found"
+        # count too, list-only. A converted book (its sources removed by the app's own cleanup) stays everywhere.
+        gone = [tone(self.audio / 'Unsorted' / 'Утро снайпера' / ('%02d.mp3' % n), self.cover, album='Утро снайпера', title='Глава %d' % n, track='%d/2' % n) for n in (1, 2)]
+        done = tone(self.audio / 'Unsorted' / 'Тайна дома' / '01.mp3', self.cover, album='Тайна дома', title='Глава 1')
+        self.serve()
+        book = self.row('Тайна дома')
+        self.service.approve_book(book['id'], book['revision'], author='Чехов Антон')
+        self.start_and_wait()
+        self.assertFalse(done.exists(), 'positive control: the app removed the converted book\'s sources')
+        self.assertEqual(self.listing('converted')[0], ['Тайна дома'])
+        before = self.listing('all')
+        self.assertEqual(before, (['Тайна дома', 'Утро снайпера'], 2), 'positive control: both listed')
+        self.assertEqual(self.attention()[1]['audiobook_jobs']['candidate_total'], 2)
+        for path in gone:
+            path.unlink()
+        self.scan()
+        self.assertEqual(self.attention()[1]['source_check']['removed'], 1)
+        self.assertEqual(self.listing('all'), (['Тайна дома'], 1), 'the gone book left All candidates; the converted one stayed')
+        self.assertEqual(self.listing('converted')[0], ['Тайна дома'], 'the converted list is untouched')
+        jobs = self.attention()[1]['audiobook_jobs']
+        self.assertEqual((jobs['candidate_total'], jobs['not_approved_total']), (1, 0), 'the count leaves it out too')
+        self.assertEqual(self.listing('all', 'Утро'), ([], 0), 'nor found by a search in All candidates')
 
 
 if __name__ == '__main__':

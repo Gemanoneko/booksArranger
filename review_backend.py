@@ -414,6 +414,9 @@ class CandidateReviewService:
         direct=status in ('all','errors','changed')
         with connect(self.inventory.database) as db:
             self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
+            # 0.29.0 (Sergei, Futaba M-5): books the check pass took off the list leave All candidates too, list-only. A
+            # book with a job is never among them, so a converted book stays in the converted list.
+            hidden=__import__('source_presence').hidden(db) if status=='all' else set()
         self.page_local.jobs={};job_rows=None;attention={}
         if self.jobs and hasattr(self.jobs,'jobs'):
             job_rows=self.jobs.jobs.status()['jobs']
@@ -464,6 +467,7 @@ class CandidateReviewService:
             elif status=='recording_review' and automatic is not None:ids={cid for cid,item in automatic.items() if item['duplicate_review']}|{cid for cid,saved in self.page_local.contexts.items() if saved['data'].get('duplicate_review')}
             elif status=='restarted':ids=set(restart)
         result=self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all',ids=ids) if ids is not None else \
+            self.inventory.candidates('Audiobooks',limit,offset,search,status,hidden=hidden) if hidden else \
             self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all')
         def current_auto(row):
             if automatic is not None:

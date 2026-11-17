@@ -146,6 +146,17 @@ def _forget(db, ids):
         db.execute('DELETE FROM source_gone WHERE candidate_id=?', (identity,))
 
 
+def hidden(db, have=None):
+    """{candidate id} the check pass took off the list that the catalog still shows as gone (still_gone) and that have no
+    audiobook job: All candidates and the candidate count leave them out as Needs attention does (Sergei, Futaba M-5;
+    list-only). A book with any job, a converted one among them, is never hidden. Read-only."""
+    have = _tables(db) if have is None else have
+    gone = still_gone(db, have)
+    if gone and 'audio_jobs' in have:
+        gone -= {r[0] for r in db.execute("SELECT DISTINCT json_extract(manifest,'$.candidate_id') FROM audio_jobs")}
+    return gone
+
+
 def _books(database, roots):
     """[{id, revision, fingerprint, root, title, paths}] of every current book under these roots, with the set of books
     that have an audiobook job, the (candidate, fingerprint) pairs already off the list, and the books an earlier pass

@@ -727,7 +727,7 @@ class Inventory:
             if not result.rowcount:
                 raise ValueError('Inventory file changed or is no longer available; reload its evidence before reviewing')
 
-    def candidates(self,label,limit=100,offset=0,search='',status='all',ids=None):
+    def candidates(self,label,limit=100,offset=0,search='',status='all',ids=None,hidden=None):
         if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')
         # Book list speed (Sergei 2026-10-24, ruling 18): when the stored groups are current the page is a plain read
         # of one SQLite snapshot (WAL), so it no longer waits for group_lock, which an automatic approval holds for
@@ -736,7 +736,7 @@ class Inventory:
         with connect(self.database) as connection:
             connection.execute('BEGIN')
             if all(groups.current(connection,root) for root in roots):
-                return self._candidate_page(connection,roots,limit,offset,search,status,ids)
+                return self._candidate_page(connection,roots,limit,offset,search,status,ids,hidden)
             connection.execute('ROLLBACK')
         with self.group_lock:
             # 0.22.2: the stale groups are built outside the write transaction (groups.presync); only a first setup, a
@@ -749,18 +749,19 @@ class Inventory:
             roots=self.source_roots(label)
             if not all(groups.current(connection,root) for root in roots):
                 connection.execute('ROLLBACK');connection.execute('BEGIN IMMEDIATE')  # the groups are rebuilt: that writes
-            return self._candidate_page(connection,roots,limit,offset,search,status,ids)
+            return self._candidate_page(connection,roots,limit,offset,search,status,ids,hidden)
 
-    def _candidate_page(self,connection,roots,limit,offset,search,status,ids):
+    def _candidate_page(self,connection,roots,limit,offset,search,status,ids,hidden=None):
+        """hidden: candidate ids left out of the page and its total (books the check pass took off, Futaba M-5)."""
         import reacquire_sources
         archived=[item['candidate_id'] for root in roots for item in reacquire_sources.markers(connection,root) if item['state']=='archived']
         if len(roots)==1:
-            result=groups.page(connection,roots[0],limit,offset,search,status,self._coverage(connection,roots[0]),ids=ids)
+            result=groups.page(connection,roots[0],limit,offset,search,status,self._coverage(connection,roots[0]),ids=ids,hidden=hidden)
             return dict(result,reacquire_archives=archived)
         # One transaction, one global ordering/filter/pagination. Each source
         # is grouped independently; no tracks cross a durable root boundary.
         result=groups.page_sources(connection,roots,limit,offset,search,status,
-            {root:self._coverage(connection,root) for root in roots},ids=ids)
+            {root:self._coverage(connection,root) for root in roots},ids=ids,hidden=hidden)
         return dict(result,reacquire_archives=archived)
 
     def _coverage(self,connection,root):

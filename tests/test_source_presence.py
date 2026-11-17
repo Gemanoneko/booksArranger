@@ -219,6 +219,20 @@ class CheckPassTests(unittest.TestCase):
         self.run_pass()
         self.assertEqual(self.dismissed(), set())
 
+    def test_hidden_books_never_include_one_with_a_job_m_5(self):
+        # Futaba M-5: All candidates and the count leave out what the pass took off; a book with any job (a converted one
+        # among them) never, even with a record left from before its job.
+        _folder, paths = self.book('gone', ['01.mp3'])
+        _folder, done = self.book('done', ['01.mp3'], job=True)
+        for path in paths + done:
+            os.remove(path)
+        self.run_pass()
+        with connect(self.database) as db:
+            db.execute(source_presence.GONE_TABLE)
+            db.execute("INSERT OR REPLACE INTO source_gone VALUES('done','fp-done',?,'now')", (json.dumps(source_presence._path_keys(done)),))
+            self.assertEqual(source_presence.still_gone(db), {'gone', 'done'}, 'positive control: both recorded')
+            self.assertEqual(source_presence.hidden(db), {'gone'})
+
     def test_needs_attention_drops_a_gone_book_from_every_group_at_once_s_m2(self):
         # Senua S-M2 (probe P2): a Name taken book whose files Sergei deleted since the last scan left the list only after
         # a scan marked them missing; the pass's record now takes it off every group at once.
