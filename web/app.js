@@ -4288,6 +4288,14 @@ function namesSavedText(row,answer){
   if(row.creation?.job?.state==='Output needs attention')return 'Saved. The next attempt uses these names.';
   return 'Saved. These names are used when it converts.';
 }
+// Futaba O-r2-1: after a Save the Goes to line keeps the path its preview showed for the saved names until the next list
+// read brings the engine's own; clearing the draft fell back to the row's old path for a poll or two. Only a preview of
+// exactly the values on screen is kept.
+function keepShownDestination(id){
+  const row=rows.find(item=>item.id===id),d=askDrafts.get(id);if(!row || !askOf(row) || typeof d?.preview?.path!=='string')return;
+  const names=namesFor(row);if(d.previewKey!==JSON.stringify({...askValues(row,true),...(names?{names}:{})}))return;
+  row.ask={...row.ask,destination:{...(row.ask.destination || {}),path:d.preview.path,absolute:d.preview.absolute || '',taken:d.preview.taken===true,reason:d.preview.reason || ''}};
+}
 async function namesSave(id){
   const row=rows.find(item=>item.id===id),state=namesState.get(id),entry=namesRows.get(id);if(!row || !state || state.pending)return;
   if(entry?.save?.getAttribute('aria-disabled')==='true')return;
@@ -4298,6 +4306,7 @@ async function namesSave(id){
   if(answer?.durable){
     if(namesState.get(id)!==state || rows.find(item=>item.id===id)?.fingerprint!==row.fingerprint){namesNotes.set(id,{text:decisionLine({body:{action:'names'},title:decisionName(row)},answer.decision)+' The source changed; review the current book before using these names.',warn:true});updateNamesRows();return;}
     const unchanged=decisionPacked(namesSent(row))===decisionPacked(values);
+    if(unchanged)keepShownDestination(id);  // before the proposals take the saved values (its preview key is of the draft)
     for(const [field,value] of Object.entries(values))if(state.data?.fields?.[field])state.data.fields[field]={...state.data.fields[field],proposal:value};
     decisionBooks.set(id,{fingerprint:row.fingerprint,names:{...(decisionBooks.get(id)?.names || {}),...values}});
     state.openDraft={names:{},ask:null};
@@ -4314,6 +4323,7 @@ function namesDone(row,answer,forget=false){
   namesNotes.set(id,{text:forget?'Forgotten. Nothing is renamed or moved.':namesSavedText(row,answer),warn:false});
   if(Array.isArray(answer?.entered))row.entered=answer.entered;
   if(!forget){const line=namesSavedStrip(row,answer);askNote(line);watchLeaving(row,line,answer);}else watchLeaving(row,`Took back a correction for ${askName(row)}.`,answer);
+  if(!forget)keepShownDestination(id);
   const state=namesState.get(id);if(state){state.open=false;state.data=null;state.draft={};state.preview=null;state.previewKey='';}
   askDrafts.delete(id);renderRows(true);namesRows.get(id)?.button?.focus?.({preventScroll:true});releaseLeaving(id);
   namesFacts.key='';if(selectedRow?.id===id)loadNamesFacts(selectedRow);  // the panel's facts read the saved names
