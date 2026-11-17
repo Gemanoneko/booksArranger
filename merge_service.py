@@ -204,6 +204,15 @@ class FolderOpenRefused(ValueError):
     def payload(self):return {'error':str(self),'code':self.code,'folder':self.folder,'fix':self.fix}
 
 
+
+def hold_cause(reason):
+    """A held cleanup's cause as a code the page words (Judy 0.29.0 section 7): 'identity_read' when the app could not read
+    a file's protected identity («Похититель детей»), else 'other' (the page then points to Needs attention)."""
+    from source_cleanup import LEGACY_IDENTITY_HOLD
+    text=str(reason or '')
+    if LEGACY_IDENTITY_HOLD.casefold() in text.casefold() or 'could not read file information' in text.casefold():return 'identity_read'
+    return 'other'
+
 class MergeService:
     draining=False # Set by a desktop Quit: the current book finishes, nothing new starts.
 
@@ -838,7 +847,10 @@ class MergeService:
             # the active row between two books.
             error=errors[0];held=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
             phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
-            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason',''),'task_kind':held['manifest'].get('task_kind') if held else None}
+            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason',''),'task_kind':held['manifest'].get('task_kind') if held else None,
+                           # 0.29.0 (Judy section 7, On hold): which book (Show in list), how many are held, and a cause code
+                           # the page words plainly instead of the engine's text.
+                           'book_id':held['manifest'].get('candidate_id') if held else None,'held_total':len(errors),'cause':hold_cause(error.get('reason',''))}
             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
         totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
         self._remember_converted(started,totals.get('converted_ids') or (),token)

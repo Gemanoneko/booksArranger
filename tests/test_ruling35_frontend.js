@@ -62,7 +62,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   answers['/api/audiobook/startover']=data=>ok({outcome:'automatic',set_aside:true,job_id:data.job_id,row:null},202);
   run('busy=true;controls()');
   await run('restartPress(rows.find(r=>r.id==="cand-c"),{kind:"startover",endpoint:"/api/audiobook/startover"},null)');
-  tr=trOf('cand-c');assert.equal(statusCell(tr).children[0].textContent,'Start over queued. It runs when the current action finishes.');
+  tr=trOf('cand-c');assert.equal(statusCell(tr).children[0].textContent,'Start over queued. It runs when the app is free.');
   assert.equal(sent('/api/audiobook/startover').length,0,'nothing sent while the page is busy');
   const held=buttonsOf(tr).find(b=>b.textContent==='Cancel start over');assert.ok(held && !held.hidden,'its Cancel');
   run('busy=false;controls()');await tick();await tick();

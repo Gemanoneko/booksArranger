@@ -28,7 +28,7 @@ const answer=body=>({ok:true,status:200,json:async()=>body});
   assert.equal(get('pause-jobs').disabled,false);assert.equal(get('resume-jobs').disabled,true);
   assert.equal(get('pause-jobs').title,'Pause the start checks and keep pending work. The current read may finish before stopping.');
   assert.equal(get('jobs-rows').children[0].dataset.kind,'admission');
-  assert.equal(run("activityRows.get('admission').bar.hidden"),true);assert.equal(run("activityRows.get('admission').time.hidden"),true);
+  assert.equal(run("activityRows.get('admission').bar.hidden"),false);assert.equal(run("activityRows.get('admission').bar.value ?? null"),null,'0.29.0: a phase-only row slides');assert.equal(run("activityRows.get('admission').time.hidden"),true);
   assert.equal(run("activityRows.get('maintenance').subject.textContent"),'Earlier book');
   assert.equal(run("activityRows.get('maintenance').detail.textContent"),'');
   assert.equal(run("activityRows.get('cleanup').detail.textContent"),'0 of 19 files');
@@ -96,7 +96,7 @@ const answer=body=>({ok:true,status:200,json:async()=>body});
   for(const [origin,copy] of [['automatic','with the automatic names'],['user','with your approved names'],['unknown','converting.']]){context.failure={httpStatus:409,body:{code:'book_converting',job_origin:origin}};const line=run("askErrorText(failure,'approve',fixture)");assert.ok(line.includes(copy));assert.ok(line.endsWith('Your new names were not applied.'));}
   assert.equal(run("namesSavedText(fixture,{outcome:'replanned'})"),'Names saved. Approve to queue this book with these names.');
   group.admission_error=undefined;group.chapter_corrections=[{file:'source.m4b',chapter_title:'Last',original_end:999,corrected_end:4}];group.audiobook_ready=false;assert.ok(!run('technicalText(fixture)').includes('corrected in the audiobook'));group.audiobook_ready=true;assert.ok(run('technicalText(fixture)').startsWith('Final chapter end corrected in the audiobook. Chapter names and start times are kept.'));
-  group.chapter_check={phase:'Checking source audio',reason:'terminal_chapter_end',file:'source.m4b'};run('rows=[fixture];renderJobs()');assert.equal(run("activityRows.get('chapter').label.textContent"),'Checking source audio: ');assert.equal(run("activityRows.get('chapter').bar.hidden"),true);assert.ok(run('technicalText(fixture)').startsWith('Checking source audio:'));
+  group.chapter_check={phase:'Checking source audio',reason:'terminal_chapter_end',file:'source.m4b'};run('rows=[fixture];renderJobs()');assert.equal(run("activityRows.get('chapter').label.textContent"),'Checking source audio: ');assert.equal(run("activityRows.get('chapter').bar.hidden"),false);assert.ok(run('technicalText(fixture)').startsWith('Checking source audio:'));
   delete group.chapter_check;run('renderJobs()');assert.equal(run("activityRows.has('chapter')"),false,'no stale checking row after callback ends');run('rows=[]');
 
   // Protective folders and audio-like leftovers name the actual subject without an automatic retry promise.

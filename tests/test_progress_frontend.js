@@ -31,7 +31,7 @@ function parts(row){const [first,bar,last]=row.children;return {label:first.chil
 const conversion=(extra={})=>({id:'conversion',kind:'conversion',subject:'Long book title',step:'encoding',step_index:3,step_count:4,done:4325,total:39820,unit:'seconds',indeterminate:false,state:'running',step_started_at:NOW-134000,...extra});
 
 // Status line is unchanged.
-render();assert.match(get('jobs-status').textContent,/^Running · 0 queued · 0 need attention · 1 converted out of 2 approved books/);
+render();assert.match(get('jobs-status').textContent,/^Nothing running · 0 need attention · 1 converted out of 2 approved books/);  // 0.29.0: the worker's "Running" is not work
 render({approved_total:undefined});assert.match(get('jobs-status').textContent,/Approved book progress unavailable/);
 
 // One measured conversion row: label, subject, audio-time detail, bar, Step N of 4, elapsed.
@@ -67,11 +67,13 @@ const research={id:'scan',kind:'scan',subject:'Дюна',step:'researching',step
 const series={id:'series',kind:'series',subject:'Мухи',step:'series looking up',done:0,total:292,unit:'books',state:'running',step_started_at:NOW};
 const oldHeld={id:'cleanup',kind:'cleanup',subject:'Похититель детей',step:'originals',state:'attention',reason:'Cannot refresh protected file identity'};
 let mixed=render({state:'Paused',queued:418,attention_counts:{other:65},approved_total:1200,converted_total:778,pause:{origin:'interrupted'}},[oldHeld,series]);
-assert.match(get('jobs-status').textContent,/^Paused · 418 queued · 65 need attention · 778 converted out of 1200 approved books/);
+assert.match(get('jobs-status').textContent,/^Paused · Metadata: Updating series: Мухи · 418 books waiting to convert · 65 need attention · 778 converted out of 1200 approved books/);
 assert.match(get('jobs-help').textContent,/has not identified which book stopped them/);assert.doesNotMatch(get('jobs-help').textContent,/Похититель|Возрожденный/);
 assert.equal(parts(mixed.find(item=>item.dataset.kind==='series')).label,'Metadata: Updating series: ');
 assert.equal(parts(mixed.find(item=>item.dataset.kind==='series')).detail,'0 of 292 books');
-assert.equal(parts(mixed.find(item=>item.dataset.kind==='cleanup')).bar.hidden,true);
+// 0.29.0 (Judy section 7): a held cleanup leaves the Running list for the On hold list, with its plain cause.
+assert.equal(mixed.find(item=>item.dataset.kind==='cleanup'),undefined);assert.equal(get('jobs-hold-block').hidden,false);
+assert.match(get('jobs-hold').children[0].children[0].children[0].textContent,/^On hold: /);
 render({state:'Running',queue_work:{schema:'books-audio-queue-work-v1',state:'checking_pending'}},[series]);
 assert.match(get('jobs-status').textContent,/^Checking pending audiobook work/);
 assert.equal(get('jobs-rows').children.some(item=>item.dataset.kind==='conversion'),false);
@@ -99,18 +101,24 @@ assert.equal(row.step,'Removing source folders');
 rows=render({state:'Paused'},[conversion({state:'paused'})]);row=parts(rows[0]);
 assert.equal(row.step,'Paused - Step 3 of 4 - Encoding audio');assert.equal(rows[0].classList.contains('paused'),true);assert.equal(row.bar.value,10);
 const frozen=row.time;run(`updateActivity(activityRows.get('conversion'),${NOW+60000})`);assert.equal(parts(rows[0]).time,frozen);
-rows=render({state:'Needs attention'},[conversion({state:'attention',reason:'Exact source changed'})]);row=parts(rows[0]);
-assert.equal(row.step,'On hold — Exact source changed');assert.equal(rows[0].classList.contains('attention'),true);assert.equal(rows[0].classList.contains('paused'),false);
-assert.equal(row.bar.hidden,true,'a held row never shows a progressing bar');assert.equal(row.detail,'','no file count on a held row');
-assert.equal(row.time,'','no elapsed clock on a held row');assert.equal(rows[0].children[2].children[1].hidden,true);
-run(`updateActivity(activityRows.get('conversion'),${NOW+60000})`);assert.equal(parts(rows[0]).time,'','the timer tick never brings it back');
+// 0.29.0 (Judy section 7): a held item leaves the Running list for On hold: no bar, no clock, never the verb, and its
+// line 2 is the plain cause (an unmapped one points to Needs attention, never the engine's text).
+rows=render({state:'Needs attention'},[conversion({state:'attention',reason:'Exact source changed'})]);
+assert.equal(rows.length,0,'a held row is not a running row');assert.equal(get('jobs-hold-block').hidden,false);
+let hold=get('jobs-hold').children[0];assert.equal(hold.children[0].children[0].textContent,'On hold: Long book title');
+assert.equal(hold.children[0].children[1].textContent,'Stopped. See Needs attention.');assert.equal(hold.children[1].textContent,'Show in list');
+assert.match(get('jobs-status').textContent,/^Nothing running · 1 on hold · /);
+rows=render({state:'Needs attention'},[{id:'cleanup',kind:'cleanup',subject:'Похититель детей',step:'originals',state:'attention',reason:'Cannot refresh protected file identity',cause:'identity_read',book_id:'b1',held_total:1}]);
+hold=get('jobs-hold').children[0];assert.equal(hold.children[0].children[0].textContent,'On hold: Похититель детей');
+assert.equal(hold.children[0].children[1].textContent,"Cleanup stopped. The app couldn't read one file's information.");
+assert.doesNotMatch(get('jobs-status').textContent,/Running|Removing originals/);
 rows=render({state:'Running'},[conversion()]);assert.match(parts(rows[0]).time,/elapsed/,'positive control: a running row keeps its clock');assert.equal(rows[0].children[2].children[1].hidden,false);
 assert.equal(parts(render({state:'Pausing'},[conversion({state:'pausing'})])[0]).step,'Pausing - Step 3 of 4 - Encoding audio');
 
 // Idle: "Nothing running"; paused with no rows: how to continue.
 assert.equal(render({},[]).length,0);assert.equal(get('jobs-idle').textContent,'Nothing running');assert.equal(get('jobs-idle').hidden,false);
 render({state:'Paused'},[]);assert.equal(get('jobs-idle').textContent,'Paused. Resume continues pending books.');
-render({},undefined);assert.equal(get('jobs-idle').textContent,'Nothing running');
+render({},undefined);assert.equal(get('jobs-idle').textContent,'Nothing running');assert.equal(get('jobs-hold-block').hidden,true,'On hold empties with its rows');
 
 // ETA: only when determinate, running, at least 10 s into the step and 5 % done; from the recent rate.
 rows=render({},[conversion({step_started_at:NOW-20000,done:10,total:100,unit:'files'})]);

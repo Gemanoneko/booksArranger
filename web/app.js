@@ -647,7 +647,7 @@ async function action(route, data) {
   if (ended) return;
   if(['/api/audiobook/resume','/api/audiobook/pause','/api/audiobook/resume-cancel'].includes(route))return jobControlAction(route,data);
   if (busy){pressLater('press:'+route,{'/api/scan/start':'scan_start','/api/scan/resume':'scan_resume','/api/scan/stop':'scan_stop','/api/audiobook/pause':'pause','/api/audiobook/resume':'resume'}[route],'',()=>action(route,data));return;}
-  busy=true; controls(); message();
+  busy=true;busyPress=laterWord({'/api/scan/start':'scan_start','/api/scan/resume':'scan_resume','/api/scan/stop':'scan_stop'}[route]);if(busyPress==='This press')busyPress=''; controls(); message();
   // Ruling 35: Start and Resume scanning are accepted while conversion or automatic processing runs and start when they end.
   const queueable=route==='/api/scan/start' || route==='/api/scan/resume';
   try { const answer=await request(route,queueable?{...data,queue:true}:data); if(answer?.queued===true)message(`${laterWord(route.endsWith('/start')?'scan_start':'scan_resume')} queued. It starts when ${queueP(answer.blocker?.kind)} finishes.`);
@@ -662,7 +662,7 @@ async function action(route, data) {
     else if(route==='/api/audiobook/resume-cancel' && error.body?.code==='started')message('Too late to cancel: Resume audiobook jobs has already started.');
     else message(error.message);
   }
-  finally { busy=false; controls(); }
+  finally { busy=false;busyPress=''; controls(); }
 }
 // Provisional copy (ruling 35's rest, sent to Judy): what a kept Resume waits for.
 const START_WAITS={pause:'the pause',start:'the earlier start',scan:'the library scan'};
@@ -1249,14 +1249,63 @@ function renderJobs(){
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
   const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved`:'Book candidate totals unavailable');
-  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[admissionLine(jobs) || jobs.state,`${jobs.queued || 0} queued`,`${attentionTotal(jobs)} need attention`,counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:''].filter(Boolean).join(' · '));
-  renderActivities(checkActivities(Array.isArray(state.activities)?state.activities:[],jobs),jobs);
+  const acts=checkActivities(Array.isArray(state.activities)?state.activities:[],jobs);
+  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[admissionLine(jobs) || jobsFirstPart(jobs,acts),queuedPart(jobs),`${attentionTotal(jobs)} need attention`,counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:''].filter(Boolean).join(' · '));
+  renderActivities(acts,jobs);
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
   $('resume-jobs').title=cleanup?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.';
   const help=cleanup?'Pausing source cleanup finishes the current file. Resume continues its saved progress. Scanning has separate stop and resume controls. An interrupted conversion restarts; completed outputs stay in place.':'An interrupted conversion restarts; completed outputs stay in place. Scanning has separate stop and resume controls.';
   text('jobs-help',help+(Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?' Source folders retained: safe automatic removal is unavailable on this drive.':''));
   renderJobControlState();
+}
+// 0.29.0 (Sergei 2026-11-17; Judy section 7): the jobs line starts with what is running, in plain words. "Converting" only
+// while a book converts; any other work is named; a held item is never counted as running; the queue worker's own
+// momentary state word ("Running") is no longer shown.
+function runningActs(acts){return acts.filter(row=>row && activityOrder.includes(row.kind) && ['running','pausing'].includes(row.state));}
+function heldActs(acts){return acts.filter(row=>row && activityOrder.includes(row.kind) && row.state==='attention');}
+function heldCount(acts){return heldActs(acts).reduce((sum,row)=>sum+(Number.isInteger(row.held_total) && row.held_total>0?row.held_total:1),0);}
+function actName(row){return activityLabel(row)+(row.subject?': '+row.subject:'');}
+function jobsFirstPart(jobs,acts){
+  const running=runningActs(acts),held=heldCount(acts),paused=['Paused','paused'].includes(jobs?.state);
+  if(!running.length && paused)return 'Paused';
+  if(!running.length && jobs?.state==='Pausing')return 'Pausing audiobook jobs…';
+  const named=running.length===1?actName(running[0]):running.length>1?`${actName(running[0])} and ${running.length-1} more`:'';
+  if(named)return (paused?'Paused · ':'')+named;  // the queue paused while other work (a series update, a check) runs
+  return held?`Nothing running · ${held} on hold`:'Nothing running';
+}
+// "3 books waiting to convert" says what is queued; a zero is left out.
+function queuedPart(jobs){const n=Number.isInteger(jobs?.queued)?jobs.queued:0;return n>0?plural(n,'book','books')+' waiting to convert':'';}
+// On hold (Judy section 7): the held item leaves the Running list. Line 2 is the plain cause, never the engine's text.
+const HOLD_CAUSES={identity_read:"Cleanup stopped. The app couldn't read one file's information."};
+function holdCause(row){return HOLD_CAUSES[row.cause] || 'Stopped. See Needs attention.';}
+function renderHold(held){
+  const block=$('jobs-hold-block'),list=$('jobs-hold');if(!block || !list)return;
+  const shown=held.slice(0,3),total=heldCount(held),key=JSON.stringify(shown.map(row=>[row.book_id,row.subject,row.cause]));
+  block.hidden=!shown.length;
+  if(list.dataset.key!==key){
+    list.dataset.key=key;list.replaceChildren();
+    for(const row of shown){
+      const item=node('li','','hold-row'),text=node('div','','hold-text'),button=node('button','Show in list','quiet');
+      text.append(node('p','On hold: '+(row.subject || 'a book')),node('p',holdCause(row)));button.type='button';
+      button.title='List this book: sets Status to All and searches for its title.';button.setAttribute('aria-label','Show in list: '+(row.subject || 'the held book'));
+      button.disabled=!row.subject;button.addEventListener('click',()=>showInList({id:row.book_id,title:row.subject}));
+      item.append(text,button);list.append(item);
+    }
+  }
+  const more=$('jobs-hold-more'),extra=total-shown.length;if(more){writeText(more,extra>0?`+${extra} more on hold`:'');more.hidden=!(extra>0);}
+}
+// Item 1 (Judy section 1): each library root and whether it answers ({path, available, empty, books}), from the engine.
+function libraryNotices(){return Array.isArray(state?.library_roots)?state.library_roots.filter(item=>item && typeof item.path==='string'):[];}
+// The Waiting line (Judy section 7): what the app waits for and when; the queued actions are named, not only counted.
+function waitingLine(){
+  const parts=[],automatic=state?.automatic_processing;
+  if(['Running','Stopping'].includes(automatic?.state) && automatic?.research?.waiting>0){const at=automatic.next_retry_at,when=typeof at==='number' && at>0?new Date(at<1e12?at*1000:at):null;parts.push('Waiting for metadata sources.'+(when && Number.isFinite(when.getTime())?` Next try ${String(when.getHours()).padStart(2,'0')}:${String(when.getMinutes()).padStart(2,'0')}.`:''));}
+  for(const root of libraryNotices().filter(item=>!item.available || item.empty))parts.push(`Waiting for ${root.path} to answer.`);
+  const queued=queueState.queued;
+  if(queued.length){const named=queued.slice(0,2).map(item=>`${QUEUE_ACTION_WORDS[item.action] || 'Action'}: ${rows.find(row=>row.id===item.book_id)?.title_clue || item.title || 'a book'}`);
+    parts.push(`Waiting: ${named.join(', ')}${queued.length>2?` and ${queued.length-2} more`:''}. They run one at a time.`);}
+  return parts.join(' ');
 }
 // Progress rows (ProgressRows spec): one row per running activity, fixed order, updated in place.
 const activityOrder=['admission','chapter','conversion','cleanup','identity','series','scan','maintenance'],activityRows=new Map();let activityTimer=null;
@@ -1324,7 +1373,8 @@ function activityRow(kind){
 function writeText(element,value){if(element.textContent!==value)element.textContent=value;}
 function renderActivities(list,jobs){
   const priority=row=>(row.state==='paused'?20:0)+activityOrder.indexOf(row.kind);
-  const rows=list.filter(row=>row && activityOrder.includes(row.kind)).sort((a,b)=>priority(a)-priority(b));
+  const rows=list.filter(row=>row && activityOrder.includes(row.kind) && row.state!=='attention').sort((a,b)=>priority(a)-priority(b));
+  renderHold(list.filter(row=>row && activityOrder.includes(row.kind) && row.state==='attention'));
   const shown=[],seen=new Set();for(const row of rows){if(seen.has(row.kind))continue;seen.add(row.kind);shown.push(row);}
   const visible=shown.slice(0,4),extra=rows.length-visible.length,holder=$('jobs-rows');
   for(const [kind,view] of activityRows)if(!visible.some(row=>row.kind===kind)){view.item.parentElement?.removeChild(view.item);activityRows.delete(kind);}
@@ -1337,6 +1387,7 @@ function renderActivities(list,jobs){
   writeText($('jobs-more'),extra>0?`+${extra} more running`:'');$('jobs-more').hidden=!(extra>0);
   const idle=visible.length?'':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.':'Nothing running';
   writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;
+  const waiting=waitingLine();if($('jobs-waiting')){writeText($('jobs-waiting'),waiting);$('jobs-waiting').hidden=!waiting;}
   if(visible.length && activityTimer===null && typeof setInterval==='function')activityTimer=setInterval(()=>{const now=Date.now();for(const view of activityRows.values())updateActivity(view,now);},1000);
   if(!visible.length && activityTimer!==null && typeof clearInterval==='function'){clearInterval(activityTimer);activityTimer=null;}
 }
@@ -1344,7 +1395,7 @@ function updateActivity(view,now){
   const row=view.row,running=row.state==='running' || row.state==='pausing',measured=!row.indeterminate && row.total>0 && row.done>=0 && row.done<=row.total;
   const finishing=measured && running && row.done>=row.total,determinate=measured && !finishing;
   const held=row.state==='attention',label=activityLabel(row),subject=typeof row.subject==='string'?row.subject:'',step=activityStep(row,finishing),detail=held?'':activityDetail(row,finishing);
-  view.bar.hidden=held || row.phase_only===true;
+  view.bar.hidden=held;  // 0.29.0: every running row shows a bar; a row with no measure slides (Judy section 7)
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
   writeText(view.detail,detail);writeText(view.step,step);view.step.title=step;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',row.state==='attention');
@@ -2446,7 +2497,10 @@ $('recovery-dialog').addEventListener('keydown',event=>{if(!recoveryConfirmation
 const automaticStates=new Set(['Idle','Running','Stopping','Paused','Completed','Needs attention']);
 function settleAutomaticRequest(flight){
   if(!flight || automaticFlight!==flight)return;
-  automaticFlight=null;automaticRequest=null;busy=false;
+  automaticFlight=null;automaticRequest=null;
+  // Q8 (Sergei 2026-11-17): Stop acts at once and leaves busy alone: another press in flight keeps its own. Only a Stop
+  // that took over a Start in flight releases the busy that Start set (its own settle is skipped then).
+  if(flight.kind!=='stop' || flight.tookOver)busy=false;
 }
 function reconcileAutomaticRequest(automatic){
   const flight=automaticFlight;if(!flight)return;
@@ -2512,9 +2566,19 @@ function renderAutomatic(){
 }
 async function automaticAction(kind){
   controls();const button=$({start:'start-automatic',stop:'stop-automatic','cancel-start':'cancel-automatic-start'}[kind]);
-  if(button.disabled || automaticRequest!==null && !(kind==='stop' && automaticRequest==='start') || $('library').value!=='Audiobooks')return;
+  const refused=button.disabled?(button.title || 'it no longer applies'):$('library').value!=='Audiobooks'?'switch to Audiobooks to use it':
+    automaticRequest!==null && !(kind==='stop' && automaticRequest!=='stop')?(automaticRequest==='start'?'Start automatic processing is still being sent':'another automatic processing press is still being sent'):'';
+  // A queued press the page turns away when its turn comes says why (it used to vanish without a word).
+  if(refused){if(drainingPress)message(`${laterWord(drainingPress.kind)} was not sent: ${refused.replace(/\.$/,'')}.`);return;}
   const automatic=state?.automatic_processing,flight={kind,run_id:automatic?.run_id,state:automatic?.state,failure_id:automatic?.failure?.id};
-  automaticFlight=flight;automaticRequest=kind;busy=true;renderAutomatic();controls();message();
+  if(kind==='stop'){
+    // Q8: Stop acts at once, never queued behind another press, and never touches busy. A press already in flight may
+    // reach the engine after this Stop and start the queue again; once every such press has landed the page pauses
+    // audiobook jobs again (stopAfterFlights, drainLater), so the job Stop paused stays paused.
+    flight.tookOver=automaticRequest!==null;if(pressBusy())stopAfterFlights=true;
+    for(const queued of [...laterPresses])if(['resume','start_automatic'].includes(queued.kind))cancelLater(queued.key);
+    automaticFlight=flight;automaticRequest=kind;renderAutomatic();controls();message('Stopping automatic processing…');
+  }else{automaticFlight=flight;automaticRequest=kind;busy=true;renderAutomatic();controls();message();}
   let refreshNeeded=false;
   try{
     const result=await request('/api/automatic/'+kind,{},60000);
@@ -2542,7 +2606,8 @@ async function automaticAction(kind){
 }
 $('cancel-automatic-start').addEventListener('click',()=>automaticAction('cancel-start'));
 {const start=later('toolbar:start-automatic','start_automatic',()=>automaticAction('start'));$('start-automatic').addEventListener('click',event=>{if(automaticRequest==='start')return;return start(event);});}
-{const stop=later('toolbar:stop-automatic','stop_automatic',()=>automaticAction('stop'));$('stop-automatic').addEventListener('click',event=>{if($('stop-automatic').disabled)return;return automaticRequest==='start'?automaticAction('stop'):stop(event);});}
+// Q8 (Sergei 2026-11-17): Stop automatic processing bypasses the page queue, like Pause audiobook jobs.
+$('stop-automatic').addEventListener('click',()=>{if($('stop-automatic').disabled)return;return automaticAction('stop');});
 function recordedApproval(row){
   if(row.metadata_approved!==true)return '';
   const approval=row.review_context?.automatic_approval;
@@ -4204,8 +4269,9 @@ function renderStripShow(){
   const shown=!!stripShow && !!stripNote;button.hidden=!shown;
   if(shown){button.setAttribute('aria-label','Show it: '+stripShow.title);button.title='List this book: sets Status to All and searches for its title.';}
 }
-async function showLeaver(){
-  const target=stripShow;if(!target)return;
+async function showLeaver(){return showInList(stripShow);}
+async function showInList(target){
+  if(!target || !target.title)return;
   $('search').value=target.title;filters[view]='all';attentionGroup='all';resetStrip();viewControls();
   await updateList();
   const row=rows.find(item=>item.id===target.id);
@@ -4406,11 +4472,27 @@ function laterFor(key){return laterPresses.find(item=>item.key===key) || null;}
 // The rest of ruling 35 (ruling 37): a press the engine answered "busy" waits here too and is sent again, with why.
 // Judy 14.6: every queued line says "the app is free" ("the catalog" is where the data lives, not a busy state).
 const LATER_WHY={catalog:'It runs when the app is free.',app:'It runs when the app is free.',file:'It tries again every 10 s.'};
+// 0.29.0 (Judy section 7): a queued line names what it waits for; a blocker the page cannot name is "the app is free",
+// never "the current action". busyPress is the press of this page that holds busy, when the page knows its name.
+let busyPress='',drainingPress=null,stopAfterFlights=false;
+function pressBlocker(){
+  if(automaticRequest==='start')return 'Start automatic processing';
+  if(automaticRequest==='cancel-start')return 'Cancel automatic start';
+  if(retryPending)return 'Retry';
+  if(bulkRunning())return 'Retry all';
+  if(releaseRun)return 'Let the app handle selected';
+  if(askBulk)return 'Approve selected';
+  if(recoverySubmitting)return 'Delete recovery copies';
+  if(busy && busyPress)return busyPress;
+  return '';
+}
 function laterLine(item){
   if(!loadingActive && item.why==='file')return `${laterWord(item.kind)} queued: a file is open in another program. ${LATER_WHY.file}`;
   if(!loadingActive && item.why && LATER_WHY[item.why])return `${laterWord(item.kind)} queued. ${LATER_WHY[item.why]}`;
-  return `${laterWord(item.kind)} queued. It runs when ${loadingActive?'loading':item.waitFor?.()?'the scan':'the current action'} finishes.`;
+  const blocker=loadingActive?'loading':item.waitFor?.()?'the scan':pressBlocker();
+  return `${laterWord(item.kind)} queued. ${blocker?`It runs when ${blocker} finishes.`:'It runs when the app is free.'}`;
 }
+function pageHeld(waitFor){return pressBusy() || !!LS && loadingActive || !!waitFor?.();}
 function pressLater(key,kind,title,run,waitFor=null,why=''){
   if(laterFor(key))return laterFor(key);
   const item={id:'later-'+(++laterSeq),key,kind,title:title || '',run,at:Date.now(),waitFor,why};laterPresses.push(item);
@@ -4421,7 +4503,10 @@ function pressLater(key,kind,title,run,waitFor=null,why=''){
 function holdAgain(key,kind,title,run,why,seconds){const until=Date.now()+seconds*1000;return pressLater(key,kind,title,run,()=>Date.now()<until,why);}
 function cancelLater(key){
   const index=laterPresses.findIndex(item=>item.key===key);if(index<0)return false;
-  const [item]=laterPresses.splice(index,1);queueAnnounce(`${laterWord(item.kind)} cancelled${item.title?': '+item.title:''}.`);controls();return true;
+  const [item]=laterPresses.splice(index,1);queueAnnounce(`${laterWord(item.kind)} cancelled${item.title?': '+item.title:''}.`);
+  // The "queued … Press it again to cancel." line it left is replaced, never left standing (the stuck-Stop read, 2026-11-17).
+  const line=$('message')?.textContent || '';if(line.startsWith(laterWord(item.kind)+' queued'))message(`${laterWord(item.kind)} cancelled. Nothing was sent.`);
+  controls();return true;
 }
 // The toolbar and panel buttons (ruling 35): a press made while another press of this page runs, or while loading, waits
 // (pressLater) and runs then, as if pressed then; the same button pressed again takes it back. Provisional copy, for Judy.
@@ -4436,7 +4521,7 @@ function later(key,kind,handler){
   return (...args)=>{
     if(laterFor(key)){cancelLater(key);return;}
     const waitFor=SCAN_HELD.includes(kind)?scanRunning:null;
-    if(!ended && (busy || automaticRequest!==null || !!LS && loadingActive || waitFor?.())){const item=pressLater(key,kind,'',()=>handler(...args),waitFor);message(laterLine(item)+' Press it again to cancel.');return;}
+    if(!ended && pageHeld(waitFor)){const item=pressLater(key,kind,'',()=>handler(...args),waitFor);message(laterLine(item)+' Press it again to cancel.');return;}
     return handler(...args);
   };
 }
@@ -4451,9 +4536,11 @@ function renderLaterButtons(){
   for(const id of [...laterDecorated])if(!now.has(id)){const button=$(id);laterDecorated.delete(id);if(button?.setAttribute){button.title=button.dataset?.laterTitle || '';button.removeAttribute('aria-disabled');}}
 }
 function drainLater(){
-  if(laterRunning || !laterPresses.length || pressBusy() || loadingActive || laterPresses[0].waitFor?.())return;
+  // Stop pressed while another press was in flight: once every such press has landed, audiobook jobs are paused again.
+  if(stopAfterFlights && !pressBusy() && !ended){stopAfterFlights=false;jobControlAction('/api/audiobook/pause',{});}
+  if(laterRunning || !laterPresses.length || pageHeld(laterPresses[0].waitFor))return;
   const item=laterPresses.shift();laterRunning=true;
-  Promise.resolve().then(()=>item.run()).catch(()=>{}).finally(()=>{laterRunning=false;controls();});
+  Promise.resolve().then(()=>{drainingPress=item;try{return item.run();}finally{drainingPress=null;}}).catch(()=>{}).finally(()=>{laterRunning=false;controls();});
 }
 // What a Retry or Delete pressed now would wait for, as far as the page knows. The engine's answer decides.
 function pageBlocker(){
@@ -5098,10 +5185,13 @@ function renderAttentionShortcut(){
   button.hidden=$('library').value!=='Audiobooks' || !state?.audiobook_jobs || total<=0;
   const text=`Needs attention · ${total.toLocaleString()}`;if(button.textContent!==text)button.textContent=text;
 }
-$('attention-shortcut').addEventListener('click',()=>{
+function showNeedsAttention(){
   $('search').value='';view='candidates';filters.candidates='output_attention';attentionGroup='all';resetStrip();restartCounts=null;viewControls();
   const done=updateList();$('group-all').focus?.({preventScroll:true});return done;
-});
+}
+$('attention-shortcut').addEventListener('click',showNeedsAttention);
+// "+N more on hold" does what the Needs attention shortcut does.
+$('jobs-hold-more')?.addEventListener('click',showNeedsAttention);
 $('copy-technical').addEventListener('click',async()=>{
   const text=$('automatic-technical').textContent || '';
   try{await copyDiagnosticText(text);setText('copy-technical-status','Copied.');}

@@ -228,6 +228,17 @@ class CleanupCountTests(unittest.TestCase):
 
 
 class ActivityRowTests(unittest.TestCase):
+    def test_a_held_cleanup_names_its_book_count_and_plain_cause_0290(self):
+        # 0.29.0 item 7 (Judy section 7, On hold): «Похититель детей» read "On hold — Cannot refresh protected file identity".
+        from merge_service import hold_cause
+        from source_cleanup import LEGACY_IDENTITY_HOLD
+        self.assertEqual(hold_cause(LEGACY_IDENTITY_HOLD),'identity_read')
+        self.assertEqual(hold_cause('The app could not read file information for Похититель детей - Brom.m4b.'),'identity_read')
+        self.assertEqual(hold_cause('Current output changed'),'other')
+        jobs={'attention_row':{'title':'Похититель детей','reason':LEGACY_IDENTITY_HOLD,'book_id':'book-1','held_total':3,'cause':'identity_read'}}
+        row=activities(jobs,None,None,None,{},now_ms=1)[0]
+        self.assertEqual((row['state'],row['book_id'],row['held_total'],row['cause']),('attention','book-1',3,'identity_read'))
+
     def test_extra_source_activity_keeps_typed_cleanup_identity(self):
         jobs={'state':'Running','current_title':'Extra','current_task_kind':'duplicate_source_cleanup','progress':{'phase':'checking extra source'}}
         self.assertEqual(activities(jobs,None,None,None,{},now_ms=1)[0]['task_kind'],'duplicate_source_cleanup')

@@ -46,7 +46,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
   for(const [key,tip] of [['part_of_book','Show books that may be parts of a bigger book.'],['files_unclear',"Show books where the app isn't sure which files belong."],['order_unclear',"Show books where the app isn't sure of the playback order."]])
     assert.ok(html.includes('id="group-'+key+'" type="button" class="quiet attention-group" aria-pressed="false" title="'+tip+'" hidden>'),key);
-  assert.equal(get('group-all').textContent,'All · 23');assert.equal(get('attention-shortcut').textContent,'Needs attention · 23');assert.equal(get('jobs-status').textContent,'Needs attention · 0 queued · 23 need attention · 0 converted out of 0 approved books');
+  assert.equal(get('group-all').textContent,'All · 23');assert.equal(get('attention-shortcut').textContent,'Needs attention · 23');assert.equal(get('jobs-status').textContent,'Nothing running · 23 need attention · 0 converted out of 0 approved books');
 
   // Order unclear: one sentence per cause, the "Playback order" list of 5, then "+ n more".
   const order=[hold('o1','order_unclear','no_tracks',{missing:12,total:12}),hold('o2','order_unclear','some_missing',{missing:3,total:12}),hold('o3','order_unclear','some_missing',{missing:1,total:12}),

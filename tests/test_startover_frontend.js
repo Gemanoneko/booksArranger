@@ -382,7 +382,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   paint([cleanable]);run('retryPending={key:"other",kind:"retry"};controls()');assert.equal(actionButtons(rowOf('cw'))[1].disabled,false);
   assert.match(actionButtons(rowOf('cw'))[0].title,/^Queue this retry\. The app is working on another action/,'positive control: Retry sees the other press (0.22.1: it would be queued)');
   const sent=posts.length;await run('clearFromRow(rows[0],[...rowButtons("cand-cw").children].find(b=>b.textContent==="Clear working files" || b.textContent==="Clearing…"))');
-  assert.equal(posts.length,sent,'nothing is sent while the other press runs');assert.equal(statusCell(rowOf('cw')).children[0].textContent,'Clear working files queued. It runs when the current action finishes.');
+  assert.equal(posts.length,sent,'nothing is sent while the other press runs');assert.equal(statusCell(rowOf('cw')).children[0].textContent,'Clear working files queued. It runs when Retry finishes.');
   assert.equal(run('laterPresses.length'),1);run('laterPresses.length=0;retryPending=null;retryResult=null;controls()');
   // Blocked: its own status, no Retry, no Clear; the reason and the folder in Technical detail only.
   const blockedRow=m4bRow('bw',{retry:undefined,attention:{group:'other',cause:null,originals_untouched:true,working:{state:'blocked',stops:true,bytes:null,reason:'A file the app did not record is in the working folder: x.wav'},working_folder:FOLDER}});

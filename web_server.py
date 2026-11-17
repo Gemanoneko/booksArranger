@@ -91,7 +91,8 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
     held = jobs.get('attention_row')
     if isinstance(held, dict) and not any(row['kind'] == 'cleanup' for row in rows):
         rows.append({'id': 'cleanup', 'kind': 'cleanup', 'subject': held.get('title') or '', 'step': held.get('phase') or 'originals',
-                     'state': 'attention', 'reason': held.get('reason') or '', 'task_kind':held.get('task_kind')} | _measure(held, 'files'))
+                     'state': 'attention', 'reason': held.get('reason') or '', 'task_kind':held.get('task_kind'),
+                     'book_id': held.get('book_id'), 'held_total': held.get('held_total') or 1, 'cause': held.get('cause') or 'other'} | _measure(held, 'files'))
     check = jobs.get('published_check')
     if isinstance(check, dict):
         row = {'id': 'identity', 'kind': 'identity', 'subject': '', 'step': 'identity', 'state': 'running'} | _measure(check, 'books')
