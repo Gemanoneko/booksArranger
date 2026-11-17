@@ -283,6 +283,28 @@ class ConstructionTests(unittest.TestCase):
                     queue.assert_not_called();cleanup.assert_not_called()
                 self.assertFalse(self.intent())
 
+    def test_a_jobs_pause_an_older_version_saved_wins_whatever_its_origin_s_m8(self):
+        # Senua S-m8, jobs-queue half (D-m2: nothing pinned it): a Quit or update pause that 0.28.x saved (no writer stamp)
+        # wins over a left intent; that version never resumed work after a restart.
+        import pause_state
+        for origin in ('closing','update'):
+            with self.subTest(origin=origin):
+                merge=self.saved_queue()
+                with scanner.connect(self.database) as db:
+                    db.execute('CREATE TABLE IF NOT EXISTS pause_attribution(scope TEXT PRIMARY KEY, data TEXT NOT NULL)')
+                    older={'origin':origin,'at':'2026-11-17T10:00:00+00:00','reason':'Audiobook jobs paused'}  # as 0.28.13 writes it
+                    db.execute('INSERT OR REPLACE INTO pause_attribution VALUES(?,?)',('jobs',json.dumps(older)))
+                    self.assertFalse(pause_state.own(pause_state.read(db,'jobs')))
+                with patch.object(merge.cleanup,'resume') as cleanup,patch.object(merge.jobs,'resume') as queue:
+                    merge.restore_work_after_restart()
+                    queue.assert_not_called();cleanup.assert_not_called()
+                self.assertFalse(self.intent())
+        # Positive control: the same pause saved by this version (writer stamp) is restored.
+        merge=self.saved_queue(origin='closing')
+        with patch.object(merge.cleanup,'resume',return_value={'state':'started'}),patch.object(merge.jobs,'resume',return_value={'state':'started'}) as queue:
+            merge.restore_work_after_restart()
+            queue.assert_called_once()
+
     def test_a_restore_with_nothing_to_do_ends_the_intent_r_m3(self):
         merge=self.saved_queue(pending=False)
         with patch.object(merge.jobs,'resume') as queue:

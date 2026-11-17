@@ -111,6 +111,17 @@ const running={...backend.automatic_processing,state:'Running',phase:'research',
   assert.equal(sent('/api/automatic/start'),1,'sent at once: nothing the page counts as busy');
   resumeLater(ok({state:'Running'}));await resuming2;for(let i=0;i<4;i++)await tick();
   assert.equal(sent('/api/audiobook/pause'),0,'his Start ends the pending re-pause');
+  // His own Resume audiobook jobs sent after Stop ends it too (Senua D-m2: nothing held this half of S-m2(c)).
+  posts.length=0;backend={...backend,automatic_processing:running};run('state='+JSON.stringify(backend)+';busy=false;controls()');
+  let scanLater;answers['/api/scan/start']=()=>new Promise(resolve=>{scanLater=resolve;});
+  answers['/api/audiobook/resume']=()=>ok({state:'Running'});
+  const scan3=run("action('/api/scan/start',{library:'Audiobooks'})");
+  await get('stop-automatic').handlers.click();await tick();
+  assert.equal(run('stopAfterFlights'),true,'positive control: a re-pause waits for the press in flight');
+  await run("jobControlAction('/api/audiobook/resume',{})");
+  assert.equal(sent('/api/audiobook/resume'),1,'his Resume is sent');
+  scanLater(ok({state:'Running'}));await scan3;for(let i=0;i<6;i++)await tick();
+  assert.equal(sent('/api/audiobook/pause'),0,'his Resume ends the pending re-pause');
   // 9. Futaba m-3 and m-6: the Waiting line.
   run('rows=[{id:"b",kind:"candidate",title_clue:"Foo"}];queueState={queued:[{id:"q1",book_id:"b",action:"retry"}],running:null}');
   assert.equal(run('waitingLine()'),'Waiting: Retry: Foo. It runs when the app is free.','one queued action is "It"');
