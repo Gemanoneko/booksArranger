@@ -973,7 +973,9 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
     // A book list requested before Retry was answered predates it and would repaint the old state.
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     acknowledgeReacquireArchives(page);
+    const before=rows;
     rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);listGeneration++;pruneQueueNotes();
+    if(requestView==='candidates')rows=keepUnderCursor(rows,before);  // 0.29.0 item 3: never vanishes under his cursor
     if(requestView==='candidates')rows=withoutDeleted(rows,sentAt);  // Judy 0.22.2 section 5
     restartCounts=requestFilter==='restarted' && page.restart_counts && typeof page.restart_counts==='object'?page.restart_counts:null;
     if(heldRow && (heldRow.context!==context || Date.now()>heldRow.until))heldRow=null;
@@ -2948,7 +2950,26 @@ function technicalText(row){
   const folder=(working || refusal && refusal.cause==='working_files' && refusal.stale!==true) && typeof attention?.working_folder==='string' && attention.working_folder?'; working folder: '+attention.working_folder:'';
   return 'Technical detail: '+(facts || rawReasons(row).join('; ') || 'Unavailable')+folder+(details.length?' — '+details.join(' '):'');
 }
+// 0.29.0 item 3 (Judy section 3, "Never under his cursor"): a row that left the list stays, in place, while Sergei works on it:
+// its Edit names editor is open, it has unsaved name edits, or it is the selected row with unsaved panel edits. Its status
+// says why it will go; it leaves on the first list read after he is done.
+const leavingRows=new Map();  // id -> the row as it was when the list dropped it
+function underCursor(row){return !!row && (namesOpen(row.id) || !!namesData(row.id) && namesChanged(row) || selectedRow?.id===row.id && (dirty || trackDirty));}
+function keepUnderCursor(next,before){
+  const ids=new Set(next.map(row=>row.id));
+  for(const id of [...leavingRows.keys()])if(ids.has(id))leavingRows.delete(id);
+  (before || []).forEach((row,index)=>{
+    if(!row || ids.has(row.id) || !(leavingRows.has(row.id) || underCursor(row)))return;
+    if(!underCursor(row)){leavingRows.delete(row.id);return;}
+    const cleared=(state?.source_check?.cleared || []).find(item=>item?.id===row.id);
+    const kept={...row,leaving:cleared?.cause==='name_taken'?'name_free':'gone'};leavingRows.set(row.id,kept);
+    next.splice(Math.min(index,next.length),0,kept);
+  });
+  return next;
+}
+const LEAVING_LINES={name_free:'The name is free now. This row leaves the list when you close this editor.',gone:'This row leaves the list when you close this editor.'};
 function candidateStatus(row){
+  if(row.leaving && LEAVING_LINES[row.leaving])return LEAVING_LINES[row.leaving];
   const extra=row.creation?.job;if(extra?.task_kind==='duplicate_source_cleanup')return extra.state || 'Checking extra source';
   const identityStatus=cleanupIdentityText(row);if(identityStatus)return identityStatus.status;
   const ask=askText(row);if(ask)return askDone.has(row.id) && ASK_DONE[askDone.get(row.id)]?.[0] || ask.status;

@@ -66,6 +66,15 @@ const texts=element=>element.children.map(child=>child.children.length?child.chi
   run('state={...state,source_check:{removed:0,folders:0,cleared:[{id:"x1",title:"A",cause:"other"},{id:"x2",title:"B",cause:"other"},{id:"x3",title:"C",cause:"name_taken"}]}};renderJobs()');
   assert.equal(run('stripNote'),'3 books left this list: their problem no longer applies. They are checked again.');
   run('stripNote="kept";renderJobs()');assert.equal(run('stripNote'),'kept','said once, never repeated on every poll');
+  // Never under his cursor: a cleared row whose Edit names editor is open stays in place with its line, and goes after.
+  run('state={...state,source_check:{removed:0,folders:0,cleared:[{id:"n2",title:"Неисповедимый путь 2",cause:"name_taken"}]}}');
+  run('namesState.set("n2",{open:true,draft:{},data:null})');
+  run('globalThis.kept=keepUnderCursor([{id:"a"},{id:"c"}],[{id:"a"},{id:"n2",title_clue:"Неисповедимый путь 2"},{id:"c"}])');
+  assert.equal(run('kept.map(row=>row.id).join(",")'),'a,n2,c','the row stays where it was');
+  assert.equal(run('candidateStatus(kept[1])'),'The name is free now. This row leaves the list when you close this editor.');
+  run('namesState.delete("n2")');
+  assert.equal(run('keepUnderCursor([{id:"a"},{id:"c"}],kept).map(row=>row.id).join(",")'),'a,c','it leaves once the editor is closed');
+  assert.equal(run('keepUnderCursor([{id:"a"}],[{id:"a"},{id:"b"}]).map(row=>row.id).join(",")'),'a','a row nobody works on leaves at once');
   console.log('PASS 0.29.0 source check on the page: drive lines with Check again, the removed line with Details and Dismiss, cleared rows in the strip');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
