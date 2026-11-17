@@ -54,6 +54,8 @@ const texts=element=>element.children.map(child=>child.children.length?child.chi
   run('state={...state,source_check:{...state.source_check,folders:2,folder_list:[{path:"Z:\\\\Audiobooks\\\\A",files:["cover.jpg"]}],removed_more:12}};renderJobs()');
   assert.equal(get('source-removed-line').textContent,'Removed 3 books whose files are gone. Deleted 2 source folders that held only leftover files.');
   assert.doesNotMatch(get('source-removed-line').textContent,/No files were touched/,'never printed when a folder was deleted');
+  run('globalThis.kept=sourceRemovedText({removed:2,folders:0,files_removed:1})');assert.equal(run('kept'),'Removed 2 books whose files are gone.','Senua S-m7: nor when leftover files went from a folder that stayed');
+  assert.equal(run('sourceRemovedText({removed:2,folders:0,files_removed:0})'),'Removed 2 books whose files are gone. No files were touched.');
   get('source-details').handlers.click();
   assert.deepEqual(get('source-details-list').children.map(item=>item.textContent),['Абсолютное зеро — Z:\\Audiobooks\\Unsorted\\Сборник','+ 12 more','Z:\\Audiobooks\\A — cover.jpg']);
   answers['/api/sources/dismiss']=()=>ok({source_check:{removed:0,folders:0,cleared:[]}});
@@ -98,6 +100,33 @@ const texts=element=>element.children.map(child=>child.children.length?child.chi
   run('leavingRows.set("n9",{id:"n9",leaving:"name_free"});globalThis.counted={audiobook_jobs:{attention_counts:{name_taken:2}}};leavingCounts(counted)');
   assert.equal(run('counted.audiobook_jobs.attention_counts.name_taken'),3);
   run('leavingRows.delete("n9")');
+  // Futaba M-4: a Name taken row open in Edit names when its name becomes free.
+  run('stripNote="";leavingRows.clear();view="candidates";filters.candidates="output_attention"');
+  const listed=()=>run('rows.map(row=>row.id).join(",")');
+  run('globalThis.plain={id:"a",path:"a",kind:"candidate",title_clue:"A",members:[]};rows=[plain,{id:"n3",path:"n3",kind:"candidate",title_clue:"Книга Тета",members:[],ask:{kind:"name_taken",fields:{title:{proposal:"Книга Тета"},author:{proposal:"Волкова Ольга"}},destination:{path:"X",taken:true}}}]');
+  assert.match(run('askInert(rows[1])'),/already in Audiobooks Sorted/,'positive control: the Name taken refusal before the name is free');
+  run('namesState.set("n3",{open:true,draft:{},data:{fields:{}},openDraft:{names:{},ask:null}})');
+  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,attention_counts:{name_taken:1}},source_check:{removed:0,folders:0,cleared:[{id:"n3",title:"Книга Тета",cause:"name_taken"}]}};renderJobs()');
+  assert.doesNotMatch(run('stripNote'),/left this list/,'(b) the strip waits while the row is still on the page');
+  run('rows=keepUnderCursor([plain],rows)');assert.equal(listed(),'a,n3','the list read keeps it while the editor is open');
+  const kept=()=>run('rows.find(row=>row.id==="n3")');
+  assert.doesNotMatch(run('askInert(rows.find(row=>row.id==="n3"))'),/already in Audiobooks Sorted/,'(a) the stale Name taken refusal is gone');
+  assert.doesNotMatch(run('approveBlock(rows.find(row=>row.id==="n3")).text'),/already in Audiobooks Sorted/);
+  // A later pass replaces source_check.cleared: the row keeps its cause, its line and its count (it read "gone" before).
+  run('state={...state,source_check:{...state.source_check,cleared:[]}};rows=keepUnderCursor([plain],rows)');
+  assert.equal(kept().leaving,'name_free');assert.equal(run('candidateStatus(rows.find(row=>row.id==="n3"))'),'The name is free now. This row leaves the list when you close this editor.');
+  // (c) Discard: the row leaves at once, the counts drop with it, and the strip says why.
+  run('namesClose("n3")');
+  assert.equal(listed(),'a','it leaves the moment the editor closes, not at a later list read');
+  assert.equal(run('state.audiobook_jobs.attention_counts.name_taken'),0,'the count drops with the row');
+  assert.equal(run('leavingRows.has("n3")'),false);
+  assert.equal(run('stripNote'),'«Книга Тета» left this list: the name is free now. The book is checked again.');
+  // A closed editor whose proposals merely differ from the row's question is not his work: nothing holds the row.
+  run('namesState.set("n4",{open:false,draft:{},data:{fields:{title:{proposal:"Иное"}}}})');
+  assert.equal(run('underCursor({id:"n4",title_clue:"Другое",members:[]})'),false);
+  run('namesState.set("n4",{open:false,draft:{title:"Моё"},data:{fields:{title:{proposal:"Иное"}}}})');
+  assert.equal(run('underCursor({id:"n4",title_clue:"Другое",members:[]})'),true,'positive control: a typed draft holds it');
+  run('namesState.delete("n4");namesState.delete("n3")');
   console.log('PASS 0.29.0 source check on the page: drive lines with Check again, the removed line with Details and Dismiss, cleared rows in the strip');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

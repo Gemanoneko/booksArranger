@@ -70,6 +70,57 @@ const running={...backend.automatic_processing,state:'Running',phase:'research',
   run("state={...state,automatic_processing:{...state.automatic_processing,state:'Running',can_start:false,can_stop:true}};busy=false;controls()");await tick();await tick();
   assert.equal(sent('/api/automatic/start'),0);
   assert.match(get('message').textContent,/^Start automatic processing was not sent: /);
+  // 7. Futaba m-4: the Stop line goes once processing has stopped; it stays while it is stopping.
+  const paused={...running,state:'Paused',can_start:true,can_stop:false};
+  run('message(STOPPING_LINE);state={...state,automatic_processing:'+JSON.stringify({...running,state:'Stopping',can_stop:false})+'};renderAutomatic()');
+  assert.equal(get('message').textContent,'Stopping automatic processing…','positive control: still stopping');
+  run('state={...state,automatic_processing:'+JSON.stringify(paused)+'};renderAutomatic()');
+  assert.equal(get('message').textContent,'','gone once it reads Paused');
+  run("message('Something else');renderAutomatic()");assert.equal(get('message').textContent,'Something else','another line is left alone');
+  // 8. Senua S-m2: a Start queued after Stop runs only after Stop's re-pause has landed.
+  posts.length=0;backend={...backend,automatic_processing:running};run('state='+JSON.stringify(backend)+';busy=false;controls()');
+  let scanLate;answers['/api/scan/start']=()=>new Promise(resolve=>{scanLate=resolve;});
+  let pauseLate;answers['/api/audiobook/pause']=()=>new Promise(resolve=>{pauseLate=resolve;});
+  answers['/api/automatic/start']=()=>ok({automatic_processing:running});
+  const scan2=run("action('/api/scan/start',{library:'Audiobooks'})");
+  await get('stop-automatic').handlers.click();await tick();
+  backend={...backend,automatic_processing:paused};run('state='+JSON.stringify(backend)+';controls()');
+  get('start-automatic').handlers.click();assert.equal(run('laterPresses.length'),1,'his Start waits behind the press in flight');
+  scanLate(ok({state:'Running'}));await scan2;for(let i=0;i<4;i++)await tick();
+  assert.equal(sent('/api/audiobook/pause'),1,'the re-pause is sent');
+  assert.equal(sent('/api/automatic/start'),0,'his Start waits until that pause has landed');
+  pauseLate(ok({state:'Paused'}));for(let i=0;i<8;i++)await tick();
+  assert.equal(sent('/api/automatic/start'),1,'then his Start runs');
+  assert.deepEqual(posts.filter(p=>['/api/audiobook/pause','/api/automatic/start'].includes(p.route)).map(p=>p.route),['/api/audiobook/pause','/api/automatic/start']);
+  // A Resume audiobook jobs press in flight counts too: once it lands, the jobs are paused again.
+  posts.length=0;backend={...backend,automatic_processing:running};run('state='+JSON.stringify(backend)+';busy=false;controls()');
+  answers['/api/audiobook/pause']=()=>ok({state:'Paused'});
+  let resumeLate;answers['/api/audiobook/resume']=()=>new Promise(resolve=>{resumeLate=resolve;});
+  const resuming=run("jobControlAction('/api/audiobook/resume',{})");
+  await get('stop-automatic').handlers.click();await tick();
+  assert.equal(sent('/api/audiobook/pause'),0);
+  resumeLate(ok({state:'Running'}));await resuming;for(let i=0;i<4;i++)await tick();
+  assert.equal(sent('/api/audiobook/pause'),1,'a Resume in flight landing after Stop is paused again');
+  // His own Start sent after Stop (nothing queued it) is never undone by the pending re-pause.
+  posts.length=0;backend={...backend,automatic_processing:running};run('state='+JSON.stringify(backend)+';busy=false;controls()');
+  let resumeLater;answers['/api/audiobook/resume']=()=>new Promise(resolve=>{resumeLater=resolve;});
+  const resuming2=run("jobControlAction('/api/audiobook/resume',{})");
+  await get('stop-automatic').handlers.click();await tick();
+  backend={...backend,automatic_processing:paused};run('state='+JSON.stringify(backend)+';controls()');
+  await get('start-automatic').handlers.click();await tick();
+  assert.equal(sent('/api/automatic/start'),1,'sent at once: nothing the page counts as busy');
+  resumeLater(ok({state:'Running'}));await resuming2;for(let i=0;i<4;i++)await tick();
+  assert.equal(sent('/api/audiobook/pause'),0,'his Start ends the pending re-pause');
+  // 9. Futaba m-3 and m-6: the Waiting line.
+  run('rows=[{id:"b",kind:"candidate",title_clue:"Foo"}];queueState={queued:[{id:"q1",book_id:"b",action:"retry"}],running:null}');
+  assert.equal(run('waitingLine()'),'Waiting: Retry: Foo. It runs when the app is free.','one queued action is "It"');
+  run('queueState={queued:[{id:"q1",book_id:"b",action:"retry"}],running:{id:"q0",book_id:"c",action:"delete",title:"Bar"}}');
+  assert.equal(run('waitingLine()'),'Waiting: Retry: Foo. It runs when Delete: Bar finishes.','its blocker is named when known');
+  run('queueState={queued:[{id:"q1",book_id:"b",action:"retry"},{id:"q2",book_id:"b",action:"delete"}],running:null}');
+  assert.match(run('waitingLine()'),/They run one at a time\.$/);
+  run('queueState={queued:[],running:null};state={...state,library_roots:[],automatic_processing:{...state.automatic_processing,state:"Running",next_retry_at:Date.now()/1000+3600,research:{researching:0,waiting:0,held:6}}}');
+  assert.match(run('waitingLine()'),/^Waiting for metadata sources\. Next try \d\d:\d\d\.$/,'a timed retry is a wait even with no book waiting');
+  run('state={...state,automatic_processing:{...state.automatic_processing,next_retry_at:null}}');assert.equal(run('waitingLine()'),'','positive control: nothing scheduled');
   console.log('PASS 0.29.0 Stop acts at once: bypasses the queue, keeps busy, re-pauses after a press in flight; queued lines name the blocker; cancel and turn-away lines');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

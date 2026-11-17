@@ -6,6 +6,7 @@ let dirty = false, busy = false, polling = false, ended = false, timer = null, s
 let view='candidates',totalRows=0,selectedLibrary=null;
 let automaticRequest=null,automaticFlight=null,automaticResultKey=null,automaticInspectorKey=null;
 const jobControlFlights=new Map();let jobControlNote='';
+const STOPPING_LINE='Stopping automatic processing…';  // Stop's own line (Q8), cleared once processing has stopped
 let manualMetadataTouched=false,manualTrackTouched=false,manualDraftLease=null,draftLeaseFailure='',draftLeaseQueue=Promise.resolve();
 const filters={files:'all',candidates:'converted'};
 const filterOptions={files:[['all','All files'],['errors','Read errors'],['review','Needs metadata review'],['preview','Preview available'],['missing','No longer found']],candidates:[['converted','Audiobook Ready'],['all','All candidates'],['jobs','Queued / creating'],['held','Held'],['recording_review','Recording review'],['errors','Source read errors'],['changed','Candidate changed'],['output_attention','Output needs attention'],['restarted','Started over']]};
@@ -699,6 +700,7 @@ function renderJobControlState(){
 }
 async function jobControlAction(route,data){
   const kind=route.split('/').pop();if(ended || recoveryDisconnected || jobControlFlights.has(kind))return;
+  if(kind==='resume')stopAfterFlights=false;  // Senua S-m2: his Resume after Stop is never undone by Stop's late re-pause
   const flight={};jobControlFlights.set(kind,flight);jobControlNote='';renderJobs();controls();
   try{
     const answer=await request(route,data);
@@ -1306,6 +1308,7 @@ function libraryNotices(){return Array.isArray(state?.library_roots)?state.libra
 // One line per root that does not answer (or answers empty), under the Source lines; its books stay. Check again probes the
 // roots now; the page also checks by itself every 30 s while a line shows. A root that answers again loses its line at once.
 const sourceChecks=new Set(),sourceStill=new Set();let sourceTimer=null,sourceDetailsOpen=false,sourceClearedSeen=new Set(),sourceKey='';
+const sourceClearedWaiting=new Map();  // id -> cleared item whose strip line waits for its row to leave the page (Futaba M-4)
 function rootBooks(root){return Number.isInteger(root.books) && root.books>0?`Its ${plural(root.books,'book','books')} stay on the list.`:'Its books stay on the list.';}
 function rootLine(root){
   if(sourceChecks.has(root.path))return `Checking ${root.path}…`;
@@ -1345,7 +1348,7 @@ function sourceRemovedText(check){
   const books=Number.isInteger(check?.removed)?check.removed:0,folders=Number.isInteger(check?.folders)?check.folders:0;
   const parts=[];if(books)parts.push(`Removed ${plural(books,'book','books')} whose files are gone.`);
   if(folders)parts.push(`Deleted ${plural(folders,'source folder','source folders')} that held only leftover files.`);
-  else if(books)parts.push('No files were touched.');
+  else if(books && !(Number.isInteger(check?.files_removed) && check.files_removed>0))parts.push('No files were touched.');  // Senua S-m7
   return parts.join(' ');
 }
 function renderSourceCheck(){
@@ -1360,15 +1363,20 @@ function renderSourceCheck(){
     if(check.folders_more>0)items.push(node('li',`+ ${check.folders_more} more`));
     list.replaceChildren(...items);
   }
-  // Item 3 (Judy section 3): rows whose problem no longer applies left the list; the Needs attention strip says why.
+  // Item 3 (Judy section 3): rows whose problem no longer applies left the list; the Needs attention strip says why. A row
+  // Sergei is still working on is still on the page: its line waits until it leaves (Futaba M-4: the strip said "left this
+  // list" beside the row).
   const cleared=(Array.isArray(check?.cleared)?check.cleared:[]).filter(item=>item && typeof item.id==='string' && !sourceClearedSeen.has(item.id));
   if(cleared.length){
-    for(const item of cleared)sourceClearedSeen.add(item.id);
-    if(view==='candidates' && filters.candidates==='output_attention'){
-      if(cleared.length===1){askNote(`«${cleared[0].title || 'The book'}» left this list: ${cleared[0].cause==='name_taken'?'the name is free now':'the problem no longer applies'}. The book is checked again.`);stripShow={id:cleared[0].id,title:cleared[0].title};renderStripShow();}
-      else askNote(`${plural(cleared.length,'book','books')} left this list: their problem no longer applies. They are checked again.`);
-    }
+    for(const item of cleared){sourceClearedSeen.add(item.id);sourceClearedWaiting.set(item.id,item);}
+    announceCleared(cleared.filter(item=>!(leavingRows.has(item.id) || underCursor(rows.find(row=>row.id===item.id)))).map(item=>item.id));
   }
+}
+function announceCleared(ids){
+  const items=ids.map(id=>sourceClearedWaiting.get(id)).filter(Boolean);for(const item of items)sourceClearedWaiting.delete(item.id);
+  if(!items.length || !(view==='candidates' && filters.candidates==='output_attention'))return;
+  if(items.length===1){askNote(`«${items[0].title || 'The book'}» left this list: ${items[0].cause==='name_taken'?'the name is free now':'the problem no longer applies'}. The book is checked again.`);stripShow={id:items[0].id,title:items[0].title};renderStripShow();}
+  else askNote(`${plural(items.length,'book','books')} left this list: their problem no longer applies. They are checked again.`);
 }
 $('source-details')?.addEventListener('click',()=>{sourceDetailsOpen=!sourceDetailsOpen;renderSourceCheck();});
 $('source-dismiss')?.addEventListener('click',async()=>{sourceDetailsOpen=false;try{const answer=await request('/api/sources/dismiss',{});if(state)state={...state,source_check:answer?.source_check?{...answer.source_check,roots:undefined}:null};}catch(error){message(error.message);}renderSourceCheck();});
@@ -1378,11 +1386,14 @@ globalThis.addEventListener?.('focus',()=>{if(ended || loadingActive || Date.now
 // The Waiting line (Judy section 7): what the app waits for and when; the queued actions are named, not only counted.
 function waitingLine(){
   const parts=[],automatic=state?.automatic_processing;
-  if(['Running','Stopping'].includes(automatic?.state) && automatic?.research?.waiting>0){const at=automatic.next_retry_at,when=typeof at==='number' && at>0?new Date(at<1e12?at*1000:at):null;parts.push('Waiting for metadata sources.'+(when && Number.isFinite(when.getTime())?` Next try ${String(when.getHours()).padStart(2,'0')}:${String(when.getMinutes()).padStart(2,'0')}.`:''));}
+  // Futaba m-3: a timed retry (next_retry_at) is a wait for metadata sources even when no book reads "waiting".
+  if(['Running','Stopping'].includes(automatic?.state) && (automatic?.research?.waiting>0 || typeof automatic?.next_retry_at==='number' && automatic.next_retry_at>0)){const at=automatic.next_retry_at,when=typeof at==='number' && at>0?new Date(at<1e12?at*1000:at):null;parts.push('Waiting for metadata sources.'+(when && Number.isFinite(when.getTime())?` Next try ${String(when.getHours()).padStart(2,'0')}:${String(when.getMinutes()).padStart(2,'0')}.`:''));}
   for(const root of libraryNotices().filter(item=>!item.available || item.empty))parts.push(`Waiting for ${root.path} to answer.`);
   const queued=queueState.queued;
   if(queued.length){const named=queued.slice(0,2).map(item=>`${QUEUE_ACTION_WORDS[item.action] || 'Action'}: ${rows.find(row=>row.id===item.book_id)?.title_clue || item.title || 'a book'}`);
-    parts.push(`Waiting: ${named.join(', ')}${queued.length>2?` and ${queued.length-2} more`:''}. They run one at a time.`);}
+    // Futaba m-6: one queued action is "It", and names what it waits for when the page knows (Judy's queued-line rule).
+    const running=queueState.running,blocker=running?`${QUEUE_ACTION_WORDS[running.action] || 'Action'}: ${rows.find(row=>row.id===running.book_id)?.title_clue || running.title || 'a book'}`:'';
+    parts.push(`Waiting: ${named.join(', ')}${queued.length>2?` and ${queued.length-2} more`:''}. ${queued.length>1?'They run one at a time.':`It runs when ${blocker?blocker+' finishes':'the app is free'}.`}`);}
   return parts.join(' ');
 }
 // Item 8 (Judy section 8): only Sergei's review can move things on. The engine decides (needs_you_only); the count is the
@@ -2648,6 +2659,9 @@ function renderAutomatic(){
   if(loadingActive && !(state && partReady('jobs')))return loadPlaceholders();
   const automatic=state?.automatic_processing,known=automaticStates.has(automatic?.state),stale=recoveryDisconnected || ended?'Last confirmed — ':'';
   reconcileAutomaticRequest(automatic);
+  // Futaba m-4: "Stopping automatic processing…" stayed after the state read Paused. It goes once the Stop has landed and
+  // automatic processing is no longer stopping (another line written since is left alone).
+  if(automaticRequest!=='stop' && known && automatic.state!=='Stopping' && $('message')?.textContent===STOPPING_LINE)message();
   const shown=automatic?.state==='Needs attention'?'Stopped — needs attention':automatic?.state;
   setText('automatic-status',(!known || stale?'Current processing status unavailable. ':'')+stale+'Automatic processing: '+(known?(stale?automatic.state:shown):'status unavailable'));
   setText('automatic-request',automaticRequest==='start'?(automaticFlight?.state==='Paused'?'Resume':'Start')+' requested. Waiting for the app to respond.':automaticRequest==='stop'?'Requesting automatic stop…':automaticRequest==='cancel-start'?'Cancelling the queued start…':'');
@@ -2684,10 +2698,12 @@ async function automaticAction(kind){
     // Q8: Stop acts at once, never queued behind another press, and never touches busy. A press already in flight may
     // reach the engine after this Stop and start the queue again; once every such press has landed the page pauses
     // audiobook jobs again (stopAfterFlights, drainLater), so the job Stop paused stays paused.
-    flight.tookOver=automaticRequest!==null;if(pressBusy())stopAfterFlights=true;
+    flight.tookOver=automaticRequest!==null;if(stopFlightsBusy())stopAfterFlights=true;
     for(const queued of [...laterPresses])if(['resume','start_automatic'].includes(queued.kind))cancelLater(queued.key);
-    automaticFlight=flight;automaticRequest=kind;renderAutomatic();controls();message('Stopping automatic processing…');
-  }else{automaticFlight=flight;automaticRequest=kind;busy=true;renderAutomatic();controls();message();}
+    message(STOPPING_LINE);automaticFlight=flight;automaticRequest=kind;renderAutomatic();controls();
+  }else{
+    if(kind==='start')stopAfterFlights=false;  // Senua S-m2: his Start after Stop is never undone by Stop's late re-pause
+    automaticFlight=flight;automaticRequest=kind;busy=true;renderAutomatic();controls();message();}
   let refreshNeeded=false;
   try{
     const result=await request('/api/automatic/'+kind,{},60000);
@@ -2976,20 +2992,47 @@ function technicalText(row){
 }
 // 0.29.0 item 3 (Judy section 3, "Never under his cursor"): a row that left the list stays, in place, while Sergei works on it:
 // its Edit names editor is open, it has unsaved name edits, or it is the selected row with unsaved panel edits. Its status
-// says why it will go; it leaves on the first list read after he is done.
+// says why it will go; it leaves as soon as he is done (Discard, Save, or the first list read after that).
 const leavingRows=new Map();  // id -> the row as it was when the list dropped it
-function underCursor(row){return !!row && (namesOpen(row.id) || !!namesData(row.id) && namesChanged(row) || selectedRow?.id===row.id && (dirty || trackDirty));}
+// Unsaved edits on the row (Futaba M-4): a draft value that differs from what the editor proposed, or a value typed in the
+// row's own fields. A closed editor whose proposals merely differ from the row's question (namesChanged) is not his work,
+// and kept the row on the page after Discard.
+function namesUnsaved(row){
+  const draft=namesState.get(row.id)?.draft || {},d=askDrafts.get(row.id) || {};
+  if(Object.entries(draft).some(([field,value])=>NAMES_BOOL.has(field)?value!==namesProposal(row.id,field):String(value ?? '').trim()!==String(namesProposal(row.id,field)).trim()))return true;
+  return ['title','author','series','number','other'].some(field=>typeof d[field]==='string') || !!d.choice;
+}
+function underCursor(row){return !!row && (namesOpen(row.id) || namesUnsaved(row) || selectedRow?.id===row.id && (dirty || trackDirty));}
 function keepUnderCursor(next,before){
   const ids=new Set(next.map(row=>row.id));
-  for(const id of [...leavingRows.keys()])if(ids.has(id))leavingRows.delete(id);
+  for(const id of [...leavingRows.keys()])if(ids.has(id)){leavingRows.delete(id);sourceClearedWaiting.delete(id);}  // back on the list: no strip line
   (before || []).forEach((row,index)=>{
     if(!row || ids.has(row.id) || !(leavingRows.has(row.id) || underCursor(row)))return;
-    if(!underCursor(row)){leavingRows.delete(row.id);return;}
+    if(!underCursor(row)){leavingRows.delete(row.id);announceCleared([row.id]);return;}
+    // The cause is kept once known (Futaba M-4): a later pass replaces source_check.cleared, and the row then read as
+    // "gone", lost its count and kept its old Name taken line.
     const cleared=(state?.source_check?.cleared || []).find(item=>item?.id===row.id);
-    const kept={...row,leaving:cleared?.cause==='name_taken'?'name_free':'gone'};leavingRows.set(row.id,kept);
+    const kept={...row,leaving:leavingRows.get(row.id)?.leaving==='name_free' || cleared?.cause==='name_taken'?'name_free':'gone'};leavingRows.set(row.id,kept);
     next.splice(Math.min(index,next.length),0,kept);
   });
   return next;
+}
+// The row leaves the moment he is done with it (Discard or Save; Futaba M-4: it stayed until a later list read while the
+// counts had already dropped). The counts drop with it, focus moves on if it was there, and the strip says why.
+function releaseLeaving(id){
+  const kept=leavingRows.get(id);if(!kept)return false;
+  const at=rows.findIndex(item=>item.id===id);
+  if(underCursor(at<0?kept:rows[at]))return false;
+  leavingRows.delete(id);
+  if(at>=0){
+    const focused=globalThis.document?.activeElement?.closest?.('tr')?.dataset?.path===rows[at].path;
+    rows=rows.filter(item=>item.id!==id);
+    const counts=state?.audiobook_jobs?.attention_counts;if(kept.leaving==='name_free' && Number.isInteger(counts?.name_taken) && counts.name_taken>0)counts.name_taken--;
+    askRows.delete(id);renderRows(true);renderAttentionGroups();renderAttentionShortcut();if(partReady('jobs'))renderJobs();
+    if(focused)moveFocusAfterLeave(at);
+  }
+  announceCleared([id]);
+  return true;
 }
 // Judy section 3: a focused row that leaves hands focus to the next row's first control, else the previous row's, else the
 // Needs attention shortcut. Focus is never moved by a pass otherwise.
@@ -3254,7 +3297,7 @@ function askInert(row){
   const names=namesFor(row);  // Edit names open (Judy 1.3): Series and Number go together
   if(names?.series && !names.number)return 'Type the number in the series, or clear the series.';
   if(names?.number && !names.series)return 'Type the series name, or clear the number.';
-  if(askDestination(row)?.taken===true)return chosenCopy(row,'That name is already in Audiobooks Sorted. Change the title or author.');
+  if(askDestination(row)?.taken===true && row.leaving!=='name_free')return chosenCopy(row,'That name is already in Audiobooks Sorted. Change the title or author.');
   return askPanelEdits(row);
 }
 // Unsaved metadata, order or file edits in the panel for this book (Judy 2026-10-24, 0.22.0 review A5: trackDirty too). The
@@ -3476,7 +3519,8 @@ function updateAskRow(entry){
   else if(!pending){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued delete's outcome (1.6)
   const deleted=deleteNotes.get(row.id);if(deleted && !done){hint=deleted.text;warn=deleted.warn;clause='';lines=deleted.lines;}  // Delete book's outcome (ruling 23)
   const queued=done?null:queueHint(row);if(queued!==null){hint=queued;warn=false;clause='';lines=null;}  // the queued line replaces the hint (1.3)
-  if(!done && activeChapterCheck(row)){status='Checking source audio';hint='Checking the complete audio before correcting the final chapter end.';warn=false;clause='';lines=null;}
+  if(!done && row.leaving && LEAVING_LINES[row.leaving]){hint=LEAVING_LINES[row.leaving];warn=false;clause='';lines=null;}  // 0.29.0 item 3
+  else if(!done && activeChapterCheck(row)){status='Checking source audio';hint='Checking the complete audio before correcting the final chapter end.';warn=false;clause='';lines=null;}
   else if(!done && !pending && !result && chapterDiagnostic(row)){hint=chapterRefusal(chapterDiagnostic(row),row);warn=true;clause='';}
   statusInPlace(entry.cell,status);setHint(entry.hint,hint,clause,warn,lines);
   const also=done?'':askAlso(ask),why=done?'':ask.kind==='same_author'?sameWhy(ask):askReason(ask);
@@ -3815,7 +3859,7 @@ function destPlan(row){
   if(ask?.kind==='files_missing' && !(Number(ask.missing?.present)>0))return null;  // nothing will be written and nothing exists to move
   if(members.length && members.every(member=>member?.missing))return null;
   let dest=null,label='Goes to',taken=false;const job=row.creation?.job;
-  if(ask){dest=askDestination(row);taken=dest?.taken===true && !askDone.has(row.id);label=taken?'Already there':setCause(ask) || folderQuestion(ask)?'As one book':'Goes to';}
+  if(ask){dest=askDestination(row);taken=dest?.taken===true && !askDone.has(row.id) && row.leaving!=='name_free';label=taken?'Already there':setCause(ask) || folderQuestion(ask)?'As one book':'Goes to';}
   else if(namesOpen(row.id) && (namesState.get(row.id)?.preview || namesData(row.id)?.destination))dest=namesState.get(row.id)?.preview || namesData(row.id)?.destination;
   else if(job && typeof job==='object')dest=job.state==='Output needs attention'?job.destination:null;
   else if(typeof row.preview?.path==='string' && row.preview.path)dest=row.preview;
@@ -4090,6 +4134,7 @@ function namesClose(id,keep=false){
   const state=namesState.get(id);if(!state)return;state.open=false;state.loadSeq=(state.loadSeq || 0)+1;
   if(!keep){state.draft={...(state.openDraft?.names || {})};if(state.openDraft?.ask)askDrafts.set(id,{...state.openDraft.ask});else askDrafts.delete(id);state.preview=null;state.previewKey='';}
   renderRows(true);namesRows.get(id)?.button?.focus?.({preventScroll:true});
+  releaseLeaving(id);  // 0.29.0 item 3: a row that left the list while he worked on it goes now
 }
 // Fields stop clicks and keys reaching the row; Esc closes only an unchanged editor; Ctrl+Enter presses the row's Approve,
 // else Save (Judy 1.3, 1.7); Enter alone refreshes the Goes to line.
@@ -4269,7 +4314,7 @@ function namesDone(row,answer,forget=false){
   if(Array.isArray(answer?.entered))row.entered=answer.entered;
   if(!forget){const line=namesSavedStrip(row,answer);askNote(line);watchLeaving(row,line,answer);}else watchLeaving(row,`Took back a correction for ${askName(row)}.`,answer);
   const state=namesState.get(id);if(state){state.open=false;state.data=null;state.draft={};state.preview=null;state.previewKey='';}
-  askDrafts.delete(id);renderRows(true);namesRows.get(id)?.button?.focus?.({preventScroll:true});
+  askDrafts.delete(id);renderRows(true);namesRows.get(id)?.button?.focus?.({preventScroll:true});releaseLeaving(id);
   namesFacts.key='';if(selectedRow?.id===id)loadNamesFacts(selectedRow);  // the panel's facts read the saved names
   const wait={id,at:Date.now()};listWait=wait;lastKey=null;
   refresh(true).then(()=>{if(listWait===wait){listWait=null;updateNamesRows();}}).catch(()=>{if(listWait===wait)listWait=null;if(!forget){namesNotes.set(id,{text:'Saved. The list could not be refreshed. It updates by itself.',warn:false});updateNamesRows();}});  // the list follows; its failure is not the save's
@@ -4360,7 +4405,7 @@ function approveBlock(row){
   const names=namesFor(row);
   if(names?.series && !names.number)return {text:'Type the number in the series, or clear the series.',fix:'series'};
   if(names?.number && !names.series)return {text:'Type the series name, or clear the number.',fix:'number'};
-  if(askDestination(row)?.taken===true)return {text:'That name is already in Audiobooks Sorted. Change the title or author.',fix:null};
+  if(askDestination(row)?.taken===true && row.leaving!=='name_free')return {text:'That name is already in Audiobooks Sorted. Change the title or author.',fix:null};
   if(askPanelEdits(row))return {text:panelEditsLine(),fix:'panel'};
   return {text:'',fix:null};
 }
@@ -4623,7 +4668,10 @@ function laterFor(key){return laterPresses.find(item=>item.key===key) || null;}
 const LATER_WHY={catalog:'It runs when the app is free.',app:'It runs when the app is free.',file:'It tries again every 10 s.'};
 // 0.29.0 (Judy section 7): a queued line names what it waits for; a blocker the page cannot name is "the app is free",
 // never "the current action". busyPress is the press of this page that holds busy, when the page knows its name.
-let busyPress='',drainingPress=null,stopAfterFlights=false;
+let busyPress='',drainingPress=null,stopAfterFlights=false,stopRepausing=false;
+// The presses Stop automatic processing waits out before it pauses audiobook jobs again: every press pressBusy counts, and a
+// Resume audiobook jobs press in flight (Senua S-m2: it was outside the guarantee).
+function stopFlightsBusy(){return pressBusy() || jobControlFlights.has('resume');}
 function pressBlocker(){
   if(automaticRequest==='start')return 'Start automatic processing';
   if(automaticRequest==='cancel-start')return 'Cancel automatic start';
@@ -4686,8 +4734,11 @@ function renderLaterButtons(){
 }
 function drainLater(){
   // Stop pressed while another press was in flight: once every such press has landed, audiobook jobs are paused again.
-  if(stopAfterFlights && !pressBusy() && !ended){stopAfterFlights=false;jobControlAction('/api/audiobook/pause',{});}
-  if(laterRunning || !laterPresses.length || pageHeld(laterPresses[0].waitFor))return;
+  // A press queued after Stop runs only once that pause has landed (Senua S-m2: sent in the same tick, the engine could take
+  // his Start first and the pause then stopped it).
+  if(stopAfterFlights && !stopFlightsBusy() && !ended){stopAfterFlights=false;stopRepausing=true;
+    Promise.resolve(jobControlAction('/api/audiobook/pause',{})).catch(()=>{}).finally(()=>{stopRepausing=false;controls();});}
+  if(stopRepausing || laterRunning || !laterPresses.length || pageHeld(laterPresses[0].waitFor))return;
   const item=laterPresses.shift();laterRunning=true;
   Promise.resolve().then(()=>{drainingPress=item;try{return item.run();}finally{drainingPress=null;}}).catch(()=>{}).finally(()=>{laterRunning=false;controls();});
 }
