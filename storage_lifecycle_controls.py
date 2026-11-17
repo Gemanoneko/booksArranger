@@ -65,6 +65,28 @@ def _read(path,sha=None):
 def _key(path):return os.path.normcase(str(Path(path).absolute()))
 
 
+def _subkey_names(key,bound,what):
+    """Every subkey name of an open registry key, read until two reads agree. Another process (the app's own terminal
+    cleanup, or a second gate worker) may add or remove a pending entry meanwhile: QueryInfoKey's count then no longer
+    matches EnumKey (ERROR_NO_MORE_ITEMS, WinError 259, failed the 0.29.0 entry check), and a removal shifts the indices
+    so that an entry could be skipped. A list that keeps changing is refused (fail closed)."""
+    import winreg
+    def read():
+        names=[]
+        for index in range(bound+1):
+            try:names.append(winreg.EnumKey(key,index))
+            except OSError as error:
+                if getattr(error,'winerror',None)==259:return names
+                raise
+        _need(False,what+' bound exceeded')
+    last=read()
+    for _ in range(4):
+        now=read()
+        if now==last:return now
+        last=now
+    raise ControlRecordsHeld(what+' records kept changing while they were read; try again')
+
+
 def assert_no_pending_overlap(scopes,installation_id=None):
     """A new installation UUID cannot adopt another pending native scope."""
     import winreg
@@ -78,16 +100,16 @@ def assert_no_pending_overlap(scopes,installation_id=None):
     try:base=winreg.OpenKey(winreg.HKEY_CURRENT_USER,BASE,0,winreg.KEY_READ|winreg.KEY_WOW64_64KEY)
     except FileNotFoundError:return
     with base:
-        count=winreg.QueryInfoKey(base)[0];_need(count<=512,'Pending cleanup installation bound exceeded')
-        for i in range(count):
-            identifier=winreg.EnumKey(base,i)
+        for identifier in _subkey_names(base,512,'Pending cleanup installation'):
             _need(str(uuid.UUID(identifier))==identifier,'Unrecognized pending cleanup installation')
-            with winreg.OpenKey(base,identifier) as installed:
-                count_tx=winreg.QueryInfoKey(installed)[0];_need(count_tx<=512,'Pending cleanup transaction bound exceeded')
-                for j in range(count_tx):
-                    tx=winreg.EnumKey(installed,j)
+            try:installed=winreg.OpenKey(base,identifier)
+            except FileNotFoundError:continue  # removed since it was listed: that cleanup ended, nothing of it is pending
+            with installed:
+                for tx in _subkey_names(installed,512,'Pending cleanup transaction'):
                     _need(str(uuid.UUID(tx))==tx,'Unrecognized pending cleanup transaction')
-                    with winreg.OpenKey(installed,tx) as key:raw,kind=winreg.QueryValueEx(key,'Authority')
+                    try:held=winreg.OpenKey(installed,tx)
+                    except FileNotFoundError:continue  # the same, for one transaction
+                    with held as key:raw,kind=winreg.QueryValueEx(key,'Authority')
                     _need(kind==winreg.REG_BINARY and len(raw)<=MAX_AUTHORITY,'Pending cleanup authority cannot be checked')
                     authority=json.loads(raw)
                     _need(authority.get('schema')==JOURNAL_SCHEMA and authority.get('installation_id')==identifier and

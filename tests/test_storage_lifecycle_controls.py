@@ -126,4 +126,53 @@ class ControlTests(unittest.TestCase):
         for root in ('data_dir','profile_dir','temp_dir','downloads_dir','logs_dir'):self.assertFalse(Path(self.value[root]).exists())
 
 
+    def fake_registry(self,lists,count=None,gone=()):
+        """winreg doubles for the pending-cleanup key: lists() gives each read's subkey names; QueryInfoKey reports count
+        (a stale number, as when another process removed an entry since); OpenKey of a name in gone is FileNotFoundError."""
+        import winreg
+        class Key:
+            def __init__(self,name):self.name=name
+            def __enter__(self):return self
+            def __exit__(self,*args):return False
+        def open_key(parent,sub,*args):
+            if parent==winreg.HKEY_CURRENT_USER:return Key('base')
+            if sub in gone or parent.name!='base':raise FileNotFoundError(2,'gone',sub)
+            return Key(sub)
+        current={'names':[]}
+        def enum(key,index):
+            if key.name=='base' and index==0:current['names']=lists()
+            names=current['names'] if key.name=='base' else []
+            if index<len(names):return names[index]
+            raise OSError(0,'No more data is available',None,259)
+        def info(key):return ((count if count is not None else len(current['names'])) if key.name=='base' else 0,0,0)
+        return [patch.object(winreg,'OpenKey',side_effect=open_key),patch.object(winreg,'EnumKey',side_effect=enum),patch.object(winreg,'QueryInfoKey',side_effect=info)]
+
+    def test_pending_entries_removed_while_they_are_read_never_fail_the_check(self):
+        # The 0.29.0 entry check at b527230: another gate worker removed its pending-cleanup key between QueryInfoKey's
+        # count and EnumKey (WinError 259), and the overlap check failed instead of reading on. The app's own terminal
+        # cleanup can do the same. A key listed and then removed is no longer pending.
+        listed,removed=str(uuid.uuid4()),str(uuid.uuid4())
+        outside=str(self.root/'not-created'/'Application')
+        # (a) The count is stale: one entry went after QueryInfoKey (EnumKey then answers ERROR_NO_MORE_ITEMS).
+        # (b) An entry is listed, then removed before it is opened.
+        for case,doubles in (('stale count',self.fake_registry(lambda:[listed],count=2)),('removed before opened',self.fake_registry(lambda:[listed,removed],gone={removed}))):
+            with self.subTest(case=case):
+                for double in doubles:double.start()
+                try:
+                    self.assertIsNone(controls.assert_no_pending_overlap([outside]))
+                finally:
+                    for double in doubles:double.stop()
+        # Fail closed: a list that differs on every read is refused, never trusted.
+        reads={'n':0}
+        def changing():
+            reads['n']+=1
+            return [listed] if reads['n']%2 else [listed,removed]
+        doubles=self.fake_registry(changing,gone={listed,removed})
+        for double in doubles:double.start()
+        try:
+            with self.assertRaisesRegex(controls.ControlRecordsHeld,'kept changing'):controls.assert_no_pending_overlap([outside])
+        finally:
+            for double in doubles:double.stop()
+
+
 if __name__=='__main__':unittest.main()
