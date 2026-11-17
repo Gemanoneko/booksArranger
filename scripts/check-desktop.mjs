@@ -205,7 +205,10 @@ for(const worker of workers){let why=null;try{if(JSON.stringify(inventory(worker
 if(changed.length)throw Error('Python batch source changed during tests: '+changed.join(', '));
 const late=results.map((r,i)=>r.timedOut?'worker '+i+' ('+r.timedOut+' deadline, '+Math.round(r.seconds)+' s)':'').filter(Boolean);
 if(late.length)throw Error('Python worker deadline: '+late.join(', '));
-if(overflow||results.some(r=>r.error||r.status!==0))throw Error('Python batch failed or exceeded output cap');
+// 0.29.0: name the worker and its exit status. At 4780be8 every batch reported OK and the gate still failed here, with no
+// way to tell which worker exited non-zero after its report (or whether the shared 16 MB output cap tripped).
+if(overflow||results.some(r=>r.error||r.status!==0))throw Error('Python batch failed or exceeded output cap: '+(overflow?'output over 16 MB; ':'')+
+ results.map((r,i)=>r.error||r.status!==0?'worker '+i+' status '+r.status+(r.error?' error '+r.error:'')+(r.status!==0?' stderr tail '+JSON.stringify(r.err.slice(-400)):''):'').filter(Boolean).join('; '));
 if(sideResult.failure)throw Error('Focused desktop check failed: '+sideResult.failure);
 const nodeOutput=sideResult.nodeOutput,nodeCount=Number(/^# tests (\d+)$/m.exec(nodeOutput)?.[1]);
 if(!nodeCount||!/^# fail 0$/m.test(nodeOutput)||!/^# skipped 0$/m.test(nodeOutput)||!/^# cancelled 0$/m.test(nodeOutput))throw Error('Node cases were not completely executed');
