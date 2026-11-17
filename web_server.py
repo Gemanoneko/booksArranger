@@ -352,14 +352,26 @@ class BrowserServer(ThreadingHTTPServer):
             print(f'Books Arranger could not check the source folders: {error}', file=sys.stderr, flush=True)
             return None
 
-    def _check_sources_later(self, **options):
+    def _check_sources_later(self, after=None, **options):
+        """The pass on its own thread. after: a thread the pass waits for first (the scan worker that asked for it)."""
         merge = self.merge
-        threading.Thread(target=self._check_sources, args=(merge,), kwargs=options, name='books-source-check', daemon=True).start()
+
+        def run():
+            if after is not None and after is not threading.current_thread():
+                after.join()
+            self._check_sources(merge, **options)
+        threading.Thread(target=run, name='books-source-check', daemon=True).start()
+
+    def _check_sources_after_scan(self):
+        """0.29.0 (Judy section 0): a finished scan runs the check pass. The scan calls this on its own worker thread, and a
+        pass refuses while a scan worker is alive (check_sources), so the pass waits for that worker to end (Futaba M-2,
+        Senua S-m9: started at once it saw the worker alive and never ran). A scan started meanwhile ends with its own pass."""
+        self._check_sources_later(after=threading.current_thread())
 
     def _start_background(self):
         from storage_relocation_native import retained_runtime
         # 0.29.0 (Judy section 0): a finished scan runs the check pass.
-        self.inventory.after_scan = self._check_sources_later
+        self.inventory.after_scan = self._check_sources_after_scan
         if retained_runtime(self.inventory.database):return
         if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
         # Published-book hashing reads every finished book from the library share; it must not delay health.
@@ -1042,25 +1054,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path=='/api/sources/check':
             # 0.29.0 (Judy section 1): Check again, and the page's 30 s re-check while a root does not answer. The roots are
-            # probed now; a pass runs (in the background) for every root that answers with content.
+            # probed now; a pass runs (in the background) only for a root that did not answer at the last check and answers
+            # with content now (Senua S-M3: the pass ran, folder deletion included, on every healthy root every 30 s).
             if data:raise ValueError('Check again requires an empty object')
             import source_presence
             merge=self.server.merge
             roots=list(self.server.inventory.source_roots('Audiobooks')) if hasattr(self.server.inventory,'source_roots') else [self.server.inventory.roots['Audiobooks']]
             states=source_presence.probe_roots(roots)
             report=merge.__dict__.get('_source_report')
+            known={source_presence._key(r['path']):r for r in report['roots']} if report is not None else None
             if report is not None:
-                known={source_presence._key(r['path']):r for r in report['roots']}
                 merge._source_report=dict(report,roots=[dict(known.get(source_presence._key(s['path']),{}),**s) for s in states])
-            answering=[s['path'] for s in states if source_presence.answers(s)]
-            if answering:self.server._check_sources_later(roots=answering)
-            self.response(200,{'source_check':merge.source_check_view() if hasattr(merge,'source_check_view') else None,'checking':bool(answering)});return
+            # No report yet (the start pass did not run): every root that answers is the one that came back.
+            back=[s['path'] for s in states if source_presence.answers(s) and (known is None or not source_presence.answers(known.get(source_presence._key(s['path']))))]
+            if back:self.server._check_sources_later(roots=back,wait=True)
+            self.response(200,{'source_check':merge.source_check_view() if hasattr(merge,'source_check_view') else None,'checking':bool(back)});return
         if path=='/api/sources/rows':
-            # Window focus (Judy section 0): stale rows only, at most once per 30 s; never folders.
+            # Window focus (Judy section 0): stale rows only, at most once per 30 s; never books, never folders (Futaba m-1).
             if data:raise ValueError('The row check requires an empty object')
             merge=self.server.merge;now=time.monotonic()
             if now-merge.__dict__.get('_rows_checked_at',-1e9)>=30:
-                merge._rows_checked_at=now;self.server._check_sources_later(folders=False)
+                merge._rows_checked_at=now;self.server._check_sources_later(books=False,folders=False)
             self.response(202,{'accepted':True});return
         if path=='/api/sources/dismiss':
             if data:raise ValueError('Dismiss requires an empty object')

@@ -3,8 +3,11 @@
 Sergei 2026-11-17: "If the folder/file is not available, I probably deleted it. Check on startup and delete from the list."
 
 - Item 1 (list-only): a book every source file of which is gone, in a library root that answers with content, leaves the
-  list through the record Remove from list writes (attention_dismissals: candidate and fingerprint, so a scan that finds
-  its files again lists it again). No file is touched. A book with any audiobook job (queued, converting, converted,
+  list at once: the pass writes the record Remove from list writes (attention_dismissals) and its own (source_gone, the
+  book's fingerprint and file paths). Needs attention skips a book in source_gone in every group, not only Missing files
+  (Senua S-M2), while the catalog still says the same: the same fingerprint (no scan since), or, after a scan, the same
+  files all marked missing (the scan changes the fingerprint; Futaba M-3: the book came back). A scan that finds any of
+  its files again lists it again. No file is touched. A book with any audiobook job (queued, converting, converted,
   stopped) is never a candidate: a converted book stays in the converted list. No mass-drop guard (Sergei: no).
 - Unavailable root: a root that does not answer, or answers with an empty listing (a failed mount until proven otherwise),
   keeps every book and folder under it. The page says so per root; the pass runs for it once it answers again.
@@ -17,7 +20,11 @@ Sergei 2026-11-17: "If the folder/file is not available, I probably deleted it. 
 - Item 3: a book held as Name taken whose destination no longer exists is checked again (its automatic record reads
   Pending, as after Let the app handle it, and the pass takes it again).
 
-A pass never decides from scan results: each path is tested now.
+Triggers (Judy section 0): start, a finished scan and a drive that answers again run every part, the drive's part for that
+root only (Senua S-M3); window focus runs item 3 only (books=False, folders=False; Futaba m-1).
+
+A pass never decides from scan results: each path is tested now, and a root is probed again before any book under it is
+dropped (Senua S-m4: a drive that went away during the pass decides nothing).
 """
 import datetime
 import json
@@ -34,6 +41,8 @@ LISTED = 10  # Details lists at most this many books and folders, then "+ N more
 WATCH_TABLE = ('CREATE TABLE IF NOT EXISTS source_folder_watch(folder TEXT PRIMARY KEY,root TEXT NOT NULL,candidate_id TEXT,'
                'first_free REAL,updated TEXT NOT NULL)')
 CHECK_JOB = 'source-check'  # job_id of the leftover rows this pass records in source_folder_removed_files
+GONE_TABLE = ('CREATE TABLE IF NOT EXISTS source_gone(candidate_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,paths TEXT NOT NULL,'
+              'at TEXT NOT NULL)')
 
 
 def _key(path):
@@ -88,15 +97,51 @@ def _tables(db):
     return {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
+def _path_keys(paths):
+    return sorted({_key(p) for p in paths})
+
+
+def still_gone(db, have=None):
+    """{candidate id} of the current books a pass found gone that the catalog still shows as gone: the same fingerprint as
+    when the pass saw it (no scan since), or every file of the book marked missing by a scan, the same files as then.
+    MergeService._todo skips these in every group (Senua S-M2), and a later pass does not report them again (Futaba M-3).
+    Read-only."""
+    have = _tables(db) if have is None else have
+    if 'source_gone' not in have or 'book_groups' not in have:
+        return set()
+    found = set()
+    for r in db.execute('SELECT s.candidate_id,s.paths,CASE WHEN g.fingerprint=s.fingerprint THEN NULL ELSE g.evidence END AS changed '
+                        'FROM source_gone s JOIN book_groups g ON g.id=s.candidate_id WHERE g.superseded=0'):
+        if r['changed'] is None:
+            found.add(r['candidate_id'])
+            continue
+        try:
+            members = json.loads(r['changed'] or '{}').get('members') or []
+            recorded = json.loads(r['paths'])
+        except (TypeError, ValueError, AttributeError):
+            continue
+        paths = [m.get('path') for m in members if isinstance(m, dict) and m.get('path')]
+        if paths and len(paths) == len(members) and all(m.get('missing') is True for m in members) and _path_keys(paths) == recorded:
+            found.add(r['candidate_id'])
+    return found
+
+
 def _books(database, roots):
     """[{id, revision, fingerprint, root, title, paths}] of every current book under these roots, with the set of books
-    that have an audiobook job and the (candidate, fingerprint) pairs already off the list."""
+    that have an audiobook job, the (candidate, fingerprint) pairs already off the list, and the books an earlier pass
+    found gone that are still gone (still_gone). A source_gone record that no longer applies (a scan found the files
+    again) is dropped here, so it never hides the book later."""
     with connect(database) as db:
         have = _tables(db)
         if 'book_groups' not in have:
-            return [], set(), set()
+            return [], set(), set(), set()
         jobs = {r[0] for r in db.execute("SELECT DISTINCT json_extract(manifest,'$.candidate_id') FROM audio_jobs")} if 'audio_jobs' in have else set()
         dismissed = {(r[0], r[1]) for r in db.execute('SELECT candidate_id,fingerprint FROM attention_dismissals')} if 'attention_dismissals' in have else set()
+        gone = still_gone(db, have)
+        if 'source_gone' in have:
+            stale = [(r[0],) for r in db.execute('SELECT candidate_id FROM source_gone') if r[0] not in gone]
+            if stale:
+                db.executemany('DELETE FROM source_gone WHERE candidate_id=?', stale)
         rows = db.execute('SELECT id,revision,fingerprint,root,scope,evidence FROM book_groups WHERE superseded=0').fetchall()
     keys = {_key(root): str(root) for root in roots}
     books = []
@@ -113,7 +158,7 @@ def _books(database, roots):
             continue  # only a book whose every file lies under its library root is ever decided
         title = str(evidence.get('title_clue') or '').strip() or Path(paths[0]).parent.name
         books.append({'id': row['id'], 'revision': row['revision'], 'fingerprint': row['fingerprint'], 'root': root, 'title': title, 'paths': paths})
-    return books, jobs, dismissed
+    return books, jobs, dismissed, gone
 
 
 def _gone(paths):
@@ -128,6 +173,8 @@ def _dismiss(database, book):
     with connect(database) as db:
         db.execute('CREATE TABLE IF NOT EXISTS attention_dismissals(candidate_id TEXT NOT NULL,fingerprint TEXT NOT NULL,dismissed_utc TEXT NOT NULL,PRIMARY KEY(candidate_id,fingerprint))')
         db.execute('INSERT OR IGNORE INTO attention_dismissals VALUES(?,?,?)', (book['id'], book['fingerprint'], _stamp()))
+        db.execute(GONE_TABLE)
+        db.execute('INSERT OR REPLACE INTO source_gone VALUES(?,?,?,?)', (book['id'], book['fingerprint'], json.dumps(_path_keys(book['paths']), ensure_ascii=False), _stamp()))
 
 
 def _stamp():
@@ -208,63 +255,124 @@ def _record(database, folder, candidate, item, state, detail=''):
         db.execute('UPDATE source_folder_removed_files SET state=?,detail=?,updated=? WHERE id=?', (state, detail, _stamp(), item))
 
 
+def _identity(folder):
+    """(volume, file id, type) of the folder itself, or None when it cannot be read."""
+    import stat
+    try:
+        facts = os.lstat(folder)
+    except OSError:
+        return None
+    return facts.st_dev, facts.st_ino, stat.S_IFMT(facts.st_mode)
+
+
+_OWNERSHIP = {}
+
+
+def _held(database, folder, candidate, leftovers):
+    """Senua S-m1: the guards the reviewed folder cleanup (storage_cleanup, ruling 74e) applies before a leftover goes, as a
+    reason to keep the folder, else None: more entries than its LEFTOVER_LIMIT, a retained recovery's sources or stage in or
+    under the folder (producer_recovery.protected_dependency), and a leftover another current book, an unfinished job (its
+    sources or reviewed cover) or a reacquire record names (cleanup_ownership). An unreadable catalog keeps the folder."""
+    from storage_cleanup import StorageCleanup
+    if len(leftovers) > StorageCleanup.LEFTOVER_LIMIT:
+        return 'Folder holds too many entries to clear; retained'
+    try:
+        from cleanup_ownership import OwnershipIndex
+        from producer_recovery import protected_dependency
+        with connect(database) as db:
+            if protected_dependency(db, [folder]):
+                return 'Isolated old files and source dependencies are retained'
+            # One index per catalog for every pass: it rebuilds only when that catalog's owners change.
+            index = _OWNERSHIP.setdefault(_key(database), OwnershipIndex())
+            held = index.held(db, _tables(db), None, candidate, {os.path.normcase(str(item['path'])) for item in leftovers})
+    except Exception:
+        return "Ownership of the folder's files could not be read; retained"
+    return 'Another book or job uses a file in this folder; retained' if held else None
+
+
 def _remove_folder(database, watched, leftovers):
-    """The folder's safe leftovers, each recorded first, then the folder and each parent left empty, never the root."""
+    """The folder's safe leftovers, each recorded first, then the folder and each parent left empty, never the root. The
+    reviewed guards (_held) come first; the folder must still be the one listed (_identity) when it goes. (gone, names
+    of the leftover files removed): a folder that stayed may still have lost files (Senua S-m7)."""
     from book_delete import _remove_folder as rmdir_if_empty
     folder, root = watched['folder'], watched['root']
+    identity = _identity(folder)
+    if identity is None or _held(database, folder, watched['candidate_id'], leftovers):
+        return False, []
+    removed = []
     for item in leftovers:
         row = _record(database, folder, watched['candidate_id'], item, 'removing')
         failed = remove_leftover(item['path'], root, item['size'])
         _record(database, folder, watched['candidate_id'], row, 'not_removed' if failed else 'removed', failed or '')
         if failed:
-            return False
-    if not rmdir_if_empty(folder, root):
-        return False
+            return False, removed
+        removed.append(item['name'])
+    if _identity(folder) != identity or not rmdir_if_empty(folder, root):
+        return False, removed
     parent = os.path.dirname(folder)
     while _inside(parent, root) and rmdir_if_empty(parent, root):
         parent = os.path.dirname(parent)
-    return True
+    return True, removed
 
 
-def run(merge, *, roots=None, folders=True, progress=None, now=None, stop=None, on_phase=None):
-    """One pass. roots: the library roots to check (default: every Audiobooks source root). folders=False: never delete a
-    folder (window focus). Returns the report the page shows: roots, books removed from the list, folders deleted,
-    Name-taken rows checked again."""
+def run(merge, *, roots=None, folders=True, books=True, progress=None, now=None, stop=None, on_phase=None):
+    """One pass. roots: the library roots to check (default: every Audiobooks source root). books=False: item 1 does not
+    run and no root is probed (window focus, Futaba m-1). folders=False: never delete a folder (window focus). Returns the
+    report the page shows: roots, books removed from the list, folders deleted, Name-taken rows checked again."""
     inventory = merge.inventory
     database = inventory.database
     now = time.time() if now is None else now
+    report = {'roots': [], 'removed': [], 'folders': [], 'files': [], 'cleared': []}
+    if not books:
+        report['cleared'] = recheck_rows(merge, [], {})
+        return report
     every = list(inventory.source_roots('Audiobooks')) if hasattr(inventory, 'source_roots') else [inventory.roots['Audiobooks']]
     chosen = [r for r in every if roots is None or _key(r) in {_key(x) for x in roots}]
     states = {_key(s['path']): s for s in probe_roots(chosen)}
-    books, jobs, dismissed = _books(database, chosen)
-    report = {'roots': [], 'removed': [], 'folders': [], 'cleared': []}
+    listed, jobs, dismissed, gone = _books(database, chosen)
+    listed = [b for b in listed if b['id'] not in gone]  # already off the list: never reported twice (Futaba M-3)
     counts = {}
-    for book in books:
+    for book in listed:
         if (book['id'], book['fingerprint']) not in dismissed:
             counts[_key(book['root'])] = counts.get(_key(book['root']), 0) + 1
     for root in chosen:
         state = dict(states[_key(root)])
         state['books'] = counts.get(_key(root), 0)
         report['roots'].append(state)
-    candidates = [b for b in books if b['id'] not in jobs and (b['id'], b['fingerprint']) not in dismissed and answers(states.get(_key(b['root'])))]
-    gone_folders = []
+    candidates = [b for b in listed if b['id'] not in jobs and (b['id'], b['fingerprint']) not in dismissed and answers(states.get(_key(b['root'])))]
+    found = []
     for index, book in enumerate(candidates):
         if stop is not None and stop.is_set():
             break
         if progress is not None:
             progress(index, len(candidates))
         if _gone(book['paths']):
+            found.append(book)
+    if progress is not None:
+        progress(len(candidates), len(candidates))
+    if found:
+        # Senua S-m4: a drive that stopped answering during the pass makes every later book look gone. Its root is probed
+        # again; a root that does not answer now decides nothing (its books stay, its state says so).
+        again = {_key(s['path']): s for s in probe_roots(sorted({b['root'] for b in found}))}
+        for key, state in again.items():
+            if not answers(state):
+                states[key] = state
+                for entry in report['roots']:
+                    if _key(entry['path']) == key:
+                        entry.update(available=state['available'], empty=state['empty'])
+        gone_folders = []
+        for book in found:
+            if not answers(states.get(_key(book['root']))):
+                continue
             _dismiss(database, book)
             report['removed'].append({'id': book['id'], 'title': book['title'], 'path': os.path.dirname(book['paths'][0])})
             for folder in sorted({os.path.dirname(p) for p in book['paths']}):
                 if _inside(folder, book['root']) and os.path.isdir(folder):
                     gone_folders.append((folder, book['root'], book['id']))
-    if progress is not None:
-        progress(len(candidates), len(candidates))
+        if gone_folders:
+            _watch(database, gone_folders)
     if report['removed']:
         merge.__dict__.pop('_needs_cache', None)
-    if gone_folders:
-        _watch(database, gone_folders)
     if folders:
         if on_phase is not None:
             on_phase('folders')  # the jobs panel's "Removing source folders" row (Judy section 7)
@@ -290,9 +398,12 @@ def run(merge, *, roots=None, folders=True, progress=None, now=None, stop=None, 
                 if watched['first_free'] is None:
                     _set_watch(database, watched['folder'], first_free=now)
                 continue
-            if _remove_folder(database, watched, leftovers):
+            went, removed = _remove_folder(database, watched, leftovers)
+            if went:
                 _set_watch(database, watched['folder'], drop=True)
                 report['folders'].append({'path': watched['folder'], 'files': [item['name'] for item in leftovers]})
+            elif removed:
+                report['files'].append({'path': watched['folder'], 'files': removed})  # the folder stayed; these files went
     report['cleared'] = recheck_rows(merge, chosen, states)
     return report
 
@@ -364,6 +475,9 @@ def summary(report):
     """The page's view of one pass: per-root states, the removed books and deleted folders (Details: at most LISTED each,
     then how many more), and the rows checked again."""
     removed, folders = report.get('removed') or [], report.get('folders') or []
+    # files_removed: leftover files removed from folders that then stayed (Senua S-m7): the line never says "No files were
+    # touched" while it is above 0.
     return {'roots': report.get('roots') or [], 'removed': len(removed), 'removed_list': removed[:LISTED], 'removed_more': max(0, len(removed) - LISTED),
             'folders': len(folders), 'folder_list': folders[:LISTED], 'folders_more': max(0, len(folders) - LISTED),
+            'files_removed': sum(len(item.get('files') or []) for item in report.get('files') or []),
             'cleared': report.get('cleared') or [], 'at': time.time()}

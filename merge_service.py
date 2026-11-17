@@ -1043,13 +1043,15 @@ class MergeService:
         wake=getattr(self,'_retention_wake',None)
         if wake is not None:wake.set()
 
-    def check_sources(self,*,roots=None,folders=True,progress=None):
+    def check_sources(self,*,roots=None,folders=True,books=True,progress=None,wait=False):
         """0.29.0 items 1, 3 and 5: one check pass (source_presence.run). None when another pass or a scan runs (the scan's
         end runs one). The per-root states are replaced as roots are checked; removed books and deleted folders add up
-        until Dismiss or the next start (Judy section 1)."""
+        until Dismiss or the next start (Judy section 1), each book and folder once (Futaba M-3: Details listed books twice).
+        books=False, folders=False: window focus, Name taken rows only (Futaba m-1). wait=True (a drive that answers again,
+        on its own thread): a pass already running is waited for, not skipped, since its probe may predate the drive."""
         import source_presence
         lock=self.__dict__.setdefault('_source_check_lock',threading.Lock())
-        if not lock.acquire(blocking=False):return None
+        if not lock.acquire(blocking=wait):return None
         try:
             worker=getattr(self.inventory,'worker',None)
             if worker is not None and worker.is_alive():return None
@@ -1061,13 +1063,17 @@ class MergeService:
                 self._source_progress={'phase':'checking','done':done,'total':total,'started':started}
                 if progress is not None:progress(done,total)
             def phase(name):self._source_progress={'phase':name,'started':int(time.time()*1000)}
-            report=source_presence.run(self,roots=roots,folders=folders,progress=counted,stop=self.__dict__.get('_retention_stop'),on_phase=phase)
+            report=source_presence.run(self,roots=roots,folders=folders,books=books,progress=counted,stop=self.__dict__.get('_retention_stop'),on_phase=phase)
         finally:
             self._source_checking=False;self._source_progress=None;lock.release()
-        previous=self.__dict__.get('_source_report') or {'roots':[],'removed':[],'folders':[],'cleared':[]}
+        previous=self.__dict__.get('_source_report') or {'roots':[],'removed':[],'folders':[],'files':[],'cleared':[]}
         states={source_presence._key(r['path']):r for r in previous['roots']}
         for state in report['roots']:states[source_presence._key(state['path'])]=state
-        self._source_report={'roots':list(states.values()),'removed':previous['removed']+report['removed'],'folders':previous['folders']+report['folders'],'cleared':report['cleared']}
+        def once(before,now,key):
+            seen={item[key] for item in before}
+            return before+[item for item in now if item[key] not in seen and not seen.add(item[key])]
+        self._source_report={'roots':list(states.values()),'removed':once(previous['removed'],report['removed'],'id'),
+                             'folders':once(previous['folders'],report['folders'],'path'),'files':previous.get('files',[])+report.get('files',[]),'cleared':report['cleared']}
         self.invalidate_status() if hasattr(self,'invalidate_status') else None
         return report
 
@@ -1082,7 +1088,7 @@ class MergeService:
     def dismiss_source_report(self):
         """Dismiss: the removed-books line goes; the per-root states stay."""
         report=self.__dict__.get('_source_report')
-        if report is not None:self._source_report=dict(report,removed=[],folders=[],cleared=[])
+        if report is not None:self._source_report=dict(report,removed=[],folders=[],files=[],cleared=[])
         return self.source_check_view()
 
     def report_restore_failure(self,error):
@@ -2730,7 +2736,8 @@ class MergeService:
                    tuple(db.execute('SELECT count(*),total(revision) FROM book_groups WHERE superseded=0').fetchone()),
                    tuple(db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() or ()) if 'book_catalog_revision' in have else (),
                    tuple(db.execute('SELECT count(*),max(updated) FROM audio_jobs').fetchone()) if 'audio_jobs' in have else (),
-                   tuple(db.execute('SELECT count(*) FROM attention_dismissals').fetchone()) if 'attention_dismissals' in have else ())
+                   tuple(db.execute('SELECT count(*) FROM attention_dismissals').fetchone()) if 'attention_dismissals' in have else (),
+                   tuple(db.execute('SELECT count(*),max(at) FROM source_gone').fetchone()) if 'source_gone' in have else ())
             rules=__import__('author_rules').load(database);generation=rules.generation if rules else ''
             cached=self.__dict__.get('_needs_cache')
             if cached and cached[0]==(stamp,generation):return copy.deepcopy(cached[1]),dict(cached[2])
@@ -2741,11 +2748,15 @@ class MergeService:
             if 'catalog_group_members' in have:
                 gone={r[0] for r in db.execute('SELECT DISTINCT m.group_id FROM catalog_group_members m JOIN files f ON f.root=m.root AND f.path=m.path WHERE f.missing=1')}
             records={r['id']:r for r in db.execute('SELECT id,revision,fingerprint,state,result FROM automatic_candidates')}
+            # 0.29.0 item 1: a book the check pass found gone leaves the list in every group at once, not only once a scan
+            # marks its files missing (Senua S-M2), and stays off after that scan changes its fingerprint (Futaba M-3).
+            source_gone=__import__('source_presence').still_gone(db,have)
         import todo_causes,local_identity
         from public_research import RESEARCH_VERSION
         found={};coverage=dict(self.NO_COVERAGE)
         for identity,(revision,fingerprint) in current.items():
             if identity in jobs:coverage['with_job']+=1;continue  # queued, converting, converted or a stopped job (listed as Stopped)
+            if identity in source_gone:coverage['removed']+=1;continue
             record=records.get(identity)
             same_files=bool(record and record['fingerprint']==fingerprint);exact=bool(same_files and record['revision']==revision)
             try:result=json.loads(record['result']) if same_files else None

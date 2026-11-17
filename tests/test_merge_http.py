@@ -65,7 +65,7 @@ class MergeHTTPTests(unittest.TestCase):
         self.assertEqual(self.call('/api/sources/dismiss',{'x':1})[0],400)
         self.server._check_sources_later=Mock()
         self.assertEqual(self.call('/api/sources/rows',{})[0],202);self.assertEqual(self.call('/api/sources/rows',{})[0],202)
-        self.server._check_sources_later.assert_called_once_with(folders=False)
+        self.server._check_sources_later.assert_called_once_with(books=False,folders=False)  # Futaba m-1: rows only
         import source_presence
         self.inventory.source_roots=lambda library:['Z:\\Audiobooks','Y:\\Books']
         self.merge.source_check_view=Mock(return_value={'roots':[]})
@@ -74,7 +74,18 @@ class MergeHTTPTests(unittest.TestCase):
         with patch.object(source_presence,'probe_roots',return_value=probed):
             status,body=self.call('/api/sources/check',{})[:2]
         self.assertEqual((status,body['checking']),(200,True))
-        self.server._check_sources_later.assert_called_once_with(roots=['Y:\\Books'])
+        self.server._check_sources_later.assert_called_once_with(roots=['Y:\\Books'],wait=True)  # no report yet: every answering root
+        # Senua S-M3: with a report, only a root that did not answer then and answers now is checked (folders included);
+        # a root that answered all along is left alone, every 30 s.
+        self.merge._source_report={'roots':[{'path':'Z:\\Audiobooks','available':False,'empty':False},{'path':'Y:\\Books','available':True,'empty':False}],'removed':[],'folders':[],'cleared':[]}
+        self.server._check_sources_later.reset_mock()
+        with patch.object(source_presence,'probe_roots',return_value=probed):
+            self.assertFalse(self.call('/api/sources/check',{})[1]['checking'])
+        self.server._check_sources_later.assert_not_called()
+        both=[dict(probed[0],available=True),probed[1]]
+        with patch.object(source_presence,'probe_roots',return_value=both):
+            self.assertTrue(self.call('/api/sources/check',{})[1]['checking'])
+        self.server._check_sources_later.assert_called_once_with(roots=['Z:\\Audiobooks'],wait=True)
 
     def test_automatic_controls_draft_token_shape_and_scanner_owner(self):
         automatic=SimpleNamespace(status=Mock(return_value={'state':'Idle'}),start=Mock(return_value={'state':'Running'}),stop=Mock(return_value={'state':'Stopping'}),pause_jobs=Mock(return_value={'state':'Stopping'}),draft=Mock(return_value={'protected':True}))

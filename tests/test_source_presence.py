@@ -28,7 +28,7 @@ class CheckPassTests(unittest.TestCase):
         self.database = base / 'catalog.sqlite3'
         with connect(self.database) as db:
             db.execute('CREATE TABLE book_groups(id TEXT PRIMARY KEY,root TEXT,scope TEXT,revision INTEGER,fingerprint TEXT,evidence TEXT,superseded INTEGER DEFAULT 0)')
-            db.execute('CREATE TABLE audio_jobs(job_id TEXT,manifest TEXT)')
+            db.execute("CREATE TABLE audio_jobs(job_id TEXT,manifest TEXT,state TEXT NOT NULL DEFAULT 'completed',updated TEXT)")
         inventory = SimpleNamespace(database=str(self.database), roots={'Audiobooks': str(self.root)}, source_roots=lambda library: [str(self.root)],
                                     output_root=str(base / 'Sorted'))
         self.merge = SimpleNamespace(inventory=inventory, approval_preview=Mock(), automatic=SimpleNamespace(requeue=Mock()))
@@ -48,7 +48,7 @@ class CheckPassTests(unittest.TestCase):
         with connect(self.database) as db:
             db.execute('INSERT INTO book_groups VALUES(?,?,?,?,?,?,0)', (identity, str(self.root), identity, 1, 'fp-' + identity, json.dumps(evidence)))
             if job:
-                db.execute('INSERT INTO audio_jobs VALUES(?,?)', ('job-' + identity, json.dumps({'candidate_id': identity})))
+                db.execute('INSERT INTO audio_jobs(job_id,manifest) VALUES(?,?)', ('job-' + identity, json.dumps({'candidate_id': identity})))
         return folder, paths
 
     def dismissed(self):
@@ -127,7 +127,6 @@ class CheckPassTests(unittest.TestCase):
         report = self.run_pass(now=now)
         self.assertEqual((len(report['removed']), report['folders']), (1, []), 'first seen audio-free: not deleted yet')
         self.assertEqual(self.run_pass(now=now + 60)['folders'], [], 'inside the grace: kept')
-        self.assertEqual(self.run_pass(now=now + 61, folders=False)['folders'], [], 'never on window focus')
         report = self.run_pass(now=now + source_presence.FOLDER_GRACE_SECONDS + 1)
         self.assertEqual([item['path'] for item in report['folders']], [str(folder)])
         self.assertEqual(sorted(report['folders'][0]['files']), ['Thumbs.db', 'cover.jpg', 'info.txt'])
@@ -136,6 +135,118 @@ class CheckPassTests(unittest.TestCase):
         with connect(self.database) as db:
             rows = db.execute("SELECT state FROM source_folder_removed_files WHERE job_id='source-check'").fetchall()
         self.assertEqual([r[0] for r in rows], ['removed'] * 3, 'each removed file recorded (ruling 77c)')
+
+    def test_window_focus_checks_rows_only_never_books_or_folders_s_m6_m_1(self):
+        # Senua S-m6: the focus guard is tested past the grace, where the folder phase would delete; Futaba m-1: focus
+        # drops no book either (Judy section 0: focus re-checks rows only).
+        folder, paths = self.book('leftovers', ['01.mp3'])
+        os.remove(paths[0])
+        (folder / 'cover.jpg').write_bytes(b'jpg')
+        self.run_pass(now=0.0)  # dropped, folder first seen leftover-only
+        _later, later = self.book('later', ['01.mp3'])
+        os.remove(later[0])
+        late = source_presence.FOLDER_GRACE_SECONDS * 10
+        with patch.object(source_presence, 'probe_roots', side_effect=AssertionError('focus probes no root')):
+            report = self.run_pass(now=late, books=False, folders=False)
+        self.assertEqual((report['removed'], report['folders'], report['roots']), ([], [], []))
+        self.assertTrue((folder / 'cover.jpg').exists(), 'past the grace, focus still deletes nothing')
+        self.assertNotIn('later', self.dismissed(), 'focus drops no book')
+        # Positive control: the same moment through a full pass deletes the folder and drops the book.
+        report = self.run_pass(now=late)
+        self.assertEqual(([item['id'] for item in report['removed']], [item['path'] for item in report['folders']]), (['later'], [str(folder)]))
+
+    def test_a_scan_after_the_pass_keeps_the_book_off_and_it_is_reported_once_m_3(self):
+        # Futaba M-3: the scan marks the gone files missing, which changes the book's fingerprint; the book stays off the
+        # list and the next pass does not report it again. Files that come back list it again.
+        folder, paths = self.book('gone', ['01.mp3', '02.mp3'])
+        for path in paths:
+            os.remove(path)
+        self.assertEqual([item['id'] for item in self.run_pass()['removed']], ['gone'])
+        with connect(self.database) as db:
+            self.assertEqual(source_presence.still_gone(db), {'gone'}, 'no scan since: the same fingerprint')
+            missing = {'title_clue': 'gone', 'members': [{'path': p, 'missing': True} for p in paths]}
+            db.execute("UPDATE book_groups SET fingerprint='fp-scanned',revision=2,evidence=? WHERE id='gone'", (json.dumps(missing),))
+            self.assertEqual(source_presence.still_gone(db), {'gone'}, 'the scan marked every file missing: still gone')
+        self.assertEqual(self.run_pass()['removed'], [], 'reported once')
+        with connect(self.database) as db:
+            # Positive control: a scan that finds one file again lists the book again, and the record goes.
+            back = {'title_clue': 'gone', 'members': [{'path': paths[0], 'missing': False}, {'path': paths[1], 'missing': True}]}
+            db.execute("UPDATE book_groups SET fingerprint='fp-back',revision=3,evidence=? WHERE id='gone'", (json.dumps(back),))
+            self.assertEqual(source_presence.still_gone(db), set())
+        Path(paths[0]).write_bytes(b'x' * 10)
+        self.run_pass()
+        with connect(self.database) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM source_gone').fetchone()[0], 0, 'a record that no longer applies goes')
+
+    def test_needs_attention_drops_a_gone_book_from_every_group_at_once_s_m2(self):
+        # Senua S-M2 (probe P2): a Name taken book whose files Sergei deleted since the last scan left the list only after
+        # a scan marked them missing; the pass's record now takes it off every group at once.
+        from merge_service import MergeService
+        _folder, paths = self.book('taken', ['01.mp3'])
+        with connect(self.database) as db:
+            db.execute('CREATE TABLE automatic_candidates(id TEXT PRIMARY KEY,revision INTEGER,fingerprint TEXT,state TEXT,result TEXT,retry_at REAL,attempted TEXT,matcher_version TEXT)')
+            from public_research import RESEARCH_VERSION
+            db.execute('INSERT INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)', ('taken', 1, 'fp-taken', 'Held',
+                       json.dumps({'reasons': ['An audiobook already exists at this path; nothing was overwritten'], 'research_version': RESEARCH_VERSION}), None, '1', ''))
+        merge = MergeService.__new__(MergeService)
+        merge.inventory = self.merge.inventory
+        self.assertEqual({key: value['group'] for key, value in merge._todo()[0].items()}, {'taken': 'name_taken'}, 'positive control: listed')
+        os.remove(paths[0])
+        with patch.object(source_presence, 'recheck_rows', return_value=[]):
+            self.assertEqual([item['id'] for item in source_presence.run(merge)['removed']], ['taken'])
+        found, coverage = merge._todo()
+        self.assertEqual((found, coverage['removed']), ({}, 1), 'off the list at once, no scan needed')
+
+    def test_a_drive_that_stops_answering_during_the_pass_drops_nothing_s_m4(self):
+        _folder, paths = self.book('maybe', ['01.mp3'])
+        os.remove(paths[0])
+        answering = {'path': str(self.root), 'available': True, 'empty': False}
+        away = {'path': str(self.root), 'available': False, 'empty': False}
+        with patch.object(source_presence, 'probe_roots', side_effect=[[answering], [away]]):
+            report = self.run_pass()
+        self.assertEqual((report['removed'], report['roots'][0]['available']), ([], False))
+        self.assertEqual(self.dismissed(), set())
+        with patch.object(source_presence, 'probe_roots', side_effect=[[answering], [answering]]):
+            self.assertEqual([item['id'] for item in self.run_pass()['removed']], ['maybe'], 'positive control: still answering')
+
+    def test_a_leftover_another_job_or_book_names_keeps_the_folder_s_m1(self):
+        # Senua S-m1: the reviewed 74e guards apply: a leftover an unfinished job names (its reviewed cover here) keeps the
+        # folder, every file in place.
+        folder, paths = self.book('held', ['01.mp3'])
+        os.remove(paths[0])
+        cover = folder / 'cover.jpg'
+        cover.write_bytes(b'jpg')
+        with connect(self.database) as db:
+            db.execute("INSERT INTO audio_jobs(job_id,manifest,state) VALUES('job-other',?,'pending')", (json.dumps({'candidate_id': 'other', 'sources': [], 'cover': {'path': str(cover)}}),))
+        self.run_pass(now=0.0)
+        self.assertEqual(self.run_pass(now=10_000.0)['folders'], [])
+        self.assertTrue(cover.exists(), 'kept: another job still reads it')
+        with connect(self.database) as db:
+            recorded = db.execute("SELECT count(*) FROM sqlite_master WHERE name='source_folder_removed_files'").fetchone()[0]
+            self.assertEqual(recorded and db.execute('SELECT count(*) FROM source_folder_removed_files').fetchone()[0], 0, 'nothing was removed or recorded')
+            db.execute("UPDATE audio_jobs SET state='completed' WHERE job_id='job-other'")
+        self.assertEqual([item['path'] for item in self.run_pass(now=20_000.0)['folders']], [str(folder)], 'positive control: the job finished')
+        with patch.object(source_presence, '_identity', side_effect=[('v', 1, 0), ('v', 2, 0)]):
+            other, other_paths = self.book('swapped', ['01.mp3'])
+            os.remove(other_paths[0])
+            (other / 'info.txt').write_bytes(b'txt')
+            with connect(self.database) as db:
+                db.execute("INSERT OR REPLACE INTO source_folder_watch(folder,root,candidate_id,first_free,updated) VALUES(?,?,?,0,'x')", (str(other), str(self.root), 'swapped'))
+            self.assertEqual(source_presence._remove_folder(str(self.database), {'folder': str(other), 'root': str(self.root), 'candidate_id': 'swapped'},
+                                                            source_presence.folder_verdict(str(other))[0]), (False, ['info.txt']))
+        self.assertTrue(other.is_dir(), 'a folder that is no longer the one listed is never removed')
+
+    def test_files_removed_from_a_folder_that_stayed_are_reported_s_m7(self):
+        # Senua S-m7: the leftovers went, the folder's rmdir then failed: the line must not say "No files were touched".
+        folder, paths = self.book('stays', ['01.mp3'])
+        os.remove(paths[0])
+        (folder / 'cover.jpg').write_bytes(b'jpg')
+        self.run_pass(now=0.0)
+        with patch.object(source_presence, '_identity', side_effect=[('v', 1, 0), ('v', 2, 0)]):
+            report = self.run_pass(now=10_000.0)
+        self.assertEqual((report['folders'], report['files']), ([], [{'path': str(folder), 'files': ['cover.jpg']}]))
+        self.assertEqual(source_presence.summary(report)['files_removed'], 1)
+        self.assertEqual(source_presence.summary({'removed': [{'id': 'x'}]})['files_removed'], 0, 'positive control: nothing removed')
 
     def test_a_folder_directly_inside_the_library_folder_goes_too(self):
         folder, paths = self.book('top', ['01.mp3'], folder=('Robert R. McCammon',))
