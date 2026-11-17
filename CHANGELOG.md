@@ -1,5 +1,22 @@
 # Changelog
 
+## [v0.29.0] - 2026-11-18
+
+### Added
+
+- Books whose files are gone leave the list at startup, after scans and when a drive answers again. A drive that is unavailable or empty keeps its books and shows a notice with a Check again button.
+- Light Novels is a book type.
+- Source folders that hold only leftover files are removed once no audio is left.
+- A restart picks up where it left off: a run or queue that was running when the app closed, updated or crashed starts again by itself. Anything you stopped or paused stays stopped.
+- Clear "what is running" status, and Stop takes effect at once.
+- A "Waiting for you" line shows what needs your decision.
+
+### Fixed
+
+- Stale "Name taken" rows clear once the clash is gone.
+- Cleanup finds the cover by its correct path.
+- Chapter names in cp1251 are readable.
+
 ## [v0.28.13] - 2026-11-16
 
 ### Added
