@@ -3483,8 +3483,11 @@ class MergeService:
             # The editor shows the same accepted names as its Goes to line,
             # including the current confirmed trilogy decision. Saved entries
             # remain authoritative; raw file names stay separately in read.
+            # Light novel is not taken from the preview: a book whose author is still unresolved has no review there, so the
+            # preview said No and hid the folder pre-tick (Futaba M-6). Its proposal stays Sergei's saved value, else the
+            # folder's (names_read), which is what research files the book with.
             proposed={'title':preview.get('title'),'author':preview.get('author'),
-                      'universe':place.get('universe'),'collection':place.get('collection'),'light_novel':place.get('light_novel') is True}
+                      'universe':place.get('universe'),'collection':place.get('collection')}
             if preview.get('series'):
                 proposed.update(series=preview['series']['name'],number=preview['series']['number'])
             for field,value in proposed.items():
@@ -3496,6 +3499,11 @@ class MergeService:
         except (ValueError,OSError) as error:
             place,destination=self._place({'universe':fields['universe']['proposal'],'series':fields['series']['proposal'],'number':fields['number']['proposal'],
                                            'anthology':fields['collection']['proposal'],'light_novel':fields['light_novel']['proposal']}),{'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
+        light=fields['light_novel']
+        if light['proposal'] is True and fields['collection']['proposal'] is True and 'light_novel' not in now:
+            light['proposal']=False  # one or the other (Sergei's answer 2): a collection is never pre-ticked a light novel
+        if light['proposal'] is True and isinstance(place,dict) and place.get('collection') is not True:
+            place=dict(place,light_novel=True)  # the Place line's lead follows the box, as the Goes to line does
         job=self._names_job(row['id'])
         return {'fields':fields,'read':read,'remembered':entered_names.remembered(self.inventory.database,row,read,scope),'universes':universes,'series':names,
                 'job':job['state'],'place':place,'destination':destination,'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row)),'applies':1}

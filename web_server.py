@@ -177,7 +177,9 @@ APPROVE_CODES = (('changed', ('Candidate changed', 'Source files changed', 'evid
                  ('draft', ('Manual draft retained',)), ('closing', ('is closing',)), ('binding', ('Collection source/component binding changed',)),
                  ('identity', ('Book identity uncertain', 'Author and work not independently verified', "couldn't read this book's identity")))
 NAMES_ROUTES = ('/api/candidate/names', '/api/candidate/names-save', '/api/candidate/names-forget')
-NAME_FIELDS = ('title', 'author', 'series', 'number', 'universe', 'collection')
+# 0.29.0 item 4: light_novel is a yes/no field beside collection (entered_names.FIELDS and BOOL_FIELDS are the store's).
+NAME_FIELDS = ('title', 'author', 'series', 'number', 'universe', 'collection', 'light_novel')
+NAME_BOOLS = ('collection', 'light_novel')
 NAMES_QUEUED = {'retry': 'A retry is queued for this book. Cancel it to use this.', 'repair': 'A repair is queued for this book. Cancel it to use this.',
                 'delete': 'A delete is queued for this book. Cancel it to use this.'}
 
@@ -902,13 +904,14 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def names_value(value,partial=False):
-        """Edit names values: an object of the six fields (texts, collection a boolean); partial: any of series, number,
-        universe and collection (Approve and its preview)."""
-        allowed=('series','number','universe','collection') if partial else NAME_FIELDS
-        if not isinstance(value,dict) or not value and not partial or any(key not in allowed for key in value):raise ValueError('Edit names takes '+', '.join(allowed))
+        """Edit names values: an object of the seven fields (texts; collection and light novel booleans); partial: any of
+        series, number, universe, collection and light novel (Approve and its preview). 0.29.0 (Futaba B-1): the page sends
+        light_novel from an open editor, so both lists carry it."""
+        allowed=('series','number','universe','collection','light_novel') if partial else NAME_FIELDS
+        if not isinstance(value,dict) or not value and not partial or any(key not in allowed for key in value):raise ValueError('Edit names takes '+', '.join(key.replace('_',' ') for key in allowed))
         for key,item in value.items():
-            if key=='collection':
-                if type(item) is not bool:raise ValueError('Collection must be an explicit boolean')
+            if key in NAME_BOOLS:
+                if type(item) is not bool:raise ValueError(('Collection' if key=='collection' else 'Light novel')+' must be an explicit boolean')
             elif not isinstance(item,str) or len(item)>1000:raise ValueError('Text exceeds its allowed bound')
         return dict(value)
 
@@ -1641,7 +1644,7 @@ class Handler(BaseHTTPRequestHandler):
             source=connection.execute('SELECT * FROM files WHERE root=? AND path=?',(root,data['path'])).fetchone()
         if source is None or source['kind'] not in {'audiobook','ebook'} or source['error'] or source['missing']:
             raise ValueError('Only available audiobook/ebook catalog rows can be reviewed')
-        if source['kind']!='audiobook' and (review['anthology'] or review['canonical_author'] or review['narrator']):
+        if source['kind']!='audiobook' and (review['anthology'] or review.get('light_novel') or review['canonical_author'] or review['narrator']):
             raise ValueError('Audiobook role and anthology fields do not apply to ebooks')
         self.server.inventory.save_review(root,data['path'],review,data['size'],int(data['modified']))
         self.response(200,{'saved':True,'source_changed':False})
@@ -1657,10 +1660,10 @@ class Handler(BaseHTTPRequestHandler):
         if type(review['multi_author']) is not bool or type(review['anthology']) is not bool or review['original_language'] not in {'Unknown','Russian','Other'} or review['genre'] not in {'',*GENRES}:
             raise ValueError('Invalid original language, genre or series flag')
         if 'light_novel' in review:
-            # 0.29.0 item 4: Light novel, beside Short-story collection; one or the other.
+            # 0.29.0 item 4: Light novel, beside Short-story collection; one or the other. The ebook refusal is save_review's
+            # (it reads the catalog row); this check has no row (Senua S-M1: it read an undefined name and answered 500).
             import light_novels
             light_novels.check(review['light_novel'],review['anthology'])
-            if source['kind']!='audiobook' and review['light_novel']:raise ValueError('Audiobook role and anthology fields do not apply to ebooks')
             if not review['light_novel']:review.pop('light_novel')
         return review
 

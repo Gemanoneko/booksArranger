@@ -97,7 +97,8 @@ ATTENTION_GROUPS=frozenset(('all',)+NEEDS_GROUPS+JOB_GROUPS)
 
 
 # Ruling 40: the names a book's row edits (Edit names); the book panel shows them as facts and never saves them.
-ROW_NAME_FIELDS=('title','author','universe','series','number','anthology')
+ROW_NAME_FIELDS=('title','author','universe','series','number','anthology','light_novel')  # 0.29.0: Light novel sits beside anthology
+ROW_NAME_BOOLS=('anthology','light_novel')
 
 
 class CandidateReviewService:
@@ -616,7 +617,7 @@ class CandidateReviewService:
             review=copy.deepcopy(review)
             if names_row_only:
                 saved=row.get('review') or {}
-                for field in ROW_NAME_FIELDS:review[field]=saved.get(field,False if field=='anthology' else '')
+                for field in ROW_NAME_FIELDS:review[field]=saved.get(field,False if field in ROW_NAME_BOOLS else '')
                 manual_source_values={k:v for k,v in review.items() if k not in ROW_NAME_FIELDS}
             review['organization_policy']='books-hierarchy-v2'
             ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)

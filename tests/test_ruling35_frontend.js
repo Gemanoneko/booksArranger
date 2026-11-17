@@ -106,7 +106,8 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   answers['/api/candidate/names-save']=data=>ok({queued:true},202);
   await run('namesSave("cand-a")');
   const body=sent('/api/candidate/names-save').at(-1);
-  assert.deepEqual(body.names,{title:'Пртоколы SCP. Сейф №1',author:'Разные авторы',series:'Протоколы SCP',number:'1',universe:'',collection:true,light_novel:false});assert.equal(body.queue,undefined);
+  // 0.29.0 (Futaba M-6): an untouched Light novel box is not sent, so Save never stores an explicit No over the folder.
+  assert.deepEqual(body.names,{title:'Пртоколы SCP. Сейф №1',author:'Разные авторы',series:'Протоколы SCP',number:'1',universe:'',collection:true});assert.equal(body.queue,undefined);
   assert.equal(save().textContent,'Save');assert.equal(run('namesOpen("cand-a")'),true,'receipt keeps editor/focus');
   assert.equal(run('namesNotes.get("cand-a").text'),'Saved names for Title a.');
   assert.equal(run('queueHint(rows.find(row=>row.id==="cand-a"))'),null,'no memory queue hint');

@@ -4003,6 +4003,10 @@ function namesValue(row,field){
   return namesProposal(row.id,field);
 }
 function namesValues(row){const values={};for(const field of NAMES_FIELDS)values[field]=NAMES_BOOL.has(field)?namesValue(row,field)===true:String(namesValue(row,field) ?? '').trim();return values;}
+// What Save, Approve and the Goes to line send (0.29.0, Futaba M-6): Light novel only when the box differs from what the
+// editor proposed, so an untouched box never stores an explicit No over the folder's pre-tick (the engine then reads his
+// saved value, else the folder, which is the proposal).
+function namesSent(row){const v=namesValues(row);if(v.light_novel===namesProposal(row.id,'light_novel'))delete v.light_novel;return v;}
 // What Approve and its preview carry while the editor is open (the four fields beside Title and Author).
 function namesFor(row){
   if(!row)return null;
@@ -4011,7 +4015,7 @@ function namesFor(row){
     return series || number || typeof d.series==='string' || typeof d.number==='string'?{series,number}:null;
   }
   if(!namesOpen(row.id) || !namesData(row.id))return null;
-  const v=namesValues(row);return {series:v.series,number:v.number,universe:v.universe,collection:v.collection,light_novel:v.light_novel};
+  const v=namesSent(row);return {series:v.series,number:v.number,universe:v.universe,collection:v.collection,...(Object.hasOwn(v,'light_novel')?{light_novel:v.light_novel}:{})};
 }
 function namesChanged(row){if(!namesData(row.id))return false;const v=namesValues(row);return NAMES_FIELDS.some(field=>NAMES_BOOL.has(field)?v[field]!==namesProposal(row.id,field):v[field]!==String(namesProposal(row.id,field)).trim());}
 // Why Save does nothing yet ('' when it works), Judy 1.6.
@@ -4218,7 +4222,8 @@ function namesPreview(id,delay){
   const v=namesValues(row),key=JSON.stringify(v);if(state.timer){clearTimeout(state.timer);state.timer=null;}
   if(key===state.previewKey || !v.title || (v.series && !v.number) || (v.number && !v.series))return;
   const send=async()=>{state.timer=null;state.previewKey=key;const seq=++state.seq;
-    try{const answer=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,title:v.title,author:v.author,names:{series:v.series,number:v.number,universe:v.universe,collection:v.collection}});
+    const sent=namesSent(row);  // Futaba B-1: the Goes to line follows the Light novel box too
+    try{const answer=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,title:v.title,author:v.author,names:{series:v.series,number:v.number,universe:v.universe,collection:v.collection,...(Object.hasOwn(sent,'light_novel')?{light_novel:sent.light_novel}:{})}});
       if(seq===state.seq && answer?.preview)state.preview=answer.preview;}
     catch(error){if(seq===state.seq)state.previewKey='';}
     finally{if(seq===state.seq)updateNamesRows();}};
@@ -4240,13 +4245,13 @@ function namesSavedText(row,answer){
 async function namesSave(id){
   const row=rows.find(item=>item.id===id),state=namesState.get(id),entry=namesRows.get(id);if(!row || !state || state.pending)return;
   if(entry?.save?.getAttribute('aria-disabled')==='true')return;
-  const values=namesValues(row);state.pending={at:Date.now()};namesNotes.delete(id);updateNamesRows();
+  const values=namesSent(row);state.pending={at:Date.now()};namesNotes.delete(id);updateNamesRows();
   let answer=null,failure=null;
   try{answer=await bookDecision(row,'names',{names:values});}catch(error){failure=error;}
   state.pending=null;
   if(answer?.durable){
     if(namesState.get(id)!==state || rows.find(item=>item.id===id)?.fingerprint!==row.fingerprint){namesNotes.set(id,{text:decisionLine({body:{action:'names'},title:decisionName(row)},answer.decision)+' The source changed; review the current book before using these names.',warn:true});updateNamesRows();return;}
-    const unchanged=decisionPacked(namesValues(row))===decisionPacked(values);
+    const unchanged=decisionPacked(namesSent(row))===decisionPacked(values);
     for(const [field,value] of Object.entries(values))if(state.data?.fields?.[field])state.data.fields[field]={...state.data.fields[field],proposal:value};
     decisionBooks.set(id,{fingerprint:row.fingerprint,names:{...(decisionBooks.get(id)?.names || {}),...values}});
     state.openDraft={names:{},ask:null};
