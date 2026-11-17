@@ -2996,11 +2996,12 @@ function technicalText(row){
 const leavingRows=new Map();  // id -> the row as it was when the list dropped it
 // Unsaved edits on the row (Futaba M-4): a draft value that differs from what the editor proposed, or a value typed in the
 // row's own fields. A closed editor whose proposals merely differ from the row's question (namesChanged) is not his work,
-// and kept the row on the page after Discard.
+// and kept the row on the page after Discard. An author choice counts only when it differs from the one the row preselected
+// by rendering (Futaba N-1: every Author unclear row got its default "c0" that way, so every one of them was held).
 function namesUnsaved(row){
   const draft=namesState.get(row.id)?.draft || {},d=askDrafts.get(row.id) || {};
   if(Object.entries(draft).some(([field,value])=>NAMES_BOOL.has(field)?value!==namesProposal(row.id,field):String(value ?? '').trim()!==String(namesProposal(row.id,field)).trim()))return true;
-  return ['title','author','series','number','other'].some(field=>typeof d[field]==='string') || !!d.choice;
+  return ['title','author','series','number','other'].some(field=>typeof d[field]==='string') || !!d.choice && d.choice!==d.preselected;
 }
 function underCursor(row){return !!row && (namesOpen(row.id) || namesUnsaved(row) || selectedRow?.id===row.id && (dirty || trackDirty));}
 function keepUnderCursor(next,before){
@@ -3390,7 +3391,7 @@ function buildAskFields(entry){
   const set=node('fieldset','','ask-choice'),group='ask-author-'+row.id;set.append(node('legend','Author'));
   if(plan.author==='radio'){
     const author=askProposal(ask,'author'),candidates=(Array.isArray(ask.candidates)?ask.candidates:[]).filter(c=>typeof c?.name==='string');
-    if(d.choice===undefined){const index=candidates.findIndex(c=>c.name===author);d.choice=index>=0?'c'+index:null;}
+    if(d.choice===undefined){const index=candidates.findIndex(c=>c.name===author);d.choice=index>=0?'c'+index:null;d.preselected=d.choice;}
     candidates.forEach((c,i)=>{const readers=Number.isInteger(c.reader_count) && c.reader_count>0?`reader on ${plural(c.reader_count,'other book','other books')}`:'';set.append(askRadio(entry,group,'c'+i,c.name,`Use ${c.name} as the author.`,[candidateTag(ask,c),readers].filter(Boolean).join(' · ')));});
   }else{
     const s=ask.same_author || {};

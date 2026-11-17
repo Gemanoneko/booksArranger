@@ -127,6 +127,37 @@ const texts=element=>element.children.map(child=>child.children.length?child.chi
   run('namesState.set("n4",{open:false,draft:{title:"Моё"},data:{fields:{title:{proposal:"Иное"}}}})');
   assert.equal(run('underCursor({id:"n4",title_clue:"Другое",members:[]})'),true,'positive control: a typed draft holds it');
   run('namesState.delete("n4");namesState.delete("n3")');
+  // Futaba N-1: a real Author unclear row, rendered by the page in its default state (its best-guess radio preselected,
+  // nothing typed, no editor), is nobody's work: a chip change or a gone book drops it from the page at once.
+  run('stripNote="";leavingRows.clear();sourceClearedWaiting.clear();askDrafts.clear();askRows.clear();view="candidates";filters.candidates="output_attention";attentionGroup="all"');
+  globalThis.unclear={id:'au1',path:'au1',kind:'candidate',library:'Audiobooks',revision:1,fingerprint:'b'.repeat(64),scope:'private fixture',preview:{path:''},metadata:{tags:{}},title_clue:'Тайна дома',artists:[],members:[{path:'X:\\private\\au1.mp3'}],review:{},review_context:{},status:'Held',creation:{status:'Held',can_create:false,reasons:[]},automatic:{state:'Held'},source_directory_count:1,
+    place:{series:'',number:'',universe:'',collection:false},ask:{kind:'author_unclear',why:'two_people',fields:{title:{proposal:'Тайна дома',basis:'tag'},author:{proposal:'Толстой Лев',basis:'tag'}},candidates:[{name:'Толстой Лев'},{name:'Чехов Антон'}],destination:{path:'Толстой Лев\\Тайна дома.m4b'}}};
+  context.unclear=globalThis.unclear;context.taken={id:'nt1',path:'nt1',kind:'candidate',title_clue:'Книга НТ',members:[]};
+  run('rows=[unclear,taken];renderRows(true)');
+  assert.equal(run('askDraft("au1").choice'),'c0','positive control: rendering preselected the best guess, as on the page');
+  assert.equal(run('underCursor(rows[0])'),false,'an untouched Author unclear row is not his work');
+  // A chip change (Name taken) or a scan that found the book gone: the next list read does not have the row.
+  inventoryRows=[context.taken];
+  await run('loadList(listContext(),"Audiobooks","candidates","output_attention",0,"",retryEpoch,true)');
+  assert.equal(listed(),'nt1','the untouched row left the page with the list read');
+  assert.equal(run('leavingRows.has("au1")'),false);
+  assert.equal(get('inventory').children.some(tr=>JSON.stringify(tr.children.map(td=>td.textContent)).includes('leaves the list when you close')),false,'no "leaves the list" line without an editor');
+  // Positive control: his own choice of another author is his work; the row stays, in place, with its line.
+  inventoryRows=[context.unclear,context.taken];
+  await run('loadList(listContext(),"Audiobooks","candidates","output_attention",0,"",retryEpoch,true)');
+  const radio=value=>run('askRows.get("au1").controls').find(c=>c.type==='radio' && c.value===value);
+  radio('c1').checked=true;radio('c1').handlers.change();
+  assert.equal(run('underCursor(rows.find(row=>row.id==="au1"))'),true,'a different author picked is unsaved work');
+  inventoryRows=[context.taken];
+  await run('loadList(listContext(),"Audiobooks","candidates","output_attention",0,"",retryEpoch,true)');
+  assert.equal(listed(),'au1,nt1','his picked row stays where it was');
+  assert.equal(run('candidateStatus(rows[0])'),'This row leaves the list when you close this editor.');
+  // Back to the preselected author: nothing differs from the row's own proposal, so it goes with the next read.
+  radio('c0').checked=true;radio('c0').handlers.change();
+  assert.equal(run('underCursor(rows[0])'),false,'the preselected author picked again is no edit');
+  await run('loadList(listContext(),"Audiobooks","candidates","output_attention",0,"",retryEpoch,true)');
+  assert.equal(listed(),'nt1');
+  run('askDrafts.clear();askRows.clear();leavingRows.clear();rows=[]');inventoryRows=[];
   console.log('PASS 0.29.0 source check on the page: drive lines with Check again, the removed line with Details and Dismiss, cleared rows in the strip');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
