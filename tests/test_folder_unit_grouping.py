@@ -363,6 +363,25 @@ class TagRepair(unittest.TestCase):
     def test_tags_reads_repaired_values_and_keeps_numbers(self):
         self.assertEqual(tag_text.tags({'tags':{'ALBUM':'Øëÿïà','track':'3/7'}}),{'album':'Шляпа','track':'3/7'})
 
+    def test_chapter_names_and_comment_of_a_new_conversion_are_read_repaired(self):
+        # 0.29.0, «Похититель детей»: cp1251 tags stored as ISO-8859-1 gave the audiobook chapters named "Ãëàâà 1".
+        from chapter_plan import prepare
+        from metadata import future_audio_tags
+        def raw(text):return text.encode('cp1251').decode('latin-1')
+        album=raw('Похититель детей')
+        members=[{'path':'Z:/Book/%02d.mp3'%n,'source_track':str(n),'metadata':{'tags':{'title':raw(title),'album':album}}}
+                 for n,title in ((1,'Глава первая. Питер'),(2,'Глава вторая. Ник'))]
+        prepare(members)
+        self.assertEqual([m['chapter_name'] for m in members],['Глава первая. Питер','Глава вторая. Ник'])
+        self.assertEqual({m['chapter_name_source'] for m in members},{'source'})
+        # A title tag equal to the album is a whole-book label on every file, raw or repaired.
+        labelled=[{'path':'Z:/Book/Похититель детей %02d.mp3'%n,'source_track':str(n),'metadata':{'tags':{'title':album,'album':album}}} for n in (1,2)]
+        prepare(labelled)
+        self.assertEqual([m['chapter_name'] for m in labelled],['',''])
+        tags=future_audio_tags({'tags':{'comment':raw('Читает Александр Аравушкин')}})
+        self.assertEqual((tags['COMMENTS'],tags['comment_fields']),('Читает Александр Аравушкин',[{'field':'comment','value':'Читает Александр Аравушкин'}]))
+        self.assertEqual(future_audio_tags({'tags':{'comment':'Ángel Béjar'}})['COMMENTS'],'Ángel Béjar','readable Latin text is never touched')
+
 
 class Identity(unittest.TestCase):
     def test_gene_wolfe_is_a_foreign_given_name_and_files_surname_first(self):

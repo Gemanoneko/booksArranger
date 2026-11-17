@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 from collections import Counter
 
+import tag_text
+
 _SEPARATORS = ' ._-–—:'
 
 
@@ -29,8 +31,10 @@ def prepare(members):
     titles,albums=[],[]
     for member in members:
         metadata=member.get('metadata',{})
-        tags={str(k).casefold():str(v) for k,v in metadata.get('tags',{}).items()}
-        titles.append(str(metadata.get('track_title') or tags.get('title') or '').strip())
+        # 0.29.0: cp1251 bytes stored as ISO-8859-1 (old MP3 uploads) read as "Ãëàâà 1"; chapter names use the same
+        # repaired text as every other tag reader (tag_text). The catalog and the source files keep the raw values.
+        tags={k:str(v) for k,v in tag_text.tags(metadata).items()}
+        titles.append(str(tag_text.text(metadata.get('track_title')) or tags.get('title') or '').strip())
         albums.append(tags.get('album','').strip())
     stems=[Path(str(member.get('path',''))).stem for member in members]
     # Futaba's 0.22.0 QA, m-12: one title tag on every file that every file name also starts with ("Пастушья корона" on 77

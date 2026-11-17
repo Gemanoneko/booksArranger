@@ -541,7 +541,10 @@ class CleanupJobs:
             if out.get('identity') is not None and output.facts()['identity']!=out['identity']:raise BoundaryError('Relocated output native identity changed; originals retained')
             if ob.identities!=[tuple(v) for v in out['parent_identity']] or output.facts()['size']!=out['size'] or output.sha256()!=out['sha256']:
                 raise BoundaryError('Validated output is changed or unavailable; originals retained')
-            cover=ordinary(manifest['cover']['path']);stack.enter_context(DirectoryBoundary(cover.anchor,cover.parent));art=stack.enter_context(VerifiedFile(cover))
+            # The frozen manifest keeps the cover's path from conversion time; a storage move since then leaves that path
+            # stale. Read it where the conversion itself reads it (0.29.0: «Похититель детей» held on the old path).
+            from audio_pipeline import reviewed_cover_path
+            cover=reviewed_cover_path(manifest['cover']);stack.enter_context(DirectoryBoundary(cover.anchor,cover.parent));art=stack.enter_context(VerifiedFile(cover))
             if art.sha256()!=manifest['cover']['sha256']:raise BoundaryError('Reviewed cover bytes changed')
             with connect(self.database) as db:
                 if not self.guard(db,intent):raise BoundaryError('Completed book review changed')

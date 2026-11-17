@@ -9,6 +9,8 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 
+import tag_text
+
 AUDIO = {'.mp3', '.m4a', '.m4b', '.aac', '.flac', '.ogg', '.opus', '.wav', '.wma', '.aax', '.aa'}
 EBOOK = {'.epub', '.fb2', '.pdf', '.mobi', '.azw', '.azw3', '.djvu', '.txt', '.doc', '.docx', '.rtf'}
 GENRES = ('Science Fiction', 'Fantasy', 'Horror', 'Adventure', 'Mystery & Thriller', 'Nonfiction', "Children's Tales")
@@ -160,8 +162,10 @@ def future_audio_tags(metadata, review=None):
         if key.lower() in {'comment','comments','\xa9cmt'}:
             values = value if isinstance(value,list) else [value]
             for item in values:
-                comments.append(str(item))
-                comment_fields.append({'field':key,'value':str(item)})
+                # 0.29.0: a cp1251 comment stored as ISO-8859-1 is written to the audiobook as readable text (tag_text).
+                item = tag_text.text(str(item))
+                comments.append(item)
+                comment_fields.append({'field':key,'value':item})
     original_comments = '\n'.join(comments)
     narrator_line = 'Narrator: ' + narrator if narrator else ''
     output_comments = original_comments

@@ -36,7 +36,7 @@ class CleanupTest(unittest.TestCase):
         self.sorted=self.base/'sorted';self.sorted.mkdir();self.output_root=str(self.sorted);self.policy_calls=0
         final=self.sorted/'book.m4b';final.write_bytes(b'validated fixture output')
         with DirectoryBoundary(self.sorted,final.parent) as boundary:identity=boundary.identities
-        self.job={'job_id':'test','state':'completed','manifest':{'root':str(self.library),'output_root':str(self.sorted),'sources':self.sources,'cover':{'path':str(final),'sha256':hashlib.sha256(final.read_bytes()).hexdigest()}},
+        self.job={'job_id':'test','state':'completed','manifest':{'root':str(self.library),'output_root':str(self.sorted),'sources':self.sources,'cover':self.fixture_cover(final)},
             'output':{'root':str(self.sorted),'final_path':str(final),'size':final.stat().st_size,'sha256':hashlib.sha256(final.read_bytes()).hexdigest(),'parent_identity':identity,'validation':{'passed':True}}}
         self.job['manifest'].update(profile='fixture',metadata={'title':'Fixture','canonical_author':'Author'},chapters=[])
         self.job['output']['validation'].update(checks='Output checks passed',profile='fixture',sha256=self.job['output']['sha256'],size=final.stat().st_size,
@@ -44,6 +44,8 @@ class CleanupTest(unittest.TestCase):
         with connect(self.db) as db:db.execute('CREATE TABLE owned_artifacts(path TEXT PRIMARY KEY,job_id TEXT,kind TEXT,sha256 TEXT,size INTEGER)')
         self.worker=CleanupJobs(self.db,self.base/'recovery',lambda db,intent:self.good,contextlib.nullcontext,output_policy=self.policy)
         self.id=self.worker.enroll(self.job,{})
+    def fixture_cover(self,final):
+        return {'path':str(final),'sha256':hashlib.sha256(final.read_bytes()).hexdigest()}
     def policy(self):
         self.policy_calls+=1
         return self.output_root,(str(self.library),)
@@ -258,6 +260,36 @@ class CleanupTest(unittest.TestCase):
         self.worker.resume([self.id],follow_audio=False);self.worker.thread.join(5)
         self.assertEqual(called,[self.id]);self.worker.after_drain.assert_not_called()
         self.assertEqual(self.worker.status('other')['state'],'waiting')
+
+
+class RelocatedCoverTests(unittest.TestCase):
+    """0.29.0: «Похититель детей» stayed on hold because cleanup read the reviewed cover at the path frozen into its
+    manifest, which a storage move had left stale. Cleanup now reads it where conversion reads it
+    (audio_pipeline.reviewed_cover_path), and still checks the bytes against the reviewed hash."""
+    setUp=CleanupTest.setUp;tearDown=CleanupTest.tearDown;policy=CleanupTest.policy;assert_all_kept=CleanupTest.assert_all_kept
+    def fixture_cover(self,final):
+        old=self.base/'old-data'/'merge-cache';old.mkdir(parents=True);cover=old/'cover.png';cover.write_bytes(b'\x89PNG\r\n\x1a\nreviewed cover')
+        return {'path':str(cover),'sha256':hashlib.sha256(cover.read_bytes()).hexdigest()}
+    def move_cover(self,payload=None):
+        """The storage move: the cover now lives under new-data; the frozen manifest still names old-data."""
+        old=Path(self.job['manifest']['cover']['path']);new=self.base/'new-data'/'merge-cache'/old.name;new.parent.mkdir(parents=True)
+        new.write_bytes(old.read_bytes() if payload is None else payload);old.unlink();old.parent.rmdir()
+        def resolve(path,sha256=None):return new if Path(path)==old else Path(path)
+        return patch('audio_pipeline.managed_read_path',side_effect=resolve)
+    def test_cleanup_reads_a_moved_cover_at_its_current_place(self):
+        with self.move_cover():self.worker.run(self.id)
+        self.assertEqual(self.worker.status('test')['removed'],2)
+        self.assertTrue(all(not Path(s['path']).exists() for s in self.sources))
+    def test_a_moved_cover_with_changed_bytes_keeps_every_original(self):
+        with self.move_cover(b'\x89PNG\r\n\x1a\nanother cover'):
+            with self.assertRaisesRegex(BoundaryError,'Reviewed cover bytes changed'):self.worker.run(self.id)
+        self.assert_all_kept()
+    def test_a_refused_cover_lookup_keeps_every_original_and_never_reads_the_stale_path(self):
+        from storage_relocation_native import RelocationRefused
+        self.move_cover()  # the stale path is gone; a lookup refusal must not fall back to it
+        with patch('audio_pipeline.managed_read_path',side_effect=RelocationRefused('Managed read lacks its exact portable content binding')):
+            with self.assertRaisesRegex(RelocationRefused,'portable content binding'):self.worker.run(self.id)
+        self.assert_all_kept()
 
 if __name__=='__main__':unittest.main()
 
