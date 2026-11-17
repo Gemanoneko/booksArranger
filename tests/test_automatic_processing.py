@@ -765,6 +765,70 @@ class AutoTests(unittest.TestCase):
             self.assertFalse(second._pending_thread.is_alive())
             second.thread.join(3)
             work.assert_called_once_with(run_id)
+
+    # Senua's restart-intent review (0.28.13 doc), fixed in 0.29.0.
+    def saved_run(self,state,restart_paused,origin,older_version):
+        """A catalog as an older version left it: one run, its saved stop origin, and (older_version) no restart marker."""
+        auto,merge,inv=self.fake_merge()
+        run_id=str(uuid.uuid4());created=str(time.time_ns())  # the newest run is the current one
+        with connect(self.db) as db:
+            db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,?)',(run_id,state,'research','{"pending":["saved-book"]}','0.28.12 reason',created,created,restart_paused))
+            if origin:__import__('pause_state').record(db,'automatic',origin,'Automatic processing stopped')
+            if older_version:db.execute('DROP TABLE IF EXISTS automatic_restart_intent')
+        second=AutomaticProcessing(merge,auto.research);self.controllers.append(second)
+        return second,merge,run_id
+
+    def test_first_launch_starts_nothing_an_older_version_left_paused_r_m1(self):
+        for state,restart_paused,origin in (('Paused',0,'closing'),('Paused',0,'update'),('Paused',1,'interrupted'),('Running',0,None)):
+            with self.subTest(state=state,restart_paused=restart_paused,origin=origin):
+                second,merge,run_id=self.saved_run(state,restart_paused,origin,older_version=True)
+                with patch.object(second,'_work') as work:
+                    self.assertFalse(second.restore_after_restart())
+                    work.assert_not_called()
+                self.assertIsNone(second.thread)
+                self.assertEqual((second._run_row()['state'],second._run_row()['restart_paused']),('Paused',0))
+        # Positive control: the same Quit under this version (marker present) is restored.
+        second,merge,run_id=self.saved_run('Paused',0,'closing',older_version=False)
+        with patch.object(second,'_work') as work:
+            self.assertTrue(second.restore_after_restart());second.thread.join(3)
+            work.assert_called_once_with(run_id)
+
+    def test_stop_or_cancel_ends_a_restart_and_no_later_launch_restores_it_r_m2(self):
+        for press in ('stop','cancel'):
+            with self.subTest(press=press):
+                second,merge,run_id=self.saved_run('Paused',0,'closing',older_version=False)
+                self.assertEqual(second._run_row()['restart_paused'],1)
+                if press=='stop':second.stop()
+                else:
+                    second.start_pending={'kind':'scan','restored':True}
+                    self.assertTrue(second.cancel_start()['cancelled'])
+                self.assertEqual(second._run_row()['restart_paused'],0)
+                with connect(self.db) as db:self.assertEqual(__import__('pause_state').read(db,'automatic')['origin'],'user')
+                third=AutomaticProcessing(merge,second.research);self.controllers.append(third)
+                with patch.object(third,'_work') as work:
+                    self.assertFalse(third.restore_after_restart());work.assert_not_called()
+
+    def test_restore_refuses_after_a_paused_or_held_queue_r_m2(self):
+        for origin in ('user','interrupted'):
+            with self.subTest(origin=origin):
+                second,merge,run_id=self.saved_run('Paused',0,'closing',older_version=False)
+                with connect(self.db) as db:__import__('pause_state').record(db,'jobs',origin,'Audiobook jobs paused')
+                with patch.object(second,'_work') as work:
+                    self.assertFalse(second.restore_after_restart());work.assert_not_called()
+
+    def test_a_restored_run_leaves_waiting_cleanups_for_a_press_r_m2(self):
+        second,merge,run_id=self.saved_run('Paused',0,'closing',older_version=False)
+        with patch.object(second,'_work'):
+            self.assertTrue(second.restore_after_restart());second.thread.join(3)
+        self.assertTrue(second.restored_without_press)
+        second._resume_queue();merge.resume.assert_called_once_with(pressed=False)
+        # Sergei's own Start makes the run his: its queue starts are presses again.
+        second.stop_work(origin='user');second._paused_checkpoint(run_id,{'pending':['saved-book']})
+        merge.resume.reset_mock()
+        with patch.object(second,'_work'):
+            second.start();second.thread.join(3)
+        self.assertFalse(second.restored_without_press)
+        second._resume_queue();merge.resume.assert_called_once_with()
     def test_unsaved_manual_draft_lease_blocks_only_candidate(self):
         auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');finish_scan(inv);candidate=inv.candidates('Audiobooks')['rows'][0]
         auto.draft(candidate['id'],candidate['revision'],True);self.assertTrue(auto.manual_draft(candidate));auto.start();self.wait_auto(auto)

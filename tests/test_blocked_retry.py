@@ -48,7 +48,7 @@ class Queue:
         """
         manifest=manifest or self.manifest();job_id=self.jobs.enqueue(manifest);attempt=str(uuid.uuid4())
         journal={'attempt_id':attempt,'history':[{'stage':'checking sources','at':'2026-10-16T23:58:00+00:00','details':None}]}
-        self.jobs._update(job_id,state='pending',stage='queued',attempt_id=attempt,journal=json.dumps(journal),reason='Interrupted book restarts on explicit resume')
+        self.jobs._update(job_id,state='pending',stage='queued',attempt_id=attempt,journal=json.dumps(journal),reason='Interrupted book restarts when the queue resumes')
         folder=self.stage_root/job_id/attempt;folder.mkdir(parents=True);(folder/'source00000.mp3').write_bytes(b'legacy working input')
         self.jobs.resume();self.wait()
         row=self.row(job_id)

@@ -58,7 +58,7 @@ class MergeHTTPTests(unittest.TestCase):
     def identity(self):return {'library':'Audiobooks','id':ID,'revision':1}
 
     def test_automatic_controls_draft_token_shape_and_scanner_owner(self):
-        automatic=SimpleNamespace(status=Mock(return_value={'state':'Idle'}),start=Mock(return_value={'state':'Running'}),stop=Mock(return_value={'state':'Stopping'}),draft=Mock(return_value={'protected':True}))
+        automatic=SimpleNamespace(status=Mock(return_value={'state':'Idle'}),start=Mock(return_value={'state':'Running'}),stop=Mock(return_value={'state':'Stopping'}),pause_jobs=Mock(return_value={'state':'Stopping'}),draft=Mock(return_value={'protected':True}))
         self.merge.automatic=automatic
         for route in ('/api/automatic/start','/api/automatic/stop'):
             self.assertEqual(self.call(route,{},token=False)[0],403)
@@ -69,7 +69,9 @@ class MergeHTTPTests(unittest.TestCase):
         for update in ({'revision':True},{'id':'../escape'},{'path':'Z:/anything'}):self.assertEqual(self.call('/api/automatic/draft',body|update)[0],400)
         automatic.status.return_value={'state':'Running'}
         self.assertEqual(self.call('/api/scan/start',{'library':'Audiobooks'})[0],409);self.inventory.launch.assert_not_called()
-        self.assertEqual(self.call('/api/audiobook/pause',{})[0],200);automatic.stop.assert_called_once_with()
+        # Restart intent (Senua R-M4): Pause audiobook jobs goes through automatic.pause_jobs, which stops a running pass
+        # as the user's and otherwise pauses the queue.
+        self.assertEqual(self.call('/api/audiobook/pause',{})[0],200);automatic.pause_jobs.assert_called_once_with();automatic.stop.assert_not_called()
 
     def test_recovery_delete_scope_token_origin_and_scan_admission(self):
         self.merge.delete_recovery=Mock(return_value={'started':True})

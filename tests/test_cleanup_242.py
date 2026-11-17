@@ -38,7 +38,7 @@ class MaintenanceTests(unittest.TestCase):
         value=self.service();value._resume_guarded=Mock(return_value={'start_admission':{'state':'running'}})
         value._recheck_finished=Mock(side_effect=AssertionError('unrelated full pass'))
         self.assertEqual(value.resume()['start_admission']['state'],'running')
-        value._resume_guarded.assert_called_once_with(0,None,False)
+        value._resume_guarded.assert_called_once_with(0,None,False,True)  # pressed: Sergei's own start (0.29.0, restart intent)
         self.assertTrue(value._retention_wake.is_set())
     def test_initial_paused_queue_does_not_strand_old_folder_work(self):
         value=self.service();value.jobs._stop.set()

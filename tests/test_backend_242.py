@@ -335,6 +335,7 @@ class PauseAndMembershipTests(PrivateCatalog):
         auto.on_change = Mock()
         auto.status = lambda: {'state': 'Paused', 'start_pending': auto.start_pending}
         auto.start_pending = {'kind': 'scan'}
+        auto._run_row = lambda: None  # restart intent (Senua R-M4): a cancelled start reads its run for a restart flag
         self.assertEqual(auto.cancel_start(), {'state': 'Paused', 'start_pending': None, 'cancelled': True})
         self.assertEqual(auto.cancel_start(), {'state': 'Paused', 'start_pending': None, 'cancelled': False})
         self.assertTrue(auto._pending_wake.is_set())

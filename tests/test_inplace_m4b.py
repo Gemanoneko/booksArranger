@@ -703,7 +703,7 @@ class RecoveryWiringTests(Fixture):
         manifest = self.manifest(source, root=library); job_id = self.enqueue(self.queue(), manifest, 'running')
         self.crash('type_patched', manifest); away = library.with_name('Library offline'); library.rename(away)
         journaled = self.rows()[0]['state']; jobs = self.queue(); row = self.job(jobs, job_id)
-        self.assertEqual((row['state'], row['reason']), ('pending', 'Interrupted book restarts on explicit resume'))
+        self.assertEqual((row['state'], row['reason']), ('pending', 'Interrupted book restarts when the queue resumes'))
         self.assertEqual(self.rows()[0]['state'], journaled)  # still open, nothing recorded
         inplace_m4b.clear(self.database, manifest); self.assertEqual(self.rows()[0]['state'], journaled)  # an attempt is not refused
         away.rename(library); self.queue()
@@ -773,7 +773,7 @@ def damaged(value, keys, how):
     return value
 
 
-RESTARTS = ('pending', 'Interrupted book restarts on explicit resume')
+RESTARTS = ('pending', 'Interrupted book restarts when the queue resumes')
 REFUSED = ('needs attention', inplace_m4b.ATTENTION + inplace_m4b.DAMAGED)
 NO_RECEIPT = 'In-place move receipt is missing; nothing retired'
 

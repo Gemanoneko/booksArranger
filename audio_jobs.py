@@ -8,6 +8,7 @@ import json
 import math
 import os
 import sqlite3
+import sys
 import time
 import threading
 import uuid
@@ -563,7 +564,7 @@ class AudioJobs:
                 if change:
                     self._update(row["job_id"], **change)
             else:
-                self._update(row["job_id"], state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
+                self._update(row["job_id"], state="pending", stage="queued", reason="Interrupted book restarts when the queue resumes")
                 if failure and inplace_m4b.offered(json.loads(row["manifest"])):
                     held[row["job_id"]] = failure  # the journal could not be read or settled: any of these may be edited
         # 0.21.0 F4: an edit recovery could not settle shows on its interrupted book now, not only when Start reaches it.
@@ -1229,19 +1230,31 @@ class AudioJobs:
         return answer('started')
 
     def _save_run_intent(self, active):
+        """Best effort with the busy retry (Senua R-m1): a busy catalog never turns a Start into a raw sqlite error.
+        A lost write only loses the restart's resume (the safe direction: the queue then waits for a press)."""
         import pause_state
-        with self._db() as db:
+        def save(db):
             pause_state.set_jobs_active(db, active)
             if active:
                 pause_state.clear(db, 'jobs')
+        try:
+            transaction(self.database, save)
+        except sqlite3.Error as error:
+            print(f'Books Arranger could not save the audiobook queue run intent: {error}', file=sys.stderr, flush=True)
 
     def _hold_queue(self):
+        """A safety stop. The stop itself never waits on the catalog; recording it is best effort (Senua R-m1), so the
+        caller's safety callback (on_working_hold / on_space_hold) always runs and the original error is kept."""
         with self._lock:
             self._stop.set()
-            import pause_state
-            with self._db() as db:
-                pause_state.set_jobs_active(db, False)
-                pause_state.record(db, 'jobs', 'interrupted', 'Audiobook jobs stopped at a safety hold')
+        import pause_state
+        def hold(db):
+            pause_state.set_jobs_active(db, False)
+            pause_state.record(db, 'jobs', 'interrupted', 'Audiobook jobs stopped at a safety hold')
+        try:
+            transaction(self.database, hold)
+        except Exception as error:
+            print(f'Books Arranger could not record the safety hold: {error}', file=sys.stderr, flush=True)
 
     def pause(self):
         self.pause_work()
@@ -1559,7 +1572,7 @@ class AudioJobs:
                     except Exception as validation_exc:
                         self._update(job_id, state="needs attention", reason=str(validation_exc) or type(validation_exc).__name__)
                 elif isinstance(exc, InterruptedError) and self._stop.is_set():
-                    self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
+                    self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts when the queue resumes")
                 else:
                     failure_stage = journal['history'][-1]['stage'] if journal['history'] else 'checking sources'
                     journal['failure'] = _failure_details(exc, failure_stage)

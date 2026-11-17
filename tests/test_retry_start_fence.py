@@ -23,6 +23,8 @@ def queue():
     q._thread=None;q._resuming=False;q._check_progress=None
     q.status=Mock(side_effect=lambda:{'state':'Paused','jobs':[]})
     q._rows=Mock(return_value=[]);q._settle=Mock();q._apply_unchanged=Mock();q._work=Mock()
+    # Restart intent (0.29.0): this stub has no catalog; the fence, not the saved intent, is tested here.
+    q._save_run_intent=Mock();q.has_unfinished=Mock(return_value=False)
     return q
 
 def cleanup():

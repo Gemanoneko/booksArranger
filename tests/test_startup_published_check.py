@@ -54,7 +54,7 @@ class StartupPublishedCheckTests(unittest.TestCase):
         self.assertEqual(checked, [self.publishing['job_id']])
         states = self.states(queue)
         self.assertEqual(states[self.publishing['job_id']][0], 'completed')
-        self.assertEqual(states[self.running['job_id']], ('pending', 'Interrupted book restarts on explicit resume'))
+        self.assertEqual(states[self.running['job_id']], ('pending', 'Interrupted book restarts when the queue resumes'))
         self.assertEqual(states[self.completed['job_id']][0], 'completed')
         queue.close()
 

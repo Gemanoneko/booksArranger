@@ -82,6 +82,9 @@ class AutomaticProcessing:
     # Defaults for an instance built without __init__ (private test stubs that run _work directly): no book was put
     # back, the run is not closing, no hook is set, no start is pending.
     _requeued=();_closing_run=False;on_started=None;server_closing=None;start_pending=None;_stop_origin=None;_stop_generation=0
+    # True while the run was started by the restart restore, not by a press (Senua R-M2): its queue starts leave the
+    # cleanups that were already waiting before this launch for Sergei's own Start or Resume.
+    restored_without_press=False
     def __init__(self,merge,research=None,clock=time.time):
         self.merge=merge;self.inventory=merge.inventory;self.database=self.inventory.database
         self.research=research or PublicResearch(PublicClient(self.database))
@@ -124,6 +127,14 @@ class AutomaticProcessing:
                            (int(eligible and (pause or {}).get('origin')!='user'),prior['id']))
             elif prior and prior['state']=='Paused' and (pause or {}).get('origin') in ('closing','update'):
                 db.execute('UPDATE automatic_runs SET restart_paused=1 WHERE id=?',(prior['id'],))
+            # Senua R-M1: the first launch of the version with restart intent starts nothing the previous version left
+            # waiting for Start (its contract: "Server restart never starts an automatic run"). Once per catalog: no run
+            # carries a restart flag into this launch, whatever the version before it recorded.
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='automatic_restart_intent'").fetchone():
+                db.execute('CREATE TABLE automatic_restart_intent(id INTEGER PRIMARY KEY CHECK(id=1))')
+                db.execute('INSERT INTO automatic_restart_intent VALUES(1)')
+                db.execute("UPDATE automatic_runs SET restart_paused=0,reason=CASE WHEN reason='Paused after server restart — saved work kept' "
+                           "THEN 'Paused after server restart — start to continue saved work' ELSE reason END WHERE restart_paused<>0")
             db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
     def _run_row(self):
         with connect(self.database) as db:
@@ -326,7 +337,7 @@ class AutomaticProcessing:
         if probe is None:return False
         try:return bool(probe())
         except Exception:return True
-    def start(self,*,server_closing=False):
+    def start(self,*,server_closing=False,restored=False):
         with self.lock:
             # Checked under self.lock, which stop() also takes: a start can no longer slip in after Quit's stop.
             if server_closing or self._server_closing():raise ValueError('The local server is stopping or stopped. Start is unavailable.')
@@ -347,15 +358,17 @@ class AutomaticProcessing:
                 from audio_jobs import StartRefused
                 raise StartRefused('busy','A previous start is still reaching its pause checkpoint. Retry Start after it stops.')
             try:
-                with connect(self.database) as db:
-                    if not run or run['state']=='Completed' or run['state']=='Needs attention' and not research_retry(run):
-                        id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
-                        db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
-                    else:
-                        db.execute("UPDATE automatic_runs SET state='Running',reason='',restart_paused=0,updated=? WHERE id=?",(stamp(),run['id']))
+                fresh=not run or run['state']=='Completed' or run['state']=='Needs attention' and not research_retry(run)
+                if fresh:id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
+                def admit(db):
+                    if fresh:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
+                    else:db.execute("UPDATE automatic_runs SET state='Running',reason='',restart_paused=0,updated=? WHERE id=?",(stamp(),run['id']))
                     __import__('pause_state').clear(db,'automatic')
+                # Senua R-m1: one transaction with the busy retry _update has, for the new run and the continued one.
+                transaction(self.database,admit)
                 self._stop_generation+=1
                 self._stop_origin=None;self.stop_event.clear();self.start_pending=None;self._closing_run=False
+                self.restored_without_press=bool(restored)
             finally:pause_lock.release()
             self.thread=threading.Thread(target=self._work,args=(run['id'],),name='BooksArrangerAutomatic',daemon=False);self.thread.start()
         started=self.on_started
@@ -399,7 +412,7 @@ class AutomaticProcessing:
             taken=list(self._requeued);self._requeued.clear()
         if taken:self._requeue_into(checkpoint,taken)
         return bool(taken)
-    def request_start(self,*,server_closing=False):
+    def request_start(self,*,server_closing=False,restored=False):
         """Start over / release (O9, O12): start automatic processing when it is not running. Never raises: a start a
         blocker refuses leaves one pending start when that blocker clears by itself, and is reported otherwise.
         {'action': 'running'|'started'|'continued'|'pending'|'blocked', 'pending_kind'?, 'reason'?}."""
@@ -407,12 +420,12 @@ class AutomaticProcessing:
             if self.thread and self.thread.is_alive():return {'action':'running'}
             run=self._run_row()
             continuing=bool(run and (run['state'] in ('Paused','Stopping') or research_retry(run)))
-        try:self.start(server_closing=server_closing)
+        try:self.start(server_closing=server_closing,restored=restored)
         except ValueError as error:
             kind,reason=self._current_block(server_closing=server_closing)
             if kind=='running':return {'action':'running'}
             if kind in CLEARS:
-                self._set_pending(kind)
+                self._set_pending(kind,restored=restored)
                 return {'action':'pending','pending_kind':kind,'reason':reason}
             return {'action':'blocked','reason':reason or str(error)}
         return {'action':'continued' if continuing else 'started'}
@@ -429,7 +442,7 @@ class AutomaticProcessing:
                     return False
                 if (attribution.read(db,'jobs') or {}).get('origin') in ('user','interrupted'):
                     return False
-            result=self.request_start()
+            result=self.request_start(restored=True)
             return result['action'] in ('running','continued','pending')
     def _current_block(self,server_closing=False):
         run=self._run_row()
@@ -442,9 +455,9 @@ class AutomaticProcessing:
         if notify:
             try:notify()
             except Exception:pass
-    def _set_pending(self,kind):
+    def _set_pending(self,kind,restored=False):
         with self.lock:
-            self.start_pending={'kind':kind}
+            self.start_pending={'kind':kind,'restored':bool(restored)}
             if not (self._pending_thread and self._pending_thread.is_alive()):
                 self._pending_wake.clear()
                 self._pending_thread=threading.Thread(target=self._pending_loop,name='BooksArrangerPendingStart',daemon=True);self._pending_thread.start()
@@ -453,8 +466,8 @@ class AutomaticProcessing:
         """Cancel automatic start: the pending start ends; books keep waiting for a press."""
         with self.lock:
             cancelled=self.start_pending is not None;self.start_pending=None
-            run=self._run_row()
-            if cancelled and run and run['state']=='Paused' and run['restart_paused']:
+            run=self._run_row() if cancelled else None
+            if run and run['state']=='Paused' and run['restart_paused']:
                 self._cancel_restart(run['id'])
         self._pending_wake.set();self._changed()
         return self.status()|{'cancelled':cancelled}
@@ -475,7 +488,7 @@ class AutomaticProcessing:
                 try:
                     with self.lock:
                         if self.start_pending is not pending:continue  # cancelled meanwhile
-                        self.start()
+                        self.start(restored=pending.get('restored',False))
                 except ValueError:kind,_=self._current_block()
                 else:
                     self._changed();return
@@ -485,7 +498,7 @@ class AutomaticProcessing:
             with self.lock:
                 if self.start_pending is not pending:continue
                 if kind in CLEARS and kind==pending['kind']:continue
-                self.start_pending={'kind':kind} if kind in CLEARS else None
+                self.start_pending={'kind':kind,'restored':pending.get('restored',False)} if kind in CLEARS else None
             self._changed()
             if kind not in CLEARS:return
     def stop(self,force=False,origin=None):
@@ -524,9 +537,10 @@ class AutomaticProcessing:
         return active
 
     def _cancel_restart(self,id,origin='user'):
-        with connect(self.database) as db:
+        def cancel(db):
             db.execute('UPDATE automatic_runs SET restart_paused=0 WHERE id=?',(id,))
             __import__('pause_state').record(db,'automatic',origin,'Automatic processing stays paused')
+        transaction(self.database,cancel)
     def _pause_stopped(self,generation):
         # Never hold self.lock while entering scanner/merge locks. Serialize the
         # durable origin and queue pause together; a later press is read when its
@@ -663,7 +677,9 @@ class AutomaticProcessing:
         (StartRefused 'closing' or 'stale'); for this worker that is a stop, so the run pauses with its work saved.
         Live 2026-10-23: a Start racing Quit recorded 'Books is closing' as an automatic-processing failure."""
         from audio_jobs import StartRefused
-        try:self.merge.resume()
+        try:
+            if self.restored_without_press:self.merge.resume(pressed=False)
+            else:self.merge.resume()
         except StartRefused as refused:
             if getattr(refused,'start_state',None) in ('closing','stale') or self.stop_event.is_set():raise InterruptedError() from refused
             raise

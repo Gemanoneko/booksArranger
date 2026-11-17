@@ -330,8 +330,13 @@ class BrowserServer(ThreadingHTTPServer):
         if restore is not None:
             try:restore()
             except Exception as error:
-                # Recovery admission can refuse independently of a successful catalog load.
+                # Recovery admission can refuse independently of a successful catalog load. Nothing starts, and the
+                # jobs line says so (Senua R-m5): a refused restore never reads as a deliberate pause.
                 print(f'Books Arranger could not resume saved work: {error}', file=sys.stderr, flush=True)
+                report=getattr(merge,'report_restore_failure',None)
+                if report is not None:
+                    try:report(error)
+                    except Exception:pass
 
     # ------------------------------------------------------------------ startup loader (ruling 28, 0.22.1)
     # Sergei 2026-10-25: "Show me the screen and load whatever you want after." The engine used to open the whole
@@ -1168,9 +1173,11 @@ class Handler(BaseHTTPRequestHandler):
             if data: raise ValueError('Audiobook job controls require an empty object')
             # Ruling 35: Resume while a Pause or an earlier start is still settling is kept and made when it settles.
             merge=self.server.merge
-            pause_jobs=getattr(getattr(merge,'automatic',None),'pause_jobs',merge.pause)
-            self.response(200,pause_jobs() if path.endswith('/pause') else
-                          merge.resume_press() if hasattr(merge,'resume_press') else merge.resume())
+            if path.endswith('/pause'):
+                # Restart intent: a running pass stops as the user's; otherwise the queue pauses (read only for Pause).
+                automatic=getattr(merge,'automatic',None)
+                self.response(200,automatic.pause_jobs() if hasattr(automatic,'pause_jobs') else merge.pause())
+            else:self.response(200,merge.resume_press() if hasattr(merge,'resume_press') else merge.resume())
             return
         if path=='/api/audiobook/resume-cancel':
             # Resume audiobook jobs pressed again while it waits for the queue to settle: it is taken back.

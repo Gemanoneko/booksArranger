@@ -242,7 +242,82 @@ class ConstructionTests(unittest.TestCase):
         seed.close()
 
     def tearDown(self):
+        for merge in self.__dict__.get('merges',()):merge.close()  # before their catalog folder goes
         self.temp.cleanup()
+
+    # Senua's restart-intent review (0.28.13 doc), fixed in 0.29.0.
+    def saved_queue(self,origin=None,pending=True,backlog=False):
+        """A MergeService over a catalog whose queue intent is saved: optionally a pending book, a saved jobs pause and a
+        cleanup that was already waiting before this launch (the NAS backlog)."""
+        from merge_service import MergeService
+        import pause_state
+        merge=MergeService(self.inventory,Path(self.temp.name)/'merge-cache')
+        self.__dict__.setdefault('merges',[]).append(merge)
+        if pending:merge.jobs.enqueue(manifest())
+        with scanner.connect(self.database) as db:
+            db.execute('UPDATE audiobook_run_intent SET active=1 WHERE id=1')
+            if origin:pause_state.record(db,'jobs',origin,'Audiobook jobs paused')
+            if backlog:db.execute('INSERT INTO source_cleanup VALUES(?,?,?,?,?,?,?)',('nas-backlog-'+str(uuid.uuid4()),str(uuid.uuid4()),'{}','paused','Paused','1','1'))
+        return merge
+
+    def intent(self):
+        from pause_state import jobs_active
+        with scanner.connect(self.database) as db:return jobs_active(db)
+
+    def test_restore_starts_the_queue_and_leaves_waiting_cleanups_for_a_press_r_m2(self):
+        merge=self.saved_queue(backlog=True)
+        with patch.object(merge.cleanup,'resume',return_value={'state':'started'}) as cleanup, \
+             patch.object(merge.jobs,'resume',return_value={'state':'started'}) as queue:
+            merge.restore_work_after_restart()
+            queue.assert_called_once();cleanup.assert_not_called()
+            self.assertEqual(merge.__dict__.get('_automatic_cleanup_generation',0),0,'no press authorized the held-cleanup sweep')
+            merge.resume()  # Sergei's own Resume: the backlog runs first, as in 0.28.13
+            cleanup.assert_called_once()
+
+    def test_a_pause_saved_by_an_older_version_wins_over_a_left_intent_r_m3(self):
+        for origin in ('user','interrupted'):
+            with self.subTest(origin=origin):
+                merge=self.saved_queue(origin=origin,backlog=True)
+                with patch.object(merge.cleanup,'resume') as cleanup,patch.object(merge.jobs,'resume') as queue:
+                    merge.restore_work_after_restart()
+                    queue.assert_not_called();cleanup.assert_not_called()
+                self.assertFalse(self.intent())
+
+    def test_a_restore_with_nothing_to_do_ends_the_intent_r_m3(self):
+        merge=self.saved_queue(pending=False)
+        with patch.object(merge.jobs,'resume') as queue:
+            merge.restore_work_after_restart()
+            queue.assert_not_called()
+        self.assertFalse(self.intent())
+
+    def test_resume_clears_paused_by_you_while_cleanup_owns_the_start_r_m6(self):
+        import pause_state
+        merge=self.saved_queue(backlog=True)
+        merge.pause_work(origin='user')
+        with scanner.connect(self.database) as db:self.assertEqual(pause_state.read(db,'jobs')['origin'],'user')
+        with patch.object(merge.cleanup,'resume',return_value={'state':'started'}):merge.resume()
+        self.assertTrue(merge.jobs._stop.is_set(),'the queue worker has not started yet')
+        with scanner.connect(self.database) as db:self.assertIsNone(pause_state.read(db,'jobs'))
+        self.assertTrue(self.intent())
+
+    def test_a_busy_catalog_never_skips_a_safety_hold_or_fails_a_start_r_m1(self):
+        import sqlite3
+        merge=self.saved_queue(pending=False)
+        with patch('audio_jobs.transaction',side_effect=sqlite3.OperationalError('database is locked')):
+            merge.jobs._hold_queue()
+            self.assertTrue(merge.jobs._stop.is_set())
+            merge.jobs._save_run_intent(True)  # best effort: no raw sqlite error reaches Start
+
+    def test_a_failed_restore_says_so_on_the_jobs_line_r_m5(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        merge=SimpleNamespace(restore_work_after_restart=Mock(side_effect=RuntimeError('catalog busy')),report_restore_failure=Mock())
+        web_server.BrowserServer._restore_saved_work(SimpleNamespace(closing=False,inventory=self.inventory),merge)
+        self.assertEqual(str(merge.report_restore_failure.call_args.args[0]),'catalog busy')
+        real=self.saved_queue(pending=False)
+        real.report_restore_failure(RuntimeError('catalog busy'))
+        worker=real.jobs.status()['retry_checks']['worker']
+        self.assertEqual(worker['state'],'blocked');self.assertIn('Saved work was not resumed after the restart: catalog busy',worker['reason'])
 
     def test_startup_resumes_admitted_audiobooks_and_respects_user_pause(self):
         from merge_service import MergeService

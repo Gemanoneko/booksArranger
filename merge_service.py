@@ -951,23 +951,27 @@ class MergeService:
         # Read-only callback: called under worker locks; never acquires a Merge lock or performs I/O.
         return generation==self.__dict__.get('_start_generation',0) and not self.draining and not self.__dict__.get('_closing',False) and not self.__dict__.get('_pause_depth',0)
 
-    def _authorize_automatic_cleanup(self,generation):
-        # An admitted explicit Start renews the existing policy; a periodic wake never does.
+    def _authorize_automatic_cleanup(self,generation,cleanups=True):
+        # An admitted explicit Start renews the existing policy; a periodic wake never does. A restart restore that no
+        # press started (cleanups=False, Senua R-M2) does not authorize the held-cleanup sweep either.
         with _BULK_LOCK:
             if not self._start_allowed(generation):raise StartRefused('stale','Start was superseded by Pause or closing.')
-            self._automatic_cleanup_generation=generation
+            if cleanups:self._automatic_cleanup_generation=generation
             self._maintenance_paused=False
-            if not self.jobs._stop.is_set():
-                with connect(self.inventory.database) as db:__import__('pause_state').clear(db,'jobs')
+            # Senua R-m6: the admitted start clears "Paused by you." at once, also while cleanup owns the handoff and the
+            # queue's stop flag is still set; the saved run intent, not this display record, says what a restart resumes.
+            with connect(self.inventory.database) as db:__import__('pause_state').clear(db,'jobs')
 
-    def resume(self,*,start_generation=None,pending_owner=None,recheck=True):
+    def resume(self,*,start_generation=None,pending_owner=None,recheck=True,pressed=True):
         """Admit pending work promptly. Finished-book checks belong to idle maintenance.
 
         The requested job still verifies its own exact inputs and destination. A Start
         never hashes unrelated completed books under the foreground operation lock.
+        pressed=False: a start no press made (the restart restore and the run it restored). Until Sergei's first own
+        start in this launch, it leaves every cleanup that was already waiting alone (Senua R-M2, the NAS backlog).
         """
         generation=self._capture_start_generation() if start_generation is None else start_generation
-        result=self._resume_guarded(generation,pending_owner,False)
+        result=self._resume_guarded(generation,pending_owner,False,pressed)
         if recheck:
             wake=getattr(self,'_retention_wake',None)
             if wake is not None:wake.set()
@@ -985,14 +989,22 @@ class MergeService:
         with _BULK_LOCK, connect(self.inventory.database) as db:
             if not self._start_allowed(generation) or not pause_state.jobs_active(db):
                 return
+            # Senua R-M3: a Pause or safety hold saved by a version that never clears the intent (0.28.12, after a
+            # rollback) wins over an intent left from before it. The intent ends with it.
+            if (pause_state.read(db,'jobs') or {}).get('origin') in ('user','interrupted'):
+                pause_state.set_jobs_active(db,False)
+                return
         if not self.jobs.has_unfinished() and not self._pending_replacement_postprocessing():
+            # Senua R-m3: nothing to resume, so the intent ends here; later work never starts without a press.
+            with _BULK_LOCK, connect(self.inventory.database) as db:
+                if self._start_allowed(generation):pause_state.set_jobs_active(db,False)
             return
         try:
-            self.resume(start_generation=generation)
+            self.resume(start_generation=generation,pressed=False)
         except StartRefused as error:
             if error.start_state=='busy':
                 try:
-                    self.start_when_settled(start_generation=generation)
+                    self.start_when_settled(start_generation=generation,pressed=False)
                 except StartRefused:
                     pass  # A later Pause or shutdown superseded this restore.
             elif error.start_state not in ('closing','stale'):
@@ -1004,9 +1016,15 @@ class MergeService:
         wake=getattr(self,'_retention_wake',None)
         if wake is not None:wake.set()
 
+    def report_restore_failure(self,error):
+        """Senua R-m5: a restart restore that failed says so on the jobs line instead of only in the engine log."""
+        self.jobs.report_priority({'state':'blocked','job_id':None,'reason':'Saved work was not resumed after the restart: '+(str(error) or type(error).__name__)+'. Press Resume audiobook jobs to continue.'})
+
     @operation
-    def _resume_guarded(self,generation,pending_owner=None,recheck=True):
+    def _resume_guarded(self,generation,pending_owner=None,recheck=True,pressed=True):
         allow=lambda:self._start_allowed(generation)
+        # Senua R-M2: cleanups waiting from before this launch (the NAS backlog among them) start only after a press.
+        backlog_waits=not pressed and self.__dict__.get('_backlog_needs_press',True)
         answer=(lambda:self.state()) if recheck else dict
         if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','This start was superseded by Pause or closing; saved requests are retained.')
         if self.__dict__.get('_resume_pending') and self.__dict__.get('_resume_pending_owner') is not pending_owner:
@@ -1015,14 +1033,15 @@ class MergeService:
         except ValueError as error:raise StartRefused('busy',str(error)) from error
         if self.jobs._thread and self.jobs._thread.is_alive():
             if self.jobs._stop.is_set():raise StartRefused('busy','The audiobook worker is still pausing. Retry Start after it stops.')
-            self._authorize_automatic_cleanup(generation)
+            self._authorize_automatic_cleanup(generation,cleanups=not backlog_waits)
             return answer()|{'start_admission':{'state':'running','generation':generation}}
         if self.cleanup.thread and self.cleanup.thread.is_alive():
             if self.cleanup.stop.is_set():raise StartRefused('busy','The cleanup worker is still pausing. Retry Start after it stops.')
-            self._authorize_automatic_cleanup(generation)
+            self._authorize_automatic_cleanup(generation,cleanups=not backlog_waits)
             return answer()|{'start_admission':{'state':'checking','generation':generation}}
         if not allow():raise StartRefused('stale','Startup was paused; saved retry requests are retained.')
-        pending=self.cleanup._rows("SELECT id,intent FROM source_cleanup WHERE state IN ('waiting','paused')")
+        if pressed:self._backlog_needs_press=False
+        pending=[] if backlog_waits else self.cleanup._rows("SELECT id,intent FROM source_cleanup WHERE state IN ('waiting','paused')")
         historical=[c['id'] for c in pending if json.loads(c['intent']).get('historical')]
         def handoff():
             try:return self.jobs.resume(admission_check=allow,admission_token=generation,settle=recheck)
@@ -1040,7 +1059,7 @@ class MergeService:
             started=self.cleanup.resume(admission_check=allow,after_drain=handoff,admission_token=generation)
         else:started=self.jobs.resume(admission_check=allow,admission_token=generation,settle=recheck)
         if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','Startup was superseded by Pause or closing; saved retry requests are retained.')
-        self._authorize_automatic_cleanup(generation)
+        self._authorize_automatic_cleanup(generation,cleanups=not backlog_waits)
         admission=started.get('start_admission',started) if isinstance(started,dict) else {'state':'requested'}
         return answer()|{'start_admission':admission}
 
@@ -2359,7 +2378,7 @@ class MergeService:
         if scan is not None and scan.is_alive():return 'scan'
         return None
 
-    def start_when_settled(self,why=None,*,start_generation=None):
+    def start_when_settled(self,why=None,*,start_generation=None,pressed=True):
         """Ruling 35 (Sergei 2026-10-26): a start refused only because a Pause, an earlier start or a stopping worker is
         still settling ("Retry Start after it stops") is kept and made when it settles, every check again then. One waits at
         a time; a second press joins it. A Pause pressed after it, or closing, drops it (the later press wins).
@@ -2370,9 +2389,11 @@ class MergeService:
             if start_generation is not None and start_generation!=generation:
                 raise StartRefused('stale','Start was superseded by Pause or closing.')
             waiting=self.__dict__.get('_start_waiting')
-            if waiting is not None and waiting['generation']==generation:return {'state':'waiting','reason':waiting['reason']}
+            if waiting is not None and waiting['generation']==generation:
+                if pressed:waiting['pressed']=True  # a press joining a restored start makes it Sergei's own
+                return {'state':'waiting','reason':waiting['reason']}
             token=object()
-            self._start_waiting={'generation':generation,'reason':why or self._settling() or 'pause','since':time.time(),'token':token}
+            self._start_waiting={'generation':generation,'reason':why or self._settling() or 'pause','since':time.time(),'token':token,'pressed':bool(pressed)}
             answer={'state':'waiting','reason':self._start_waiting['reason']}
         threading.Thread(target=self._settle_then_start,args=(token,),name='books-start-when-settled',daemon=True).start()
         self.invalidate_status()
@@ -2405,7 +2426,7 @@ class MergeService:
                 with _BULK_LOCK:
                     if current() is None:return
                     self._start_waiting=None
-                try:self.resume(start_generation=waiting['generation'])
+                try:self.resume(start_generation=waiting['generation'],pressed=waiting.get('pressed',True))
                 except StartRefused as error:
                     if error.start_state!='busy':self._record_start_failure(error);return
                     with _BULK_LOCK:
@@ -4503,8 +4524,9 @@ class MergeService:
                                 except (ValueError,OSError):pass
         if stop.is_set():raise InterruptedError()
         # Ruling 56: Sergei's Approve saves/queues only; it never starts or resumes the conversion/cleanup queue.
-        # Automatic research runs inside an authorized Start and may keep that run's conversion queue moving.
-        if approved_by is None:self.resume(recheck=False)
+        # Automatic research runs inside an authorized Start and may keep that run's conversion queue moving; a run the
+        # restart restored, not a press, keeps leaving the waiting cleanups alone (Senua R-M2).
+        if approved_by is None:self.resume(recheck=False,pressed=not getattr(getattr(self,'automatic',None),'restored_without_press',False))
         return fresh,job
 
     def _request_m4b_readmission(self,job_id,kind,origin=None):
