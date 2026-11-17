@@ -99,7 +99,15 @@ class OperatorNativeTests(unittest.TestCase):
     def args(self):
         return (self.source, self.target, ['data'], 'data/inventory.sqlite3', self.work)
 
+    def remove_fixture(self):
+        """This test's own fixture folders, gone after it. Its fake .git makes the source look like a repository, which
+        the studio cleanup rightly never deletes, so it was left in scratch after every run."""
+        for root in (self.source, self.area):
+            if root.exists():shutil.rmtree(root)
+            self.assertFalse(root.exists(), 'fixture removed: '+str(root))
+
     def test_broad_repo_unknown_data_and_library_paths_never_gain_cleanup_ownership(self):
+        self.addCleanup(self.remove_fixture)
         (self.source/'.git').mkdir();(self.source/'.git/config').write_bytes(b'private git history')
         (self.source/'program.py').write_bytes(b'private source')
         # Use the exact source's broad child as the candidate scope without
