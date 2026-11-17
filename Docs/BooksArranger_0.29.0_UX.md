@@ -228,3 +228,27 @@ Red-team: do not say "nothing more can happen" while a cleanup retry or a 14:05 
 6. Folders directly inside a library folder (such as `Z:\Audiobooks\Robert R. McCammon`) are never removed today. Keep that rule for item 5? keep / remove
 7. Keep a book's "All files missing" row while its folder is kept for a non-leftover file, so it can say why? yes / no
 8. Should **Stop automatic processing** always act at once and never wait behind another action? yes / no
+
+## Sergei's answers (2026-11-17, relayed by Jane)
+
+1. Light novel box in Edit names: **same logic as Short Stories** — put it wherever Short Stories is.
+2. Both Light novel and Short-story collection: **no** — one or the other.
+3. `Ранобэ` folders: **yes** — they go to `Light Novels` too.
+4. Drive back: **then** — drop gone books as soon as the drive answers.
+5. Mass-drop guard: **open** — Sergei asked why a check would remove books; Jane explaining (a share that answers empty or half-connected could look like hundreds of deleted books).
+6. Folders directly inside a library folder: **remove** — no empty folders anywhere.
+7. Row for a folder kept by a non-audio file: **no** — once no audio is left, the book leaves the list (audiobooks; the text-books module is not started). The folder itself is still kept per the item-5 ruling (only safe leftovers deleted).
+8. Stop always acts at once: **open** — Sergei asked why it waits now; Ender is reading the live page state to find out.
+
+Also for this version (Sergei): fix chapter names from old-encoding (cp1251) tags so new conversions get readable chapter names (Ender's diagnosis: `chapter_plan.prepare` reads raw tags, `tag_text.repair` not applied), and fix «Похититель детей»'s chapter names and comment after its cleanup finishes. Cleanup cover-path fix: `source_cleanup._run` uses `audio_pipeline.reviewed_cover_path`.
+
+### Ender's read of the stuck Stop (2026-11-17, read-only on the live app)
+
+Not the Brom hold (corrects the section 7 guess). Stop was queued by the page because another page press was in flight, then a second press cancelled it; `cancelLater` (`web/app.js:4422`) never replaced the visible "queued … Press it again to cancel" line. Engine never received Stop; automatic processing is running, waiting for metadata sources. Related: queue/release use different tests (`app.js:4439` vs `drainLater`/`pressBusy`), a queued Stop can be dropped silently (`automaticAction`, `app.js:2515`), "Running" in the jobs line is the job worker's momentary state. Proposed: Stop bypasses the page queue (like Pause audiobook jobs, `app.js:1509`) without touching `busy`; cancel replaces the line; queued line names its blocker; one test for queue and release. Test to add: a press in flight landing just after Stop leaves its job paused.
+
+### Sergei's follow-up answers (2026-11-17)
+
+- **Item 1 is list-only.** "Remove" means remove the row from the list — no file is touched. A book whose source is gone but that was successfully converted stays in the converted list.
+- **Q5: no guard.** Converted books in the output folder are what matters; the old unconverted versions aren't needed. (Removal is list-only, so nothing on disk is at risk.)
+- **Q8: yes** — Stop always acts at once.
+- **"Running" / "busy" (item 7):** to Sergei, busy means converting. The jobs line must not say "Running" unless a conversion runs; any other work (cleanup check, finished-book check, research wait, etc.) is named in plain words. Ender found the "Running" Sergei saw was the job worker's momentary state, not a conversion — the page never said what it was, which is the bug.
