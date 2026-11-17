@@ -239,6 +239,29 @@ class ActivityRowTests(unittest.TestCase):
         row=activities(jobs,None,None,None,{},now_ms=1)[0]
         self.assertEqual((row['state'],row['book_id'],row['held_total'],row['cause']),('attention','book-1',3,'identity_read'))
 
+    def test_needs_you_only_only_when_nothing_runs_waits_or_is_scheduled_0290(self):
+        # 0.29.0 item 8 (Judy section 8): the page never guesses; one engine flag.
+        from web_server import needs_you_only
+        idle={'state':'Needs attention','queued':0,'attention_counts':{'all':329,'other':329},'retry_checks':{'waiting':0},'todo_still_checking':0}
+        auto={'state':'Completed','start_pending':None,'next_retry_at':None}
+        self.assertTrue(needs_you_only(idle,auto,[],False,{'queued_actions':[],'queue_running':None}))
+        self.assertTrue(needs_you_only(dict(idle,state='Running'),auto,[],False,{}),'the worker\'s momentary state is not work')
+        held=[{'kind':'cleanup','state':'attention'}]
+        self.assertTrue(needs_you_only(idle,auto,held,False,{}),'a held item is not running')
+        for name,jobs,automatic,rows,scanning,queue in (
+                ('nothing needs attention',dict(idle,attention_counts={'all':0}),auto,[],False,{}),
+                ('a row runs',idle,auto,[{'kind':'identity','state':'running'}],False,{}),
+                ('a scan runs',idle,auto,[],True,{}),
+                ('books wait to convert',dict(idle,queued=2),auto,[],False,{}),
+                ('a queued action',idle,auto,[],False,{'queued_actions':[{'id':'q'}]}),
+                ('a retry check waits',dict(idle,retry_checks={'waiting':1}),auto,[],False,{}),
+                ('books wait to be checked',dict(idle,todo_still_checking=3),auto,[],False,{}),
+                ('a timed cleanup retry',dict(idle,timed_retry=True),auto,[],False,{}),
+                ('a metadata retry at 14:05',idle,dict(auto,next_retry_at=1896901200),[],False,{}),
+                ('automatic processing paused with work left',idle,dict(auto,state='Paused'),[],False,{}),
+                ('automatic processing runs',idle,dict(auto,state='Running'),[],False,{})):
+            with self.subTest(name):self.assertFalse(needs_you_only(jobs,automatic,rows,scanning,queue))
+
     def test_extra_source_activity_keeps_typed_cleanup_identity(self):
         jobs={'state':'Running','current_title':'Extra','current_task_kind':'duplicate_source_cleanup','progress':{'phase':'checking extra source'}}
         self.assertEqual(activities(jobs,None,None,None,{},now_ms=1)[0]['task_kind'],'duplicate_source_cleanup')

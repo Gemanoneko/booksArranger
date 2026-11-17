@@ -1307,6 +1307,14 @@ function waitingLine(){
     parts.push(`Waiting: ${named.join(', ')}${queued.length>2?` and ${queued.length-2} more`:''}. They run one at a time.`);}
   return parts.join(' ');
 }
+// Item 8 (Judy section 8): only Sergei's review can move things on. The engine decides (needs_you_only); the count is the
+// Needs attention shortcut's own number.
+function renderWaitingForYou(shown,jobs){
+  const block=$('jobs-you');if(!block)return;block.hidden=!shown;if(!shown)return;
+  const review=$('jobs-review');writeText(review,'Review them');review.title='Show every book that needs you.';
+  const n=attentionTotal(jobs),line=$('jobs-you-line'),key=String(n);
+  if(line.dataset.key!==key){line.dataset.key=key;const strong=node('strong','Waiting for you:');line.replaceChildren(strong,node('span',` ${plural(n,'book needs','books need')} attention. The app can't do more until you review them.`));}
+}
 // Progress rows (ProgressRows spec): one row per running activity, fixed order, updated in place.
 const activityOrder=['admission','chapter','conversion','cleanup','identity','series','scan','maintenance'],activityRows=new Map();let activityTimer=null;
 function checkActivities(list,jobs){
@@ -1385,8 +1393,9 @@ function renderActivities(list,jobs){
     view.row=row;updateActivity(view,Date.now());
   });
   writeText($('jobs-more'),extra>0?`+${extra} more running`:'');$('jobs-more').hidden=!(extra>0);
-  const idle=visible.length?'':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.':'Nothing running';
-  writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;
+  const you=!visible.length && state?.needs_you_only===true && attentionTotal(jobs)>0;
+  const idle=visible.length?'':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.':you?'Nothing running.':'Nothing running';
+  writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;renderWaitingForYou(you,jobs);
   const waiting=waitingLine();if($('jobs-waiting')){writeText($('jobs-waiting'),waiting);$('jobs-waiting').hidden=!waiting;}
   if(visible.length && activityTimer===null && typeof setInterval==='function')activityTimer=setInterval(()=>{const now=Date.now();for(const view of activityRows.values())updateActivity(view,now);},1000);
   if(!visible.length && activityTimer!==null && typeof clearInterval==='function'){clearInterval(activityTimer);activityTimer=null;}
@@ -5190,8 +5199,8 @@ function showNeedsAttention(){
   const done=updateList();$('group-all').focus?.({preventScroll:true});return done;
 }
 $('attention-shortcut').addEventListener('click',showNeedsAttention);
-// "+N more on hold" does what the Needs attention shortcut does.
-$('jobs-hold-more')?.addEventListener('click',showNeedsAttention);
+// Review them (item 8) and "+N more on hold" do what the Needs attention shortcut does.
+$('jobs-review')?.addEventListener('click',showNeedsAttention);$('jobs-hold-more')?.addEventListener('click',showNeedsAttention);
 $('copy-technical').addEventListener('click',async()=>{
   const text=$('automatic-technical').textContent || '';
   try{await copyDiagnosticText(text);setText('copy-technical-status','Copied.');}

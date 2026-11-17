@@ -879,7 +879,9 @@ class MergeService:
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
             'maintenance':copy.deepcopy(self.__dict__.get('_maintenance')),'published_check':value.get('published_check'),'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable,'attention_row':attention_row,
-            'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None}
+            'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None,
+            # 0.29.0 item 8: a cleanup retry the app makes by itself later (the jobs panel never says "only you" then).
+            'timed_retry':any(deadline>time.monotonic() for deadline in self.__dict__.get('_cleanup_retry_at',{}).values())}
 
     def _current_start_admission(self):
         with _BULK_LOCK:

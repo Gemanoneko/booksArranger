@@ -119,6 +119,13 @@ assert.equal(parts(render({state:'Pausing'},[conversion({state:'pausing'})])[0])
 assert.equal(render({},[]).length,0);assert.equal(get('jobs-idle').textContent,'Nothing running');assert.equal(get('jobs-idle').hidden,false);
 render({state:'Paused'},[]);assert.equal(get('jobs-idle').textContent,'Paused. Resume continues pending books.');
 render({},undefined);assert.equal(get('jobs-idle').textContent,'Nothing running');assert.equal(get('jobs-hold-block').hidden,true,'On hold empties with its rows');
+// Item 8: only Sergei's review can move things on (the engine's needs_you_only), the count is Needs attention's own.
+const renderYou=(jobs,you)=>{context.fixture={audiobook_jobs:{state:'Running',approved_total:2,converted_total:1,queued:0,failed:0,...jobs},activities:[],needs_you_only:you};run('state=fixture;renderJobs()');};
+renderYou({attention_counts:{other:329}},true);assert.equal(get('jobs-idle').textContent,'Nothing running.');
+assert.equal(get('jobs-you').hidden,false);assert.equal(get('jobs-you-line').children.map(item=>item.textContent).join(''),"Waiting for you: 329 books need attention. The app can't do more until you review them.");
+assert.equal(get('jobs-review').textContent,'Review them');assert.equal(get('jobs-review').title,'Show every book that needs you.');
+renderYou({attention_counts:{other:329}},false);assert.equal(get('jobs-you').hidden,true,'a retry or check the app will make itself: not shown');assert.equal(get('jobs-idle').textContent,'Nothing running');
+renderYou({attention_counts:{}},true);assert.equal(get('jobs-you').hidden,true,'nothing needs attention: Nothing running only');
 
 // ETA: only when determinate, running, at least 10 s into the step and 5 % done; from the recent rate.
 rows=render({},[conversion({step_started_at:NOW-20000,done:10,total:100,unit:'files'})]);

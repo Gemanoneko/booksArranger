@@ -125,6 +125,28 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
     return sorted(rows, key=lambda row: ACTIVITY_ORDER[row['kind']])
 
 
+def needs_you_only(jobs, automatic, rows, scanning, queue):
+    """0.29.0 item 8 (Judy section 8): True only when nothing runs, nothing waits and the app will not act by itself, so
+    only Sergei's review of Needs attention can move things on. The page never guesses this: a scheduled cleanup retry,
+    a metadata retry, a queued action or a book waiting to be checked each make it False."""
+    jobs = jobs if isinstance(jobs, dict) else {}
+    automatic = automatic if isinstance(automatic, dict) else {}
+    queue = queue if isinstance(queue, dict) else {}
+    counts = jobs.get('attention_counts')
+    attention = sum(value for key, value in counts.items() if key != 'all' and type(value) is int and value > 0) if isinstance(counts, dict) else int(jobs.get('failed') or 0)
+    running = any(isinstance(row, dict) and row.get('state') in ('running', 'pausing') for row in rows or [])
+    admission = jobs.get('start_admission') if isinstance(jobs.get('start_admission'), dict) else {}
+    retry = jobs.get('retry_checks') if isinstance(jobs.get('retry_checks'), dict) else {}
+    maintenance = jobs.get('maintenance') if isinstance(jobs.get('maintenance'), dict) else {}
+    waiting = (int(jobs.get('queued') or 0) > 0 or bool(queue.get('queued_actions')) or bool(queue.get('queue_running')) or int(retry.get('waiting') or 0) > 0
+               or admission.get('state') in ('checking', 'waiting') or bool(jobs.get('start_waiting')) or int(jobs.get('todo_still_checking') or 0) > 0
+               or maintenance.get('state') in ('checking', 'stopping') or bool(jobs.get('timed_retry')) or bool(jobs.get('cleanup_active')))
+    automatic_busy = (automatic.get('state') in ('Running', 'Stopping', 'Paused') or bool(automatic.get('start_pending'))
+                      or automatic.get('next_retry_at') is not None)
+    # jobs['state'] is the queue worker's momentary state, not work: the rows, counts and schedules above decide.
+    return bool(attention > 0 and not running and not scanning and not waiting and not automatic_busy)
+
+
 STARTED = time.monotonic()  # the engine's own start: "Loaded in" counts from here
 # Startup (ruling 28; Judy's 0.22.1 UX spec, section 3). The shell owns step 1 (the process is launching); the engine
 # reports the rest. Parts are what the page may show, each whole: absent from /api/state until it arrives.
@@ -596,9 +618,10 @@ class BrowserServer(ThreadingHTTPServer):
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
             'status': status, 'audiobook_jobs': jobs,
-            'automatic_processing': automatic, **self.actions.view(),
-            'activities': activities(jobs, self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None,
-                                     self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))}
+            'automatic_processing': automatic, **(queue:=self.actions.view()),
+            'activities': (rows:=activities(jobs, self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None,
+                                     self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))),
+            'needs_you_only': needs_you_only(jobs, automatic, rows, active, queue)}
 
     def loading_state(self, library):
         """/api/state while loading: answered at once, with only the parts that have arrived. A part that has not
