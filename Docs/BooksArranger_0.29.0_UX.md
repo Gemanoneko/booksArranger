@@ -252,3 +252,4 @@ Not the Brom hold (corrects the section 7 guess). Stop was queued by the page be
 - **Q5: no guard.** Converted books in the output folder are what matters; the old unconverted versions aren't needed. (Removal is list-only, so nothing on disk is at risk.)
 - **Q8: yes** — Stop always acts at once.
 - **"Running" / "busy" (item 7):** to Sergei, busy means converting. The jobs line must not say "Running" unless a conversion runs; any other work (cleanup check, finished-book check, research wait, etc.) is named in plain words. Ender found the "Running" Sergei saw was the job worker's momentary state, not a conversion — the page never said what it was, which is the bug.
+- **Futaba M-5 (Sergei, 2026-11-17): yes** — books whose source is gone leave the "All candidates" view too, not only Needs attention (still list-only; converted books stay in the converted list).
