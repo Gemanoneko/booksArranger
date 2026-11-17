@@ -271,3 +271,7 @@ Sergei explicitly requested logging only: no investigation, implementation, test
 - **Rare copy mismatch** (`797cc95`): a rename recorded before the app closed, while the share is away, shows the `copy` line ("both files are kept"), but only the old file is known to exist. Judy should write a line for it.
 - **"Restart Books Arranger" button on an unfinished-move row** (Judy's offer, 2026-10-30). It would use `shellApi.restartEngine`, which also stops other books' work. Offered to Sergei; not approved.
 - **Sweep fails open on a `git grep` error** (studio tooling, not this tool): a grep error counts as "not cited", so the folder can be deleted. Offered to Sergei 2026-10-30, unanswered.
+
+## Backlog for the next version (Sergei, 2026-11-17)
+
+- **Drop books whose source is gone, at startup.** Sergei: "If the folder/file is not available, I probably deleted it. Check on startup and delete from the list." Seen on «Абсолютное зеро» (in `Z:\Audiobooks\Unsorted\Ужасы и трэшатинка. Сборник рассказов\Сборник`): Open source folder answered "Couldn't open … Check that this folder is available". The row should not be on the list at all. Not started; parked for the next version. Open for Judy/Ender: how to tell "deleted" from "drive or share not connected" (the existing rule that an unreachable library folder records nothing — 77b — suggests removing only when the library root is reachable and the source alone is missing).
