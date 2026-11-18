@@ -59,8 +59,16 @@ def regular_evidence(path):
 
 def stamp():return datetime.now(timezone.utc).isoformat()
 def packed(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+PENDING=('waiting','checking','removing','pausing','paused')  # a cleanup that waits, runs or is paused (not ended, not held)
+def moving_text(state,removed,total):
+    """status()'s line for a cleanup in one of the PENDING states."""
+    return {'waiting':'Waiting for output checks','checking':'Checking temporary recovery copies','removing':f'Removing originals: {removed} of {total}',
+            'pausing':'Pausing source cleanup','paused':f'Source cleanup paused: {removed} of {total} removed'}[state]
 def setup(db):
     db.execute('CREATE TABLE IF NOT EXISTS source_cleanup(id TEXT PRIMARY KEY,job_id TEXT UNIQUE,intent TEXT NOT NULL,state TEXT NOT NULL,reason TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL)')
+    # 0.30.0: the jobs panel reads the waiting, running and held cleanups on every poll (pending(), held()); without this a
+    # read walked every cleanup's intent (a whole manifest each).
+    db.execute('CREATE INDEX IF NOT EXISTS source_cleanup_state ON source_cleanup(state)')
     db.execute('CREATE TABLE IF NOT EXISTS cleanup_members(cleanup_id TEXT,path TEXT,backup TEXT,facts TEXT,state TEXT,PRIMARY KEY(cleanup_id,path))')
     if 'restore_intent' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN restore_intent TEXT NOT NULL DEFAULT ''")
     if 'backup_facts' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN backup_facts TEXT NOT NULL DEFAULT ''")
@@ -354,8 +362,7 @@ class CleanupJobs:
             for member in members:
                 try:current_bytes+=Path(member['backup']).stat().st_size
                 except FileNotFoundError:pass
-            texts={'waiting':'Waiting for output checks','checking':'Checking temporary recovery copies','removing':f'Removing originals: {len(removed)} of {total}',
-                'pausing':'Pausing source cleanup','paused':f'Source cleanup paused: {len(removed)} of {total} removed','completed':success,
+            texts={**{name:moving_text(name,len(removed),total) for name in PENDING},'completed':success,
                 'needs_attention':'Source cleanup needs attention: '+reason+'. Remaining originals and temporary files are preserved for recovery.'}
             retained=False
             if state=='needs_attention':
@@ -387,6 +394,29 @@ class CleanupJobs:
                     elif recovery['state']=='deleted':item['status']='Originals removed; recovery copies deleted'
                 item['recovery_bytes']=recovery['bytes'];item['recovery_location']=recovery['location'] if recovery['count'] else ''
         return result[0] if job_id and result else (None if job_id else result)
+    def _brief(self,where,params=()):
+        """id, job_id, state, reason, created, removed, total of the cleanups `where` selects, oldest first: one catalog read,
+        no file is read (status() reads every recovery copy and source folder, about 30 ms a book on the library share)."""
+        storage="(SELECT reason FROM storage_cleanup_jobs s WHERE s.job_id=c.job_id)" if self._rows("SELECT 1 FROM sqlite_master WHERE name='storage_cleanup_jobs'") else "''"
+        rows=self._rows("SELECT c.id,c.job_id,c.state,c.reason,c.created,%s AS storage_reason,json_array_length(c.intent,'$.manifest.sources') AS total,"
+                        "(SELECT count(*) FROM cleanup_members m WHERE m.cleanup_id=c.id AND m.state='removed') AS removed "
+                        "FROM source_cleanup c WHERE %s ORDER BY c.created"%(storage,where),params)
+        for row in rows:
+            storage_reason=row.pop('storage_reason');row['total']=row['total'] or 0;row['reason']=row['reason'] or storage_reason or ''
+            if self.current==row['id'] and self.stop.is_set():row['state']='pausing'  # as status() says it
+        return rows
+    def pending(self):
+        """0.30.0: the cleanups that wait, run or are paused, as status() gives them (state, status, removed, total, checked),
+        from the catalog only, so the jobs panel reads them on every poll."""
+        rows=self._brief("c.state IN (%s)"%','.join('?'*len(PENDING)),PENDING);current=self.current
+        if current and not any(row['id']==current for row in rows):
+            rows=sorted(rows+self._brief('c.id=?',(current,)),key=lambda row:row['created'])  # a held one being retried, stopping
+        rows=[row for row in rows if row['state'] in PENDING]
+        for row in rows:row.update(status=moving_text(row['state'],row['removed'],row['total']),checked=self.checked.get(row['id'],0) if row['state']=='checking' else None)
+        return rows
+    def held(self):
+        """0.30.0: the cleanups that need attention (Sergei's Retry cleanup), from the catalog only, oldest first."""
+        return [row for row in self._brief("c.state='needs_attention'") if row['state']=='needs_attention']
     def resume(self,selected=None,follow_audio=True,admission_check=None,after_drain=None,admission_token=None,identity_retry=None):
         with self.lock:
             if self.closed:raise ValueError('Cleanup worker is closing')

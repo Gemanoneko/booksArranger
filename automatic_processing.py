@@ -580,8 +580,13 @@ class AutomaticProcessing:
             if thread.is_alive():raise TimeoutError('Automatic processing still closing at safe checkpoint')
     def _progress(self,title,source,stage):
         self.current={'title':title,'source':source,'stage':stage}
-    def _idle_jobs(self):
-        state=self.merge.state()
+    def _jobs_now(self):
+        """The audiobook jobs' state(): state, queued, cleanup_active, read now. 0.30.0: from the merge's live read. The wait
+        loops below asked for the full status computation twice every 0.2 s while waiting for the queue (each one seconds
+        to minutes under load, read again as soon as it ended); that kept a full computation running beside the jobs."""
+        return self.merge.jobs_now() if callable(getattr(type(self.merge),'jobs_now',None)) else self.merge.state()
+    def _idle_jobs(self,state=None):
+        state=self._jobs_now() if state is None else state
         return state['state'] not in ('Running','Pausing') and not state.get('queued',0) and not state.get('cleanup_active',False)
     def draft(self,id,revision,active):
         if type(active) is not bool:raise ValueError('Draft activity must be an explicit boolean')
@@ -743,7 +748,7 @@ class AutomaticProcessing:
                       # Let already admitted books and required cleanup drain before waiting.
                       while not self._idle_jobs():
                           if self.stop_event.wait(.2):raise InterruptedError()
-                          if self.merge.state()['state']=='Paused':raise InterruptedError()
+                          if self._jobs_now()['state']=='Paused':raise InterruptedError()
                       checkpoint['pending']=list(dict.fromkeys(deferred));deferred.clear()
                       self._add_current_candidates(checkpoint)
                       with connect(self.database) as db:
@@ -892,7 +897,7 @@ class AutomaticProcessing:
               row=None;identity=None;phase='conversion';self.current=None;self._update(id,phase='conversion')
               while not self._idle_jobs():
                   if self.stop_event.wait(.2):raise InterruptedError()
-                  if self.merge.state()['state']=='Paused':raise InterruptedError()
+                  if self._jobs_now()['state']=='Paused':raise InterruptedError()
                   if self._requeued:break  # a book put back meanwhile is researched in this run
               if self.stop_event.is_set():raise InterruptedError()
               if checkpoint.get('scan_after'):
@@ -916,7 +921,7 @@ class AutomaticProcessing:
             # Report Paused only after both scan and owned converter/cleanup have stopped.
             self._pause_stopped(generation)
             while self.inventory.worker and self.inventory.worker.is_alive():self.inventory.worker.join(.2)
-            while self.merge.state()['state']=='Pausing':time.sleep(.2)
+            while self._jobs_now()['state']=='Pausing':time.sleep(.2)
             try:self._paused_checkpoint(id,checkpoint)
             except (OSError,sqlite3.Error) as error:self._failure(id,error,'pause',identity,row,False)
         except Exception as error:

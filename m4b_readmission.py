@@ -86,7 +86,11 @@ def next_job(db_factory,admit,now,report=None):
             if report:report({'state':'idle','reason':'','job_id':None})
             return None
         parent,kind,state,child=order[0]
-        if state=='admitted':return child
+        if state=='admitted':
+            # 0.30.0: its check is over (the child converts now); 'checking' stayed reported for the parent until the next
+            # retry request, so the jobs panel would name a retry check that no longer runs.
+            if report:report({'state':'idle','reason':'','job_id':None})
+            return child
         if report:report({'state':'checking','job_id':parent,'reason':''})
         try:result=admit(parent,kind)
         except InterruptedError:raise

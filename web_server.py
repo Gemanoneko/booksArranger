@@ -20,6 +20,7 @@ from review_backend import ATTENTION_GROUPS
 from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
 from action_queue import ActionQueue
+import background_work
 
 PORT = 5210
 MAX_BODY = 256 * 1024
@@ -636,7 +637,16 @@ class BrowserServer(ThreadingHTTPServer):
         return {'result': 'refused', 'code': 'failed', 'error': 'Unknown queued action'}
 
     def jobs_active(self):
-        return self.merge.state().get('state') in {'Running','Pausing','running','pausing'}
+        # 0.30.0: the live read (a queued scan asks this every 0.5 s; the full status computation took seconds to minutes).
+        state = self.merge.jobs_now() if callable(getattr(type(self.merge), 'jobs_now', None)) else self.merge.state()
+        return state.get('state') in {'Running','Pausing','running','pausing'}
+
+    def polled_jobs(self):
+        """The audiobook jobs status for a poll (0.30.0): the shared status computation's answer (its counts can be seconds
+        to minutes old under load) with its running part read now (MergeService.live_state)."""
+        merge = self.merge
+        jobs = merge.status_snapshot() if hasattr(merge, 'status_snapshot') else merge.state()
+        return merge.live_state(jobs) if callable(getattr(type(merge), 'live_state', None)) else jobs
 
     def server_bind(self):
         import socket
@@ -668,7 +678,7 @@ class BrowserServer(ThreadingHTTPServer):
         active = bool(self.inventory.worker and self.inventory.worker.is_alive())
         quiet=getattr(self.merge,'_quiet_token',None) if cached else None
         token=quiet() if callable(quiet) else None
-        jobs=self.merge.status_snapshot() if cached and hasattr(self.merge,'status_snapshot') else self.merge.state()
+        jobs=self.polled_jobs() if cached else self.merge.state()
         key=(library,active,self.closing,self.active_library,json.dumps(jobs,sort_keys=True,default=str))
         kept=self.__dict__.get('_quiet_parts')
         bound=self.merge.quiet_max_age() if hasattr(self.merge,'quiet_max_age') else QUIET_MAX_AGE
@@ -679,17 +689,23 @@ class BrowserServer(ThreadingHTTPServer):
             automatic=self.merge.automatic.status(jobs=jobs,scanning=active,server_closing=self.closing) if hasattr(self.merge,'automatic') else None
             if token is not None and quiet()==token:self._quiet_parts=((token,key),time.monotonic(),copy.deepcopy((status,automatic)))
         loaded = {'loading': self.loading.view()} if self.loading is not None else {}
+        queue = self.actions.view()
+        # 0.30.0 (Judy's spec 2.1): each queued action's blocker names what really holds it, from this poll's jobs fields.
+        background_work.explain_queue(queue, jobs, self.merge)
+        scan = self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None
+        sources = self._source_view()
         return self.health() | loaded | {'library': library, 'root': self.inventory.roots[library],
             'libraries': list(self.inventory.roots), 'genres': list(GENRES),'source_roots':list(self.inventory.source_roots(library)) if hasattr(self.inventory,'source_roots') else [self.inventory.roots[library]],'audiobook_output_root':getattr(self.inventory,'output_root',None),
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
             'status': status, 'audiobook_jobs': jobs,
-            'automatic_processing': automatic, **(queue:=self.actions.view()),
-            'activities': (rows:=activities(jobs, self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None,
-                                     self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))),
+            'automatic_processing': automatic, **queue,
+            'activities': (rows:=activities(jobs, scan, self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))),
             'needs_you_only': needs_you_only(jobs, automatic, rows, active, queue),
+            # 0.30.0 (Sergei 2026-11-18, Judy's spec): every running job and everything waiting (background_work).
+            'work': background_work.view(self, jobs, automatic, queue, active, scan, sources.get('library_roots'), self.__dict__.setdefault('_work_started', {})),
             # 0.29.0 item 1 (Judy section 1): each library root's state and the last check pass's report.
-            **self._source_view()}
+            **sources}
 
     def _source_view(self):
         view = self.merge.source_check_view() if hasattr(self.merge, 'source_check_view') else None
@@ -1061,7 +1077,8 @@ class Handler(BaseHTTPRequestHandler):
     def automatic_status(self):
         """A fresh automatic-processing status for a control's answer (the page takes it at once, as after Start)."""
         merge=self.server.merge
-        jobs=merge.status_snapshot() if hasattr(merge,'status_snapshot') else merge.state()
+        polled=getattr(self.server,'polled_jobs',None)
+        jobs=polled() if callable(polled) else merge.status_snapshot() if hasattr(merge,'status_snapshot') else merge.state()
         return merge.automatic.status(jobs=jobs,scanning=self.server.scan_active(),server_closing=self.server.closing)
 
     def refused(self,error,identity=None):

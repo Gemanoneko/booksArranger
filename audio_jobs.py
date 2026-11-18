@@ -1318,6 +1318,43 @@ class AudioJobs:
         if not running and not counts['queued'] and waiting_requests:state='Waiting for retry checks'
         return {"queue_work":{"schema":"books-audio-queue-work-v1","state":"checking_pending"} if admitting else None,"retry_checks":{"waiting":waiting_requests,"worker":copy.deepcopy(self._priority_status)},"state": state, **counts, "published_check": check, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
 
+    def live_status(self):
+        """0.30.0: status() for the jobs panel's every poll. The same state, queue_work, retry_checks, published_check,
+        current job and queued and failed counts, without reading every finished job's manifest (status() parses all of
+        them). 'jobs' holds only the running job and the waiting or held jobs whose progress is kept in memory; there is
+        no 'completed' count (the full status computation counts it)."""
+        import m4b_readmission
+        from manual_conversion import active_keys, source_keys
+        tracked=json.dumps(sorted(self._progress))
+        with self._db() as db:
+            waiting_requests=m4b_readmission.pending_count(db)
+            reserved=active_keys(db)
+            rows=[dict(row) for row in db.execute("SELECT job_id,state,stage,attempt_id,reason,CASE WHEN state='running' OR (state='pending' AND ?) "
+                  "OR job_id IN (SELECT value FROM json_each(?)) THEN manifest END AS manifest FROM audio_jobs "
+                  "WHERE state IN ('pending','running','needs attention') AND " + CURRENT + " ORDER BY created, job_id", (bool(reserved), tracked))]
+        for row in rows:row['manifest']=json.loads(row['manifest']) if row['manifest'] else None
+        if reserved:  # as status(): a waiting job whose sources a manual conversion holds is not listed
+            rows=[row for row in rows if not (row['state']=='pending' and not row['manifest'].get('manual_conversion') and not reserved.isdisjoint(source_keys(row['manifest'])))]
+        queued=sum(row['state']=='pending' for row in rows);failed=sum(row['state']=='needs attention' for row in rows)
+        current=([row for row in rows if row['state']=='running'] or [None])[-1]
+        running = bool(self._thread and self._thread.is_alive())
+        state = "Pausing" if running and self._stop.is_set() else "Running" if running else "Paused" if queued else "Needs attention" if failed else "Completed"
+        with self._lock:
+            check = copy.deepcopy(self._check_progress)
+            admitting=bool(running and current is None and self._claimed)
+        if not running and not queued and waiting_requests:state='Waiting for retry checks'
+        shown=[row for row in rows if row['manifest'] is not None and (row is current or row['job_id'] in self._progress)]
+        return {"queue_work":{"schema":"books-audio-queue-work-v1","state":"checking_pending"} if admitting else None,"retry_checks":{"waiting":waiting_requests,"worker":copy.deepcopy(self._priority_status)},"state":state,"queued":queued,"failed":failed,"published_check":check,"current_stage":current["stage"] if current else None,"current_job_id":current["job_id"] if current else None,
+                "jobs":[{"job_id":row["job_id"],"state":row["state"],"stage":row["stage"],"attempt_id":row["attempt_id"],"reason":row["reason"],"manifest":row["manifest"],"output":None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in shown]}
+
+    def job_rows(self, ids):
+        """{job_id: job} as status() lists them (output left out), for these ids only (0.30.0)."""
+        ids=[identity for identity in dict.fromkeys(ids) if identity]
+        if not ids:return {}
+        with self._db() as db:
+            rows=[dict(row) for row in db.execute('SELECT job_id,state,stage,attempt_id,reason,manifest FROM audio_jobs WHERE job_id IN (SELECT value FROM json_each(?))',(json.dumps(ids),))]
+        return {row['job_id']:{"job_id":row["job_id"],"state":row["state"],"stage":row["stage"],"attempt_id":row["attempt_id"],"reason":row["reason"],"manifest":json.loads(row["manifest"]),"output":None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows}
+
     def report_priority(self,value):
         with self._lock:self._priority_status=dict(value)
 

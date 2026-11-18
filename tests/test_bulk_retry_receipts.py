@@ -46,6 +46,13 @@ class BulkReceiptTests(unittest.TestCase):
         self.assertEqual(requests.describe(self.db,'parent')['waiting_reason'],'database is locked')
         self.assertEqual(requests.target_progress(self.db,['parent'])['targets'][0]['reason'],'database is locked')
         self.assertEqual(requests.pending_count(self.db),1)
+    def test_an_admitted_retry_ends_its_checking_report_0_30_0(self):
+        # 0.30.0: after the check admits the child, the worker's report went on saying 'checking' for the parent while the
+        # child converted, so the jobs panel would name a retry check that no longer ran.
+        self.request();events=[];self.db.execute("INSERT INTO audio_jobs VALUES('child','pending','')");self.db.commit()
+        self.assertEqual(requests.next_job(self.connection,lambda *_:dict(requeued=True,job_id='child'),2,events.append),'child')
+        self.assertEqual([event['state'] for event in events],['checking','idle'])
+        self.assertIsNone(events[-1]['job_id'])
     def test_worker_admission_rejection_keeps_typed_failure(self):
         self.request();requests.next_job(self.connection,lambda *_:dict(requeued=False,reason='Review changed',cause='unknown'),2)
         p=requests.target_progress(self.db,['parent']);self.assertEqual(p['counts']['stopped'],1)

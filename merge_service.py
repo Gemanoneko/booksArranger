@@ -643,14 +643,26 @@ class MergeService:
         token=self._quiet_token(True)
         with _QUIET_LOCK:
             kept=self.__dict__.get('_quiet_state')
-            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():return copy.deepcopy(kept[2])
+            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():
+                self._served_at=kept[3];return copy.deepcopy(kept[2])
         with _QUIET_LOCK:
             if self.__dict__.get('_closing'):raise StatusUnavailable('Books Arranger is closing')
             shared=self.__dict__.setdefault('_status_shared',SharedSnapshot())
-        started,value=shared.get(lambda:(self._quiet_token(),self.state()),max_age)
+        # 0.30.0: each answer carries when its computation began (snapshot_info), so the page can say how old it is.
+        started,value,began=shared.get(lambda:(lambda began:(self._quiet_token(),self.state(),began))(time.monotonic()),max_age)
+        self._served_at=began
         if token is not None and started==token:
-            with _QUIET_LOCK:self._quiet_state=(token,time.monotonic(),copy.deepcopy(value))
+            with _QUIET_LOCK:self._quiet_state=(token,time.monotonic(),copy.deepcopy(value),began)
         return value
+
+    def snapshot_info(self):
+        """0.30.0 (Judy's spec, section 3): {'snapshot_age_ms': how long ago the last answer status_snapshot served began
+        computing, 'refreshing': a newer computation runs now}. None before the first answer. Its counts (attention,
+        converted, candidates) are that old; the running part is read at every poll (live_state)."""
+        began=self.__dict__.get('_served_at')
+        if began is None:return None
+        shared=self.__dict__.get('_status_shared')
+        return {'snapshot_age_ms':max(0,int((time.monotonic()-began)*1000)),'refreshing':bool(shared is not None and shared._flight is not None)}
 
     def cached_page(self,limit,offset,search,status,group=None):
         """The book list for polling: a quiet app reuses the identical page (see status_snapshot). A page the list marks
@@ -805,7 +817,6 @@ class MergeService:
         # (its marker cleared, its row still read as pending) is never reported Paused (v0.16.2).
         worker=self._worker_active();token=self._quiet_token();started=time.monotonic()
         value=self.jobs.status()
-        with connect(self.inventory.database) as db:pause=__import__('pause_state').read(db,'jobs')
         cleanups=self._catalog_cached('cleanups',self.cleanup.status);storage=self._catalog_cached('storage',self.storage_cleanup.status)
         folders=self._catalog_cached('folders',self.storage_cleanup.folder_status)
         self._cleanup_kept=(started,token,{item['job_id']:item for item in cleanups})  # the book list reuses these
@@ -813,27 +824,72 @@ class MergeService:
         if hasattr(self,'replacements'):
             visible,completed=self.replacements.projected(value['jobs'],value['current_job_id'])
             value['jobs']=visible;value['completed']=completed
-        current=next((j for j in value['jobs'] if j['job_id']==value['current_job_id']),None)
-        pending=[c for c in cleanups if c['state'] in ('waiting','checking','removing','pausing','paused')]
+        shown={j['job_id']:j for j in value['jobs']};every={j['job_id']:j for j in raw_jobs}
+        pending,held=self._cleanups_now(cleanups)
+        live,current=self._running(value,lambda identity:shown.get(identity) or every.get(identity),pending,self._held(storage,held),worker)
+        # Empty-folder housekeeping holds nothing and is never attention (Sergei, 2026-10-18).
+        folder_notes=[]
+        totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
+        self._remember_converted(started,totals.get('converted_ids') or (),token)
+        # One predicate feeds every count and every list (Judy 2026-10-24, section 1): stale job rows are not counted, and
+        # the books only Sergei can move on are counted beside the stopped jobs.
+        summary=self.attention_summary(retry=False)
+        try:summary=self.stale_attention(summary,raw_jobs,set(totals.get('converted_ids') or ()))
+        except (sqlite3.Error,OSError):pass
+        current_media=summary.get(current['job_id'],{}).get('media_failure') if current else None
+        self._media_reason(live,current,current_media)
+        counts,cleanable=attention_counts(summary)
+        try:needs,coverage=self._todo()
+        except (sqlite3.Error,OSError,ValueError):needs,coverage={},dict(self.NO_COVERAGE)
+        for entry in needs.values():counts[entry['group']]=counts.get(entry['group'],0)+1
+        for group in self.NEEDS_GROUPS:counts.setdefault(group,0)
+        return {'completed':value['completed']} | live | {
+            'approved_total':totals['approved'],'converted_total':totals['converted'],'candidate_total':totals.get('candidate_total'),'not_approved_total':totals.get('not_approved_total'),'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
+            'current_media_failure':copy.deepcopy(current_media),
+            'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
+            'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable}
+
+    # The fields of state() that say what runs now. The live read (live_jobs) gives exactly these, fresh on every poll.
+    LIVE_FIELDS=('state','queued','failed','pause','start_admission','queue_work','current_job_origin','current_title','current_task_kind',
+                 'current_job_id','attempt_id','progress','stage','cleanup_active','maintenance','published_check','attention_row',
+                 'series_update','timed_retry','retry_checks','queued_conversions','cleanups_waiting','cleanups_paused','current_book_id',
+                 'cleanups_pending')
+
+    def _cleanups_now(self,cleanups=None):
+        """(pending, held) source cleanups: CleanupJobs.pending() and held(), catalog only. A stand-in without them filters
+        its status() (or cleanups, a status() already read) as state() did before 0.30.0."""
+        if callable(getattr(type(self.cleanup),'pending',None)) and callable(getattr(type(self.cleanup),'held',None)):
+            return self.cleanup.pending(),self.cleanup.held()
+        rows=self.cleanup.status() if cleanups is None else cleanups
+        return [c for c in rows if c['state'] in ('waiting','checking','removing','pausing','paused')],[c for c in rows if c['state']=='needs_attention']
+
+    def _held(self,storage,held):
+        """Every held cleanup (the jobs panel's On hold), in the status order: source cleanups (held, phase 'originals'),
+        temporary-file cleanups ('temporary'), replacement postprocessing ('former outputs'). Catalog only."""
+        errors=[dict(c,phase='originals') for c in held]+[dict(r,phase='temporary') for r in storage if r['state']=='needs_attention']
+        if hasattr(self,'replacements'):
+            for relation in self.replacements.rows():
+                failure=json.loads(relation['failure_json'] or '{}')
+                if failure and failure.get('type')!='InterruptedError':errors.append({'job_id':relation['replacement_job_id'],'state':'needs_attention','reason':failure.get('message','Replacement postprocessing needs attention'),'replacement':True,'phase':'former outputs'})
+        return errors
+
+    def _running(self,value,job,pending,errors,worker):
+        """What runs now, as the jobs panel says it: (the LIVE_FIELDS, the current job or None). One function for the full
+        status computation and the live read every poll makes (0.30.0), so the two never word it differently. value: a jobs
+        status (AudioJobs.status() or live_status()), its state, queued and failed updated here; job(id): that job or None;
+        pending: CleanupJobs.pending(); errors: _held(); worker: _worker_active() sampled before the reads."""
+        current=job(value['current_job_id']) if value['current_job_id'] else None
         active=next((c for c in pending if c['id']==self.cleanup.current),None)
         if not active and pending and not value['current_job_id']:active=pending[0]
         post=self._post_current
         if post and not self.cleanup.current:active=None
-        if not current and (active or post):
-            id=active['job_id'] if active else post[0]
-            current=next((j for j in value['jobs'] if j['job_id']==id),None)
+        if not current and (active or post):current=job(active['job_id'] if active else post[0])
         worker=worker or self._worker_active() # The pre-v0.16.2 after-read check, kept: a worker resumed mid-read.
+        conversions=value['queued']
         if pending and not value['current_job_id']:
             value['state']='Pausing' if worker and self.cleanup.stop.is_set() else 'Running' if worker else 'Paused'
             value['queued']+=len(pending)
         elif value['state']=='Paused' and worker:value['state']='Pausing' if self.cleanup.stop.is_set() else 'Running'
-        errors=[c for c in cleanups if c['state']=='needs_attention']+[r for r in storage if r['state']=='needs_attention']
-        if hasattr(self,'replacements'):
-            for relation in self.replacements.rows():
-                failure=json.loads(relation['failure_json'] or '{}')
-                if failure and failure.get('type')!='InterruptedError':errors.append({'job_id':relation['replacement_job_id'],'state':'needs_attention','reason':failure.get('message','Replacement postprocessing needs attention'),'replacement':True})
-        # Empty-folder housekeeping holds nothing and is never attention (Sergei, 2026-10-18).
-        folder_notes=[]
         value['failed']+=len(errors)
         if errors and value['state']=='Completed':value['state']='Needs attention'
         progress=None
@@ -845,10 +901,9 @@ class MergeService:
             chapter=(current.get('progress') or {}).get('chapter_check')
             if chapter:progress={'phase':'Checking source audio','chapter_check':copy.deepcopy(chapter)}
         elif errors:
-            error=errors[0];current=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
-            phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
-            progress={'phase':phase,'reason':error['reason'],'attention':True}  # held, not running
-            if phase=='originals':progress.update(completed=error['removed'],total=error['total'])
+            error=errors[0];current=job(error['job_id'])
+            progress={'phase':error['phase'],'reason':error['reason'],'attention':True}  # held, not running
+            if error['phase']=='originals':progress.update(completed=error['removed'],total=error['total'])
         elif value['state'] in ('Paused','Needs attention'):
             waiting=next((j for j in reversed(value['jobs']) if j['state'] in ('pending','needs attention') and j.get('progress')),None)
             if waiting:current=waiting;progress=phase_progress(waiting['stage'],waiting['progress'])
@@ -859,43 +914,85 @@ class MergeService:
         if errors:
             # Shown as its own needs-attention row whatever else runs, so it never flickers in as
             # the active row between two books.
-            error=errors[0];held=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
-            phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
-            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason',''),'task_kind':held['manifest'].get('task_kind') if held else None,
+            error=errors[0];held=job(error['job_id'])
+            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':error['phase'],'reason':error.get('reason',''),'task_kind':held['manifest'].get('task_kind') if held else None,
                            # 0.29.0 (Judy section 7, On hold): which book (Show in list), how many are held, and a cause code
                            # the page words plainly instead of the engine's text.
                            'book_id':held['manifest'].get('candidate_id') if held else None,'held_total':len(errors),'cause':hold_cause(error.get('reason',''))}
-            if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
-        totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
-        self._remember_converted(started,totals.get('converted_ids') or (),token)
-        # One predicate feeds every count and every list (Judy 2026-10-24, section 1): stale job rows are not counted, and
-        # the books only Sergei can move on are counted beside the stopped jobs.
-        summary=self.attention_summary(retry=False)
-        try:summary=self.stale_attention(summary,raw_jobs,set(totals.get('converted_ids') or ()))
-        except (sqlite3.Error,OSError):pass
-        current_media=summary.get(current['job_id'],{}).get('media_failure') if current else None
-        if current_media and progress and progress.get('reason'):progress['reason']=current_media['hint']
-        if current and current['state']=='needs attention' and progress and progress.get('reason') and not current_media:progress['reason']='The media check stopped. Open Technical details for the recorded failure.'
-        counts,cleanable=attention_counts(summary)
-        try:needs,coverage=self._todo()
-        except (sqlite3.Error,OSError,ValueError):needs,coverage={},dict(self.NO_COVERAGE)
-        for entry in needs.values():counts[entry['group']]=counts.get(entry['group'],0)+1
-        for group in self.NEEDS_GROUPS:counts.setdefault(group,0)
-        return {key:value[key] for key in ('state','queued','completed','failed')} | {
-            'approved_total':totals['approved'],'converted_total':totals['converted'],'candidate_total':totals.get('candidate_total'),'not_approved_total':totals.get('not_approved_total'),'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
-            'pause':pause,'start_admission':self._current_start_admission(),
+            if error['phase']=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
+        with connect(self.inventory.database) as db:pause=__import__('pause_state').read(db,'jobs')
+        return {'state':value['state'],'queued':value['queued'],'failed':value['failed'],'pause':pause,'start_admission':self._current_start_admission(),
             'queue_work':value.get('queue_work') if not active and not post else None,
             'current_job_origin':job_origin(current['manifest']) if current else 'unknown',
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
             'current_task_kind':current['manifest'].get('task_kind') if current else None,
-            'current_media_failure':copy.deepcopy(current_media),
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
+            'current_book_id':current['manifest'].get('candidate_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
-            'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
-            'maintenance':copy.deepcopy(self.__dict__.get('_maintenance')),'published_check':value.get('published_check'),'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable,'attention_row':attention_row,
+            'cleanup_active':bool(active or pending or post),
+            'maintenance':copy.deepcopy(self.__dict__.get('_maintenance')),'published_check':value.get('published_check'),'attention_row':attention_row,
             'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None,
             # 0.29.0 item 8: a cleanup retry the app makes by itself later (the jobs panel never says "only you" then).
-            'timed_retry':any(deadline>time.monotonic() for deadline in self.__dict__.get('_cleanup_retry_at',{}).values())}
+            'timed_retry':any(deadline>time.monotonic() for deadline in self.__dict__.get('_cleanup_retry_at',{}).values()),
+            # 0.30.0: the retry checks waiting and the one running (the page read them; state() never sent them), and the
+            # three numbers 'queued' adds up (Judy's 0.30.0 spec, section 4): books waiting to convert, cleanups not
+            # started, cleanups paused (pausing included).
+            'retry_checks':copy.deepcopy(value.get('retry_checks')),'queued_conversions':conversions,
+            'cleanups_waiting':sum(c['state']=='waiting' for c in pending),'cleanups_paused':sum(c['state'] in ('paused','pausing') for c in pending),
+            # Every cleanup that waits, runs or is paused, oldest first ('active': the one the status calls current).
+            'cleanups_pending':[{key:c[key] for key in ('job_id','state','removed','total')}|{'active':c is active} for c in pending]},current
+
+    @staticmethod
+    def _media_reason(live,current,media):
+        """The media check's own hint replaces a held job's reason (media: current_media_failure, from the attention summary)."""
+        progress=live.get('progress')
+        if media and progress and progress.get('reason'):progress['reason']=media['hint']
+        if current and current['state']=='needs attention' and progress and progress.get('reason') and not media:progress['reason']='The media check stopped. Open Technical details for the recorded failure.'
+
+    def live_jobs(self):
+        """0.30.0 (Sergei 2026-11-18: every running job visible): the LIVE_FIELDS of state(), read now from the workers'
+        memory and a few small catalog reads, never from the full status computation (which reads every recovery copy,
+        finished job and attention record, and took seconds to minutes under load). Returns (fields, current job or None)."""
+        worker=self._worker_active()
+        # A stand-in queue without the live reads (tests) gives its whole status, as before 0.30.0.
+        lean=callable(getattr(type(self.jobs),'live_status',None))
+        value=self.jobs.live_status() if lean else self.jobs.status()
+        rows={j['job_id']:j for j in value['jobs']}
+        def job(identity):
+            if identity not in rows and lean:rows.update(self.jobs.job_rows([identity]))
+            return rows.get(identity)
+        pending,held=self._cleanups_now()
+        return self._running(value,job,pending,self._held(self.storage_cleanup.status(),held),worker)
+
+    def jobs_now(self):
+        """The jobs' state, queued, cleanup_active and the other LIVE_FIELDS, read now (live_jobs), for the loops that wait for
+        the queue (automatic processing; a queued scan's jobs_active). A state() set on this instance, a stand-in's jobs state,
+        answers instead."""
+        own=self.__dict__.get('state')
+        return own() if callable(own) else self.live_jobs()[0]
+
+    def live_state(self,snapshot=None):
+        """A polling answer whose running part is read now (0.30.0): snapshot (status_snapshot's answer, seconds to minutes
+        old under load) with its LIVE_FIELDS, Retry all and a waiting Resume replaced by live reads. The media hint is kept
+        only for the same job. A failed live read leaves the snapshot as it was, and so does a stand-in's own state() or
+        status_snapshot() set on this instance."""
+        if snapshot is not None and any(callable(self.__dict__.get(name)) for name in ('state','status_snapshot')):return snapshot
+        try:live,current=self.live_jobs()
+        except Exception as error:  # never fail a poll over it: the snapshot is what the page had before 0.30.0
+            self._live_error=type(error).__name__+': '+str(error)[:300]
+            return snapshot
+        if snapshot is None:return live
+        media=snapshot.get('current_media_failure') if snapshot.get('current_job_id')==live['current_job_id'] else None
+        self._media_reason(live,current,media)
+        value=dict(snapshot)|live|{'current_media_failure':copy.deepcopy(media)}
+        value.pop('start_waiting',None)
+        with _BULK_LOCK:running=self.__dict__.get('_retry_all_run') is not None
+        if running:  # a Retry all in this session: its progress now (an older saved run's receipt is the snapshot's)
+            run=self._bulk_retry_view()
+            if run is not None:value['retry_all']=run
+        waiting=self.__dict__.get('_start_waiting')
+        if waiting is not None:value['start_waiting']={'reason':waiting['reason']}
+        return value
 
     def _current_start_admission(self):
         with _BULK_LOCK:
