@@ -338,16 +338,32 @@ class ConstructionTests(unittest.TestCase):
             with self.subTest(fails=fails):
                 seen=[]
                 def check(merge,**options):
-                    seen.append(server.loading.view()['step'])
+                    # 0.30.0 (Senua S-m4, stall half): the startup pass stops when loading is stopped (a Quit while loading).
+                    seen.append((server.loading.view()['step'],options.get('stop') is server.loading.abort))
                     if fails:raise RuntimeError('drive error')
                 with patch.object(MergeService,'check_sources',autospec=True,side_effect=check),patch.object(web_server.BrowserServer,'_start_background'):
                     server=web_server.BrowserServer(('127.0.0.1',0),self.inventory,defer=True)
                     try:
                         server.start_loading().join(10)
                         self.assertTrue(server.loading.finished,server.loading.error)
-                        self.assertEqual(seen,['sources'])
+                        self.assertEqual(seen,[('sources',True)])
                     finally:
                         server.server_close()
+
+    def test_the_check_pass_stops_for_its_callers_stop_and_for_closing_s_m4(self):
+        # 0.30.0 (Senua S-m4, stall half): source_presence.run is stopped by the caller's stop (the loader's abort) as well
+        # as by the app's own closing stop; nothing else stops it.
+        import source_presence
+        from types import SimpleNamespace
+        from merge_service import MergeService
+        merge=MergeService.__new__(MergeService);merge.inventory=SimpleNamespace(worker=None)
+        own,caller=threading.Event(),threading.Event();merge._retention_stop=own;flags=[]
+        empty={'roots':[],'removed':[],'folders':[],'files':[],'cleared':[]}
+        with patch.object(source_presence,'run',side_effect=lambda *a,**k:flags.append(k['stop']) or dict(empty)):
+            merge.check_sources(stop=caller);merge.check_sources()
+        self.assertEqual([flag.is_set() for flag in flags],[False,False])
+        caller.set();self.assertEqual([flag.is_set() for flag in flags],[True,False],'the loader\'s abort stops the startup pass')
+        own.set();self.assertEqual([flag.is_set() for flag in flags],[True,True],'closing stops every pass')
 
     def test_a_failed_restore_says_so_on_the_jobs_line_r_m5(self):
         from types import SimpleNamespace

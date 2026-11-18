@@ -86,6 +86,16 @@ class MergeHTTPTests(unittest.TestCase):
         with patch.object(source_presence,'probe_roots',return_value=both):
             self.assertTrue(self.call('/api/sources/check',{})[1]['checking'])
         self.server._check_sources_returned.assert_called_once_with(['Z:\\Audiobooks'])
+        # 0.30.0 (Senua S-m3): the probe (up to 11 s on a hung root) holds no merge admission, so a scan start, a restart and a
+        # recovery deletion are not refused meanwhile; a closing server answers without probing.
+        held=[]
+        with patch.object(source_presence,'probe_roots',side_effect=lambda roots:held.append(self.server.merge_admissions) or both):
+            self.assertEqual(self.call('/api/sources/check',{})[0],200)
+        self.assertEqual(held,[0])
+        self.server.closing=True
+        with patch.object(source_presence,'probe_roots',side_effect=AssertionError('probed while closing')):
+            self.assertEqual(self.call('/api/sources/check',{})[0],409)
+        self.server.closing=False
 
     def test_a_skipped_or_failed_drive_return_pass_is_tried_again_d_m3(self):
         # Senua D-m3: the route records the root as answering before its pass runs, so the page stops asking. A pass that
@@ -123,6 +133,15 @@ class MergeHTTPTests(unittest.TestCase):
             alive[0]=True;self.merge._source_checked_at={}
             then['after']=lambda:alive.__setitem__(0,False)
             self.assertEqual(returned(),1)
+            # 0.30.0 (Senua D-m3, final review): a scan longer than the tries (here 3 x RETURN_TRIES waits), then stopped: the
+            # waits for it are not tries, so the pass still runs once it ends.
+            alive[0]=True;left=[3*web_server.BrowserServer.RETURN_TRIES]
+            def long_scan():
+                left[0]-=1
+                if not left[0]:alive[0]=False
+            then['after']=long_scan;self.merge.check_sources=Mock(return_value=report)
+            self.assertEqual(returned(),1,'the root is checked after a long scan that was stopped')
+            self.assertEqual(left[0],0,'it waited for the whole scan')
             # Bounded: a pass that never runs is tried RETURN_TRIES more times, then left to the next scan or launch.
             then['after']=lambda:None;self.merge.check_sources=Mock(return_value=None)
             self.assertEqual(returned(),web_server.BrowserServer.RETURN_TRIES+1)

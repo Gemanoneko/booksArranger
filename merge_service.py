@@ -1144,7 +1144,7 @@ class MergeService:
         wake=getattr(self,'_retention_wake',None)
         if wake is not None:wake.set()
 
-    def check_sources(self,*,roots=None,folders=True,books=True,progress=None,wait=False):
+    def check_sources(self,*,roots=None,folders=True,books=True,progress=None,wait=False,stop=None):
         """0.29.0 items 1, 3 and 5: one check pass (source_presence.run). None when another pass or a scan runs (the scan's
         end runs one). The per-root states are replaced as roots are checked; removed books and deleted folders add up
         until Dismiss or the next start (Judy section 1), each book and folder once (Futaba M-3: Details listed books twice).
@@ -1164,7 +1164,12 @@ class MergeService:
                 self._source_progress={'phase':'checking','done':done,'total':total,'started':started}
                 if progress is not None:progress(done,total)
             def phase(name):self._source_progress={'phase':name,'started':int(time.time()*1000)}
-            report=source_presence.run(self,roots=roots,folders=folders,books=books,progress=counted,stop=self.__dict__.get('_retention_stop'),on_phase=phase)
+            # 0.30.0 (Senua S-m4, stall half): stop is the caller's too (the startup pass gets the loader's abort, so a Quit
+            # during loading no longer waits for every book's folder on a share that stalls); the pass ends at its next book
+            # or folder, deciding only what it has checked.
+            own=self.__dict__.get('_retention_stop')
+            halt=_Flag(lambda:bool(own is not None and own.is_set() or stop is not None and stop.is_set()))
+            report=source_presence.run(self,roots=roots,folders=folders,books=books,progress=counted,stop=halt,on_phase=phase)
         finally:
             self._source_checking=False;self._source_progress=None;lock.release()
         previous=self.__dict__.get('_source_report') or {'roots':[],'removed':[],'folders':[],'files':[],'cleared':[]}

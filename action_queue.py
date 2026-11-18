@@ -86,6 +86,10 @@ class ActionQueue:
                 return 'automatic'
             if server.scan_active():
                 return 'scan'
+            # 0.30.0 (Senua S-m9, overlap half): nor beside a source check pass. A pass refuses to start beside a scan; a scan
+            # started during a pass regrouped the books the pass was testing.
+            if getattr(merge, '__dict__', {}).get('_source_checking'):
+                return 'operation'
             try:
                 if server.jobs_active():
                     return 'jobs'

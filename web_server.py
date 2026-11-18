@@ -381,16 +381,21 @@ class BrowserServer(ThreadingHTTPServer):
             return all(stamps.get(source_presence._key(root), float('-inf')) >= asked for root in roots)
 
         def run():
-            for attempt in range(self.RETURN_TRIES + 1):
-                if attempt:
-                    time.sleep(self.RETURN_RETRY_SECONDS)
+            tries = 0
+            while True:
                 if self.closing or checked():
                     return
                 worker = getattr(self.inventory, 'worker', None)
                 if worker is not None and worker.is_alive():
+                    # Senua D-m3 (0.29.0 final review): a running scan is waited for, never counted as a try. A scan longer
+                    # than the eight tries (about 2 min) used them all up, and if it was then stopped (no pass at its end)
+                    # the root that came back stayed unchecked until the next finished scan or launch.
+                    time.sleep(self.RETURN_RETRY_SECONDS)
                     continue
-                if self._check_sources(merge, roots=roots, wait=True) is not None:
+                if self._check_sources(merge, roots=roots, wait=True) is not None or tries >= self.RETURN_TRIES:
                     return
+                tries += 1
+                time.sleep(self.RETURN_RETRY_SECONDS)
         threading.Thread(target=run, name='books-source-check', daemon=True).start()
 
     def _check_sources_after_scan(self):
@@ -445,7 +450,8 @@ class BrowserServer(ThreadingHTTPServer):
             self.merge = merge
             # 0.29.0 (Judy section 1): the check pass is part of loading, before the list appears, so it never shows ghosts.
             loading.begin('sources', 0, 'books')
-            self._check_sources(merge, progress=lambda done, total: loading.advance(done, total))
+            # Senua S-m4 (stall half): the loader's abort stops the pass, so a Quit while a share stalls is not held up by it.
+            self._check_sources(merge, progress=lambda done, total: loading.advance(done, total), stop=loading.abort)
             loading.checkpoint()
             # Step 5: the first status (counted per book) and the first book page, so the page's first reads are warm.
             loading.begin('books', 0, 'books')
@@ -1091,6 +1097,26 @@ class Handler(BaseHTTPRequestHandler):
             if row is not None:body['row']=row
         self.response(409,body)
 
+    def sources_check(self,data):
+        """0.29.0 (Judy section 1): Check again, and the page's 30 s re-check while a root does not answer. The roots are
+        probed now; a pass runs (in the background) only for a root that did not answer at the last check and answers with
+        content now (Senua S-M3: the pass ran, folder deletion included, on every healthy root every 30 s). 0.30.0 (Senua
+        S-m3): no merge admission is held (do_POST): the probe takes up to 11 s on a hung root, and Start scan, Restart Books
+        Arranger and recovery deletion were refused meanwhile. It reads the drives and replaces only the pass report."""
+        if data:raise ValueError('Check again requires an empty object')
+        import source_presence
+        merge=self.server.merge
+        roots=list(self.server.inventory.source_roots('Audiobooks')) if hasattr(self.server.inventory,'source_roots') else [self.server.inventory.roots['Audiobooks']]
+        states=source_presence.probe_roots(roots)
+        report=merge.__dict__.get('_source_report')
+        known={source_presence._key(r['path']):r for r in report['roots']} if report is not None else None
+        if report is not None:
+            merge._source_report=dict(report,roots=[dict(known.get(source_presence._key(s['path']),{}),**s) for s in states])
+        # No report yet (the start pass did not run): every root that answers is the one that came back.
+        back=[s['path'] for s in states if source_presence.answers(s) and (known is None or not source_presence.answers(known.get(source_presence._key(s['path']))))]
+        if back and not self.server.closing:self.server._check_sources_returned(back)  # retried if skipped or failed (Senua D-m3)
+        self.response(200,{'source_check':merge.source_check_view() if hasattr(merge,'source_check_view') else None,'checking':bool(back)})
+
     def merge_request(self,path,data):
         if path.startswith('/api/manual-conversion/'):
             action=path.rsplit('/',1)[1]
@@ -1099,23 +1125,6 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as error:
                 self.fail(400,str(error))
             return
-        if path=='/api/sources/check':
-            # 0.29.0 (Judy section 1): Check again, and the page's 30 s re-check while a root does not answer. The roots are
-            # probed now; a pass runs (in the background) only for a root that did not answer at the last check and answers
-            # with content now (Senua S-M3: the pass ran, folder deletion included, on every healthy root every 30 s).
-            if data:raise ValueError('Check again requires an empty object')
-            import source_presence
-            merge=self.server.merge
-            roots=list(self.server.inventory.source_roots('Audiobooks')) if hasattr(self.server.inventory,'source_roots') else [self.server.inventory.roots['Audiobooks']]
-            states=source_presence.probe_roots(roots)
-            report=merge.__dict__.get('_source_report')
-            known={source_presence._key(r['path']):r for r in report['roots']} if report is not None else None
-            if report is not None:
-                merge._source_report=dict(report,roots=[dict(known.get(source_presence._key(s['path']),{}),**s) for s in states])
-            # No report yet (the start pass did not run): every root that answers is the one that came back.
-            back=[s['path'] for s in states if source_presence.answers(s) and (known is None or not source_presence.answers(known.get(source_presence._key(s['path']))))]
-            if back:self.server._check_sources_returned(back)  # retried if skipped or failed (Senua D-m3)
-            self.response(200,{'source_check':merge.source_check_view() if hasattr(merge,'source_check_view') else None,'checking':bool(back)});return
         if path=='/api/sources/rows':
             # Window focus (Judy section 0): stale rows only, at most once per 30 s; never books, never folders (Futaba m-1).
             if data:raise ValueError('The row check requires an empty object')
@@ -1598,7 +1607,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.status_control=False
                 self.response(202,self.queue_press(path,data,always=True));return
             if path in READ_ONLY_POSTS and isinstance(data,dict) and data.get('queue') is not True:self.status_control=False  # ruling 75a: a read keeps it
-            merge_routes={'/api/sources/check','/api/sources/rows','/api/sources/dismiss','/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup/retry','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
+            if path=='/api/sources/check':
+                # Senua S-m3 (0.29.0): probed without a merge admission (sources_check).
+                with self.server.control_lock:
+                    if self.server.closing:self.fail(409,'Server is shutting down');return
+                    if still_loading(self.server):self.response(409,{'error':NOT_YET,'code':'loading'});return
+                self.sources_check(data);return
+            merge_routes={'/api/sources/rows','/api/sources/dismiss','/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup/retry','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',

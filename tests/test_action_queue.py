@@ -524,6 +524,15 @@ class QueueTests(unittest.TestCase):
                 self.retry(2)
         self.assertEqual(len(self.queue.view()['queued_actions']), 2)
 
+    def test_a_scan_waits_for_a_source_check_pass_s_m9(self):
+        # 0.30.0 (Senua S-m9, overlap half): a scan pressed while a check pass runs waits for it, then runs.
+        self.server.jobs_active = lambda: False
+        self.server.merge._source_checking = True
+        self.assertEqual(self.queue.blocker('scan_start', 'library:Audiobooks'), 'operation')
+        self.assertEqual(self.queue.blocker('scan_resume', 'library:Audiobooks'), 'operation')
+        self.server.merge._source_checking = False
+        self.assertIsNone(self.queue.blocker('scan_start', 'library:Audiobooks'), 'positive control: nothing else holds it')
+
     def test_retry_cleanup_is_never_held_by_its_own_books_cleanup_only_by_another_books(self):
         # 0.30.0 (action_queue.py:113): Retry cleanup is queued under the book's candidate id with its job in the args; the
         # check compared that candidate id with each cleanup's job id, so the book's own waiting or paused cleanup held it.
