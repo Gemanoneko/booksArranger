@@ -94,6 +94,9 @@ NEEDS_GROUPS=('files_missing','title_author','author_unclear','same_author','nam
 JOB_ORDER={'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
 JOB_GROUPS=tuple(JOB_ORDER)
 ATTENTION_GROUPS=frozenset(('all',)+NEEDS_GROUPS+JOB_GROUPS)
+# The book list filters a book the check pass took off the list (source_presence.hidden) leaves, as Needs attention does:
+# All candidates (0.29.0, Futaba M-5), Held and Candidate changed (0.30.0, Futaba O-r3-1). List-only; never a job book.
+HIDES_GONE=('all','held','changed')
 
 
 # Ruling 40: the names a book's row edits (Edit names); the book panel shows them as facts and never saves them.
@@ -415,8 +418,9 @@ class CandidateReviewService:
         with connect(self.inventory.database) as db:
             self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
             # 0.29.0 (Sergei, Futaba M-5): books the check pass took off the list leave All candidates too, list-only. A
-            # book with a job is never among them, so a converted book stays in the converted list.
-            hidden=__import__('source_presence').hidden(db) if status=='all' else set()
+            # book with a job is never among them, so a converted book stays in the converted list. 0.30.0 (Sergei,
+            # Futaba O-r3-1): the Held and Candidate changed filters too.
+            hidden=__import__('source_presence').hidden(db) if status in HIDES_GONE else set()
         self.page_local.jobs={};job_rows=None;attention={}
         if self.jobs and hasattr(self.jobs,'jobs'):
             job_rows=self.jobs.jobs.status()['jobs']
@@ -466,8 +470,10 @@ class CandidateReviewService:
             elif status=='held' and automatic is not None:ids={cid for cid,item in automatic.items() if item['state']=='Held'}
             elif status=='recording_review' and automatic is not None:ids={cid for cid,item in automatic.items() if item['duplicate_review']}|{cid for cid,saved in self.page_local.contexts.items() if saved['data'].get('duplicate_review')}
             elif status=='restarted':ids=set(restart)
+        if ids is not None and hidden:ids=set(ids)-hidden
+        # Held is not a direct filter: its rows are read whole (search included) and chosen below, the hidden ones left out.
         result=self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all',ids=ids) if ids is not None else \
-            self.inventory.candidates('Audiobooks',limit,offset,search,status,hidden=hidden) if hidden else \
+            self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all',hidden=hidden) if hidden else \
             self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all')
         def current_auto(row):
             if automatic is not None:

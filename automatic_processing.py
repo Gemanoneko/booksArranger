@@ -302,6 +302,12 @@ class AutomaticProcessing:
                 if r['state']=='Researching':counts['researching']+=r['n']
                 elif r['state']=='Waiting for source':counts['waiting']+=r['n']
                 elif r['state']=='Held':counts['held']+=r['n']
+            # 0.30.0 (Futaba O-r3-1): a book the check pass took off the list leaves the Held filter, so it leaves its count
+            # too, as it left the candidate count in 0.29.0 (list-only; a book with a job is never hidden).
+            gone=__import__('source_presence').hidden(db) if counts['held'] else set()
+            if gone:
+                counts['held']-=db.execute("SELECT count(*) FROM automatic_candidates a JOIN book_groups g ON g.id=a.id AND g.revision=a.revision AND g.fingerprint=a.fingerprint "
+                                           "WHERE g.superseded=0 AND a.state='Held' AND a.id IN (SELECT value FROM json_each(?))",(json.dumps(sorted(gone)),)).fetchone()[0]
         state=run['state'] if run else 'Idle'
         with connect(self.database) as db:
             failure=db.execute('SELECT diagnostic FROM automatic_errors WHERE run_id=? ORDER BY created DESC LIMIT 1',(run['id'] if run else '',)).fetchone()

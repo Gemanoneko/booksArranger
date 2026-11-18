@@ -315,6 +315,32 @@ class RealServerTests(ApproveFixture):
         self.assertEqual((jobs['candidate_total'], jobs['not_approved_total']), (1, 0), 'the count leaves it out too')
         self.assertEqual(self.listing('all', 'Утро'), ([], 0), 'nor found by a search in All candidates')
 
+    def test_a_gone_book_leaves_the_held_and_candidate_changed_filters_and_the_held_count_o_r3_1(self):
+        # 0.30.0 (Futaba O-r3-1, Sergei: yes): as in All candidates (M-5), list-only; a book with a job is never hidden.
+        [tone(self.audio / 'Unsorted' / 'Утро снайпера' / ('%02d.mp3' % n), self.cover, album='Утро снайпера', title='Глава %d' % n, track='%d/2' % n) for n in (1, 2)]
+        tone(self.audio / 'Unsorted' / 'Ясно' / '01.mp3', self.cover, album='Ясно', title='Глава 1')
+        self.serve()
+        gone, kept = self.row('Утро снайпера'), self.row('Ясно')
+        for row in (gone, kept):
+            self.service.automatic._record(row, 'Held', dict(self.research(row), reasons=['fixture hold']))
+        self.assertEqual(self.listing('held'), (['Утро снайпера', 'Ясно'], 2), 'positive control: both held')
+        self.assertEqual(self.attention()[1]['automatic_processing']['research']['held'], 2)
+        # 1. Away with no scan (the pass at a launch): the book keeps its fingerprint, so its Held record still matches.
+        folder, away = self.audio / 'Unsorted' / 'Утро снайпера', self.base / 'away'
+        os.rename(folder, away)
+        self.assertEqual([item['id'] for item in self.service.check_sources()['removed']], [gone['id']])
+        self.assertEqual(self.service.automatic.index()[gone['id']]['state'], 'Held', 'positive control: still recorded as held')
+        self.assertEqual(self.listing('held'), (['Ясно'], 1), 'the gone book left Held')
+        self.assertEqual(self.listing('held', 'Утро'), ([], 0), 'nor found by a search in Held')
+        self.assertEqual(self.attention()[1]['automatic_processing']['research']['held'], 1, 'the held count leaves it out too')
+        # 2. A scan marks its files missing: the catalog calls it changed, the Candidate changed filter leaves it out.
+        self.scan()
+        changed = self.inv.candidates('Audiobooks', limit=100, status='changed')['rows']
+        self.assertIn(gone['id'], [row['id'] for row in changed], 'positive control: the catalog lists it as changed')
+        self.assertEqual(self.listing('changed'), ([], 0), 'the gone book left Candidate changed')
+        self.assertEqual(self.listing('changed', 'Утро'), ([], 0), 'nor found by a search in Candidate changed')
+        self.assertEqual(self.listing('held')[0], ['Ясно'])
+
 
 if __name__ == '__main__':
     unittest.main()
