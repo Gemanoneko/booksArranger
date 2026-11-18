@@ -583,7 +583,7 @@ class PassTests(Base):
         calls = {'n': 0}
         def state():
             calls['n'] += 1
-            if calls['n'] == 3:  # the conversion wait's idle check (two reads before it look for queued work)
+            if calls['n'] == 2:  # the conversion wait's idle check (one read before it looks for queued work: 0.30.0 item F)
                 auto.requeue('late-book')  # a Start over press while the run waits for conversions
             return {'state': 'Idle', 'queued': 0, 'cleanup_active': False, 'failed': 0}
         merge.state = state

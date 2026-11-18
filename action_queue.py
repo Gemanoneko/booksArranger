@@ -436,7 +436,8 @@ class ActionQueue:
             moves = [item for item in self.items if item['action'] == 'move']
             self.items = [item for item in self.items if item['action'] != 'move']
             self.changed.notify_all()
-        self._persist()
+        if moves or self.unsaved():
+            self._persist()  # 0.30.0 item F: nothing changed, nothing written (close() saves the queue once, with its stamp)
         for item in moves:
             self._forget_move(item)
 

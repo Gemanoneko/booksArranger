@@ -40,6 +40,8 @@ class DesktopControl:
         self.thread = None
         self.exit_bound = exit_bound
         self.exit_process = exit_process or os._exit
+        self.quitting = False   # a Quit or a safe stop has begun (its status answers at once, with waiting_for)
+        self.shutting = False   # its shutdown has begun: a safe stop then starts no second one
 
     def _bound_exit(self):
         """Shutdown succeeded: if this process is still alive after exit_bound, report what kept it and end it."""
@@ -110,6 +112,8 @@ class DesktopControl:
         loading = getattr(self.server, 'loading', None)
         return loading is not None and not loading.finished
 
+    QUIT_PHASES = ('finishing', 'parking', 'blocked', 'stopping', 'exiting')
+
     def status(self):
         with self.lock:
             value = {'phase': self.phase, 'error': self.error, 'requested_at': self.requested_at}
@@ -120,6 +124,13 @@ class DesktopControl:
                 value['busy'] = None
                 value['idle'] = False
                 return value
+            quitting = self.quitting and self.phase in self.QUIT_PHASES
+        if quitting:
+            # 0.30.0 item F: Quit and a safe stop answer at once with what close still waits for (waiting_for: [{kind, title}]),
+            # never with a state computation. The shell's Quit watch polls every second; each poll started a full status
+            # computation (minutes on Sergei's catalog under load), and close then waited for it.
+            value.update(busy=None, idle=False, waiting_for=self._close_waiting())
+            return value
         if self._loading():
             # Startup (ruling 28): the shell's tray and Quit read the load at once; there is no state to compute yet.
             value.update(loading=self.server.loading.view(), busy=None, idle=False)
@@ -170,9 +181,10 @@ class DesktopControl:
             self.error = ''
             self.phase = 'finishing'
             self.requested_at = time.time()
-        with self.server.control_condition:
-            # New controls are refused from here on; reads and polling keep working.
-            self.server.closing = True
+            self.quitting = True
+            self.shutting = False
+        # New controls are refused from here on; reads and polling keep working.
+        self._set_closing()
         # 0.22.3 (Quit under load, seen on 0.22.1: "Quit could not be confirmed ... Request timed out"): the stops below
         # wait for locks and catalog writes (automatic processing records "Stopping"), which took longer than the shell's
         # request under load, so the accepted Quit looked refused. They run on the quit thread; the request answers now.
@@ -180,11 +192,34 @@ class DesktopControl:
         self.thread.start()
         return {'phase': 'finishing'}
 
+    CLOSING_LOCK = 1.0  # seconds Quit, a safe stop or an update waits for the control lock before it sets closing anyway
+
+    def _set_closing(self):
+        """server.closing = True: every later press is refused. The control lock is taken when it comes free within
+        CLOSING_LOCK; a press that holds it longer (a scan control answers with a full status computation under it, minutes
+        under load) no longer holds Quit back (0.30.0 item F): the flag is set anyway, one attribute write, and a press
+        admitted meanwhile holds an admission, which close waits for like any other (merge_admissions)."""
+        condition = self.server.control_condition
+        if condition.acquire(True, self.CLOSING_LOCK):
+            try:
+                self.server.closing = True
+            finally:
+                condition.release()
+        else:
+            self.server.closing = True
+
     def _stop_work(self):
-        """Quit's stops, in their order: the queued presses, new conversions, the scan, automatic processing."""
+        """Quit's stops, in their order: the queued presses, new conversions, the scan, the background work close would
+        stop (told now, never waited for: MergeService.stop_background), automatic processing."""
         self._drop_queue()
         self.server.merge.drain()
         self.server.inventory.stop()
+        background = getattr(self.server.merge, 'stop_background', None)
+        if callable(background):
+            try:
+                background()
+            except Exception as error:  # an early signal only: close() stops the same work again, so it never blocks Quit
+                print('Books Arranger could not stop background work early: ' + (str(error) or type(error).__name__), file=sys.stderr, flush=True)
         automatic = self._automatic()
         if automatic is not None:
             getattr(automatic,'stop_work',automatic.stop)(origin='closing')
@@ -196,19 +231,53 @@ class DesktopControl:
         if actions is not None:
             actions.drop()
 
-    def _parked(self):
-        automatic = self._automatic()
-        research = bool(automatic is not None and automatic.thread and automatic.thread.is_alive())
-        return self.server.merge.drained() and not research and not self.server.scan_active()
+    QUIT_POLL = 0.25
+
+    def _close_waiting(self):
+        """[{kind, title}] of the work Quit still waits for, read now from the workers (attribute reads; the converting book's
+        title is read from the catalog once). Only work that changes files or the catalog: the book converting (Quit after
+        this book), a cleanup at its file checkpoint (source or recovery copies), the library scan, automatic processing or
+        research saving its checkpoint, an approval or another press, saved decisions being applied, a file change open
+        (critical_sections). Read-only work never holds Quit (status computations, lookups: 0.30.0 item F)."""
+        merge = self.server.merge
+        title = self.__dict__.get('_close_title')
+        jobs_thread = getattr(getattr(merge, 'jobs', None), '_thread', None)
+        if title is None and jobs_thread is not None and jobs_thread.is_alive():
+            title = self._close_title = self._read_running_title() or ''
+        waiting = self._work_waiting(title or '', lookups=False)
+        found = {item['kind'] for item in waiting}
+        named = getattr(merge, '__dict__', {})
+        retention = named.get('_retention_thread')
+        if 'cleanup' not in found and retention is not None and retention.is_alive():
+            waiting.append({'kind': 'cleanup', 'title': ''})  # the recovery-copy sweep, told to stop, ends its step first
+        decisions = getattr(named.get('decisions'), 'thread', None)
+        if decisions is not None and decisions.is_alive():
+            waiting.append({'kind': 'decisions', 'title': ''})
+        retry = named.get('_retry_all_thread')
+        if 'press' not in found and retry is not None and retry.is_alive():
+            waiting.append({'kind': 'press', 'title': ''})  # Retry all, stopped, ends at its next book
+        return waiting
 
     def _park(self):
+        """Quit: stop everything at its safe point, wait while real work finishes (waiting_for says what), then shut down.
+        Nothing here waits for a read: the waits are the workers in _close_waiting, and a safe stop (stop_now: the shell's
+        stop-now) takes over at any moment."""
         try:
             self._stop_work()
-            while not self._parked():
-                if not (self.server.merge.jobs._thread and self.server.merge.jobs._thread.is_alive()):
-                    with self.lock:
+            while True:
+                with self.lock:
+                    if self.phase not in ('finishing', 'parking'):
+                        return  # a safe stop took over; it shuts down
+                waiting = self._close_waiting()
+                with self.lock:
+                    if self.phase not in ('finishing', 'parking'):
+                        return
+                    if not any(item['kind'] == 'conversion' for item in waiting):
                         self.phase = 'parking'
-                time.sleep(.5)
+                    if not waiting:
+                        self.shutting = True
+                        break
+                time.sleep(self.QUIT_POLL)
         except Exception as error:
             with self.lock:
                 self.phase = 'blocked'
@@ -233,6 +302,7 @@ class DesktopControl:
             with self.lock:
                 self.phase = 'blocked'
                 self.error = str(error)[:512] or type(error).__name__
+                self.shutting = False  # Quit again, or the shell's safe stop, tries the close again
             return False  # A failed close is not authority to release ownership.
         with self.lock:
             self.phase = 'exiting'
@@ -266,16 +336,15 @@ class DesktopControl:
             # engine exits for the update at once; too late to cancel from here.
             self.phase = 'updating' if loading else 'pausing'
             self.error = ''
+            self.quitting = False
         if loading:
             self.server.inventory.stop()
-            with self.server.control_condition:
-                self.server.closing = True
+            self._set_closing()
             self.thread = threading.Thread(target=self._shutdown, args=('update',), name='books-desktop-update', daemon=True)
             self.thread.start()
             return self._update_answer()
-        with self.server.control_condition:
-            # New controls are refused from here on; reads and polling keep working.
-            self.server.closing = True
+        # New controls are refused from here on; reads and polling keep working.
+        self._set_closing()
         self._drop_queue()
         self.thread = threading.Thread(target=self._update_park, name='books-desktop-update', daemon=True)
         self.thread.start()
@@ -294,8 +363,8 @@ class DesktopControl:
                 'cleanup': bool(cleanup is not None and (getattr(cleanup, 'current', None) or getattr(cleanup, 'thread', None) and cleanup.thread.is_alive())),
                 'scanning': bool(self.server.scan_active()), 'library': getattr(self.server, 'active_library', None)}
 
-    def _read_update_title(self, update):
-        # This optional label is read by the worker, never before the request acknowledgement.
+    def _read_running_title(self):
+        """The title of the book converting now, from the catalog (one short read), or None when it cannot be read."""
         from contextlib import closing
         import sqlite3
         try:
@@ -303,8 +372,15 @@ class DesktopControl:
                 row=db.execute("SELECT manifest FROM audio_jobs WHERE state='running' LIMIT 1").fetchone()
             title=(json.loads(row[0]).get('metadata') or {}).get('title','') if row else ''
         except (AttributeError,sqlite3.Error,ValueError,TypeError):
+            return None
+        return str(title)[:200]
+
+    def _read_update_title(self, update):
+        # This optional label is read by the worker, never before the request acknowledgement.
+        title=self._read_running_title()
+        if title is None:
             return
-        with self.lock:update['before']['title']=str(title)[:200]
+        with self.lock:update['before']['title']=title
 
     def _update_answer(self):
         """The update part of desktop status (also the POST answers)."""
@@ -340,12 +416,17 @@ class DesktopControl:
         """[{kind, title}] of what the update still waits for: the conversion of a book, its cleanup, the library scan,
         research or automatic processing, an approval or another press, series or optional-field lookups, and any open
         file change (critical_sections)."""
+        return self._work_waiting((self.update or {}).get('before', {}).get('title', ''), lookups=True)
+
+    def _work_waiting(self, title, lookups):
+        """The update's and Quit's waiting list (attribute reads only). title: the converting book's. lookups: whether series
+        and optional-field lookups are waited for (the update starts them again on Cancel; Quit never waits for a read)."""
         import critical_sections
         merge = self.server.merge
         waiting = []
         jobs_thread = getattr(getattr(merge, 'jobs', None), '_thread', None)
         if jobs_thread and jobs_thread.is_alive():
-            waiting.append({'kind': 'conversion', 'title': (self.update or {}).get('before', {}).get('title', '')})
+            waiting.append({'kind': 'conversion', 'title': title})
         cleanup = getattr(merge, 'cleanup', None)
         if cleanup is not None and (getattr(cleanup, 'current', None) or getattr(cleanup, 'thread', None) and cleanup.thread.is_alive()) \
                 or getattr(merge, '_post_current', None):
@@ -357,7 +438,7 @@ class DesktopControl:
             waiting.append({'kind': 'research' if (getattr(automatic, 'current', None) or {}).get('stage', '').startswith('Research') else 'automatic', 'title': ''})
         if getattr(self.server, 'merge_admissions', 0):
             waiting.append({'kind': 'approval' if getattr(merge, '__dict__', {}).get('_approve_stops') else 'press', 'title': ''})
-        for name in ('series_backfill', 'gap_fill'):
+        for name in ('series_backfill', 'gap_fill') if lookups else ():
             worker = getattr(getattr(merge, '__dict__', {}).get(name), 'thread', None)
             if worker is not None and worker.is_alive():
                 waiting.append({'kind': 'lookups', 'title': ''})
@@ -558,14 +639,18 @@ class DesktopControl:
             return self._update_answer()
 
     def stop_now(self, trigger='session_end'):
-        """Immediate safe stop (Windows sign-out or shell loss): the book in progress restarts later."""
+        """Immediate safe stop (Windows sign-out, shell loss, the shell's stop-now): the book in progress restarts later.
+        During a Quit it takes over at once (the Quit's wait ends), unless the Quit's own shutdown has already begun."""
         with self.lock:
-            if self.phase in ('stopping', 'exiting'):
+            if self.phase in ('stopping', 'exiting') or self.shutting:
                 return {'phase': self.phase}
             self.phase = 'stopping'
+            self.quitting = True
+            self.shutting = True
+            if self.requested_at is None:
+                self.requested_at = time.time()
         self.server.inventory.stop()
-        with self.server.control_condition:
-            self.server.closing = True
+        self._set_closing()
         threading.Thread(target=self._shutdown, args=(trigger,), name='books-desktop-stop', daemon=True).start()
         return {'phase': 'stopping'}
 

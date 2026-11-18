@@ -89,6 +89,7 @@ const state = {
   win: null,
   tray: null,
   quit: 'none', // none | requested | updating | installing | exiting
+  quitFacts: null, // an accepted Quit's last status facts (quit-watch createQuitProgress): what it still waits for, how long
   ready: false, // the engine answered with our ownership proof
   loaded: false, // ...and reported its catalog loaded (ruling 28): until then Quit is immediate and the strip is up
   startup: null, // desktop/startup.js record: what the page's load strip needs from the shell
@@ -570,7 +571,7 @@ async function requestQuit({ confirmed }) {
 
 // HTTP failure never proves a safe checkpoint, but a closed server after an accepted Quit is the engine's
 // own last step: once connections are refused for a few seconds the engine is gone and the shell exits.
-const { createQuitWatch, outcomeOf, sendQuit, endOwnEngine } = require('./quit-watch');
+const { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, createQuitProgress, quitNow } = require('./quit-watch');
 async function engineGoneExit() {
   // Tell the host the shell is done and wait until it has really exited (it exits only after its engine), then leave.
   // Futaba's 0.22.3 QA, m-2: this waited 5 s at most, so the shell could exit while its engine was still finishing its
@@ -578,13 +579,19 @@ async function engineGoneExit() {
   await endLoadingEngine(30000);
   finishExit(state.backendExited && state.backend?.exitCode !== 0 ? 1 : 0);
 }
+// 0.30.0 item F: what an accepted Quit still waits for, from each status poll (createQuitProgress: phase, waiting_for,
+// waitedMs, blocked). Kept for the Quit-anyway offer (Judy's spec, pending) and written to the engine log when it changes.
+const quitWaitLine = (waiting) => waiting.map((item) => item.kind + (item.title ? ' “' + item.title + '”' : '')).join(', ');
 async function watchQuit() {
   const watch = createQuitWatch();
+  const progress = createQuitProgress();
   while (!state.backendExited && state.quit === 'requested') {
     await sleep(1000);
     try {
       const status = await desktopStatus.get({ timeout: 3000, maxAge: 0 });
       watch.observe('reply');
+      const facts = state.quitFacts = progress.observe(status);
+      if (facts.changed) remember('\nQuit: ' + (facts.waiting.length ? 'waiting for ' + quitWaitLine(facts.waiting) : 'nothing left to wait for') + '.\n');
       refreshTray('Books Arranger — ' + status.phase);
       if (status.phase === 'blocked') {
         state.quit = 'none';
@@ -597,6 +604,21 @@ async function watchQuit() {
       refreshTray('Books Arranger — waiting for engine checkpoint');
     }
   }
+}
+// Quit anyway (0.30.0 item F): the way out of an accepted Quit that waits for real work (state.quitFacts) or ended
+// 'blocked'. When it is offered and how it is worded is Judy's spec (pending): nothing calls it yet. The engine stops at
+// once (stop-now, as at a Windows sign-out: the book in progress converts again next time), its host gets 30 s and is then
+// ended through its own handle (endOwnEngine, never by name or PID), and the shell exits.
+async function quitAnyway() {
+  if (state.quit === 'exiting') return;
+  if (state.backendExited) return finishExit(state.backend?.exitCode === 0 ? 0 : 1);
+  state.quit = 'requested';
+  const waiting = state.quitFacts ? state.quitFacts.waiting : [];
+  remember('\nQuit anyway: stopping the engine now' + (waiting.length ? ' (it was waiting for ' + quitWaitLine(waiting) + ')' : '') + '.\n');
+  refreshTray('Books Arranger — stopping safely');
+  if (state.win && !state.win.isDestroyed()) state.win.hide();
+  await quitNow({ post: () => engineRequest('POST', '/api/desktop/stop-now', { desktop: true, timeout: 5000 }), endEngine: () => endLoadingEngine(30000) });
+  finishExit(0);
 }
 
 // Quit while loading closes at once, with no confirmation: nothing runs but loading (Judy 3.2). The window and tray go

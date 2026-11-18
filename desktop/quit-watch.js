@@ -51,4 +51,39 @@ async function endOwnEngine({ exited, closePipe, kill, sleep, onKill = () => {},
  while (!exited() && now() < deadline) await sleep(200);
  return exited() ? 'ended' : 'still-running';
 }
-module.exports = { createQuitWatch, outcomeOf, sendQuit, endOwnEngine };
+// 0.30.0 item F (Sergei 2026-11-18: closed at 21:20, the engine still answered "closing" an hour later): what an accepted
+// Quit still waits for, as the engine's desktop status gives it (waiting_for: [{kind, title}]). The engine waits only for
+// real work now (the book converting, a cleanup at its file checkpoint, a press, a scan or a file change ending), never for
+// a read. Any other shape reads as nothing.
+function quitWaiting(status) {
+ const list = status && Array.isArray(status.waiting_for) ? status.waiting_for : [];
+ return list.filter((item) => item && typeof item.kind === 'string')
+  .map((item) => ({ kind: item.kind, title: typeof item.title === 'string' ? item.title : '' }));
+}
+// The facts a Quit-anyway offer is made from, per status poll: the phase, what still runs, since when it has been waiting
+// (waitedMs, from the first poll that named work), whether the list changed, and whether the close failed ('blocked').
+function createQuitProgress({ now = () => Date.now() } = {}) {
+ let since = null;
+ let last = '[]';
+ return {
+  observe(status) {
+   const waiting = quitWaiting(status);
+   if (!waiting.length) since = null;
+   else if (since === null) since = now();
+   const key = JSON.stringify(waiting);
+   const changed = key !== last;
+   last = key;
+   return { phase: status && typeof status.phase === 'string' ? status.phase : '', waiting, waitedMs: since === null ? 0 : now() - since,
+            changed, blocked: !!status && status.phase === 'blocked', error: status && typeof status.error === 'string' ? status.error : '' };
+  },
+ };
+}
+// Quit anyway: the engine's immediate safe stop (POST /api/desktop/stop-now, as at a Windows sign-out: the book in progress
+// converts again next time; an open file change still ends first), then the shell waits for its own engine host and ends
+// it past its bound (endEngine: endOwnEngine on our own child). An engine that does not answer is stopped through its pipe.
+async function quitNow({ post, endEngine }) {
+ let answer = null;
+ try { answer = await post(); } catch { /* its pipe closes next: the same safe stop */ }
+ return { answer, engine: await endEngine() };
+}
+module.exports = { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, quitWaiting, createQuitProgress, quitNow };

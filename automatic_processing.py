@@ -361,7 +361,9 @@ class AutomaticProcessing:
             scanner=getattr(self.inventory,'worker',None)
             if scanner and scanner.is_alive():
                 raise ValueError(self._start_block_reason(run['state'] if run else 'Idle',scanning=True,server_closing=server_closing))
-            block=self._start_block_reason(run['state'] if run else 'Idle',jobs=self.merge.state(),server_closing=server_closing)
+            # 0.30.0 item F: the jobs' state read now (_jobs_now), not a full status computation under self.lock (minutes under
+            # load), which Quit's stop waited behind.
+            block=self._start_block_reason(run['state'] if run else 'Idle',jobs=self._jobs_now(),server_closing=server_closing)
             if block:raise ValueError(block)
             self.merge._no_scan()  # Recheck discovery immediately before admission.
             # Do not wait under self.lock for a pause dispatch that may be in queue locks.
@@ -588,6 +590,21 @@ class AutomaticProcessing:
     def _idle_jobs(self,state=None):
         state=self._jobs_now() if state is None else state
         return state['state'] not in ('Running','Pausing') and not state.get('queued',0) and not state.get('cleanup_active',False)
+    def _queue_to_resume(self):
+        """Saved queued work this run resumes first: queued conversions or replacement postprocessing, read now. 0.30.0 item F:
+        this was two full status computations (minutes under load), which a Quit at Start waited for."""
+        jobs=self._jobs_now()
+        if jobs.get('queued') or jobs.get('postprocessing_pending'):return True
+        if 'postprocessing_pending' in jobs:return False  # a full status answered (a stand-in's own state())
+        pending=getattr(self.merge,'_pending_replacement_postprocessing',None)
+        return bool(hasattr(self.merge,'replacements') and callable(pending) and pending())
+    def _still_pausing(self):
+        """The worker's last wait before it reports Paused: the queue it paused is still stopping. Ends when the app closes
+        (Quit, an update, a safe stop): the run's checkpoint is saved then and the process ends; close waits for the queue
+        itself (0.30.0 item F). A read that fails ends the wait."""
+        if self.closed or self._server_closing():return False
+        try:return self._jobs_now()['state']=='Pausing'
+        except Exception:return False
     def draft(self,id,revision,active):
         if type(active) is not bool:raise ValueError('Draft activity must be an explicit boolean')
         with connect(self.database) as db:
@@ -721,7 +738,7 @@ class AutomaticProcessing:
             run=self._run_row();checkpoint=json.loads(run['checkpoint']);phase=run['phase'];self.live_checkpoint=checkpoint
             if phase=='discovery':
                 # Existing queued jobs finish before a scan; never scan while encoding/cleanup runs.
-                if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):self._resume_queue()
+                if self._queue_to_resume():self._resume_queue()
                 if not self._idle_jobs():
                     # Ruling 34 (Sergei 2026-10-26, option A): Start works while audiobooks convert. The books already
                     # in the catalog are researched now; the scan waits until conversion is idle (scan_after, below).
@@ -734,7 +751,7 @@ class AutomaticProcessing:
                     self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
-                if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):self._resume_queue()
+                if self._queue_to_resume():self._resume_queue()
                 if self._add_current_candidates(checkpoint):
                     self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             checkpoint['pending']=list(dict.fromkeys(checkpoint.get('pending',[])+checkpoint.get('deferred',[])))
@@ -912,7 +929,7 @@ class AutomaticProcessing:
                   if not self._requeued:self._closing_run=True
               if self._closing_run:break
               phase='research';self._update(id,phase='research',checkpoint=json.dumps(checkpoint))
-            if self.merge.state().get('failed'):
+            if self._jobs_now().get('failed'):
                 self._update(id,state='Needs attention',phase='conversion',reason='Some audiobook jobs need attention; verified outputs and pending work are preserved')
             else:self._update(id,state='Completed',phase='completed',reason='')
         except InterruptedError:
@@ -921,7 +938,7 @@ class AutomaticProcessing:
             # Report Paused only after both scan and owned converter/cleanup have stopped.
             self._pause_stopped(generation)
             while self.inventory.worker and self.inventory.worker.is_alive():self.inventory.worker.join(.2)
-            while self._jobs_now()['state']=='Pausing':time.sleep(.2)
+            while self._still_pausing():time.sleep(.2)
             try:self._paused_checkpoint(id,checkpoint)
             except (OSError,sqlite3.Error) as error:self._failure(id,error,'pause',identity,row,False)
         except Exception as error:

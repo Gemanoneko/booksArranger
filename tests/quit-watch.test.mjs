@@ -61,3 +61,39 @@ test('the shell ends Quit through endOwnEngine on its own child only',async()=>{
  assert.match(gone,/await endLoadingEngine\(30000\);/,'the host gets 30 s, then is ended, before the shell exits');
  assert.ok(!/taskkill|process\.kill\(/.test(main),'never a kill by name or PID');
 });
+
+// 0.30.0 item F (Sergei 2026-11-18: closed at 21:20, the engine still "closing" an hour later): the engine says what an
+// accepted Quit still waits for (waiting_for), and the shell keeps those facts for the Quit-anyway offer (Judy's spec).
+const {quitWaiting,createQuitProgress,quitNow}=createRequire(import.meta.url)('../desktop/quit-watch.js');
+test('what Quit waits for is read from waiting_for; any other shape is nothing',()=>{
+ assert.deepEqual(quitWaiting({phase:'finishing',waiting_for:[{kind:'conversion',title:'Дюна'},{kind:'cleanup',title:''}]}),[{kind:'conversion',title:'Дюна'},{kind:'cleanup',title:''}]);
+ assert.deepEqual(quitWaiting({phase:'parking',waiting_for:[{kind:'press'},null,{title:'x'},{kind:5}]}),[{kind:'press',title:''}]);
+ for(const status of [null,{},{waiting_for:'conversion'},{waiting_for:{kind:'conversion'}}])assert.deepEqual(quitWaiting(status),[]);
+});
+test('the facts count how long real work has been waited for, say when the list changes, and mark a failed close',()=>{
+ const clock={t:0};const progress=createQuitProgress({now:()=>clock.t});
+ let facts=progress.observe({phase:'finishing',waiting_for:[]});
+ assert.deepEqual([facts.waitedMs,facts.changed,facts.blocked],[0,false,false]);
+ clock.t=1000;facts=progress.observe({phase:'finishing',waiting_for:[{kind:'conversion',title:'Дюна'}]});
+ assert.deepEqual([facts.waitedMs,facts.changed],[0,true]);
+ clock.t=61000;facts=progress.observe({phase:'finishing',waiting_for:[{kind:'conversion',title:'Дюна'}]});
+ assert.deepEqual([facts.waitedMs,facts.changed],[60000,false]);
+ clock.t=62000;facts=progress.observe({phase:'parking',waiting_for:[{kind:'cleanup',title:''}]});
+ assert.deepEqual([facts.phase,facts.waitedMs,facts.changed],['parking',61000,true],'still waiting since the first work named');
+ clock.t=63000;facts=progress.observe({phase:'blocked',error:'A press is still running; ownership retained',waiting_for:[{kind:'press',title:''}]});
+ assert.deepEqual([facts.blocked,facts.error],[true,'A press is still running; ownership retained']);
+ clock.t=64000;facts=progress.observe({phase:'parking',waiting_for:[]});
+ assert.deepEqual([facts.waiting,facts.waitedMs,facts.changed],[[],0,true]);
+});
+test('Quit anyway is the engine\'s safe stop, then the shell waits for its own host (and ends it past the bound)',async()=>{
+ const calls=[];
+ const done=await quitNow({post:async()=>{calls.push('stop-now');return {phase:'stopping'};},endEngine:async()=>{calls.push('end');return 'exited';}});
+ assert.deepEqual(calls,['stop-now','end']);assert.deepEqual(done,{answer:{phase:'stopping'},engine:'exited'});
+ const silent=await quitNow({post:async()=>{throw new Error('Request timed out');},endEngine:async()=>'ended'});
+ assert.deepEqual(silent,{answer:null,engine:'ended'},'an engine that does not answer is stopped through its pipe');
+ const fs=await import('node:fs');const main=fs.readFileSync(new URL('../desktop/main.js',import.meta.url),'utf8');
+ const anyway=main.slice(main.indexOf('async function quitAnyway()'),main.indexOf('// Quit while loading closes at once'));
+ assert.match(anyway,/'\/api\/desktop\/stop-now'/);assert.match(anyway,/endLoadingEngine\(30000\)/);assert.match(anyway,/finishExit\(0\)/);
+ const watch=main.slice(main.indexOf('async function watchQuit()'),main.indexOf('async function quitAnyway()'));
+ assert.match(watch,/progress\.observe\(status\)/,'every Quit status poll keeps what it waits for');
+});

@@ -33,6 +33,7 @@ INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd
 STATUS_MAX_AGE=1.0 # Seconds after a status computation STARTED during which polling readers may reuse it.
 STATUS_WAIT=4.0 # Seconds a reader waits on another thread's computation; below the desktop shell's 5 s request timeout.
 STALE_WAIT=0.5 # Seconds a poll waits for a newer status when an earlier answer exists; then it gets that answer.
+CLOSE_READS=2.0 # Seconds close waits, in all, for read-only work (status computations, book pages, lookups) before it goes on.
 CATALOG_MAX_AGE=60.0 # Seconds catalog facts (cleanups, Ready totals) are reused per catalog version while no cleanup runs.
 QUIET_MAX_AGE=300.0 # Seconds a polling answer is reused while nothing runs and the catalog has no new commit;
 # the bound only refreshes what can change without a commit (files removed by hand outside the app).
@@ -127,15 +128,21 @@ class SharedSnapshot:
                 self._threads.discard(threading.current_thread())
             flight['done'].set()
 
-    def close(self):
-        """Stop admitting reads and wait for every computation, including detached flights."""
+    def close(self,deadline=None):
+        """Stop admitting reads; wait for the computations (detached flights too) until deadline (time.monotonic(); default
+        CLOSE_READS from now). Returns the threads still running; never raises.
+
+        0.30.0 item F (Sergei 2026-11-18: closed at 21:20, the engine still answered "closing" over an hour later): this
+        waited 30 s, then raised, and Quit stopped 'blocked' with the engine half closed. A status computation takes minutes
+        on his catalog under load, and the Quit watch's own status polls had just started one. A computation only reads the
+        catalog (no file change, no catalog write); one still running ends with the process."""
         with self._lock:
-            self._closed=True;threads=list(self._threads)
-        deadline=time.monotonic()+30
+            again=self._closed;self._closed=True;threads=list(self._threads)
+        if again:return [thread for thread in threads if thread.is_alive()]  # the engine closes twice (server_close): one wait
+        deadline=time.monotonic()+CLOSE_READS if deadline is None else deadline
         for thread in threads:
-            thread.join(max(0,deadline-time.monotonic()))
-        if any(thread.is_alive() for thread in threads):
-            raise TimeoutError('Status computations are still closing their catalog reads')
+            if thread is not threading.current_thread():thread.join(max(0,deadline-time.monotonic()))
+        return [thread for thread in threads if thread.is_alive()]
 
     def get(self,compute,max_age):
         with self._lock:
@@ -5625,7 +5632,45 @@ class MergeService:
         try:self._remember_identity(record,file_identity(ordinary(record['final_path'])))
         except OSError:pass
 
+    def stop_background(self):
+        """Quit (0.30.0 item F): the background work close() stops is told to stop now, never waited for here, so it ends
+        while Quit waits for the book in progress: recovery retention, saved-decision application, series and optional-field
+        lookups, M4B repair checks, the current-audiobook and published-book checks. A cleanup step or file change already
+        begun still finishes (Quit waits for it, desktop_backend); nothing new starts (draining). Each part that is missing is
+        skipped: close() tells them all again."""
+        for name in ('_retention_stop','_retention_wake'):
+            flag=self.__dict__.get(name)
+            if isinstance(flag,threading.Event):flag.set()
+        for name in ('decisions','series_backfill','gap_fill'):
+            worker=self.__dict__.get(name)
+            for flag in (getattr(worker,'stop',None),getattr(worker,'wake',None)):
+                if isinstance(flag,threading.Event):flag.set()
+        repair=self.__dict__.get('_repair_stop')
+        if repair:repair.set()
+        current=getattr(self.__dict__.get('publications'),'_stop',None)
+        if isinstance(current,threading.Event):current.set()
+        # No queue lock (a catalog write can hold it): the queue drains before this, so the check never starts again (its
+        # start refuses while draining) and nothing clears the flag.
+        verify=getattr(self.__dict__.get('jobs'),'_verify_stop',None)
+        if isinstance(verify,threading.Event):verify.set()
+
+    @staticmethod
+    def _close_lookups(background,deadline):
+        """Series and optional-field lookups at close: daemon threads whose states resume after a hard exit (series_backfill),
+        so they are stopped and waited for only until the read bound (deadline). A file rename one has begun
+        (critical_sections.RENAME) is waited for as before (30 s). A stand-in without the stop events is closed as before."""
+        import critical_sections
+        thread=getattr(background,'thread',None)
+        if not isinstance(getattr(background,'stop',None),threading.Event) or not isinstance(getattr(background,'wake',None),threading.Event):
+            return background.close()
+        background.stop.set();background.wake.set()
+        if thread is None or thread is threading.current_thread():return None
+        thread.join(30 if critical_sections.RENAME in critical_sections.open_sections() else max(0,deadline-time.monotonic()))
+
     def close(self):
+        # 0.30.0 item F: one bound for all the read-only work below (status computations, book pages, lookups, repair checks);
+        # none of it holds close past CLOSE_READS, and none of it raises. Workers that change files or the catalog keep theirs.
+        reads=time.monotonic()+CLOSE_READS
         with _BULK_LOCK:
             self._closing=True;self._start_generation=self.__dict__.get('_start_generation',0)+1
             pending=self.__dict__.get('_retry_all_stop')
@@ -5636,16 +5681,17 @@ class MergeService:
         with _QUIET_LOCK:
             snapshots=[self.__dict__.get('_status_shared'),*self.__dict__.get('_page_shared',{}).values()]
         for snapshot in snapshots:
-            if snapshot is not None:snapshot.close()
+            if snapshot is not None:snapshot.close(reads)
         for name in ('series_backfill','gap_fill'):
             background=self.__dict__.get(name)
-            if background is not None:background.close()
+            if background is not None:self._close_lookups(background,reads)
         for name in ('_repair_stop','_retry_all_stop'):
             event=self.__dict__.get(name)
             if event:event.set()
-        for name in ('_repair_thread','_retry_all_thread'):
-            thread=self.__dict__.get(name)
-            if thread and thread is not threading.current_thread():thread.join(30)
+        repair=self.__dict__.get('_repair_thread')  # M4B repair checks: reads, each result saved as it is found
+        if repair and repair is not threading.current_thread():repair.join(max(0,reads-time.monotonic()))
+        retry=self.__dict__.get('_retry_all_thread')  # Retry all: it changes job rows; Quit waits for it first
+        if retry and retry is not threading.current_thread():retry.join(30)
         if hasattr(self,'automatic'):self.automatic.close()
         self._retention_stop.set();self._retention_wake.set()
         if self._retention_thread:

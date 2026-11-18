@@ -570,12 +570,20 @@ class BrowserServer(ThreadingHTTPServer):
             self.merge = None
         super().server_close()
 
+    ADMISSIONS_CLOSE = 30.0  # seconds a shutdown waits for presses still running (desktop Quit waits for them first, saying so)
+
     def finish_shutdown(self):
         self.stop_loading()  # Quit while loading: nothing else runs yet (Judy 3.2)
         self.actions.close()  # queued actions are dropped, never run (Q1); one running holds an admission, waited for below
+        # 0.30.0 item F: bounded like every other wait of the close (it had none). A press still running after the bound
+        # keeps ownership: the close fails as 'blocked', and the desktop status says what still runs.
+        deadline = time.monotonic() + self.ADMISSIONS_CLOSE
         with self.control_condition:
             while self.merge_admissions:
-                self.control_condition.wait(timeout=.5)
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError('A press is still running; ownership retained')
+                self.control_condition.wait(timeout=min(.5, left))
         self.inventory.stop()
         worker=self.inventory.worker
         if worker and worker.is_alive():
