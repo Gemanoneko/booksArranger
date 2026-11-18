@@ -69,10 +69,11 @@ class ActionQueue:
         self.closed = False
 
     # ------------------------------------------------------------------ what an action waits for
-    def blocker(self, action, book_id, held=0):
+    def blocker(self, action, book_id, held=0, job_id=None):
         """The kind that keeps this action from running now, or None. Reads only: the loading flag, a thread probe, the scan
         flag, the Retry all run and, for Delete, the book's own jobs and research row. held: the control admissions the
-        caller holds itself (the worker holds one while it runs an action: run_queued passes 1)."""
+        caller holds itself (the worker holds one while it runs an action: run_queued passes 1). job_id: the audiobook job
+        the action is for (its args' job_id); a cleanup action's own source cleanup never blocks it."""
         server = self.server
         loading = getattr(server, 'loading', None)
         if loading is not None and not loading.finished or getattr(server, 'merge', None) is None:
@@ -107,10 +108,14 @@ class ActionQueue:
             if alive(getattr(jobs, '_thread', None)) or alive(getattr(cleanup, 'thread', None)):
                 return 'jobs'
             if action == 'cleanup':
+                # 0.30.0: a source cleanup is keyed by its audiobook job. Retry cleanup is queued under the book's candidate
+                # id with the job in its args, so comparing the candidate id never matched and the book's own cleanup
+                # blocked it; Clean up (historical) is queued under the job id itself.
+                own = job_id or book_id
                 try:
                     if jobs is not None and any(j['state'] in ('pending', 'running') for j in jobs.status()['jobs']):
                         return 'jobs'
-                    if cleanup is not None and any(c['job_id'] != book_id and c['state'] in ('waiting', 'checking', 'removing', 'pausing', 'paused')
+                    if cleanup is not None and any(c['job_id'] != own and c['state'] in ('waiting', 'checking', 'removing', 'pausing', 'paused')
                                                    for c in cleanup.status()):
                         return 'jobs'
                 except Exception:
@@ -166,7 +171,7 @@ class ActionQueue:
         (one queued action per row, Judy 1.1)."""
         if action not in ACTIONS:
             raise ValueError('Only Retry, Repair and Delete book are queued')
-        kind = self.blocker(action, book_id)
+        kind = self.blocker(action, book_id, job_id=args.get('job_id') if isinstance(args, dict) else None)
         with self.lock:
             if self.closed or self.server.closing:
                 raise ValueError('Server is shutting down')
@@ -346,7 +351,7 @@ class ActionQueue:
                     self.items.clear()  # Quit or an update has begun: dropped, never run
                     continue
                 head = self.items[0]
-            kind = self.blocker(head['action'], head['book_id'])
+            kind = self.item_blocker(head)
             with self.lock:
                 if self.closed:
                     return
@@ -383,9 +388,14 @@ class ActionQueue:
                 except Exception:
                     pass
 
+    def item_blocker(self, item, held=0):
+        """blocker() for a queued action, with the job its args name."""
+        args = item.get('args')
+        return self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None)
+
     def blocker_after(self, item):
         try:
-            return self.blocker(item['action'], item['book_id']) or 'operation'
+            return self.item_blocker(item) or 'operation'
         except Exception:
             return 'operation'
 
@@ -420,7 +430,7 @@ class ActionQueue:
             try:
                 result = call('Audiobooks', item['book_id'], args['revision'], args['job_id'])
             except RetryRefused as error:
-                if self.server.closing or self.blocker(item['action'], item['book_id']):
+                if self.server.closing or self.item_blocker(item):
                     return None
                 text = str(error)
                 code = 'changed' if text == RETRY_BOOK_CHANGED else getattr(error, 'cause', None) or 'refused'

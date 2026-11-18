@@ -625,7 +625,7 @@ class BrowserServer(ThreadingHTTPServer):
             return {'result':'saved','code':answer.code,'answer':answer.payload()}
         except ValueError as error:
             text = str(error)
-            if self.actions.blocker(action, book, held=1):
+            if self.actions.item_blocker(item, held=1):
                 return None  # the thing it waited for came back between the look and the run: it waits again
             code = approve_code(text) if action in ('approve', 'convert') else getattr(error, 'code', None) or ('changed' if 'changed' in text.casefold() else 'refused')
             extra={}

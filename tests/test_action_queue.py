@@ -524,6 +524,28 @@ class QueueTests(unittest.TestCase):
                 self.retry(2)
         self.assertEqual(len(self.queue.view()['queued_actions']), 2)
 
+    def test_retry_cleanup_is_never_held_by_its_own_books_cleanup_only_by_another_books(self):
+        # 0.30.0 (action_queue.py:113): Retry cleanup is queued under the book's candidate id with its job in the args; the
+        # check compared that candidate id with each cleanup's job id, so the book's own waiting or paused cleanup held it.
+        own, other = self.job[0], self.job[1]
+        cleanups = [{'job_id': own, 'state': 'paused'}]
+        self.server.merge.jobs = SimpleNamespace(_thread=None, status=lambda: {'jobs': []})
+        self.server.merge.cleanup = SimpleNamespace(thread=None, status=lambda: list(cleanups))
+        args = {'identity_retry': True, 'revision': 3, 'job_id': own, 'cleanup_id': str(uuid.uuid4())}
+        item = {'action': 'cleanup', 'book_id': self.book[0], 'args': args}
+        self.assertEqual(self.queue.blocker('cleanup', self.book[0]), 'jobs', 'positive control: the candidate id alone matches no cleanup')
+        self.assertIsNone(self.queue.item_blocker(item), 'its own paused cleanup')
+        cleanups[0]['state'] = 'waiting'
+        self.assertIsNone(self.queue.item_blocker(item), 'its own waiting cleanup')
+        cleanups.append({'job_id': other, 'state': 'paused'})
+        self.assertEqual(self.queue.item_blocker(item), 'jobs', "another book's paused cleanup still holds it")
+        del cleanups[1]
+        self.assertIsNone(self.queue.enqueue('cleanup', self.book[0], 'Book 0', args), 'nothing else waits: the press runs at once')
+        # Clean up (historical) is queued under the job id itself, with the same job in its args: unchanged.
+        self.assertIsNone(self.queue.blocker('cleanup', own))
+        self.assertIsNone(self.queue.item_blocker({'action': 'cleanup', 'book_id': own, 'args': {'job_id': own}}))
+        self.assertEqual(self.queue.blocker('cleanup', other), 'jobs')
+
 
 if __name__ == '__main__':
     unittest.main()
