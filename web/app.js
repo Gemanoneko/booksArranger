@@ -725,6 +725,47 @@ function startWaitTip(button,waiting){
 // One rule (Judy, MissingFiles UX 2026-10-24): a read error is an error on a file that is not gone. A gone file's old error
 // stays in the catalog, never on screen; the server's counts and filters use the same predicate.
 function readError(row){return row.error && !row.missing ? row.error : '';}
+// 0.30.0 (Judy section 10): the two "Book metadata" lines of a candidate, from the engine's scope_view (repaired tag text).
+// The grouping key (scope: a path, \x1f, raw tags) is never printed. Line 1: where the files are; line 2: why they are
+// one book, or a separate one. Kinds her table does not name reuse the grouping copy the panel already had.
+const FOLDER_BASIS={one:'One book: every audio file of its source folder.',ask:'One source folder that may hold more than one book: asked before anything is joined or split.',
+  remainder:'The files of a source folder that are not in its existing book: held, never joined to it silently.'};
+function shortFolder(path){
+  const text=String(path || ''),parts=text.split(/[\\/]+/).filter(Boolean);
+  return parts.length<=2?text:`${/^[\\/]{2}/.test(text)?'\\\\':''}${parts[0]}\\…\\${parts.at(-1)}`;
+}
+function scopeFolders(view){return Array.isArray(view?.folders)?view.folders.filter(folder=>typeof folder==='string' && folder):[];}
+function scopeFolderLine(view){
+  const folders=scopeFolders(view);
+  return !folders.length?'':folders.length===1?folders[0]:`${shortFolder(folders[0])} and ${plural(folders.length-1,'more folder','more folders')}`;
+}
+function scopeBasisText(view){
+  if(!view || typeof view!=='object')return '';
+  const has=value=>typeof value==='string' && value.trim()!=='',quote=value=>`«${value}»`,count=value=>Number.isInteger(value) && value>0;
+  const by=(what,value)=>`Grouped by ${what} ${quote(value)}${has(view.artist)?` and artist ${quote(view.artist)}`:''}.`;
+  const album=()=>has(view.album)?`Album ${quote(view.album)}${count(view.track)?`, track ${view.track}${count(view.track_total)?` of ${view.track_total}`:''}`:''}.`:'';
+  const parts=[];let tags=false;
+  switch(view.kind){
+    case 'album':if(has(view.album)){parts.push(by('album',view.album));tags=true;}break;
+    case 'single_file':parts.push('One audiobook file.',album());tags=has(view.album);break;
+    case 'volume':parts.push(`Kept as a separate book${has(view.basis)?': '+view.basis:''}.`,album(),'If these files are one book, select them and use Join into one book.');tags=has(view.album);break;
+    case 'split_book':parts.push('Parts of one book, grouped by the file names.');break;
+    case 'filename_work':parts.push(has(view.author) && has(view.title)?`Grouped by the file names: ${quote(view.author)} - ${quote(view.title)}.`:'Grouped by the file names.');break;
+    case 'numbered_set':parts.push('Numbered files in one folder. The order comes from the file names.');break;
+    case 'standalone':parts.push('One file with no album or numbering.');break;
+    case 'same_title':if(has(view.title)){parts.push(by('the title tag',view.title));tags=true;}break;
+    case 'folder':parts.push(FOLDER_BASIS[view.basis] || FOLDER_BASIS.one);break;
+    case 'anthology':parts.push('One anthology volume: its stories keep their source credits.');break;
+    default:parts.push(album());tags=has(view.album);
+  }
+  if(tags && view.repaired===true)parts.push('The tag text was repaired from an old encoding.');
+  return parts.filter(Boolean).join(' ');
+}
+function showSource(row,candidate){
+  const view=candidate?row.scope_view:null,path=candidate?scopeFolderLine(view):row.path || '',basis=candidate?scopeBasisText(view):'';
+  writeText($('source'),path);$('source').hidden=!path;$('source').title=candidate?scopeFolders(view).join('\n'):'';
+  const line=$('source-basis');if(line){writeText(line,basis);line.hidden=!basis;}
+}
 function select(row, reset) {
   row=decisionDisplayRow(row,row.library || $('library').value);
   $('manual-review').hidden=row.manual_conversion===true;
@@ -739,7 +780,7 @@ function select(row, reset) {
   const candidate=row.kind==='candidate';
   $('details').hidden=false;
   $('details-heading').textContent=inspectorIdentity?.id===recordIdentity(row).id?(candidate?'Book metadata':'File metadata'):(candidate?'Book candidate':'Selected file');
-  $('source').textContent=candidate?row.scope:row.path;
+  showSource(row,candidate);
   $('reason').textContent=row.preview.reason;
   $('proposed').textContent=(candidate?'Reviewed destination preview: ':'')+(row.preview.path || 'No destination proposed until canonical metadata is reviewed.');
   $('method').textContent=row.metadata.method || 'Unavailable';

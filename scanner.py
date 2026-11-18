@@ -794,7 +794,7 @@ class Inventory:
         if row is None:raise ValueError('Candidate no longer current')
         current=db.execute('SELECT state,errors FROM jobs WHERE root=?',(root,)).fetchone()
         pending=db.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(root,)).fetchone()[0]
-        return groups.render(row,root,bool(current and current['state']=='completed' and not pending and not current['errors']),groups.retired_sources(db,root))
+        return groups.render(row,root,bool(current and current['state']=='completed' and not pending and not current['errors']),groups.retired_sources(db,root),groups.volume_bases(db,root))
 
     def save_candidate(self,label,identity,revision,review,approve=False):
         if label!='Audiobooks':raise ValueError('Only audiobooks have book candidates')
