@@ -470,8 +470,11 @@ class NativeContext:
             for row in ns.value['origin_ancestry']+ns.value['previous_ancestry']:
                 known.setdefault(_key(row[0]),set()).add(tuple(row[1:]))
             for relative,binding in self.manifest.directories.items():
-                known.setdefault(_key(ntpath.join(self.manifest.source_root,relative)),set()).add(binding.source)
-                known.setdefault(_key(ntpath.join(self.manifest.target_root,relative)),set()).add(binding.target)
+                # The relocation root is relative ''. ntpath.join(root,'') is 'root\\', a key no recorded ancestry row
+                # has, so the root's proved identities were never known and every recovery recorded before the first
+                # move was refused once a portable move followed it (0.30.0 item B, Sergei's Brom cleanup).
+                for root,identity in ((self.manifest.source_root,binding.source),(self.manifest.target_root,binding.target)):
+                    known.setdefault(_key(ntpath.join(root,relative) if relative else root),set()).add(identity)
             actual={_key(row[0]):tuple(row[1:]) for row in boundary.identities}
             for old in expected:
                 if not isinstance(old,(list,tuple)) or len(old)!=4:return False

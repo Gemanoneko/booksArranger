@@ -97,6 +97,7 @@ patterns.push('test_start_over.py','test_restart_242.py','test_backend_242.py','
 patterns.push('test_source_presence.py','test_light_novels.py');  // 0.29.0 items 1, 3, 5: the check pass (gone books, leftover-only folders, stale rows)
 patterns.push('test_http_0290.py');  // 0.29.0 PA-1: every new field and hook through the real server (Futaba B-1, M-1, M-2 passed mocked tests)
 patterns.push('test_live_status.py','test_background_work.py');  // 0.30.0: the running part read at every poll; every background job as a row or a waiting item
+patterns.push('test_recovery_ancestry_moves.py');  // 0.30.0 item B: a cleanup recorded before both storage moves still finds its recovery folder (Brom)
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])

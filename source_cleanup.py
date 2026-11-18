@@ -538,6 +538,15 @@ class CleanupJobs:
                     handle.restore_metadata(facts['modified'],attributes);handle.flush()
                 marked.pop(path,None)
             except (BoundaryError,OSError,ValueError,KeyError):pass
+    def _recovery_boundary(self,stack,recovery,intent):
+        """Hold this cleanup's recovery folder (stack keeps it held). Refused unless it is the folder recorded at
+        enrolment: its persisted ancestry, bridged only through the catalog's recorded storage moves
+        (storage_relocation_native.ancestry_match; 0.30.0 item B)."""
+        rb=stack.enter_context(DirectoryBoundary(self.root.anchor,recovery,create=True))
+        if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery root identity changed')
+        from storage_relocation_native import ancestry_match
+        if not ancestry_match(rb,intent['recovery_identity'],operation_path=recovery,prefix=True):raise BoundaryError('Persisted recovery ancestry changed')
+        return rb
     def _run(self,id,marked):
         row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))[0];intent=json.loads(row['intent']);manifest=intent['manifest'];out=intent['output']
         self._require_unheld_job(row['job_id'])
@@ -562,10 +571,7 @@ class CleanupJobs:
         root=ordinary(out.get('root',str(frozen_root)));final=ordinary(out['final_path']);recovery=self.root/id
         if not final.is_relative_to(root) or final.suffix.lower()!='.m4b':raise BoundaryError('Validated output is outside the frozen output root')
         with contextlib.ExitStack() as stack:
-            rb=stack.enter_context(DirectoryBoundary(self.root.anchor,recovery,create=True))
-            if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery root identity changed')
-            from storage_relocation_native import ancestry_match
-            if not ancestry_match(rb,intent['recovery_identity'],operation_path=recovery,prefix=True):raise BoundaryError('Persisted recovery ancestry changed')
+            rb=self._recovery_boundary(stack,recovery,intent)
             self.phases[id]='Checking audiobook';self._set(id,'checking')
             ob=stack.enter_context(DirectoryBoundary(root,final.parent));output=stack.enter_context(self._open_output(final))
             if out.get('identity') is not None and output.facts()['identity']!=out['identity']:raise BoundaryError('Relocated output native identity changed; originals retained')
