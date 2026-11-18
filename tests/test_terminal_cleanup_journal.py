@@ -20,7 +20,13 @@ import terminal_cleanup_journal as terminal
 
 @unittest.skipUnless(os.name=='nt','Native Windows registry terminal cleanup')
 class TerminalJournalTests(unittest.TestCase):
+    FIXTURES='Software\\BooksArrangerLifecycleFixtures'
     def setUp(self):
+        # 0.30.0 (Senua F-m2, 0.29.0 final review): a private registry namespace (as test_storage_lifecycle uses), never the
+        # installed app's Software\Books Arranger\UninstallTransactions, which it reads at install, update and uninstall: a
+        # worker stopped between a key's creation and its Authority left a key there that would refuse his update.
+        self.private_base=self.FIXTURES+'\\'+uuid.uuid4().hex+'\\UninstallTransactions'
+        namespace=patch.object(terminal,'BASE',self.private_base);namespace.start();self.addCleanup(namespace.stop)
         root=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))
         self.area=root/('terminal-registry-'+uuid.uuid4().hex);self.area.mkdir(parents=True)
         self.registrations=patch.object(life,'registered_bootstraps',return_value=[]);self.registrations.start()
@@ -80,6 +86,12 @@ class TerminalJournalTests(unittest.TestCase):
         self.lease.__exit__(None,None,None)
         if self.process:self.process.stop()
         self.configurations.stop();self.registrations.stop()
+        # The private namespace's own containers, each only when empty (another worker's may sit beside it).
+        for key in (self.private_base,self.private_base.rsplit('\\',1)[0],self.FIXTURES):
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER,key,0,terminal.ACCESS) as opened:empty=winreg.QueryInfoKey(opened)[:2]==(0,0)
+                if empty:winreg.DeleteKey(winreg.HKEY_CURRENT_USER,key)
+            except OSError:pass
     def dispose_all(self,journal):
         for target in self.ordinary['targets']:
             for entry in target['files']:self.assertTrue(journal.dispose_file(entry['path'],entry['facts'],entry['sha256'])['removed'])

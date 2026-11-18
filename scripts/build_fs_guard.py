@@ -364,7 +364,10 @@ class PriorBuild:
         present=[os.path.lexists(manifest),os.path.lexists(pointer)]
         self.plans={}
         if not any(present):return
-        if not all(present):raise BoundaryError('Incomplete prior candidate preserved; manual exact-evidence recovery required')
+        # Senua R-m3 (0.29.0): a published build's local cleanup removed dist/ and kept the pointer, so every later pack
+        # stopped here. The two describe one candidate: a cleanup retires both (Brief, Stack and commands).
+        if not all(present):raise BoundaryError('Incomplete prior candidate preserved; manual exact-evidence recovery required'
+            ' (dist/release-artifacts.json and build-cache/runtime-pointer.json describe one prior build: retire both together)')
         self.plans={'manifest':capture_metadata(tree,manifest),'pointer':capture_metadata(tree,pointer)}
         self.manifest=_json_metadata(manifest);self.pointer=_json_metadata(pointer)
         m,p=self.manifest,self.pointer

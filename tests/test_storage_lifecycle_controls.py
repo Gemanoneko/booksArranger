@@ -126,9 +126,13 @@ class ControlTests(unittest.TestCase):
         for root in ('data_dir','profile_dir','temp_dir','downloads_dir','logs_dir'):self.assertFalse(Path(self.value[root]).exists())
 
 
-    def fake_registry(self,lists,count=None,gone=()):
+    def fake_registry(self,lists,count=None,gone=(),deleted=(),transactions=None):
         """winreg doubles for the pending-cleanup key: lists() gives each read's subkey names; QueryInfoKey reports count
-        (a stale number, as when another process removed an entry since); OpenKey of a name in gone is FileNotFoundError."""
+        (a stale number, as when another process removed an entry since); OpenKey of a name in gone is FileNotFoundError.
+        deleted: keys deleted after they were opened (EnumKey and QueryValueEx raise WinError 1018, ERROR_KEY_DELETED);
+        transactions: {installation: [transaction names]}."""
+        transactions=transactions or {}
+        def key_deleted():return OSError(0,'Illegal operation attempted on a registry key that has been marked for deletion',None,1018)
         import winreg
         class Key:
             def __init__(self,name):self.name=name
@@ -136,16 +140,21 @@ class ControlTests(unittest.TestCase):
             def __exit__(self,*args):return False
         def open_key(parent,sub,*args):
             if parent==winreg.HKEY_CURRENT_USER:return Key('base')
-            if sub in gone or parent.name!='base':raise FileNotFoundError(2,'gone',sub)
+            if sub in gone or parent.name!='base' and sub not in transactions.get(parent.name,()):raise FileNotFoundError(2,'gone',sub)
             return Key(sub)
         current={'names':[]}
         def enum(key,index):
+            if key.name in deleted:raise key_deleted()
             if key.name=='base' and index==0:current['names']=lists()
-            names=current['names'] if key.name=='base' else []
+            names=current['names'] if key.name=='base' else transactions.get(key.name,[])
             if index<len(names):return names[index]
             raise OSError(0,'No more data is available',None,259)
         def info(key):return ((count if count is not None else len(current['names'])) if key.name=='base' else 0,0,0)
-        return [patch.object(winreg,'OpenKey',side_effect=open_key),patch.object(winreg,'EnumKey',side_effect=enum),patch.object(winreg,'QueryInfoKey',side_effect=info)]
+        def value(key,name):
+            if key.name in deleted:raise key_deleted()
+            raise FileNotFoundError(2,'no Authority yet',name)
+        return [patch.object(winreg,'OpenKey',side_effect=open_key),patch.object(winreg,'EnumKey',side_effect=enum),patch.object(winreg,'QueryInfoKey',side_effect=info),
+                patch.object(winreg,'QueryValueEx',side_effect=value)]
 
     def test_pending_entries_removed_while_they_are_read_never_fail_the_check(self):
         # The 0.29.0 entry check at b527230: another gate worker removed its pending-cleanup key between QueryInfoKey's
@@ -155,13 +164,24 @@ class ControlTests(unittest.TestCase):
         outside=str(self.root/'not-created'/'Application')
         # (a) The count is stale: one entry went after QueryInfoKey (EnumKey then answers ERROR_NO_MORE_ITEMS).
         # (b) An entry is listed, then removed before it is opened.
-        for case,doubles in (('stale count',self.fake_registry(lambda:[listed],count=2)),('removed before opened',self.fake_registry(lambda:[listed,removed],gone={removed}))):
+        # (c) 0.30.0 (Senua F-m2): an installation or a transaction deleted after it was opened (WinError 1018): ended too.
+        tx=str(uuid.uuid4())
+        for case,doubles in (('stale count',self.fake_registry(lambda:[listed],count=2)),('removed before opened',self.fake_registry(lambda:[listed,removed],gone={removed})),
+                             ('installation deleted after it was opened',self.fake_registry(lambda:[listed],deleted={listed})),
+                             ('transaction deleted after it was opened',self.fake_registry(lambda:[listed],transactions={listed:[tx]},deleted={tx}))):
             with self.subTest(case=case):
                 for double in doubles:double.start()
                 try:
                     self.assertIsNone(controls.assert_no_pending_overlap([outside]))
                 finally:
                     for double in doubles:double.stop()
+        # Fail closed: a transaction that exists with its Authority not yet written still refuses (never read as ended).
+        doubles=self.fake_registry(lambda:[listed],transactions={listed:[tx]})
+        for double in doubles:double.start()
+        try:
+            with self.assertRaises(FileNotFoundError):controls.assert_no_pending_overlap([outside])
+        finally:
+            for double in doubles:double.stop()
         # Fail closed: a list that differs on every read is refused, never trusted.
         reads={'n':0}
         def changing():

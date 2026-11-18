@@ -1,1 +1,6 @@
 replacement_eye_plan.json text eol=lf
+# 0.30.0 (Senua R-m1, 0.29.0 review): the files the build hashes from the working tree are LF in every checkout. With
+# core.autocrlf=true a fresh checkout wrote CRLF, and the pack refused the lockfile its LF pin names (scripts/build-inputs.json).
+package-lock.json text eol=lf
+desktop/runtime-pins.json text eol=lf
+public_source_leads.json text eol=lf

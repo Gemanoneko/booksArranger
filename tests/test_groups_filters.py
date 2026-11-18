@@ -22,6 +22,26 @@ class GroupFilterTests(unittest.TestCase):
               (self.roots['Audiobooks'],path,10,modified,1,kind,0,json.dumps(metadata),error))
         return path
 
+    def test_the_multi_source_page_leaves_hidden_books_out_of_its_rows_and_total_f_m1(self):
+        # 0.30.0 (Senua F-m1b): the two-root page's clause for books the check pass took off the list (Futaba M-5) was held by
+        # no test: the M-5 test has one root. Both page paths: the plain page (rows read by page) and a searched one.
+        import groups
+        Inventory(self.database,self.roots,self.reader)
+        second=str(self.base/'audio2');Path(second).mkdir()
+        self.catalog('audio/First/01.mp3',{'album':'First','artist':'Writer'})
+        with connect(self.database) as connection:
+            metadata={'title':'Second','author':'Writer','artist':'Writer','tags':{'album':'Second','artist':'Writer'},'notes':[],'probe':{'format':{'duration':'2.5'}},'method':'fixture'}
+            connection.execute('INSERT INTO files(root,path,size,modified,seen,kind,arrival,metadata,error) VALUES(?,?,?,?,?,?,?,?,?)',
+              (second,str(self.base/'audio2'/'Second'/'01.mp3'),10,1700000000000000101,1,'audiobook',0,json.dumps(metadata),''))
+        roots=[self.roots['Audiobooks'],second]
+        with connect(self.database) as connection:
+            every=groups.page_sources(connection,roots)
+            self.assertEqual(sorted(row['source_root'] for row in every['rows']),sorted(roots),'positive control: one book in each root')
+            first=next(row['id'] for row in every['rows'] if row['source_root']==roots[0])
+            for search in ('','01'):
+                page=groups.page_sources(connection,roots,100,0,search,'all',hidden={first})
+                self.assertEqual(([row['source_root'] for row in page['rows']],page['total']),([second],1),'search: '+repr(search))
+
     def test_numeric_track_zero_introduction_and_repeated_titles_preserved(self):
         inventory=Inventory(self.database,self.roots,self.reader)
         for number in [10,2,1,0]:self.catalog(f'audio/Book/{number}.mp3',{'album':'Book','track':str(number),'title':'Repeated title'})

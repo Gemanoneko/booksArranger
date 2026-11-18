@@ -87,6 +87,12 @@ def _subkey_names(key,bound,what):
     raise ControlRecordsHeld(what+' records kept changing while they were read; try again')
 
 
+def _finished(error):
+    """A pending-cleanup key that is gone: not found, or deleted after it was opened (WinError 1018, ERROR_KEY_DELETED, which
+    EnumKey and QueryValueEx raise instead of FileNotFoundError; Senua F-m2, 0.29.0). That cleanup has ended."""
+    return isinstance(error,FileNotFoundError) or getattr(error,'winerror',None)==1018
+
+
 def assert_no_pending_overlap(scopes,installation_id=None):
     """A new installation UUID cannot adopt another pending native scope."""
     import winreg
@@ -100,16 +106,34 @@ def assert_no_pending_overlap(scopes,installation_id=None):
     try:base=winreg.OpenKey(winreg.HKEY_CURRENT_USER,BASE,0,winreg.KEY_READ|winreg.KEY_WOW64_64KEY)
     except FileNotFoundError:return
     with base:
-        for identifier in _subkey_names(base,512,'Pending cleanup installation'):
+        try:installations=_subkey_names(base,512,'Pending cleanup installation')
+        except OSError as error:
+            if _finished(error):return  # the whole namespace went meanwhile: nothing is pending
+            raise
+        for identifier in installations:
             _need(str(uuid.UUID(identifier))==identifier,'Unrecognized pending cleanup installation')
             try:installed=winreg.OpenKey(base,identifier)
-            except FileNotFoundError:continue  # removed since it was listed: that cleanup ended, nothing of it is pending
+            except OSError as error:
+                if _finished(error):continue  # removed since it was listed: that cleanup ended, nothing of it is pending
+                raise
             with installed:
-                for tx in _subkey_names(installed,512,'Pending cleanup transaction'):
+                try:transactions=_subkey_names(installed,512,'Pending cleanup transaction')
+                except OSError as error:
+                    if _finished(error):continue  # removed after it was opened (a terminal cleanup ending)
+                    raise
+                for tx in transactions:
                     _need(str(uuid.UUID(tx))==tx,'Unrecognized pending cleanup transaction')
                     try:held=winreg.OpenKey(installed,tx)
-                    except FileNotFoundError:continue  # the same, for one transaction
-                    with held as key:raw,kind=winreg.QueryValueEx(key,'Authority')
+                    except OSError as error:
+                        if _finished(error):continue  # the same, for one transaction
+                        raise
+                    try:
+                        with held as key:raw,kind=winreg.QueryValueEx(key,'Authority')
+                    except OSError as error:
+                        # Deleted after it was opened: that transaction ended. An Authority not written yet (a key that
+                        # exists, FileNotFoundError) still refuses: fail closed.
+                        if getattr(error,'winerror',None)==1018:continue
+                        raise
                     _need(kind==winreg.REG_BINARY and len(raw)<=MAX_AUTHORITY,'Pending cleanup authority cannot be checked')
                     authority=json.loads(raw)
                     _need(authority.get('schema')==JOURNAL_SCHEMA and authority.get('installation_id')==identifier and

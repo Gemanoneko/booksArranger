@@ -214,10 +214,21 @@ class CheckPassTests(unittest.TestCase):
         self.run_pass()
         with connect(self.database) as db:
             back = {'title_clue': 'partial', 'members': [{'path': paths[0], 'missing': False}, {'path': paths[1], 'missing': True}]}
-            db.execute("UPDATE book_groups SET fingerprint='fp-partial',revision=2,evidence=? WHERE id='partial'", (json.dumps(back),))
+            # 0.30.0 (Senua F-m1a): the scan that found one file moves the fingerprint away from the recorded one, so the
+            # release goes through the stale branch (_books), not the loop for books whose files came back.
+            db.execute("UPDATE book_groups SET fingerprint='fp-partial-scanned',revision=2,evidence=? WHERE id='partial'", (json.dumps(back),))
         Path(paths[0]).write_bytes(b'x' * 10)  # the file that scan found
         self.assertEqual(self.dismissed(), {'partial'}, 'positive control: the pass wrote its Remove-from-list record')
         self.run_pass()
+        self.assertEqual(self.dismissed(), set(), 'the stale record goes with its Remove-from-list record')
+        # The other file comes back unchanged: the fingerprint is the recorded one again, and nothing hides the book.
+        Path(paths[1]).write_bytes(b'x' * 10)
+        with connect(self.database) as db:
+            whole = {'title_clue': 'partial', 'members': [{'path': paths[0], 'missing': False}, {'path': paths[1], 'missing': False}]}
+            db.execute("UPDATE book_groups SET fingerprint='fp-partial',revision=3,evidence=? WHERE id='partial'", (json.dumps(whole),))
+        self.run_pass()
+        with connect(self.database) as db:
+            self.assertNotIn('partial', source_presence.hidden(db))
         self.assertEqual(self.dismissed(), set())
 
     def test_hidden_books_never_include_one_with_a_job_m_5(self):
