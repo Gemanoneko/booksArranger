@@ -152,6 +152,9 @@ class ActionQueue:
         database = getattr(getattr(server, 'inventory', None), 'database', None)
         self.store = store if store is not None else QueueStore(database) if isinstance(database, (str, bytes)) or hasattr(database, '__fspath__') else None
         self._save_lock = threading.Lock()
+        # 0.30.0: (kind, item) -> the blocker object /api/state gives (background_work.explain_one), for a press's own answer
+        # (the server sets it); without it a press's answer carries the kind alone.
+        self.explainer = None
         self._version = 0
         self._saved = 0
         self.restored = False
@@ -301,7 +304,16 @@ class ActionQueue:
             self.changed.notify_all()
             answer = self._answer(item)
         self._persist()
-        return answer
+        return self._explained(answer, item)
+
+    def _explained(self, answer, item):
+        explainer = self.explainer
+        if not callable(explainer) or not isinstance(answer.get('blocker'), dict):
+            return answer
+        try:
+            return answer | {'blocker': explainer(answer['blocker'].get('kind'), item)}
+        except Exception:
+            return answer  # the kind alone: the page's fallback wording
 
     def _answer(self, item):
         if item is self.running:return {'queued':True,'id':item['id'],'running':True}

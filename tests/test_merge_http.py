@@ -343,12 +343,12 @@ class MergeHTTPTests(unittest.TestCase):
         # every engine check again then; nothing runs now (they refused: "Pause audiobook work before…").
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
         status,body,_=self.call('/api/audiobook/restore',{'job_id':ID})
-        self.assertEqual((status,body.get('queued'),body.get('blocker')),(202,True,{'kind':'scan'}))
+        self.assertEqual((status,body.get('queued'),body.get('blocker')),(202,True,{'kind':'scan','cause':'scan','title':None,'book_id':None,'count':None}))  # 0.30.0: with its cause
         self.merge.restore_cleanup.assert_called_once_with(ID)
         self.assertEqual(self.server.actions.cancel(body['id']),{'cancelled':True})
         self.inventory.worker=None;self.jobs._thread=SimpleNamespace(is_alive=lambda:True)
         status,body,_=self.call('/api/audiobook/cleanup',{'job_id':ID})
-        self.assertEqual((status,body.get('queued'),body.get('blocker')),(202,True,{'kind':'jobs'}))
+        self.assertEqual((status,body.get('queued'),body.get('blocker')),(202,True,{'kind':'jobs','cause':'unknown','title':None,'book_id':None,'count':None}))  # a stand-in engine has no jobs fields
         self.merge.start_historical_cleanup.assert_called_once_with(ID)
         self.assertEqual(self.server.actions.cancel(body['id']),{'cancelled':True})
 

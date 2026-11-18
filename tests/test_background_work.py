@@ -117,6 +117,16 @@ class WorkTests(unittest.TestCase):
         self.assertEqual([(item['id'], item['subject']) for item in work['waiting']], [('cleanup:job-c', 'Оно')])
         self.assertEqual((work['counts']['tasks_running'], work['counts']['cleanups_paused'], work['counts']['cleanups_waiting']), (0, 2, 1))
 
+    def test_a_stopped_job_the_status_still_shows_is_never_a_running_row(self):
+        # 0.29.0: a job in 'Needs attention' is On hold on the page (read from the jobs fields), not a Running row; a cleanup
+        # phase there was drawn as a running cleanup before this check.
+        for phase in ('encoding', 'originals'):
+            jobs = jobs_state(state='Needs attention', current_job_id='job-a', current_book_id='book-a', current_title='Дюна',
+                              progress={'phase': phase, 'completed': 1, 'total': 9})
+            self.assertEqual(self.work(jobs)['rows'], [], phase)
+        jobs = jobs_state(state='Running', current_job_id='job-a', current_book_id='book-a', current_title='Дюна', progress={'phase': 'originals', 'completed': 1, 'total': 9})
+        self.assertEqual([row['id'] for row in self.work(jobs)['rows']], ['cleanup:job-a'], 'positive control: a running cleanup is a row')
+
     def test_scan_and_research_both_have_rows_and_a_running_action_is_never_hidden(self):
         jobs = jobs_state(state='Running', current_job_id='job-a', current_book_id='book-a', current_title='Дюна', progress={'phase': 'encoding'})
         queue = {'queued_actions': [], 'queue_running': {'id': 'r1', 'action': 'delete', 'book_id': 'book-c', 'title': 'Оно', 'n': 8}}

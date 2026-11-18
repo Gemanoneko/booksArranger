@@ -21,11 +21,12 @@ work = {
   'refreshing': bool,              a newer status computation runs now
   'unread': [kind],                sources that could not be read this poll (their rows are missing, never invented)
 }
-row = {id, kind, label_key, subject, book_id, job_id, step, step_text, state, done, total, unit, fraction, started, count}
+row = {id, kind, label_key, subject, book_id, job_id, step, step_text, state, done, total, unit, fraction, started, count, task_kind}
   id: unique per job ('<kind>:<job, book or move id>' or the kind alone for a one-off worker); state: 'running', 'pausing'
   or 'paused'; done/total/unit: an amount the engine counts (unit 'files', 'books', 'seconds', 'percent', 'moves'), else
   None and the bar slides; fraction: 0..1 where the engine knows a finer one; started: epoch ms, the engine's own start or
-  the first poll that saw the row; count: how many things a row stands for when it has no amount (a paused queue's books).
+  the first poll that saw the row; count: how many things a row stands for when it has no amount (a paused queue's books);
+  task_kind: the job's own task kind where it has one (duplicate_source_cleanup: an extra source's check and removal).
 item = {id, kind, label_key, subject, book_id, job_id, blocker, ahead, at, count}
   blocker: {kind, cause, title, book_id, count} for a queued action (ActionQueue blocker kinds, the cause split out; see
   explain()), else None; ahead: actions ahead of it in the queue; at: epoch ms of a timed retry; count: books it stands for.
@@ -42,7 +43,7 @@ KINDS = ('conversion', 'chapter_check', 'cleanup', 'queue', 'source_folders', 'm
 WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_retry', 'recovery_delete', 'decisions',
                  'metadata_sources', 'drive', 'resume', 'automatic_start', 'automatic')
 ROW_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'step', 'step_text', 'state', 'done', 'total', 'unit',
-            'fraction', 'started', 'count')
+            'fraction', 'started', 'count', 'task_kind')
 ITEM_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'blocker', 'ahead', 'at', 'count')
 CLEANUP_STEPS = {'recovery copies', 'originals', 'temporary', 'folders', 'former outputs', 'verifying replacement', 'retiring former outputs'}
 LIST_LIMIT = 100  # waiting cleanups listed one by one; the counts carry the rest (a NAS backlog can hold hundreds)
@@ -131,22 +132,24 @@ class Reader:
         progress = jobs.get('progress') if isinstance(jobs.get('progress'), dict) else None
         state = {'Pausing': 'pausing', 'Paused': 'paused'}.get(jobs.get('state'), 'running')
         job, book, title = jobs.get('current_job_id'), jobs.get('current_book_id'), jobs.get('current_title') or ''
-        if job and progress and progress.get('phase') and not progress.get('attention'):
+        task = jobs.get('current_task_kind') if isinstance(jobs.get('current_task_kind'), str) else None
+        # A stopped job the status still shows (state 'Needs attention') is On hold on the page, never a running row (0.29.0).
+        if job and progress and progress.get('phase') and not progress.get('attention') and jobs.get('state') != 'Needs attention':
             phase = progress['phase']
             if progress.get('chapter_check'):
                 check = progress['chapter_check'] if isinstance(progress['chapter_check'], dict) else {}
                 self.rows.append(_row(id='chapter_check:' + job, kind='chapter_check', subject=title, book_id=book, job_id=job,
-                                      step='checking_source_audio', step_text=check.get('file'), state=state))
+                                      step='checking_source_audio', step_text=check.get('file'), state=state, task_kind=task))
             elif phase in CLEANUP_STEPS:
                 unit = 'files' if phase in ('originals', 'recovery copies') else None
                 self.rows.append(_row(id='cleanup:' + job, kind='cleanup', subject=title, book_id=book, job_id=job, step=phase,
-                                      state=state, **_amount(progress.get('completed'), progress.get('total'), unit)))
+                                      state=state, task_kind=task, **_amount(progress.get('completed'), progress.get('total'), unit)))
             elif jobs.get('state') in ('Running', 'Pausing') or state == 'paused':
                 unit = progress.get('unit') or ('seconds' if phase == 'encoding' else None)
                 started = progress.get('started') if type(progress.get('started')) is int else None
                 fraction = progress.get('fraction') if type(progress.get('fraction')) in (int, float) and 0 <= progress['fraction'] <= 1 else None
                 self.rows.append(_row(id='conversion:' + job, kind='conversion', subject=title, book_id=book, job_id=job, step=phase,
-                                      state=state, fraction=fraction, started=started,
+                                      state=state, fraction=fraction, started=started, task_kind=task,
                                       **_amount(progress.get('completed'), progress.get('total'), unit)))
         running = next((row['job_id'] for row in self.rows if row['kind'] == 'cleanup'), None)
         pending = [c for c in jobs.get('cleanups_pending') or [] if isinstance(c, dict) and c.get('job_id') != running]
@@ -401,26 +404,34 @@ def explain(kind, item, jobs, queue_running=None):
     return value
 
 
+def explain_one(kind, item, jobs, running=None, merge=None, named=None):
+    """explain() plus what only the engine can add: a scan that waits for a check pass, the title of the cleanup a cause
+    names. named: a {job id: (title, book id)} cache shared by one poll."""
+    jobs = jobs if isinstance(jobs, dict) else {}
+    named = {} if named is None else named
+    value = explain(kind, item, jobs, running)
+    if value['cause'] == 'operation' and getattr(merge, '__dict__', {}).get('_source_checking'):
+        value['cause'] = 'source_check'  # a scan waits for a check pass (Senua S-m9)
+    if value['cause'] in ('cleanup_paused', 'cleanup_waiting') and merge is not None:
+        state = ('paused', 'pausing') if value['cause'] == 'cleanup_paused' else ('waiting',)
+        first = next((c for c in jobs.get('cleanups_pending') or [] if isinstance(c, dict) and c.get('state') in state), None)
+        if first:
+            if first['job_id'] not in named:
+                try:
+                    named.update(_titles(merge, [first['job_id']]))
+                except Exception:
+                    named[first['job_id']] = (None, None)
+            value['title'], value['book_id'] = named.get(first['job_id'], (None, None))
+    return value
+
+
 def explain_queue(queue, jobs, merge=None):
-    """Every queued action's blocker gets its cause (explain) in place; the cleanups a cause names get their book's title."""
+    """Every queued action's blocker gets its cause (explain_one) in place."""
     running = queue.get('queue_running') if isinstance(queue, dict) else None
     named = {}
     for item in (queue.get('queued_actions') or []) if isinstance(queue, dict) else []:
         blocker = item.get('blocker') if isinstance(item.get('blocker'), dict) else {}
-        value = explain(blocker.get('kind'), item, jobs, running)
-        if value['cause'] == 'operation' and getattr(merge, '__dict__', {}).get('_source_checking'):
-            value['cause'] = 'source_check'  # a scan waits for a check pass (Senua S-m9)
-        if value['cause'] in ('cleanup_paused', 'cleanup_waiting') and merge is not None:
-            state = ('paused', 'pausing') if value['cause'] == 'cleanup_paused' else ('waiting',)
-            first = next((c for c in jobs.get('cleanups_pending') or [] if c.get('state') in state), None)
-            if first:
-                if first['job_id'] not in named:
-                    try:
-                        named.update(_titles(merge, [first['job_id']]))
-                    except Exception:
-                        named[first['job_id']] = (None, None)
-                value['title'], value['book_id'] = named.get(first['job_id'], (None, None))
-        item['blocker'] = value
+        item['blocker'] = explain_one(blocker.get('kind'), item, jobs, running, merge, named)
 
 
 def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo=None, now_ms=None):

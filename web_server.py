@@ -320,7 +320,19 @@ class BrowserServer(ThreadingHTTPServer):
         value = self.__dict__.get('_actions')
         if value is None:
             value = self.__dict__['_actions'] = ActionQueue(self)
+            value.explainer = self.explain_blocker
         return value
+
+    def explain_blocker(self, kind, item):
+        """0.30.0: the blocker object of a queued action as /api/state gives it (background_work.explain_one), for a press's
+        own answer: the jobs fields read now (jobs_now), the running action from the queue."""
+        merge = self.merge
+        try:
+            jobs = merge.jobs_now() if callable(getattr(type(merge), 'jobs_now', None)) else {}
+        except Exception:
+            jobs = {}
+        running = self.actions.view().get('queue_running')
+        return background_work.explain_one(kind, item, jobs, running, merge)
 
     def _open_merge(self, progress=None):
         factory = self.merge_factory
@@ -748,8 +760,10 @@ class BrowserServer(ThreadingHTTPServer):
         loaded = self.__dict__.get('_loaded_jobs')
         if view['parts']['jobs'] and loaded is not None:
             jobs, automatic = copy.deepcopy(loaded)
+            queue = self.actions.view()
             value.update(audiobook_jobs=jobs, automatic_processing=automatic,
-                         activities=activities(jobs, None, None, automatic, self.__dict__.setdefault('_activity_started', {})))
+                         activities=activities(jobs, None, None, automatic, self.__dict__.setdefault('_activity_started', {})),
+                         work=background_work.view(self, jobs, automatic, queue, False, None, None, self.__dict__.setdefault('_work_started', {})))
         return value
 
 # The presses that queue (0.22.1, Judy 1.1).
@@ -1421,7 +1435,7 @@ class Handler(BaseHTTPRequestHandler):
                 result=self.server.merge.delete_preview(id,revision,mode,wait=True)
                 if result.get('refusal') is None and not result.get('blocked'):
                     kind=self.server.actions.waiting('delete' if mode=='delete' else 'copy',id)
-                    if kind:result['blocked']={'kind':kind}
+                    if kind:result['blocked']=self.server.explain_blocker(kind,{'book_id':id})  # 0.30.0: with its cause
                 self.response(200,result);return
             paths,folders=data['paths'],data.get('folders',[])
             for values in (paths,folders):

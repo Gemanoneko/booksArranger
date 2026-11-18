@@ -204,12 +204,14 @@ class BrowserTests(unittest.TestCase):
             code,refused=self.json_call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job})
             self.assertEqual((code,refused['error']),(409,'Scanning is running. Retry when it stops.'),'control: a press without queue is refused as before')
             code,first=self.json_call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job,'queue':True,'title':'Лабиринты Ехо 3'})
-            self.assertEqual((code,first['queued'],first['position'],first['blocker']),(202,True,1,{'kind':'scan'}))
+            # 0.30.0: a press's own answer names the blocker's cause as /api/state does (Judy's spec 2.1).
+            scan={'kind':'scan','cause':'scan','title':None,'book_id':None,'count':None}
+            self.assertEqual((code,first['queued'],first['position'],first['blocker']),(202,True,1,scan))
             code,preview=self.json_call('/api/candidate/delete-preview',{'library':'Audiobooks','id':other,'revision':2,'queue':True})
             self.assertEqual((code,preview['refusal'],preview['blocked'],len(preview['files'])),(200,None,{'kind':'scan'},1),'the list and what it waits for, not a busy refusal')
             self.assertEqual(previewed.call_args.kwargs,{'wait':True})
             code,second=self.json_call('/api/candidate/delete',{'library':'Audiobooks','id':other,'revision':2,'paths':['Z:/a.mp3'],'folders':[],'queue':True,'title':'Новая плоть'})
-            self.assertEqual((code,second['position'],second['blocker']),(202,2,{'kind':'scan'}))
+            self.assertEqual((code,second['position'],second['blocker']),(202,2,scan))
             retried.assert_not_called();deleted.assert_not_called();repaired.assert_not_called()
             code,state=self.json_call('/api/state?library=Audiobooks')
             self.assertEqual([(item['id'],item['action'],item['book_id'],item['position'],item['title']) for item in state['queued_actions']],
