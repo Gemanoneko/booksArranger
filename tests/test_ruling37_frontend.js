@@ -44,13 +44,13 @@ const JOB='00000000-0000-4000-8000-0000000000c1';
   run('state={...state,active_library:"Audiobooks"};retryAllConfirm={count:1};controls()');
   get('retry-all-go').handlers.click();
   assert.equal(sent('/api/audiobook/retry-all').length,0,'nothing sent while the scan runs');
-  assert.equal(get('message').textContent,'Retry all queued. It runs when the scan finishes. Press it again to cancel.');
+  assert.equal(get('message').textContent,'Retry all queued. It runs when the library scan finishes. Stop scanning to run it sooner. Press it again to cancel.');
   run('state={...state,active_library:null};controls()');await tick(8);
   assert.equal(sent('/api/audiobook/retry-all').length,1,'sent when the scan ended');
   answers['/api/audiobook/retry-all']=()=>ok({error:'Scanning is running. Retry when it stops.',code:'scanning'},409);
   run('retryAllConfirm={count:1};retryAllRun=null;busy=false;state={...state,audiobook_jobs:{...state.audiobook_jobs,retry_all:null}};controls()');await run('startRetryAll()');
   assert.deepEqual([run('laterPresses.length'),run('laterPresses[0].kind')],[1,'retry_all'],'held again, never "Retry when it stops"');
-  assert.match(run('stripNote'),/^Retry all queued\. It runs when the scan finishes\./,'the strip line says so');
+  assert.match(run('stripNote'),/^Retry all queued\. It runs when the library scan finishes\./,'the strip line says so');
   run('laterPresses.length=0;controls()');
   // 3. Convert (Confirm and convert) while a scan runs: held for the scan, then sent with his two statements.
   const convert={id:'cand-v',path:'cand-v',kind:'candidate',library:'Audiobooks',revision:3,title_clue:'Сказка',review:{},members:[],status:'Output needs attention',
@@ -59,7 +59,7 @@ const JOB='00000000-0000-4000-8000-0000000000c1';
   run('rows=[convertRow];state={...state,active_library:"Audiobooks"};controls()');
   await run('convertPress(convertRow,null)');
   assert.equal(sent('/api/audiobook/confirm-convert').length,0,'nothing sent while the scan runs');
-  assert.deepEqual([run('laterPresses.length'),run('laterPresses[0].kind'),run('laterLine(laterPresses[0])')],[1,'convert','Convert queued. It runs when the scan finishes.']);
+  assert.deepEqual([run('laterPresses.length'),run('laterPresses[0].kind'),run('laterLine(laterPresses[0])')],[1,'convert','Convert queued. It runs when the library scan finishes. Stop scanning to run it sooner.']);
   run('state={...state,active_library:null};controls()');await tick(10);
   assert.equal(sent('/api/audiobook/confirm-convert').length,1,'sent when the scan ended');
   assert.equal(sent('/api/audiobook/confirm-convert')[0].statements.length,2,'with both statements he ticked');
@@ -68,7 +68,7 @@ const JOB='00000000-0000-4000-8000-0000000000c1';
     creation:{status:'Audiobook created',job_id:JOB,job:{job_id:JOB}},
     cleanup:{recovery:{state:'retained',eligible:true,queued:true,waits:'scan',count:2,bytes:4096,token:'a'.repeat(64),location:'C:/recovery',expires_at:'2026-11-26T00:00:00Z'}}};
   context.recoveredRow=recovered;run('recoveryDisconnected=false;rows=[recoveredRow];selectedPath="cand-r";selectedRow=recoveredRow;recoveryPanel=null;globalThis.__panel=makeRecoveryPanel()');
-  assert.equal(run('recoveryPanel.values.Status.value.textContent'),'Deletion queued. It runs when the scan finishes.');
+  assert.equal(run('recoveryPanel.values.Status.value.textContent'),'Deletion queued. It runs when the library scan finishes. Stop scanning to run it sooner.');
   assert.deepEqual([run('recoveryPanel.button.textContent'),run('recoveryPanel.button.disabled'),run('recoveryReason()')],['Cancel deletion',false,'']);
   answers['/api/audiobook/recovery/cancel']=()=>ok({cancelled:true});
   await run('cancelRecoveryDeletion()');
@@ -77,7 +77,7 @@ const JOB='00000000-0000-4000-8000-0000000000c1';
   // Not queued, a scan running: the press is offered (it was disabled with "Wait for the scan to stop…").
   run('recoveryDisconnected=false;selectedRow={...recoveredRow,cleanup:{recovery:{...recoveredRow.cleanup.recovery,queued:false}}};rows=[selectedRow];updateRecovery()');
   assert.equal(run('recoveryPanel.button.disabled'),false);assert.equal(run('recoveryPanel.button.textContent'),'Delete recovery copies…');
-  assert.match(run('recoveryPanel.button.title'),/A scan is running, so the deletion is queued after you confirm\.$/);
+  assert.match(run('recoveryPanel.button.title'),/The library scan is running, so the deletion is queued after you confirm\.$/);
   // 5. S6: a delete refusal the page has no line for is said in the engine's words.
   const link="A folder on the path to these files is a link or a junction, so the app can't tell what deleting would reach. Nothing was deleted.";
   assert.equal(run('deleteRefusalText('+JSON.stringify({code:'link',message:link})+')'),link);

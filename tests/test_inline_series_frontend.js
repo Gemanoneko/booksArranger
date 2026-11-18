@@ -109,10 +109,11 @@ const call=route=>posts.filter(p=>p.route===route).at(-1)?.data;
  context.fetch=savedFetch;context.setTimeout=savedTimer;
  context.extraRow={creation:{job:{task_kind:'duplicate_source_cleanup',state:'Extra source removed. Finished audiobook kept.'}},audiobook_ready:false};
  assert.equal(run('candidateStatus(extraRow)'),'Extra source removed. Finished audiobook kept.');
- context.extraActivity={kind:'conversion',task_kind:'duplicate_source_cleanup',step:'checking extra source',state:'running'};
- assert.equal(run('activityLabel(extraActivity)'),'Checking extra source');assert.equal(run('activityStep(extraActivity,false)'),'Checking extra source');
- context.extraActivity.kind='cleanup';assert.equal(run('activityLabel(extraActivity)'),'Removing extra source');
- context.extraActivity.state='attention';assert.equal(run('activityLabel(extraActivity)'),'Extra source kept');
+ // 0.30.0: the work row of an extra source names it as label and step; a held one is On hold (heldRows), not a row.
+ context.extraActivity={id:'conversion:x',kind:'conversion',task_kind:'duplicate_source_cleanup',step:'checking extra source',state:'running'};
+ assert.equal(run('workLabel(extraActivity)'),'Checking extra source');assert.equal(run('workStep(extraActivity,false)'),'Checking extra source');
+ context.extraActivity.kind='cleanup';assert.equal(run('workLabel(extraActivity)'),'Removing extra source');assert.equal(run('workStep(extraActivity,false)'),'Removing extra source');
+ context.extraActivity.state='paused';assert.equal(run('workStep(extraActivity,false)'),'Paused - Removing extra source');
  console.log('inline author/title/series draft, preview, approval and editor reuse: passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

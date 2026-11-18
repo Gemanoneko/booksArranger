@@ -58,7 +58,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(run('damageHint('+JSON.stringify({damage:[{kind:'truncated_final_frames',frames:1,replaced_ticks:1024,timescale:44100}]})+')'),'The last 0.02 s of audio is missing. Repair fills it with silence.');
   assert.equal(run('patchCopy('+JSON.stringify({kind:'truncated_final_frames'})+')'),'Filled the missing end of the audio with silence.','no amount from the API, no number');
   // 0.22.1 (Judy 1.1): Retry is no longer disabled while another press runs; it stays enabled and a press is queued.
-  run('busy=true;controls()');assert.equal(actionButtons(trs[0])[0].disabled,false);assert.equal(actionButtons(trs[0])[0].title,'Queue this retry. The app is working on another action; it starts when the current action finishes.');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.','busy is tooltip only');run('busy=false;controls()');
+  run('busy=true;controls()');assert.equal(actionButtons(trs[0])[0].disabled,false);assert.equal(actionButtons(trs[0])[0].title,'Queue this retry. It runs when the app is free.');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.','busy is tooltip only');run('busy=false;controls()');
 
   // Row Retry: one request, pending hint, then the book is queued; focus lands back in the list.
   let answer;retryOverride=()=>new Promise(resolve=>{answer=resolve;});inventoryRows=[space,unsupported,other,repair];const sent=calls.length;
@@ -225,10 +225,10 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   stateGate();await slowChange;context.fetch=listFetch;inventoryOverride=null;
 
   // 3c: whole files in the detail, the bar by fraction. 3d: research keeps one ETA history across books.
-  context.fixture={audiobook_jobs:{state:'Running',queued:0,failed:0},activities:[{id:'conversion',kind:'conversion',subject:'B',step:'preparing',step_index:1,step_count:4,done:2,total:4,fraction:0.63,unit:'files',indeterminate:false,state:'running',step_started_at:Date.now()-20000}]};
+  context.fixture={audiobook_jobs:{state:'Running',queued:0,failed:0},work:{rows:[{id:'conversion:j1',kind:'conversion',subject:'B',job_id:'j1',step:'preparing',done:2,total:4,fraction:0.63,unit:'files',state:'running',started:Date.now()-20000}],waiting:[],counts:{},unread:[]}};  // 0.30.0: work rows
   run('state=fixture;renderJobs()');const preparing=get('jobs-rows').children[0];assert.equal(preparing.children[0].children[1].textContent,'2 of 4 files');assert.equal(preparing.children[1].value,63);
-  const researchStart=Date.now()-60000,researching=(title,done)=>({audiobook_jobs:{state:'Running',queued:0,failed:0},activities:[{id:'scan',kind:'scan',subject:title,step:'researching',step_text:'x',done,total:100,unit:'books',indeterminate:false,state:'running',step_started_at:researchStart}]});
-  context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
+  const researchStart=Date.now()-60000,researching=(title,done)=>({audiobook_jobs:{state:'Running',queued:0,failed:0},work:{rows:[{id:'research',kind:'research',subject:title,step:'researching',step_text:'x',done,total:100,unit:'books',state:'running',started:researchStart}],waiting:[],counts:{},unread:[]}});
+  context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('research')");const samples=view.samples.length;
   context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
   context.fixture=attentionRow('bad-source','other',{}, {attention:{group:'other',originals_untouched:true,remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/Audio/Железная.mp3'}}});
   const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Source audio needs replacement');assert.equal(sourceText.hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
@@ -239,8 +239,6 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
     ['m4b_feature_unsupported','unsupported',"Can't convert — M4B feature unsupported",'source.m4b has a chapter image the app cannot preserve yet. Try again after an app update.']]){
     context.fixture=attentionRow('typed-media',group,{}, {reason:'Header missing — RAW DIAGNOSTIC',attention:{group,originals_untouched:true,media_failure:{schema:'books-media-failure-v1',code,filename:code==='source_decode_failed'?'12.mp3':'source.m4b',status,hint}}});
     assert.equal(run('candidateStatus(fixture)'),status);assert.equal(run('attentionText(fixture).hint'),hint+' Original kept.');
-    context.mediaActivity={kind:'conversion',state:'attention',media_failure:context.fixture.creation.job.attention.media_failure};
-    assert.equal(run('activityLabel(mediaActivity)'),status);assert.equal(run('activityStep(mediaActivity,false)'),hint,'Jobs uses the same typed cause without raw decoder text');
     assert.match(run('technicalText(fixture)'),/RAW DIAGNOSTIC/);assert.doesNotMatch(run('attentionText(fixture).hint'),/RAW DIAGNOSTIC/);assert.equal(run('rowAction(fixture)'),null,'no unsupported repair action');
   }
   context.fixture.creation.job.attention.media_failure={schema:'untrusted',code:'source_decode_failed',filename:'guess.mp3',status:'Guess',hint:'Guess'};
@@ -250,9 +248,11 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.match(run('attentionText(fixture).hint'),/risking missing audio/);
   assert.equal(run('rowAction(fixture)'),null,'stale Retry data cannot bypass analyzed damage');
   assert.match(run('technicalText(fixture)'),/Affected source file.*one.mp3.*deletion not confirmed/);
-  context.fixture={kind:'conversion',state:'attention'};assert.equal(run('activityLabel(fixture)'),'Audiobook on hold');
-  context.fixture={kind:'conversion',state:'paused'};assert.equal(run('activityLabel(fixture)'),'Audiobook paused');
-  context.fixture={kind:'conversion',state:'running'};assert.equal(run('activityLabel(fixture)'),'Converting');
+  // 0.30.0: a stopped conversion the status still shows is On hold (never a Running row); running and paused rows name themselves.
+  context.fixture={state:'Needs attention',current_title:'Held book',current_book_id:'b1',progress:{phase:'encoding'}};assert.deepEqual(JSON.parse(JSON.stringify(run('heldRows(fixture)'))),[{book_id:'b1',subject:'Held book',cause:'other',held_total:1}]);
+  context.fixture.progress.attention=true;assert.deepEqual(JSON.parse(JSON.stringify(run('heldRows(fixture)'))),[],'a held cleanup comes from attention_row only');
+  context.fixture={kind:'conversion',state:'paused'};assert.equal(run('workLabel(fixture)'),'Audiobook paused');
+  context.fixture={kind:'conversion',state:'running'};assert.equal(run('workLabel(fixture)'),'Converting');
   context.setTimeout=()=>0;  // nothing scheduled after the checks keeps the process alive
   console.log('PASS attention classes, row hints, Retry and Repair, queued next, repaired record, group strip, server Retry all with confirmation, details lines, list loading and request discipline, whole files and research history');
 })().catch(error=>{console.error(error);process.exitCode=1;});

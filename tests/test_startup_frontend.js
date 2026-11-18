@@ -87,7 +87,7 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     const event=h.press(h.node('start'));
     assert.equal(event.prevented,false,'not refused');
     h.node('start').handlers.click();
-    assert.equal(h.node('message').textContent,'Start scanning queued. It runs when loading finishes. Press it again to cancel.');
+    assert.equal(h.node('message').textContent,'Start scanning queued. It runs when Books Arranger finishes loading. Press it again to cancel.');
     assert.equal(h.node('start').getAttribute('aria-disabled'),'true','its face is held, with the sentence as its tooltip');
     h.node('start').handlers.click();
     assert.equal(h.node('start').getAttribute('aria-disabled'),null,'pressed again: taken back');assert.equal(h.calls.scan || 0,0);

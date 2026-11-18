@@ -122,16 +122,23 @@ const running={...backend.automatic_processing,state:'Running',phase:'research',
   assert.equal(sent('/api/audiobook/resume'),1,'his Resume is sent');
   scanLater(ok({state:'Running'}));await scan3;for(let i=0;i<6;i++)await tick();
   assert.equal(sent('/api/audiobook/pause'),0,'his Resume ends the pending re-pause');
-  // 9. Futaba m-3 and m-6: the Waiting line.
-  run('rows=[{id:"b",kind:"candidate",title_clue:"Foo"}];queueState={queued:[{id:"q1",book_id:"b",action:"retry"}],running:null}');
-  assert.equal(run('waitingLine()'),'Waiting: Retry: Foo. It runs when the app is free.','one queued action is "It"');
-  run('queueState={queued:[{id:"q1",book_id:"b",action:"retry"}],running:{id:"q0",book_id:"c",action:"delete",title:"Bar"}}');
-  assert.equal(run('waitingLine()'),'Waiting: Retry: Foo. It runs when Delete: Bar finishes.','its blocker is named when known');
-  run('queueState={queued:[{id:"q1",book_id:"b",action:"retry"},{id:"q2",book_id:"b",action:"delete"}],running:null}');
-  assert.match(run('waitingLine()'),/They run one at a time\.$/);
-  run('queueState={queued:[],running:null};state={...state,library_roots:[],automatic_processing:{...state.automatic_processing,state:"Running",next_retry_at:Date.now()/1000+3600,research:{researching:0,waiting:0,held:6}}}');
-  assert.match(run('waitingLine()'),/^Waiting for metadata sources\. Next try \d\d:\d\d\.$/,'a timed retry is a wait even with no book waiting');
-  run('state={...state,automatic_processing:{...state.automatic_processing,next_retry_at:null}}');assert.equal(run('waitingLine()'),'','positive control: nothing scheduled');
+  // 9. Futaba m-3 and m-6, 0.30.0 (Judy's spec 1.6): the Waiting list replaces the Waiting line; the engine's work.waiting
+  // items, in its order, one item each, the blocker named by the one builder.
+  const lines=item=>{context.item=item;return JSON.parse(JSON.stringify(run('waitingLines(item,workOf())')));};
+  run('queueState={queued:[],running:null};state={...state,work:{rows:[],waiting:[],counts:{},unread:[]}}');
+  assert.deepEqual(lines({id:'action:q1',kind:'action',label_key:'retry',subject:'Foo',book_id:'b',blocker:{kind:'operation',cause:'operation'},ahead:0}).slice(0,3),['Retry','Foo','It runs when the app is free.'],'an unnamed press: the fallback');
+  run('queueState={queued:[],running:{id:"q0",book_id:"c",action:"delete",title:"Bar"}}');
+  assert.deepEqual(lines({id:'action:q1',kind:'action',label_key:'retry',subject:'Foo',book_id:'b',blocker:{kind:'operation',cause:'action',title:'Bar',book_id:'c'},ahead:1}).slice(0,3),['Retry','Foo','1 ahead. It runs when Delete: Bar finishes.'],'its blocker is named');
+  assert.match(lines({id:'metadata_sources',kind:'metadata_sources',count:6,at:Date.now()+3600000})[2],/^6 books wait for a source to answer\. Next try \d\d:\d\d\.$/,'a timed retry is a wait even with no book waiting');
+  assert.equal(lines({id:'metadata_sources',kind:'metadata_sources',count:0,at:null})[2],'','positive control: nothing scheduled');
+  // The list itself: one item each, Show in list where there is a book; more than 5 waiting cleanups read as one item.
+  const cleanups=[1,2,3,4,5,6,7].map(n=>({id:'cleanup:j'+n,kind:'cleanup',subject:'Book '+n,book_id:'b'+n,job_id:'j'+n}));
+  run('state={...state,work:'+JSON.stringify({rows:[],waiting:[{id:'action:q1',kind:'action',label_key:'retry',subject:'Foo',book_id:'b',blocker:{kind:'operation',cause:'operation'},ahead:0},...cleanups],counts:{cleanups_waiting:9},unread:[]})+'};renderJobs()');
+  const wait=get('jobs-wait').children;assert.equal(get('jobs-wait-block').hidden,false);assert.equal(wait.length,2,'the action and one grouped cleanup item');
+  assert.equal(wait[0].children[0].children[0].children.map(item=>item.textContent).join(''),'Retry: Foo');assert.equal(wait[0].children[1].textContent,'Show in list');
+  assert.equal(wait[0].children[1].title,'List this book: sets Status to All and searches for its title. Its row has Cancel.');
+  assert.equal(wait[1].children[0].children[0].children.map(item=>item.textContent).join(''),'Cleanup waiting: 9 books');assert.equal(wait[1].children[0].children[1].textContent,'Next: Book 1. They run one at a time.');
+  run('state={...state,work:{rows:[],waiting:[],counts:{},unread:[]}};renderJobs()');assert.equal(get('jobs-wait-block').hidden,true,'an empty list hides');
   console.log('PASS 0.29.0 Stop acts at once: bypasses the queue, keeps busy, re-pauses after a press in flight; queued lines name the blocker; cancel and turn-away lines');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

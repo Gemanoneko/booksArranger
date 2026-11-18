@@ -44,7 +44,7 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   // 1. A scan runs: Retry stays enabled and says it will queue (1.4, the blocked tooltip). The press sends queue: true.
   run('state={...state,active_library:"Audiobooks"};controls()');
   let retry=byText(tr,'Retry');assert.equal(retry.disabled,false);assert.equal(retry.getAttribute('aria-disabled'),null);
-  assert.equal(retry.title,'Queue this retry. A scan is running; it starts when the scan finishes.');
+  assert.equal(retry.title,'Queue this retry. It runs when the library scan finishes. Stop scanning to run it sooner.');
   answers['/api/audiobook/retry']=()=>ok({queued:true,id:'q-1',position:1,blocker:{kind:'scan'}},202);
   inventoryRows=[attentionRow('a'),attentionRow('b'),attentionRow('c')];
   // As a browser does, rebuilding the list drops focus from a removed button to the page body.
@@ -56,28 +56,28 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   assert.deepEqual(posted('/api/audiobook/retry').at(-1),{library:'Audiobooks',id:'cand-a',revision:4,job_id:'job-a',queue:true,title:'Title a'});
   tr=trOf('cand-a');retry=buttonsOf(tr)[0];const cancel=byText(tr,'Cancel retry');
   assert.equal(retry.textContent,'Retry queued');assert.equal(retry.getAttribute('aria-disabled'),'true');assert.equal(retry.disabled,false,'keeps keyboard focus');
-  assert.equal(retry.getAttribute('aria-label'),'Retry queued: Title a');assert.equal(retry.title,'Retry is queued. It starts when the scan finishes.');
+  assert.equal(retry.getAttribute('aria-label'),'Retry queued: Title a');assert.equal(retry.title,'Retry is queued. It runs when the library scan finishes. Stop scanning to run it sooner.');
   assert.equal(cancel.hidden,false);assert.equal(cancel.title,'Take this retry out of the queue. Nothing was started.');assert.equal(cancel.getAttribute('aria-label'),'Cancel retry: Title a');
   assert.equal(buttonsOf(tr).indexOf(cancel),buttonsOf(tr).indexOf(retry)+1,'Cancel directly after the face (1.7)');
-  assert.equal(hint(tr),'Retry queued. Starts when the scan finishes.');
+  assert.equal(hint(tr),'Retry queued. It runs when the library scan finishes. Stop scanning to run it sooner.');
   assert.equal(get('queue-announce').textContent,'Retry queued: Title a.');
   // A double click on the queued face does nothing (1.1).
   const sent=posted('/api/audiobook/retry').length;await retry.handlers.click({stopPropagation(){}});await tick();assert.equal(posted('/api/audiobook/retry').length,sent);
   // 2. Order and count from /api/state: "{n} ahead", the strip line, a fresh press goes behind.
   queue({queued_actions:[item('q-1','retry','cand-a',1),item('q-2','retry','cand-b',2),item('q-3','repair','cand-c',3)],queue_running:null,queue_outcomes:[]});
-  assert.equal(hint(trOf('cand-b')),'Retry queued, 1 ahead. Starts when the scan finishes.');
-  assert.equal(hint(trOf('cand-c')),'Repair queued, 2 ahead. Starts when the scan finishes.');assert.equal(buttonsOf(trOf('cand-c'))[0].textContent,'Repair queued');
+  assert.equal(hint(trOf('cand-b')),'Retry queued. 1 ahead. It runs when the library scan finishes. Stop scanning to run it sooner.');
+  assert.equal(hint(trOf('cand-c')),'Repair queued. 2 ahead. It runs when the library scan finishes. Stop scanning to run it sooner.');assert.equal(buttonsOf(trOf('cand-c'))[0].textContent,'Repair queued');
   assert.equal(byText(trOf('cand-c'),'Cancel repair').hidden,false);
-  assert.equal(get('queue-line').textContent,'3 actions queued. They run one at a time when the scan finishes.');assert.equal(get('queue-line').hidden,false);
+  assert.equal(get('queue-line').textContent,'3 actions waiting, one at a time. First: Retry: Title a. It runs when the library scan finishes. Stop scanning to run it sooner.');assert.equal(get('queue-line').hidden,false);
   // The details panel shows the same pair (1.3): the queued face, Cancel repair beside it, the hint in #retry-note.
   run('select(rows.find(row=>row.id==="cand-c"),true)');
   assert.equal(get('retry-job').textContent,'Repair queued');assert.equal(get('retry-job').getAttribute('aria-disabled'),'true');
   assert.equal(get('retry-cancel').hidden,false);assert.equal(get('retry-cancel').textContent,'Cancel repair');
-  assert.equal(get('retry-note').textContent,'Repair queued, 2 ahead. Starts when the scan finishes.');
+  assert.equal(get('retry-note').textContent,'Repair queued. 2 ahead. It runs when the library scan finishes. Stop scanning to run it sooner.');
   answers['/api/queue/cancel']=()=>ok({cancelled:true});await get('retry-cancel').handlers.click({});for(let i=0;i<4;i++)await tick();
   assert.deepEqual(posted('/api/queue/cancel').at(-1),{id:'q-3'});assert.equal(get('queue-announce').textContent,'Repair cancelled: Title c.');
   queue({queued_actions:[item('q-1','retry','cand-a',1)],queue_running:null,queue_outcomes:[]});
-  assert.equal(get('queue-line').textContent,'1 action queued. It runs when the scan finishes.');
+  assert.equal(get('queue-line').textContent,'1 action waiting. It runs when the library scan finishes. Stop scanning to run it sooner.');
   // 3. Cancel: out of the queue, nothing starts, the row returns to Retry, focus on the restored button.
   answers['/api/queue/cancel']=data=>ok({cancelled:true});
   const cancelA=byText(trOf('cand-a'),'Cancel retry');cancelA.focus();await cancelA.handlers.click({stopPropagation(){}});for(let i=0;i<6;i++)await tick();
@@ -123,17 +123,17 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   // 4. Delete book while a scan runs: the preview names it, the dialog opens in its blocked variant, confirm queues.
   paint([missing('m'),missing('z',0)]);inventoryRows=[missing('m'),missing('z',0)];run('state={...state,active_library:"Audiobooks"};controls()');
   tr=trOf('cand-m');let del=byText(tr,'Delete book');
-  assert.equal(del.title,'Delete this book. A scan is running, so the delete is queued after you confirm.');assert.equal(del.getAttribute('aria-disabled'),null);
+  assert.equal(del.title,'Delete this book. The library scan is running, so the delete is queued after you confirm.');assert.equal(del.getAttribute('aria-disabled'),null);
   const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b',size:700*1024*1024}];
   answers['/api/candidate/delete-preview']=()=>ok({files:FILES,bytes:1400*1024*1024,folders:[],stay:{items:0},refusal:null,kind:'files_missing',blocked:{kind:'scan'}});
   await del.handlers.click({stopPropagation(){}});await tick();
   assert.deepEqual(posted('/api/candidate/delete-preview').at(-1),{library:'Audiobooks',id:'cand-m',revision:2,queue:true});
   assert.equal(get('delete-dialog-title').textContent,'Delete this book?');assert.equal(document.activeElement,get('delete-cancel'),'Cancel has focus');
-  assert.equal(get('delete-dialog-blocked').hidden,false);assert.equal(get('delete-dialog-blocked').textContent,'A scan is running, so this delete waits its turn.');
+  assert.equal(get('delete-dialog-blocked').hidden,false);assert.equal(get('delete-dialog-blocked').textContent,'The library scan is running, so this delete waits its turn.');
   assert.match(get('delete-dialog-files').textContent,/^These 2 files \(1[.,]4 GB\) will be deleted from your disk when it runs\. The app can't undo this\.$/);
   assert.equal(get('delete-dialog-recheck').hidden,false);assert.equal(get('delete-dialog-recheck').textContent,'The app checks this book and these files again first. If anything differs, nothing is deleted.');
   assert.equal(get('delete-confirm').textContent,'Queue delete of 2 files');
-  assert.equal(get('delete-confirm').title,"Queue this delete. It runs when the scan finishes, after the app checks the book and files again. The app can't undo it.");
+  assert.equal(get('delete-confirm').title,"Queue this delete. It runs when the library scan finishes. Stop scanning to run it sooner. The app checks the book and files again first. The app can't undo it.");
   let release;answers['/api/candidate/delete']=()=>new Promise(resolve=>{release=resolve;});
   const confirming=get('delete-confirm').handlers.click({});await tick();
   assert.equal(get('delete-confirm').textContent,'Queuing…');assert.equal(get('delete-confirm').getAttribute('aria-disabled'),'true');
@@ -143,10 +143,10 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   assert.equal(run('deleteDialog'),null,'the dialog closes');
   tr=trOf('cand-m');del=buttonsOf(tr).find(b=>b.className.includes('danger'));
   assert.equal(del.textContent,'Delete queued');assert.equal(del.getAttribute('aria-disabled'),'true');assert.equal(document.activeElement,del,'focus on the queued face');
-  assert.equal(del.title,'Delete is queued. Nothing is deleted until it runs, when the scan finishes.');assert.equal(del.getAttribute('aria-label'),'Delete queued: Title m');
+  assert.equal(del.title,'Delete is queued. Nothing is deleted until it runs. It runs when the library scan finishes. Stop scanning to run it sooner.');assert.equal(del.getAttribute('aria-label'),'Delete queued: Title m');
   assert.equal(byText(tr,'Cancel delete').hidden,false);assert.equal(byText(tr,'Cancel delete').title,'Take this delete out of the queue. Nothing was deleted.');
   assert.equal(get('queue-announce').textContent,'Delete queued: Title m.');
-  assert.equal(hint(tr),'Delete queued. Nothing is deleted yet. It runs when the scan finishes.');
+  assert.equal(hint(tr),'Delete queued. It runs when the library scan finishes. Stop scanning to run it sooner.');
   // Siblings go inert with their tooltip; View metadata stays live (1.3).
   for(const face of ['Scan again',"Convert what's there"]){const b=byText(tr,face);assert.equal(b.getAttribute('aria-disabled'),'true',face);assert.equal(b.title,'A delete is queued for this book. Cancel it to use this.',face);}
   assert.equal(byText(tr,'View metadata').getAttribute('aria-disabled'),null);
@@ -184,7 +184,7 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   answers['/api/candidate/delete']=()=>ok({queued:true,id:'d-2',position:1,blocker:{kind:'operation'}},202);
   await get('delete-confirm').handlers.click({});for(let i=0;i<4;i++)await tick();
   assert.equal(run('deleteDialog'),null);assert.equal(buttonsOf(trOf('cand-n')).find(b=>b.className.includes('danger')).textContent,'Delete queued');
-  assert.equal(hint(trOf('cand-n')),'Delete queued. Nothing is deleted yet. It runs when the current action finishes.');
+  assert.equal(hint(trOf('cand-n')),'Delete queued. It runs when the app is free.');
   // Approve as is leaves a row with a queued delete out (1.3).
   assert.equal(run('deleteQueued(rows[0])'),true);
   // Section 5 (n = 0): the files line and the face.
@@ -204,8 +204,9 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   // The queue arrives with the status read (refresh), and the page names the bulk approval it runs itself.
   backend={...backend,queued_actions:[item('q-9','retry','cand-a',1,'operation')],queue_running:null,queue_outcomes:[]};
   await run('refresh(true)');assert.equal(run('queueState.queued.length'),1);
-  run('askBulk=true');assert.equal(run('queueS("operation")'),'A bulk approval is in progress');run('askBulk=false');
-  assert.equal(run('queueS("no_such_kind")'),'The app is working on another action','an unknown kind reads as operation (ruling 35: never "Another operation is in progress")');
+  // 0.30.0 (Judy's spec 2.2): one builder; a bulk approval is its page-owned row, an unknown kind is the fallback.
+  run('askBulk=true');assert.equal(run('blockerSentence(pageBlocker()).text'),'It runs when Approving selected books finishes.');assert.equal(run('blockerSentence(queueBlocker({blocker:{kind:"operation"}})).text'),'It runs when Approving selected books finishes.');run('askBulk=false');
+  assert.equal(run('blockerSentence({kind:"no_such_kind"}).text'),'It runs when the app is free.','an unknown kind is the fallback (ruling 35: never "Another operation is in progress")');
   // N1 (Judy's implementation check): Delete book on a row with a queued Retry or Repair says which, not "Another
   // operation is in progress." (nothing else runs); inert, focus kept. The mirror of the sibling sentence above.
   paint([missing('w')]);queue({queued_actions:[item('q-r','retry','cand-w',1)],queue_running:null,queue_outcomes:[]});run('updateDeleteButtons()');
@@ -213,7 +214,7 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   queue({queued_actions:[item('q-p','repair','cand-w',1)],queue_running:null,queue_outcomes:[]});run('updateDeleteButtons()');
   assert.equal(byText(trOf('cand-w'),'Delete book').title,'A repair is queued for this book. Cancel it to use this.');
   queue({queued_actions:[],queue_running:{id:'q-p',action:'repair',book_id:'cand-w',title:'Title w'},queue_outcomes:[]});run('updateDeleteButtons()');
-  assert.equal(byText(trOf('cand-w'),'Delete book').title,'Delete this book. The app is working on another action, so the delete is queued after you confirm.','a running repair: the delete queues behind it (ruling 35)');
+  assert.equal(byText(trOf('cand-w'),'Delete book').title,'Delete this book. Repair: Title w is running, so the delete is queued after you confirm.','a running repair: the delete queues behind it (ruling 35)');
   queue({queued_actions:[],queue_running:null,queue_outcomes:[]});
   console.log('PASS queued Retry and Delete book: blocked tooltips, queued faces with Cancel, order and count, cancel and too late, every outcome line, the blocked dialog, inert siblings, bulk left out, n = 0 copy');
 })().catch(error=>{console.error(error);process.exitCode=1;});

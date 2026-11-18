@@ -134,15 +134,10 @@ function ladderNote(note,since,now=ladderClock ?? Date.now()){
   return `${note} Still waiting (${Math.floor(age/60000)} min). The app is busy with background work.`;
 }
 function wallClock(ms){const d=new Date(ms);return [d.getHours(),d.getMinutes(),d.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':');}
-// The passes the last update named (4.2): at most three, in the order shown.
+// The work the last update named (4.2). 0.30.0 (Judy's spec, section 5): every running row, by its own label.
 function busyPasses(){
-  const parts=[],named=(row,words)=>{const n=Number(row?.total);return Number.isInteger(n) && n>0?words.replace('{n}',n.toLocaleString()):words.replace('{n} ','');};
-  for(const row of Array.isArray(state?.activities)?state.activities:[]){
-    if(row?.kind==='identity')parts.push(named(row,'re-checking {n} finished books'));
-    else if(row?.kind==='series')parts.push(named(row,'updating series on {n} books'));
-    else if(row?.kind==='scan' && row.step==='researching')parts.push(named(row,'researching {n} books'));
-  }
-  return parts.slice(0,3);
+  if(!state?.work)return [];
+  return runningActs(shownRows(workOf())).map(row=>rowName(row));
 }
 // The top of the page while an answer is missing (4.2), desktop only and only after loading (the load strip owns it then).
 function renderBusy(now=Date.now()){
@@ -163,6 +158,7 @@ function clearBusy(){
 // Once a second: the notice, and the ladder of any press waiting 3 s or more.
 function pressTick(now=Date.now()){
   renderBusy(now);renderListStale(now);  // the stale-list line (ruling 75a) moves on the same clock
+  if(!loadingActive && state?.audiobook_jobs)renderFreshness(now);  // 0.30.0: the counts' age, once a second
   const since=[retryPending?.at,...[...askPendings.values()].map(item=>item.at),metaSave?.at,['deleting','queuing'].includes(deleteDialog?.state)?deleteDialog.at:null,...[...queuePresses.values()].map(item=>item.at)].filter(Number.isFinite);
   const clocks=clockSince(),reload=listWait && now-listWait.at>=1000 && !listWait.shown;if(reload)listWait.shown=true;
   if(since.some(at=>now-at>=3000) || clocks.some(at=>now-at>=2000) || since.some(at=>now-at>=2000) || reload){ladderClock=now;try{controls();if(rulesView.pending.size)renderAuthorRules();}finally{ladderClock=null;}if(['deleting','queuing'].includes(deleteDialog?.state))deleteStatusLine(now);}
@@ -651,7 +647,7 @@ async function action(route, data) {
   busy=true;busyPress=laterWord({'/api/scan/start':'scan_start','/api/scan/resume':'scan_resume','/api/scan/stop':'scan_stop'}[route]);if(busyPress==='This press')busyPress=''; controls(); message();
   // Ruling 35: Start and Resume scanning are accepted while conversion or automatic processing runs and start when they end.
   const queueable=route==='/api/scan/start' || route==='/api/scan/resume';
-  try { const answer=await request(route,queueable?{...data,queue:true}:data); if(answer?.queued===true)message(`${laterWord(route.endsWith('/start')?'scan_start':'scan_resume')} queued. It starts when ${queueP(answer.blocker?.kind)} finishes.`);
+  try { const answer=await request(route,queueable?{...data,queue:true}:data); if(answer?.queued===true)message(`${laterWord(route.endsWith('/start')?'scan_start':'scan_resume')} queued. ${blockerSentence(answer.blocker).text}`);
     // The rest of ruling 35 (ruling 37): Resume while a Pause or an earlier start settles is kept; the same button cancels it.
     else if(route==='/api/audiobook/resume' && answer?.start_admission?.state==='waiting')message(startWaitLine(answer.start_admission.reason));
     else if(route==='/api/audiobook/resume-cancel' && answer?.cancelled===true)message('Resume audiobook jobs cancelled. Nothing was started.');
@@ -673,11 +669,17 @@ function pauseLine(pause,automatic=false){
   const origin={user:'Paused by you.',update:'Paused for an update.',closing:'Paused when Books Arranger closed.',interrupted:'Paused after an interruption.'}[pause?.origin] || 'Paused.';
   return origin+' '+(automatic?'Resume automatic processing to continue.':'Resume continues pending work.');
 }
-function admissionLine(jobs){
+// 0.30.0 (Judy's spec 5): the help text and Resume's tooltip are unchanged, so they keep the checking lines; the status
+// line does not, because the start check is a row of its own (work: start_check), named by the first part like any running row.
+function admissionHelp(jobs){
   const admission=jobs?.start_admission;
   if(jobControlFlights.has('pause') && admission?.state==='checking')return 'Pausing start checks…';
   if(admission?.state==='checking')return 'Checking pending audiobook work';
   if(jobs?.state==='Running' && jobs.queue_work?.schema==='books-audio-queue-work-v1' && jobs.queue_work.state==='checking_pending')return 'Checking pending audiobook work';
+  return admissionLine(jobs);
+}
+function admissionLine(jobs){
+  const admission=jobs?.start_admission;
   if(admission?.state==='waiting')return startWaitLine(admission.reason);
   if(admission?.state==='stale')return 'Start checks stopped. Pending work is kept.';
   if(admission?.state==='closing')return 'Books Arranger is closing. Pending work is kept.';
@@ -688,7 +690,7 @@ function renderJobControlState(){
   const jobs=state?.audiobook_jobs;if(!jobs || !$('jobs-help'))return;
   const admission=jobs.start_admission,maintenance=jobs.maintenance,disconnected=ended || recoveryDisconnected;
   const stopping=jobControlFlights.has('pause') || ['Pausing','pausing'].includes(jobs.state) || maintenance?.state==='stopping' || maintenance?.cancel_requested===true;
-  const status=admissionLine(jobs),pause=$('pause-jobs'),resume=$('resume-jobs');
+  const status=admissionHelp(jobs),pause=$('pause-jobs'),resume=$('resume-jobs');
   const stopTip='Stopping at the next safe checkpoint. Pending work is kept.';
   pause.title=disconnected?'Current processing status unavailable.':stopping?stopTip:admission?.state==='checking'?'Pause the start checks and keep pending work. The current read may finish before stopping.':maintenance?'Stop finished-book checks at the next safe checkpoint. Pending work is kept.':pause.disabled?'No audiobook work is running.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
   resume.title=disconnected?'Current processing status unavailable.':status || (resume.disabled?'No pending audiobook work can be resumed.':jobs.cleanup_active===true?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.');
@@ -1181,7 +1183,7 @@ async function saveMetadata(){
       reviewRow=fresh;  // a later save goes to the book's new revision
       if(selectedRow?.id===fresh.id)select(fresh,false);
     }
-    if(current){dirty=false;manualMetadataTouched=false;syncManualDraft();const values={...review};if(row.kind==='candidate')for(const field of NAME_INPUTS)delete values[field];metaSaveResult={text:savedFieldsLine(before,review)+(saved.decision?.state==='needs_review'&&saved.decision.reason?' Audiobook work is on hold: '+saved.decision.reason:''),retained:{path:row.path,revision:selectedRow.revision,fingerprint:row.fingerprint,size:row.size,modified:row.modified,seq,values}};setText('review-note',metaSaveResult.text);}
+    if(current){dirty=false;manualMetadataTouched=false;syncManualDraft();const values={...review};if(row.kind==='candidate')for(const field of NAME_INPUTS)delete values[field];metaSaveResult={text:savedFieldsLine(before,review)+leftAttentionLine(row,saved.row?{...saved.row,kind:'candidate'}:null)+(saved.decision?.state==='needs_review'&&saved.decision.reason?' Audiobook work is on hold: '+saved.decision.reason:''),retained:{path:row.path,revision:selectedRow.revision,fingerprint:row.fingerprint,size:row.size,modified:row.modified,seq,values}};setText('review-note',metaSaveResult.text);}
     else setText('review-note',decisionLine({body:{action:row.kind==='candidate'?'review':'file_review'},title:decisionName(row)},saved.decision)+' Your newer edits are not saved yet.');
   }else{
     if(sameDecisionRow(selectedRow,row) && failure?.body?.code==='changed' && failure.body.row){reviewRow={...failure.body.row,path:row.id,kind:'candidate',library:selectedLibrary};select(reviewRow,false);}
@@ -1255,11 +1257,14 @@ function renderJobs(){
   if(loadingActive && !(state && partReady('jobs')))return loadPlaceholders();  // m-7: its placeholders until the part comes (3.5)
   const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
+  // 0.30.0 (Judy's 0.30.0 spec): the panel draws /api/state work. Only the counts are as old as the last full status
+  // computation (work.snapshot_age_ms); from 30 s they say when they were computed (section 3).
+  const now=Date.now(),work=workOf(),asOf=countsAsOf(now),unread=unreadShown(work,now);countsAsOfShown=asOf;
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
-  const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved`:'Book candidate totals unavailable');
-  const acts=checkActivities(Array.isArray(state.activities)?state.activities:[],jobs);
-  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[admissionLine(jobs) || jobsFirstPart(jobs,acts),queuedPart(jobs),`${attentionTotal(jobs)} need attention`,counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:''].filter(Boolean).join(' · '));
-  renderActivities(acts,jobs);renderSourceCheck();
+  const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved${asOf}`:'Book candidate totals unavailable');
+  const shown=shownRows(work,now);
+  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+statusParts(jobs,work,shown,counts,asOf).join(' · '));
+  renderActivities(shown,jobs,unread,asOf);renderWaitingList(work);renderHold(heldRows(jobs));renderFreshness(now);renderUnread(unread);renderSourceCheck();
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
   $('resume-jobs').title=cleanup?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.';
@@ -1267,29 +1272,45 @@ function renderJobs(){
   text('jobs-help',help+(Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?' Source folders retained: safe automatic removal is unavailable on this drive.':''));
   renderJobControlState();
 }
-// 0.29.0 (Sergei 2026-11-17; Judy section 7): the jobs line starts with what is running, in plain words. "Converting" only
-// while a book converts; any other work is named; a held item is never counted as running; the queue worker's own
-// momentary state word ("Running") is no longer shown.
-function runningActs(acts){return acts.filter(row=>row && activityOrder.includes(row.kind) && ['running','pausing'].includes(row.state));}
-function heldActs(acts){return acts.filter(row=>row && activityOrder.includes(row.kind) && row.state==='attention');}
-function heldCount(acts){return heldActs(acts).reduce((sum,row)=>sum+(Number.isInteger(row.held_total) && row.held_total>0?row.held_total:1),0);}
-function actName(row){return activityLabel(row)+(row.subject?': '+row.subject:'');}
-function jobsFirstPart(jobs,acts){
-  const running=runningActs(acts),held=heldCount(acts),paused=['Paused','paused'].includes(jobs?.state);
+// The status line (sections 1.3, 3 and 4): what runs, then the split counts. Three numbers, three phrases: books waiting to
+// convert, cleanups paused or waiting, actions waiting (work.counts); jobs.queued is never read (it adds them together).
+function statusParts(jobs,work,shown,counts,asOf){
+  const c=work.counts,n=key=>Number.isInteger(c?.[key]) && c[key]>0?c[key]:0,paused=n('cleanups_paused'),waiting=n('cleanups_waiting');
+  const cleanup=paused && waiting?`Cleanup paused for ${plural(paused,'book','books')}, waiting for ${waiting.toLocaleString()}`:paused?`Cleanup paused for ${plural(paused,'book','books')}`:waiting?`Cleanup waiting for ${plural(waiting,'book','books')}`:'';
+  return [admissionLine(jobs) || jobsFirstPart(jobs,shown),n('queued_conversions')?plural(n('queued_conversions'),'book','books')+' waiting to convert':'',cleanup,
+    n('actions_waiting')?plural(n('actions_waiting'),'action','actions')+' waiting':'',`${attentionTotal(jobs)} need attention`,
+    counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books${asOf}`:'Approved book progress unavailable',
+    n('retry_checks_waiting')?`${n('retry_checks_waiting')} waiting for retry checks`:''].filter(Boolean);
+}
+// 0.29.0 (Sergei 2026-11-17; Judy section 7): the jobs line starts with what is running, in plain words; a held item is never
+// counted as running; the queue worker's own momentary state word ("Running") is not shown. 0.30.0 (section 1.3): two or more
+// running read "3 tasks running"; every one of them is a row below.
+function runningActs(shown){return shown.filter(row=>row && ['running','pausing'].includes(row.state));}
+function rowName(row){const subject=rowSubject(row);return workLabel(row)+(subject?': '+subject:'');}
+function jobsFirstPart(jobs,shown){
+  const running=runningActs(shown),held=heldTotal(jobs),queuePaused=['Paused','paused'].includes(jobs?.state),paused=queuePaused || shown.some(row=>row.state==='paused');
   if(!running.length && paused)return 'Paused';
   if(!running.length && jobs?.state==='Pausing')return 'Pausing audiobook jobs…';
-  const named=running.length===1?actName(running[0]):running.length>1?`${actName(running[0])} and ${running.length-1} more`:'';
-  if(named)return (paused?'Paused · ':'')+named;  // the queue paused while other work (a series update, a check) runs
+  const named=running.length===1?rowName(running[0]):running.length>1?`${running.length.toLocaleString()} tasks running`:'';
+  if(named)return (queuePaused?'Paused · ':'')+named;  // the queue paused while other work (a series update, a check) runs
   return held?`Nothing running · ${held} on hold`:'Nothing running';
 }
-// "3 books waiting to convert" says what is queued; a zero is left out.
-function queuedPart(jobs){const n=Number.isInteger(jobs?.queued)?jobs.queued:0;return n>0?plural(n,'book','books')+' waiting to convert':'';}
-// On hold (Judy section 7): the held item leaves the Running list. Line 2 is the plain cause, never the engine's text.
+// On hold (Judy section 7, unchanged): the held cleanup (jobs.attention_row) leaves the Running list. Line 2 is the plain
+// cause, never the engine's text.
 const HOLD_CAUSES={identity_read:"Cleanup stopped. The app couldn't read one file's information."};
 function holdCause(row){return HOLD_CAUSES[row.cause] || 'Stopped. See Needs attention.';}
+function heldRows(jobs){
+  const out=[],held=jobs?.attention_row,progress=jobs?.progress;
+  // A stopped conversion the status still shows (0.29.0: its row was On hold, not Running).
+  if(jobs?.state==='Needs attention' && typeof jobs.current_title==='string' && jobs.current_title && progress && typeof progress==='object' && progress.phase && !progress.attention)
+    out.push({book_id:typeof jobs.current_book_id==='string'?jobs.current_book_id:null,subject:jobs.current_title,cause:'other',held_total:1});
+  if(held && typeof held==='object')out.push({book_id:typeof held.book_id==='string'?held.book_id:null,subject:typeof held.title==='string'?held.title:'',cause:held.cause || 'other',held_total:Number.isInteger(held.held_total) && held.held_total>0?held.held_total:1});
+  return out;
+}
+function heldTotal(jobs){return heldRows(jobs).reduce((sum,row)=>sum+row.held_total,0);}
 function renderHold(held){
   const block=$('jobs-hold-block'),list=$('jobs-hold');if(!block || !list)return;
-  const shown=held.slice(0,3),total=heldCount(held),key=JSON.stringify(shown.map(row=>[row.book_id,row.subject,row.cause]));
+  const shown=held.slice(0,3),total=held.reduce((sum,row)=>sum+row.held_total,0),key=JSON.stringify(shown.map(row=>[row.book_id,row.subject,row.cause]));
   block.hidden=!shown.length;
   if(list.dataset.key!==key){
     list.dataset.key=key;list.replaceChildren();
@@ -1302,6 +1323,39 @@ function renderHold(held){
     }
   }
   const more=$('jobs-hold-more'),extra=total-shown.length;if(more){writeText(more,extra>0?`+${extra} more on hold`:'');more.hidden=!(extra>0);}
+}
+// Freshness (section 3): the counts' age is the engine's snapshot_age_ms plus the time since this answer arrived. Under 10 s
+// nothing; 10 to 29 s a muted cue; from 30 s a warning cue and "(as of …)" on the stale counts. Rows are live, never hedged.
+let countsAsOfShown='';
+function countsComputedAt(){const age=state?.work?.snapshot_age_ms;if(typeof age!=='number' || !Number.isFinite(age) || age<0)return null;const at=receivedAt.get($('library').value);return Number.isFinite(at)?at-age:null;}
+function countsAge(now=Date.now()){const at=countsComputedAt();return at===null?null:Math.max(0,now-at);}
+function countsAsOf(now=Date.now()){const age=countsAge(now);return age!==null && age>=30000?` (as of ${wallClock(countsComputedAt())})`:'';}
+function freshnessText(age,refreshing){
+  if(age===null || age<10000)return '';
+  const when=age>=3600000?'over 1 h':age>=120000?`${Math.floor(age/60000)} min`:`${Math.floor(age/1000)} s`;
+  return `Counts updated ${when} ago`+(refreshing?'. Refreshing…':'');
+}
+function renderFreshness(now=Date.now()){
+  const cue=$('jobs-fresh');if(!cue)return;
+  const age=busyShown?null:countsAge(now),text=freshnessText(age,state?.work?.refreshing===true);
+  writeText(cue,text);cue.hidden=!text;cue.classList?.toggle?.('behind',!!text && age>=30000);
+  const tip=text?`Need attention, converted and candidate counts were last computed at ${wallClock(countsComputedAt())}. The running jobs below are live.`:'';
+  if(cue.title!==tip)cue.title=tip;
+  if(countsAsOf(now)!==countsAsOfShown && state?.audiobook_jobs)renderJobs();  // a suffix appears or goes, never on the tick
+}
+// A source the engine could not read (section 3.3): said once it stays unread for 3 s, so one failed poll never flashes.
+const WORK_UNREAD={jobs:'conversion and cleanup',checks:'checks',actions:'queued actions',workers:'background lookups and repairs',automatic:'scan and automatic processing'};
+const unreadSince=new Map();
+function unreadShown(work,now){
+  const list=work.unread.filter(key=>typeof key==='string');
+  for(const key of [...unreadSince.keys()])if(!list.includes(key))unreadSince.delete(key);
+  for(const key of list)if(!unreadSince.has(key))unreadSince.set(key,now);
+  return list.filter(key=>now-unreadSince.get(key)>=3000);
+}
+function renderUnread(unread){
+  const line=$('jobs-unread');if(!line)return;
+  const text=unread.length?`Could not read just now: ${unread.map(key=>WORK_UNREAD[key] || key).join(', ')}. Some work may be missing below.`:'';
+  writeText(line,text);line.hidden=!text;
 }
 // Item 1 (Judy section 1): each library root and whether it answers ({path, available, empty, books}), from the engine.
 function libraryNotices(){return Array.isArray(state?.library_roots)?state.library_roots.filter(item=>item && typeof item.path==='string'):[];}
@@ -1383,148 +1437,172 @@ $('source-dismiss')?.addEventListener('click',async()=>{sourceDetailsOpen=false;
 // Window focus (Judy section 0): rows whose cause depends on the outside world are checked again, at most once per 30 s.
 let sourceRowsAt=0;
 globalThis.addEventListener?.('focus',()=>{if(ended || loadingActive || Date.now()-sourceRowsAt<30000)return;sourceRowsAt=Date.now();request('/api/sources/rows',{}).catch(()=>{});});
-// The Waiting line (Judy section 7): what the app waits for and when; the queued actions are named, not only counted.
-function waitingLine(){
-  const parts=[],automatic=state?.automatic_processing;
-  // Futaba m-3: a timed retry (next_retry_at) is a wait for metadata sources even when no book reads "waiting".
-  if(['Running','Stopping'].includes(automatic?.state) && (automatic?.research?.waiting>0 || typeof automatic?.next_retry_at==='number' && automatic.next_retry_at>0)){const at=automatic.next_retry_at,when=typeof at==='number' && at>0?new Date(at<1e12?at*1000:at):null;parts.push('Waiting for metadata sources.'+(when && Number.isFinite(when.getTime())?` Next try ${String(when.getHours()).padStart(2,'0')}:${String(when.getMinutes()).padStart(2,'0')}.`:''));}
-  for(const root of libraryNotices().filter(item=>!item.available || item.empty))parts.push(`Waiting for ${root.path} to answer.`);
-  const queued=queueState.queued;
-  if(queued.length){const named=queued.slice(0,2).map(item=>`${QUEUE_ACTION_WORDS[item.action] || 'Action'}: ${rows.find(row=>row.id===item.book_id)?.title_clue || item.title || 'a book'}`);
-    // Futaba m-6: one queued action is "It", and names what it waits for when the page knows (Judy's queued-line rule).
-    const running=queueState.running,blocker=running?`${QUEUE_ACTION_WORDS[running.action] || 'Action'}: ${rows.find(row=>row.id===running.book_id)?.title_clue || running.title || 'a book'}`:'';
-    parts.push(`Waiting: ${named.join(', ')}${queued.length>2?` and ${queued.length-2} more`:''}. ${queued.length>1?'They run one at a time.':`It runs when ${blocker?blocker+' finishes':'the app is free'}.`}`);}
-  return parts.join(' ');
-}
 // Item 8 (Judy section 8): only Sergei's review can move things on. The engine decides (needs_you_only); the count is the
-// Needs attention shortcut's own number.
-function renderWaitingForYou(shown,jobs){
+// Needs attention shortcut's own number. 0.30.0 (section 3): from 30 s old it says when it was counted.
+function renderWaitingForYou(shown,jobs,asOf=''){
   const block=$('jobs-you');if(!block)return;block.hidden=!shown;if(!shown)return;
   const review=$('jobs-review');writeText(review,'Review them');review.title='Show every book that needs you.';
-  const n=attentionTotal(jobs),line=$('jobs-you-line'),key=String(n);
-  if(line.dataset.key!==key){line.dataset.key=key;const strong=node('strong','Waiting for you:');line.replaceChildren(strong,node('span',` ${plural(n,'book needs','books need')} attention. The app can't do more until you review them.`));}
+  const n=attentionTotal(jobs),line=$('jobs-you-line'),key=String(n)+asOf;
+  if(line.dataset.key!==key){line.dataset.key=key;const strong=node('strong','Waiting for you:');line.replaceChildren(strong,node('span',` ${plural(n,'book needs','books need')} attention${asOf}. The app can't do more until you review them.`));}
 }
-// Progress rows (ProgressRows spec): one row per running activity, fixed order, updated in place.
-// 0.29.0 (Judy section 7): conversion, cleanup, source folders, move/action, identity, series, scan/research, checks.
-const activityOrder=['admission','chapter','conversion','cleanup','sources','move','action','identity','series','scan','checks','maintenance'],activityRows=new Map();let activityTimer=null;
-const ACTION_LABELS={cleanup:'Retry cleanup',retry:'Retry',repair:'Repair',delete:'Delete',approve:'Approve',copy:'Remove copy',convert:"Convert what's there"};
-function checkActivities(list,jobs){
-  const result=list.filter(row=>!['admission','maintenance'].includes(row?.kind));
-  const add=(kind,value)=>{
-    const count=Number.isInteger(value.completed)&&Number.isInteger(value.total)&&value.completed>=0&&value.total>0&&value.completed<=value.total;
-    result.push({kind,state:value.state==='stopping'||value.cancel_requested===true||kind==='admission'&&jobControlFlights.has('pause')?'pausing':'running',subject:typeof value.title==='string'?value.title:'',step:value.phase || '',step_text:value.phase || '',done:count?value.completed:undefined,total:count?value.total:undefined,unit:count?'books':undefined,indeterminate:!count,step_started_at:Number.isFinite(value.started)?value.started:undefined,phase_only:!count});
-  };
-  if(jobs?.start_admission?.state==='checking')add('admission',jobs.start_admission);
-  const checking=rows.find(row=>activeChapterCheck(row));
-  if(checking)result.push({kind:'chapter',state:'running',subject:checking.chapter_check.file || checking.title_clue || '',step:'Checking source audio',phase_only:true,indeterminate:true});
-  if(['checking','stopping'].includes(jobs?.maintenance?.state))add('maintenance',jobs.maintenance);
-  // 0.29.0 (Judy section 7): the check pass (shown once it has run 1 s), its folder phase, a move, a queued action or bulk run.
-  const pass=state?.source_check_progress,passStarted=Number.isFinite(pass?.started)?pass.started:NaN;
-  if(pass?.phase==='checking' && Date.now()-passStarted>=1000){const count=Number.isInteger(pass.done) && Number.isInteger(pass.total) && pass.total>0 && pass.done<=pass.total;
-    result.push({kind:'checks',state:'running',subject:'',step:'checks',step_text:count?`Checking ${plural(pass.total,'book','books')}`:'Checking books',done:count?pass.done:undefined,total:count?pass.total:undefined,unit:count?'books':undefined,indeterminate:!count,step_started_at:passStarted});}
-  if(pass?.phase==='folders')result.push({kind:'sources',state:'running',subject:'',step:'sources',step_text:'Checking leftovers',indeterminate:true,step_started_at:passStarted});
-  const moving=rows.find(row=>moveOf(row)?.state==='moving');
-  if(moving){const move=moveOf(moving),percent=Number(move.progress),folder=String(move.folder || folderOf(move.target) || '').split(/[\\/]/).filter(Boolean).pop() || 'its folder',measured=move.progress!==null && move.progress!=='' && Number.isFinite(percent) && percent>=0 && percent<=100;
-    result.push({kind:'move',state:'running',subject:destTitle(moving),step:'move',step_text:`Copying to ${folder}`,fraction:measured?percent/100:undefined,done:measured?percent:undefined,total:measured?100:undefined,indeterminate:!measured});}
-  const bulk=bulkRun();
-  if(bulk?.state==='running'){const count=Number.isInteger(bulk.done) && Number.isInteger(bulk.total) && bulk.total>0 && bulk.done<=bulk.total;
-    result.push({kind:'action',state:'running',subject:'',bulk:true,step:'action',step_text:'Working',done:count?bulk.done:undefined,total:count?bulk.total:undefined,unit:count?'books':undefined,indeterminate:!count});}
-  else if(queueState.running && !result.some(row=>['conversion','cleanup'].includes(row.kind) && row.state!=='attention')){const item=queueState.running,book=rows.find(row=>row.id===item.book_id);
-    result.push({kind:'action',state:'running',subject:book?.title_clue || item.title || '',action:item.action,step:'action',step_text:'Working',indeterminate:true});}
-  return result;
+// 0.30.0 (Judy's BooksArranger_0.30.0_UX.md, section 1): every running, pausing or paused job is a row, in the engine's order
+// (work.rows), keyed by its id, updated in place; no cap and no "+N more". A row shows once it has run 1 s, except one a waiting
+// sentence names (1.4). The engine sends kinds and step keys; the page words them (tables 1.5, 1.5a, 1.5b).
+const activityRows=new Map();let activityTimer=null;
+function workOf(){
+  const work=state?.work,list=(value,check)=>Array.isArray(value)?value.filter(check):[];
+  return {rows:list(work?.rows,row=>row && typeof row.id==='string' && typeof row.kind==='string'),waiting:list(work?.waiting,item=>item && typeof item.id==='string' && typeof item.kind==='string'),
+    counts:work?.counts && typeof work.counts==='object'?work.counts:{},unread:Array.isArray(work?.unread)?work.unread:[]};
 }
+// Page-owned rows (A9): Approve selected and Let the app handle selected are loops of this page; the engine keeps no record.
+let pageRun=null;  // {kind:'approve_selected'|'release_selected', done, total, started}
+function withPageRows(rows){
+  if(!pageRun)return rows;
+  const counted=Number.isInteger(pageRun.done) && Number.isInteger(pageRun.total) && pageRun.total>0 && pageRun.done<=pageRun.total;
+  const own={id:'page:'+pageRun.kind,kind:pageRun.kind,label_key:pageRun.kind,subject:'',state:'running',done:counted?pageRun.done:null,total:counted?pageRun.total:null,unit:counted?'books':null,started:pageRun.started,page:true};
+  const after=rows.findLastIndex(row=>WORK_ORDER.indexOf(row.kind)>=0 && WORK_ORDER.indexOf(row.kind)<=WORK_ORDER.indexOf('bulk'));
+  return [...rows.slice(0,after+1),own,...rows.slice(after+1)];
+}
+const WORK_ORDER=['conversion','chapter_check','cleanup','queue','source_folders','move','move_recovery','action','bulk','start_check','retry_check','maintenance','finished_check','series','gap_fill','lookup','decisions','repair_check','recovery_delete','regroup','scan','research','discovery','source_check','drive_check'];
+function liveRows(work){
+  // A Pause pressed while start checks run: that row says so at once (the engine's row turns at its next check).
+  return withPageRows(work.rows.map(row=>row.kind==='start_check' && row.state==='running' && jobControlFlights.has('pause')?{...row,state:'pausing'}:row));
+}
+// The row a waiting sentence quotes (2.1), drawn even in its first second (1.4).
+function blockerRow(blocker,rows){
+  if(!blocker || typeof blocker!=='object')return null;
+  const cause=blocker.cause,live=row=>['running','pausing'].includes(row.state);
+  if(cause==='conversion')return rows.find(row=>row.kind==='conversion' && live(row)) || null;
+  if(cause==='cleanup_running')return rows.find(row=>row.kind==='cleanup' && live(row) && (!blocker.book_id || row.book_id===blocker.book_id)) || null;
+  if(cause==='cleanup_paused')return rows.find(row=>row.kind==='cleanup' && row.state==='paused' && (!blocker.book_id || row.book_id===blocker.book_id)) || null;
+  if(cause==='checking'){const checks=rows.filter(row=>['start_check','retry_check'].includes(row.kind));return checks.length===1?checks[0]:null;}
+  if(cause==='action')return rows.find(row=>row.kind==='action') || null;
+  if(cause==='source_check')return rows.find(row=>row.kind==='source_check') || null;
+  if(cause==='retry_run')return rows.find(row=>row.kind==='bulk') || null;
+  if(cause==='approve_run')return rows.find(row=>row.kind==='approve_selected') || null;
+  return null;
+}
+function shownRows(work,now=Date.now()){
+  const all=liveRows(work),homes=new Set();
+  for(const item of [...work.waiting,...queueState.queued]){const row=blockerRow(item?.blocker,all);if(row)homes.add(row.id);}
+  return all.filter(row=>homes.has(row.id) || !Number.isFinite(row.started) || now-row.started>=1000);
+}
+const conversionStepIndex={'checking sources':1,preparing:1,'source copies':1,'checking audio':2,'matching format':2,normalizing:2,'joined audio':2,creating:3,encoding:3,checking:4,copying:4,publishing:4};
 const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
 const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
-function activityLabel(row){
-  if(row.state==='attention' && row.media_failure?.schema==='books-media-failure-v1')return row.media_failure.status;
-  if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
-  if(row.kind==='chapter')return 'Checking source audio';
-  if(row.kind==='admission')return row.state==='pausing'?'Pausing start checks…':'Checking pending audiobook work';
-  if(row.kind==='maintenance')return row.state==='pausing'?'Stopping finished-book checks…':'Checking finished books';
-  if(row.kind==='conversion')return ({attention:'Audiobook on hold',paused:'Audiobook paused',pausing:'Pausing audiobook'})[row.state] || 'Converting';
+// 1.5a: a running queued action's step; 1.5b: a saved decision's labels (row, Waiting item).
+const ACTION_STEPS={cleanup:'Rechecking the audiobook and recovery copies',retry:'Checking this book can be converted again',repair:'Checking the audiobook file for repair',delete:'Deleting files',copy:'Deleting files',
+  approve:'Saving the approval',convert:'Queuing the files that remain',separate:'Splitting the folder into separate books',scan_again:"Reading this book's files again",dismiss:'Removing this book from the list',names:'Saving the names',names_forget:'Forgetting the saved names'};
+const DECISION_LABELS={decision_names:['Saving names','Save names'],decision_approve:['Saving approval','Approve'],decision_review:['Saving review','Save review'],decision_tracks:['Saving track review','Save track review'],
+  decision_metadata_choices:['Saving choices','Save choices'],decision_file_review:['Saving file review','Save file review']};
+function decisionLabel(key,waiting){return (DECISION_LABELS[key] || ['Saving your answers','Save your answers'])[waiting?1:0];}
+const WORK_LABELS={queue:'Conversion queue',source_folders:'Removing source folders',move:'Moving',move_recovery:'Finishing interrupted moves',start_check:'Checking books before conversion',retry_check:'Checking retry',
+  maintenance:'Checking audiobook before cleanup',finished_check:'Re-checking finished audiobooks',series:'Metadata: Updating series',gap_fill:'Looking up book details',lookup:'Looking up metadata',
+  repair_check:'Checking M4B for repair',recovery_delete:'Deleting recovery copies',regroup:'Regrouping split books',scan:'Scanning files',research:'Researching books',discovery:'Automatic processing: finding books',
+  source_check:'Checking source folders',drive_check:'Checking drives',chapter_check:'Checking source audio',approve_selected:'Approving selected books',release_selected:'Handing selected books to the app'};
+function workLabel(row){
+  if(row.task_kind==='duplicate_source_cleanup' && ['conversion','cleanup','chapter_check'].includes(row.kind))return row.kind==='cleanup'?'Removing extra source':'Checking extra source';
+  if(row.kind==='conversion')return ({paused:'Audiobook paused',pausing:'Pausing audiobook'})[row.state] || 'Converting';
   if(row.kind==='cleanup')return ['originals','recovery copies'].includes(row.step)?'Removing originals':'Cleaning up';
-  if(row.kind==='identity')return 'Checking finished books';
-  if(row.kind==='series')return 'Metadata: Updating series';
-  if(row.kind==='checks')return 'Checking source folders';
-  if(row.kind==='sources')return 'Removing source folders';
-  if(row.kind==='move')return 'Moving';
-  if(row.kind==='action')return row.bulk?'Retrying books':ACTION_LABELS[row.action] || 'Working on a book';
-  return row.step==='researching'?'Researching books':'Scanning files';
+  if(row.kind==='action')return queueWord(row.label_key);
+  if(row.kind==='bulk')return row.label_key==='retry_selected'?'Retrying selected books':'Retrying all books';
+  if(row.kind==='decisions')return decisionLabel(row.label_key,false);
+  return WORK_LABELS[row.kind] || 'Working';
 }
-function activityStep(row,finishing){
-  if(row.state==='attention' && row.media_failure?.schema==='books-media-failure-v1')return row.media_failure.hint;
-  if(row.task_kind==='duplicate_source_cleanup')return row.state==='attention'?'Extra source kept':row.kind==='cleanup'?'Removing extra source':'Checking extra source';
-  let step;
-  if(row.kind==='chapter')return 'Checking the complete audio before correcting the final chapter end.';
-  if(row.kind==='admission' || row.kind==='maintenance')return row.step_text || (row.kind==='admission'?'Checking pending audiobook work':'Checking finished books');
-  if(row.kind==='conversion'){const name=finishing && row.step==='encoding'?'Finalizing conversion':conversionSteps[row.step] || 'Working';step=Number.isInteger(row.step_index) && Number.isInteger(row.step_count)?`Step ${row.step_index} of ${row.step_count} - ${name}`:name;}
-  else if(row.kind==='cleanup')step=cleanupSteps[row.step] || 'Working';
-  else if(row.kind==='identity')step='Checking identity';
-  else if(row.kind==='series')step=row.step==='series updating'?'Writing the series into the audiobook':'Looking up the series';
-  else step=typeof row.step_text==='string' && row.step_text?row.step_text:'Working';
-  // A held row is not progressing (v0.16.8): it says so, with no bar, count or clock.
-  // A long or multi-line reason is technical text: it is never printed here (Judy 2026-10-24, section 4.6); the held book
-  // is listed under Output needs attention, so the line points there (0.22.0 review A6).
-  if(row.state==='attention')return 'On hold — '+(typeof row.reason==='string' && row.reason?(row.reason.length<=80 && !/[\r\n]/.test(row.reason)?row.reason:'see Needs attention'):step);
-  if(row.state==='paused')return 'Paused - '+step;
-  if(row.state==='pausing')return 'Pausing - '+step;
-  return step;
+function rowSubject(row){return typeof row.subject==='string'?row.subject:'';}
+function moveFolderOf(row){const move=moveOf(rows.find(item=>item.id===row.book_id));return move?String(move.folder || folderOf(move.target) || '').split(/[\\/]/).filter(Boolean).pop() || '':'';}
+function workStep(row,finishing){
+  const prefix=step=>row.state==='paused'?'Paused - '+step:row.state==='pausing'?'Pausing - '+step:step;
+  // An extra source's check and removal keep their own words (0.29.0), as step and label.
+  if(row.task_kind==='duplicate_source_cleanup' && ['conversion','cleanup','chapter_check'].includes(row.kind))return prefix(workLabel(row));
+  switch(row.kind){
+    case 'conversion':{const name=finishing && row.step==='encoding'?'Finalizing conversion':conversionSteps[row.step] || 'Working',index=conversionStepIndex[row.step];return prefix(index?`Step ${index} of 4 - ${name}`:name);}
+    case 'chapter_check':return prefix("Checking the complete audio before fixing the last chapter's end");
+    case 'cleanup':return row.state==='paused'?'Paused - Resume audiobook jobs to continue':prefix(cleanupSteps[row.step] || 'Working');
+    case 'queue':{const n=Number.isInteger(row.count)?row.count:0;return row.state==='pausing'?`Pausing - ${plural(n,'book','books')} waiting.`:`Paused - Resume audiobook jobs to continue.${rowSubject(row)?` Next: ${rowSubject(row)}.`:''}`;}
+    case 'source_folders':return prefix('Checking leftovers');
+    case 'move':{const folder=moveFolderOf(row);return prefix(folder?`Copying to ${folder}`:'Copying the audiobook to its new folder');}
+    case 'move_recovery':return prefix('Finishing moves the last restart interrupted');
+    case 'action':return prefix(ACTION_STEPS[row.label_key] || 'Working');
+    case 'bulk':case 'approve_selected':case 'release_selected':return prefix('One book at a time');
+    case 'start_check':return row.state==='pausing'?'Pausing start checks…':'Checking each waiting book is ready to convert';
+    case 'retry_check':return prefix('Checking this book can be converted again');
+    case 'maintenance':return row.state==='pausing'?'Stopping finished-book checks…':'Checking the finished audiobook before removing originals';
+    case 'finished_check':return prefix('Checking each finished file is still the right one');
+    case 'series':return prefix(row.step==='updating'?'Writing the series into the audiobook':'Looking up the series');
+    case 'gap_fill':return prefix('Asking sources for the original title and full author name');
+    case 'lookup':return prefix('Asking metadata sources');
+    case 'decisions':return prefix('Applying your answers');
+    case 'repair_check':return prefix('Reading the M4B file to see if it needs repair');
+    case 'recovery_delete':return prefix('Removing the temporary copies of the original files');
+    case 'regroup':return prefix("Putting a folder's files back into one book");
+    case 'scan':return prefix(typeof row.step_text==='string' && row.step_text?row.step_text:'Working');
+    case 'research':return prefix(typeof row.step_text==='string' && row.step_text?row.step_text:'Working');
+    case 'discovery':return prefix('Reading the library folders for new books');
+    case 'source_check':return prefix(Number.isInteger(row.total) && row.total>0?`Checking ${plural(row.total,'book','books')}`:'Checking books');
+    case 'drive_check':return prefix('Waiting for the drives to answer');
+  }
+  return prefix('Working');
 }
 function clockText(seconds,withHours){seconds=Math.max(0,Math.floor(seconds));const h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return withHours || h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`;}
 function byteText(done,total){const units=['B','KB','MB','GB','TB'];let index=0;while(index<units.length-1 && total>=1024**(index+1))index++;const scale=1024**index,format=value=>{const scaled=value/scale;return scaled.toLocaleString(undefined,{maximumFractionDigits:scaled<10 && index?1:0,minimumFractionDigits:0});};return `${format(done)} of ${format(total)} ${units[index]}`;}
-function activityDetail(row,finishing){
-  if(row.indeterminate || finishing || !(row.total>0))return '';
-  const done=row.done,total=row.total,whole=value=>Math.floor(value).toLocaleString();
-  if(row.unit==='files' || row.unit==='books'){const noun=row.unit==='files'?'file':'book';return `${whole(done)} of ${whole(total)} ${noun}${total===1?'':'s'}`;}
-  if(row.unit==='bytes')return byteText(done,total);
-  if(row.unit==='seconds'){const hours=total>=3600;return `${clockText(done,hours)} of ${clockText(total,hours)} audio`;}
-  return Math.floor(done/total*100)+'%';
+function measured(row){return Number.isFinite(row.total) && row.total>0 && Number.isFinite(row.done) && row.done>=0 && row.done<=row.total;}
+function workDetail(row,finishing){
+  if(measured(row) && !finishing){
+    const done=row.done,total=row.total,whole=value=>Math.floor(value).toLocaleString();
+    if(row.unit==='files' || row.unit==='books'){const noun=row.unit==='files'?'file':'book';return `${whole(done)} of ${whole(total)} ${noun}${total===1?'':'s'}`;}
+    if(row.unit==='bytes')return byteText(done,total);
+    if(row.unit==='seconds'){const hours=total>=3600;return `${clockText(done,hours)} of ${clockText(total,hours)} audio`;}
+    return Math.floor(done/total*100)+'%';
+  }
+  // A row with no amount but a count (1.2): what it stands for.
+  if(Number.isInteger(row.count) && row.count>0){
+    if(row.kind==='queue')return plural(row.count,'book','books')+' waiting';
+    if(row.kind==='repair_check')return plural(row.count,'book','books')+' left';
+    if(row.kind==='action')return plural(row.count,'file','files');
+  }
+  return '';
 }
-function activityRow(kind){
+function activityRow(id){
   const item=node('li','','activity-row'),first=node('div','','activity-line activity-first'),head=node('span','','activity-head'),label=node('span','','activity-label'),subject=node('span','','activity-subject'),detail=node('span','','activity-detail'),bar=node('progress'),last=node('div','','activity-line'),step=node('span','','activity-step'),time=node('span','','activity-time');
-  item.dataset.kind=kind;bar.max=100;detail.setAttribute('aria-live','off');time.setAttribute('aria-live','off');step.setAttribute('aria-live','polite');
+  item.dataset.id=id;bar.max=100;detail.setAttribute('aria-live','off');time.setAttribute('aria-live','off');step.setAttribute('aria-live','polite');
   head.append(label,subject);first.append(head,detail);last.append(step,time);item.append(first,bar,last);
   return {item,label,subject,detail,bar,step,time,samples:[],eta:'',etaAt:0,frozen:null,key:''};
 }
 function writeText(element,value){if(element.textContent!==value)element.textContent=value;}
-function renderActivities(list,jobs){
-  const priority=row=>(row.state==='paused'?20:0)+activityOrder.indexOf(row.kind);
-  const rows=list.filter(row=>row && activityOrder.includes(row.kind) && row.state!=='attention').sort((a,b)=>priority(a)-priority(b));
-  renderHold(list.filter(row=>row && activityOrder.includes(row.kind) && row.state==='attention'));
-  const shown=[],seen=new Set();for(const row of rows){if(seen.has(row.kind))continue;seen.add(row.kind);shown.push(row);}
-  const visible=shown.slice(0,4),extra=rows.length-visible.length,holder=$('jobs-rows');
-  for(const [kind,view] of activityRows)if(!visible.some(row=>row.kind===kind)){view.item.parentElement?.removeChild(view.item);activityRows.delete(kind);}
-  visible.forEach((row,index)=>{
-    let view=activityRows.get(row.kind);if(!view){view=activityRow(row.kind);activityRows.set(row.kind,view);}
+function renderActivities(shown,jobs,unread=[],asOf=''){
+  const holder=$('jobs-rows');
+  for(const [id,view] of activityRows)if(!shown.some(row=>row.id===id)){view.item.parentElement?.removeChild(view.item);activityRows.delete(id);}
+  shown.forEach((row,index)=>{
+    let view=activityRows.get(row.id);if(!view){view=activityRow(row.id);activityRows.set(row.id,view);}
     if(holder.children[index]!==view.item)holder.insertBefore(view.item,holder.children[index] || null);
-    const key=[row.step,row.step==='researching'?'':row.subject,row.step_started_at].join('\u001f');if(view.key!==key){view.key=key;view.samples=[];view.eta='';view.etaAt=0;}
+    const key=[row.step,row.kind==='research'?'':row.subject,row.started].join('\u001f');if(view.key!==key){view.key=key;view.samples=[];view.eta='';view.etaAt=0;}
     view.row=row;updateActivity(view,Date.now());
   });
-  writeText($('jobs-more'),extra>0?`+${extra} more running`:'');$('jobs-more').hidden=!(extra>0);
-  const you=!visible.length && state?.needs_you_only===true && attentionTotal(jobs)>0;
-  const idle=visible.length?'':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.':you?'Nothing running.':'Nothing running';
-  writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;renderWaitingForYou(you,jobs);
-  const waiting=waitingLine();if($('jobs-waiting')){writeText($('jobs-waiting'),waiting);$('jobs-waiting').hidden=!waiting;}
-  if(visible.length && activityTimer===null && typeof setInterval==='function')activityTimer=setInterval(()=>{const now=Date.now();for(const view of activityRows.values())updateActivity(view,now);},1000);
-  if(!visible.length && activityTimer!==null && typeof clearInterval==='function'){clearInterval(activityTimer);activityTimer=null;}
+  const you=!shown.length && !unread.length && state?.needs_you_only===true && attentionTotal(jobs)>0;
+  const idle=shown.length?'':unread.length?'Nothing running that could be read.':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.':you?'Nothing running.':'Nothing running';
+  writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;renderWaitingForYou(you,jobs,asOf);
+  if(shown.length && activityTimer===null && typeof setInterval==='function')activityTimer=setInterval(()=>{const now=Date.now();for(const view of activityRows.values())updateActivity(view,now);},1000);
+  if(!shown.length && activityTimer!==null && typeof clearInterval==='function'){clearInterval(activityTimer);activityTimer=null;}
 }
 function updateActivity(view,now){
-  const row=view.row,running=row.state==='running' || row.state==='pausing',measured=!row.indeterminate && row.total>0 && row.done>=0 && row.done<=row.total;
-  const finishing=measured && running && row.done>=row.total,determinate=measured && !finishing;
-  const held=row.state==='attention',label=activityLabel(row),subject=typeof row.subject==='string'?row.subject:'',step=activityStep(row,finishing),detail=held?'':activityDetail(row,finishing);
-  view.bar.hidden=held;  // 0.29.0: every running row shows a bar; a row with no measure slides (Judy section 7)
+  const row=view.row,running=row.state==='running' || row.state==='pausing',isMeasured=measured(row);
+  const finishing=isMeasured && running && row.done>=row.total,determinate=isMeasured && !finishing;
+  const label=workLabel(row),subject=rowSubject(row),step=workStep(row,finishing),detail=workDetail(row,finishing);
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
   const progressKey=[row.done,row.fraction,row.step,row.subject].join('\u001f');if(view.progressKey!==progressKey){view.progressKey=progressKey;view.progressAt=now;}
   const frozen=running && Number.isFinite(view.progressAt) && now-view.progressAt>=300000;
   const stepShown=frozen?'No progress for 5 min':step;view.item.classList.toggle('stalled',frozen);
-  writeText(view.detail,detail);writeText(view.step,stepShown);view.step.title=stepShown;
-  view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',row.state==='attention');
+  writeText(view.detail,detail);writeText(view.step,stepShown);
+  // The chapter check's file name is its tooltip (1.5); every other step line carries its own text.
+  view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:stepShown;
+  view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',false);
   const fraction=typeof row.fraction==='number' && row.fraction>=0 && row.fraction<=1?row.fraction:row.done/row.total;
   if(determinate){const value=Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}
   else if(view.bar.hasAttribute?.('value')!==false)view.bar.removeAttribute('value');
   view.bar.setAttribute('aria-label',label+(subject?': '+subject:''));view.bar.setAttribute('aria-valuetext',[step,detail].filter(Boolean).join(', '));
-  // Elapsed counts the current step from its start; it freezes while paused or needing attention.
-  const started=Number.isFinite(row.step_started_at)?row.step_started_at:now;
+  // Elapsed counts from the job's start (the engine's, or the first poll that saw it); it freezes while paused.
+  const started=Number.isFinite(row.started)?row.started:now;
   if(running)view.frozen=null;else if(view.frozen===null)view.frozen=now;
   const elapsed=Math.max(0,((view.frozen ?? now)-started)/1000);
   // ETA from the measured rate over the last 30 s (samples only when the data changed), once trustworthy.
@@ -1536,9 +1614,89 @@ function updateActivity(view,now){
     view.etaAt=now;
     if(rate>0){const left=(1-fraction)/rate,minutes=Math.round(left/60);view.eta=left<60?'under 1 min left':minutes<60?`about ${minutes} min left`:`about ${Math.floor(minutes/60)} h ${minutes%60} min left`;}
   }
-  // A held row is not running: no elapsed clock (Futaba, v0.16.8).
-  const noClock=held || row.phase_only===true || ['admission','maintenance'].includes(row.kind)&&!Number.isFinite(row.step_started_at);
-  writeText(view.time,noClock?'':clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));view.time.hidden=noClock;
+  writeText(view.time,clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));view.time.hidden=false;
+}
+// The Waiting list (section 1.6): everything that waits to run, in the engine's order, one item each; more than 5 cleanups
+// not started read as one labelled item. Line 1 says what it is, line 2 what it waits for; Show in list where there is a book.
+const waitingItems=new Map();
+function waitingList(work){
+  const cleanups=work.waiting.filter(item=>item.kind==='cleanup');if(cleanups.length<=5)return work.waiting;
+  const counted=work.counts.cleanups_waiting,n=Number.isInteger(counted) && counted>=cleanups.length?counted:cleanups.length,grouped={...cleanups[0],id:'cleanup:group',group:n};
+  const out=[];let placed=false;for(const item of work.waiting){if(item.kind!=='cleanup'){out.push(item);continue;}if(!placed){out.push(grouped);placed=true;}}
+  return out;
+}
+function waitingClock(at){const d=new Date(at<1e12?at*1000:at);return Number.isFinite(d.getTime())?`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`:'';}
+const CLEANUP_RETRY_LABELS={cleanup_retry:'Retry cleanup',cleanup_retry_working:'Retry cleanup of working files',cleanup_retry_temporary:'Retry cleanup of temporary files',cleanup_retry_folder:'Retry cleanup of the source folder'};
+function waitingLines(item,work){
+  const subject=typeof item.subject==='string'?item.subject:'',n=Number.isInteger(item.count)?item.count:0;
+  switch(item.kind){
+    case 'action':{const ahead=Number.isInteger(item.ahead) && item.ahead>0?`${item.ahead.toLocaleString()} ahead. `:'',said=blockerSentence(item.blocker,work);return [queueWord(item.label_key),subject,ahead+said.text,said.tip];}
+    case 'conversions':return ['Waiting to convert',plural(n,'book','books'),`${subject?`Next: ${subject}. `:''}They convert one at a time.`];
+    case 'cleanup':return item.group?['Cleanup waiting',plural(item.group,'book','books'),`Next: ${subject || 'a book'}. They run one at a time.`]:['Cleanup waiting',subject,'Waiting for the output checks.'];
+    case 'retry_checks':return ['Retry checks',plural(n,'book','books'),'They run one at a time.'];
+    case 'cleanup_retry':return [CLEANUP_RETRY_LABELS[item.label_key] || 'Retry cleanup',subject,`The app tries again by itself${Number.isFinite(item.at)?` at ${waitingClock(item.at)}`:''}.`];
+    case 'recovery_delete':return ['Delete recovery copies',subject,RECOVERY_WAITS.deletion];
+    case 'decisions':return [decisionLabel(item.label_key,true),subject,'Your answers are recorded. They apply one at a time.'];
+    case 'metadata_sources':return ['Metadata sources','',[n?`${plural(n,'book waits','books wait')} for a source to answer.`:'',Number.isFinite(item.at)?`Next try ${waitingClock(item.at)}.`:''].filter(Boolean).join(' ')];
+    case 'drive':return ['Drive not answering',subject,'Its books stay on the list. Check that the drive is connected, then press Check again in Library scan controls.'];
+    case 'resume':return ['Resume audiobook jobs','','It starts when the pause finishes.'];
+    case 'automatic_start':return ['Start automatic processing','',pendingNotice(state?.automatic_processing?.start_pending?.kind) || ''];
+    case 'automatic':return ['Automatic processing','',item.label_key==='automatic_waiting'?'Waiting between tries. It continues by itself.':'Waiting for audiobook conversion to finish. It continues by itself.'];
+  }
+  return ['',subject,''];
+}
+function renderWaitingList(work){
+  const block=$('jobs-wait-block'),list=$('jobs-wait');if(!block || !list)return;
+  const items=waitingList(work);block.hidden=!items.length;
+  for(const [id,view] of waitingItems)if(!items.some(item=>item.id===id)){view.item.parentElement?.removeChild(view.item);waitingItems.delete(id);}
+  items.forEach((item,index)=>{
+    let view=waitingItems.get(item.id);
+    if(!view){
+      const li=node('li','','hold-row wait-row'),text=node('div','','hold-text'),first=node('p'),label=node('span','','wait-label'),subject=node('span'),second=node('p'),button=node('button','Show in list','quiet');
+      button.type='button';first.append(label,subject);text.append(first,second);li.append(text,button);
+      view={item:li,label,subject,second,button,target:null};button.addEventListener('click',()=>{if(view.target)showInList(view.target);});waitingItems.set(item.id,view);
+    }
+    if(list.children[index]!==view.item)list.insertBefore(view.item,list.children[index] || null);
+    const [label,subject,line,tip]=waitingLines(item,work),book=typeof item.book_id==='string' && item.book_id?item.book_id:null;
+    const label2=item.kind==='drive' && item.label_key==='drive_empty'?'Drive answers but is empty':label;
+    writeText(view.label,label2+(subject?':':''));writeText(view.subject,subject?' '+subject:'');writeText(view.second,line);view.second.title=tip || '';
+    view.target=book?{id:book,title:subject}:null;view.button.hidden=!book;
+    const buttonTip=item.kind==='action'?'List this book: sets Status to All and searches for its title. Its row has Cancel.':'List this book: sets Status to All and searches for its title.';
+    if(view.button.title!==buttonTip)view.button.title=buttonTip;view.button.setAttribute('aria-label','Show in list: '+(subject || 'the book'));
+  });
+}
+// One blocker sentence (section 2), built from the blocker object {kind, cause, title, book_id, count}: the book row, the
+// Waiting list, the queue strip, tooltips and dialogs all use it. A blocker with a row quotes that row's label and subject.
+// Returns {text, tip, running}: running is the clause the Delete dialog leads with ("…, so this delete waits its turn").
+function blockerSentence(blocker,work=workOf()){
+  const b=blocker && typeof blocker==='object'?blocker:{kind:typeof blocker==='string'?blocker:'operation'},cause=b.cause || b.kind || 'unknown';
+  const rows=liveRows(work),row=blockerRow({...b,cause},rows),title=typeof b.title==='string' && b.title?b.title:'',count=Number.isInteger(b.count)?b.count:null;
+  const quoted=fallback=>row?rowName(row):fallback,cap=text=>text?text[0].toUpperCase()+text.slice(1):text;
+  const when=(x,act='',tip='')=>({text:`It runs when ${x} finishes.${act?' '+act:''}`,tip,running:`${cap(x)} is running`});
+  const blocked=(clause,act='')=>({text:`It can't run while ${clause}.${act?' '+act:''}`,tip:'',running:cap(clause)});
+  const resume='Press Resume audiobook jobs.',free={text:'It runs when the app is free.',tip:'',running:'The app is working on another action'};
+  switch(cause){
+    case 'own_conversion':return when("this book's conversion");
+    case 'own_cleanup':return when("this book's cleanup");
+    case 'conversion':return when(quoted(`Converting: ${title || 'a book'}`));
+    case 'conversion_queue':return when(`the whole conversion queue (${plural(count ?? 0,'book','books')})`,'','Cleanup never runs beside a conversion, so it waits for every queued book.');
+    case 'queue_paused':return blocked(`the conversion queue is paused (${plural(count ?? 0,'book','books')} waiting)`,resume);
+    case 'cleanup_running':return when(quoted(`Removing originals: ${title || 'a book'}`));
+    case 'cleanup_waiting':return {text:`It runs after the cleanup of ${title || 'another book'}, which goes first.`,tip:'',running:`The cleanup of ${title || 'another book'} goes first`};
+    case 'cleanup_paused':return blocked(`the cleanup of ${title || 'another book'} is paused`,resume);
+    case 'checking':return when(row?rowName(row):'the book checks');
+    case 'action':{const running=queueState.running;return when(quoted(`${queueWord(running?.action)}: ${title || running?.title || 'a book'}`));}
+    case 'source_check':return when('Checking source folders');
+    case 'retry_run':{const name=row?workLabel(row):'Retrying all books';return {text:`It runs when ${name} finishes${count!==null?` (${plural(count,'book','books')} left)`:''}.`,tip:'',running:`${name} is running`};}
+    case 'approve_run':return when('Approving selected books');
+    case 'book':return {text:"It runs when this book's processing finishes.",tip:'',running:'This book is being processed'};
+    case 'scan':return when('the library scan','Stop scanning to run it sooner.');
+    case 'automatic':return state?.automatic_processing?.phase==='waiting'?blocked('automatic processing waits between tries','Press Stop automatic processing to run it now.')
+      :{text:'It runs when automatic processing stops. Press Stop automatic processing to run it now.',tip:'',running:'Automatic processing is running'};
+    case 'loading':return {text:'It runs when Books Arranger finishes loading.',tip:'',running:'Books Arranger is still loading'};
+    case 'page':return when(title || 'the current press');  // a press this page holds back (laterLine)
+  }
+  return free;  // unknown, operation: a failed read or an unnamed press, never a known cause
 }
 let candidateFailure=null;
 async function candidateRequest(route,extra={},options={}){candidateFailure=null;if(busy || ended || selectedRow?.kind!=='candidate')return;const original=selectedRow,library=selectedLibrary;busy=true;controls();try{const result=await request(route,{library,id:original.id,revision:original.revision,...extra});if(selectedRow?.id===original.id && selectedLibrary===library && result.row){const updated={...result.row,path:result.row.id,kind:'candidate',library};if(dirty)reviewRow=updated;select(updated,false);}lastKey=null;await refresh(true);return result;}catch(error){candidateFailure=error;if(!options.quiet)message(error.message);}finally{busy=false;controls();}}
@@ -1660,7 +1818,7 @@ function folderCleanupFacts(row){
   if(verifiedCount(folder.absent_after_intent)>0)facts.push('Removal outcome not confirmed: '+folder.absent_after_intent+' source folders.');
   return facts;
 }
-function cleanupFacts(row){const creation=row.creation || {},policy=creation.cleanup_policy || {},receipt=row.cleanup || {},removed=verifiedCount(receipt.removed),total=verifiedCount(receipt.total),progress=removed!==null && total!==null?`${removed} of ${total} removed`:null;const state=typeof receipt.state==='string'?receipt.state.toLowerCase().replaceAll('_',' '):'';let status=typeof receipt.status==='string'?receipt.status:'';if(receipt.state==='completed' && receipt.recovery?.state==='retained')status='Originals removed; deleting recovery copies';if(!status){const states={'waiting':'Waiting for output checks','pending':'Waiting for output checks','checking':'Checking temporary recovery copies','checking recovery':'Checking temporary recovery copies','preparing':'Checking temporary recovery copies','removing':removed!==null && total!==null?`Removing originals: ${removed} of ${total}`:'Removing originals','pausing':'Pausing source cleanup','paused':progress?`Source cleanup paused: ${progress}`:'Source cleanup paused','completed':receipt.temporary_cleanup==='completed'?'Originals removed; verified temporary recovery and working copies removed':'Originals removed; temporary file cleanup pending','needs attention':'Source cleanup needs attention','failed':'Source cleanup needs attention'};status=states[state] || (removed>0?'Source cleanup needs attention':policy.enabled===true?'Waiting for output checks':'Originals retained');}const facts=[`Audiobook output: ${candidateStatus(row)}`,`Source cleanup: ${policy.enabled===true?'remove originals and their backup copies after audiobook verification':'originals retained'}`];if(removed>0 && policy.enabled!==true)facts[1]='Source cleanup: '+status;else if(receipt.state || receipt.status || policy.enabled===true)facts.push('Source cleanup status: '+status);if(progress && !status.includes(progress) && !status.includes(`${removed} of ${total}`))facts.push(progress);if(receipt.reason && !status.includes(receipt.reason))facts.push('Source cleanup needs attention: '+receipt.reason);if(receipt.recovery)facts.push('Recovery copies: '+recoveryStatus(receipt.recovery));const location=receipt.recovery?null:(receipt.recovery_location || policy.recovery_root);if(!receipt.recovery && receipt.temporary_cleanup==='completed')facts.push('Temporary recovery files: removed');else if(location && receipt.recovery_bytes!==0)facts.push('Temporary recovery storage: '+location);const bytes=verifiedCount(receipt.bytes_removed),recovery=verifiedCount(receipt.recovery_bytes);if(removed>0 && bytes!==null)facts.push(`Removed from Z: ${bytes.toLocaleString('en-US')} bytes`);if(!receipt.recovery && recovery!==null && recovery>0)facts.push(`Temporary recovery storage on C: ${recovery.toLocaleString('en-US')} bytes`);const evidence=verifiedCount(receipt.preserved_evidence_count);if(evidence>0)facts.push(`Unverified legacy evidence retained: ${evidence.toLocaleString('en-US')} files`);const remaining=verifiedCount(receipt.remaining);if(remaining!==null)facts.push('Originals remaining: '+remaining);return facts.concat(folderCleanupFacts(row));}
+function cleanupFacts(row){const creation=row.creation || {},policy=creation.cleanup_policy || {},receipt=row.cleanup || {},removed=verifiedCount(receipt.removed),total=verifiedCount(receipt.total),progress=removed!==null && total!==null?`${removed} of ${total} removed`:null;const state=typeof receipt.state==='string'?receipt.state.toLowerCase().replaceAll('_',' '):'';let status=typeof receipt.status==='string'?receipt.status:'';if(receipt.state==='completed' && receipt.recovery?.state==='retained')status='Originals removed; deleting recovery copies';if(!status){const states={'waiting':'Waiting for output checks','pending':'Waiting for output checks','checking':'Checking temporary recovery copies','checking recovery':'Checking temporary recovery copies','preparing':'Checking temporary recovery copies','removing':removed!==null && total!==null?`Removing originals: ${removed} of ${total}`:'Removing originals','pausing':'Pausing source cleanup','paused':progress?`Source cleanup paused: ${progress}`:'Source cleanup paused','completed':receipt.temporary_cleanup==='completed'?'Originals removed; verified temporary recovery and working copies removed':'Originals removed; temporary file cleanup pending','needs attention':'Source cleanup needs attention','failed':'Source cleanup needs attention'};status=states[state] || (removed>0?'Source cleanup needs attention':policy.enabled===true?'Waiting for output checks':'Originals retained');}const facts=[`Audiobook output: ${candidateStatus(row)}`,`Source cleanup: ${policy.enabled===true?'remove originals and their backup copies after audiobook verification':'originals retained'}`];if(removed>0 && policy.enabled!==true)facts[1]='Source cleanup: '+status;else if(receipt.state || receipt.status || policy.enabled===true)facts.push('Source cleanup status: '+status);if(queuedFor(row,'cleanup'))facts.push(queueHint(row));/* 0.30.0: a queued Retry cleanup, in the row's words */if(progress && !status.includes(progress) && !status.includes(`${removed} of ${total}`))facts.push(progress);if(receipt.reason && !status.includes(receipt.reason))facts.push('Source cleanup needs attention: '+receipt.reason);if(receipt.recovery)facts.push('Recovery copies: '+recoveryStatus(receipt.recovery));const location=receipt.recovery?null:(receipt.recovery_location || policy.recovery_root);if(!receipt.recovery && receipt.temporary_cleanup==='completed')facts.push('Temporary recovery files: removed');else if(location && receipt.recovery_bytes!==0)facts.push('Temporary recovery storage: '+location);const bytes=verifiedCount(receipt.bytes_removed),recovery=verifiedCount(receipt.recovery_bytes);if(removed>0 && bytes!==null)facts.push(`Removed from Z: ${bytes.toLocaleString('en-US')} bytes`);if(!receipt.recovery && recovery!==null && recovery>0)facts.push(`Temporary recovery storage on C: ${recovery.toLocaleString('en-US')} bytes`);const evidence=verifiedCount(receipt.preserved_evidence_count);if(evidence>0)facts.push(`Unverified legacy evidence retained: ${evidence.toLocaleString('en-US')} files`);const remaining=verifiedCount(receipt.remaining);if(remaining!==null)facts.push('Originals remaining: '+remaining);return facts.concat(folderCleanupFacts(row));}
 function chapterSummary(row){if(row.creation?.job)return row.creation.chapters_description || 'Chapter markers: see saved job plan';return $('add-chapters').checked && row.creation?.chapters_available?`Chapter markers: ${trackDraft.included.length} — one per included source track`:'Chapter markers: none';}
 function updateChapterSummary(){if(!trackDraft || selectedRow?.kind!=='candidate')return;$('output-summary').textContent=$('output-summary').textContent.replace(/^Chapter markers:.*$/m,chapterSummary(selectedRow));}
 function plannedChapter(member,key){if(!$('add-chapters').checked)return 'Chapter markers disabled';if(!trackDraft.included.includes(key))return 'Excluded from output — no chapter marker';if(member.chapter_name_source==='source' && member.chapter_name)return 'Source chapter name: '+member.chapter_name;const position=trackDraft.order.filter(id=>trackDraft.included.includes(id)).indexOf(key)+1;const number=Number.isInteger(member.chapter_number) && member.chapter_number>=0?member.chapter_number:position;return 'Generated chapter label: Track '+String(number).padStart(Math.max(2,String(trackDraft.included.length).length),'0');}
@@ -1684,15 +1842,21 @@ function recoveryScope(row){const r=row?.cleanup?.recovery;return r?{job_id:row.
 // The rest of ruling 35 (ruling 37): Delete recovery copies is accepted during a scan, a source cleanup or another book's
 // deletion, and queued; while queued the same button takes it back. Provisional copy, sent to Judy.
 const RECOVERY_WAITS={scan:'It runs when the scan finishes.',cleanup:'It runs when the source cleanup finishes.',deletion:'It runs after the deletion before it.',start:'It starts shortly.'};
-const RECOVERY_WAITING={scan:'A scan is running, so the deletion is queued after you confirm.',cleanup:'A source cleanup is running, so the deletion is queued after you confirm.'};
+// 0.30.0 (Judy's spec, notes): what a new deletion would wait for is named by the one blocker builder.
+const RECOVERY_BLOCKERS={scan:{kind:'scan',cause:'scan'},cleanup:{kind:'jobs',cause:'cleanup_running'}};
+function recoveryWaiting(waits){const blocker=RECOVERY_BLOCKERS[waits];return blocker?`${blockerSentence(blocker).running}, so the deletion is queued after you confirm.`:'';}
 const RECOVERY_BUTTON=['Delete recovery copies…','Permanently delete the verified recovery copies for this book. Keep the finished audiobook.'];
 let recoveryCancelling=false;
-function recoveryQueuedLine(waits){return 'Deletion queued. '+(RECOVERY_WAITS[waits] || RECOVERY_WAITS.start);}
+function recoveryQueuedLine(waits){
+  // 0.30.0 (Judy's spec, notes): a scan or a source cleanup is named by the one blocker sentence.
+  const said=RECOVERY_BLOCKERS[waits]?blockerSentence(RECOVERY_BLOCKERS[waits]).text:null;
+  return 'Deletion queued. '+(said || RECOVERY_WAITS[waits] || RECOVERY_WAITS.start);
+}
 function recoveryReason(){const r=selectedRow?.cleanup?.recovery;if(ended || recoveryDisconnected)return 'Local server unavailable';if(recoveryCancelling)return 'Cancelling the deletion…';if(recoverySubmitting)return 'Deleting the recovery copies…';if(!r)return 'Recovery details unavailable';if(r.queued===true)return '';if(r.state==='deleted')return 'No recovery copies remain';if(r.state==='deleting')return 'Recovery deletion is in progress';if(r.eligible!==true)return r.reason || 'Recovery copies are not eligible for deletion';if(!(verifiedCount(r.count)>0) || verifiedCount(r.bytes)===null || !r.token || !recoveryScope(selectedRow)?.job_id)return 'Verified recovery scope unavailable';return '';}
 function recoveryStatus(r){if(r.queued===true && r.state!=='deleted' && r.state!=='deleting')return recoveryQueuedLine(r.waits);if(r.state==='deleted')return `Recovery copies deleted${r.actor==='automatic'?' automatically':r.actor==='manual'?' manually':''} on ${recoveryDate(r.deleted_at)}`;if(r.state==='deleting')return `Deleting recovery copies: ${verifiedCount(r.removed) ?? 'Unavailable'} of ${verifiedCount(r.total) ?? 'Unavailable'}`;if(r.state==='retained' && !r.eligible)return 'Recovery copies waiting to be deleted. '+(r.reason || 'Deletion is temporarily unavailable');if(r.state==='needs_attention' || !r.eligible)return 'Recovery cleanup needs attention: '+(r.reason || 'Verified recovery scope unavailable');return 'Deleting after the audiobook check';}
 function makeRecoveryPanel(){const panel=node('section','','recovery-copies'),facts=node('dl'),values={};panel.append(node('h2','Recovery copies'));for(const key of ['Status','Original tracks backed up','Space on C:','Recovery location']){const label=node('dt',key),value=node('dd');facts.append(label,value);values[key]={label,value};}panel.append(facts);const help=node('p',"Deleting these copies permanently removes the app's backup of the original tracks. The finished audiobook stays in place.",'field-help');help.id='recovery-loss-help';const button=node('button','Delete recovery copies…','quiet');button.type='button';button.title='Permanently delete the verified recovery copies for this book. Keep the finished audiobook.';button.setAttribute('aria-describedby','recovery-loss-help recovery-reason');const reason=node('p','','field-help');reason.id='recovery-reason';const status=node('p');status.setAttribute('role','status');status.setAttribute('aria-live','polite');panel.append(help,button,reason,status);recoveryPanel={panel,values,button,reason,status,path:selectedPath};button.addEventListener('click',()=>selectedRow?.cleanup?.recovery?.queued===true?cancelRecoveryDeletion():openRecoveryDialog());updateRecovery();return panel;}
 function updateRecovery(){if(!recoveryPanel || recoveryPanel.path!==selectedPath)return;const r=selectedRow?.cleanup?.recovery;if(!r){recoveryPanel.panel.hidden=true;closeRecoveryDialog();return;}recoveryPanel.panel.hidden=false;const v=recoveryPanel.values;v.Status.value.textContent=recoveryStatus(r);v['Original tracks backed up'].value.textContent=verifiedCount(r.count)===null?'Unavailable':r.count.toLocaleString('en-US');v['Space on C:'].value.textContent=recoverySpace(r.bytes);v['Recovery location'].label.textContent=r.state==='deleted'?'Former recovery location':'Recovery location';v['Recovery location'].value.textContent=r.location || 'Unavailable';v['Recovery location'].value.className='path';const reason=recoveryReason();recoveryPanel.button.disabled=!!reason;recoveryPanel.reason.textContent=reason;
-  {const queued=r.queued===true && r.state!=='deleted' && r.state!=='deleting',label=queued?'Cancel deletion':RECOVERY_BUTTON[0],tip=queued?'Take this deletion out of the queue. Nothing was deleted.':RECOVERY_WAITING[r.waits]?RECOVERY_BUTTON[1]+' '+RECOVERY_WAITING[r.waits]:RECOVERY_BUTTON[1];
+  {const queued=r.queued===true && r.state!=='deleted' && r.state!=='deleting',label=queued?'Cancel deletion':RECOVERY_BUTTON[0],tip=queued?'Take this deletion out of the queue. Nothing was deleted.':recoveryWaiting(r.waits)?RECOVERY_BUTTON[1]+' '+recoveryWaiting(r.waits):RECOVERY_BUTTON[1];
    if(recoveryPanel.button.textContent!==label)recoveryPanel.button.textContent=label;if(recoveryPanel.button.title!==tip)recoveryPanel.button.title=tip;}if(recoveryConfirmation && !recoverySubmitting && (reason || JSON.stringify(recoveryScope(selectedRow))!==JSON.stringify(recoveryConfirmation.scope))){closeRecoveryDialog();recoveryPanel.status.textContent='Recovery copies changed. Review the updated details and try again.';}}
 function closeRecoveryDialog(restore=true){if(!recoveryConfirmation)return;const initiating=recoveryConfirmation.button;recoveryConfirmation=null;$('recovery-dialog').close?.();if(restore && initiating && initiating===recoveryPanel?.button){if(!initiating.disabled)initiating.focus?.({preventScroll:true});else{recoveryPanel.reason.setAttribute('tabindex','-1');recoveryPanel.reason.focus?.({preventScroll:true});}}}
 function openRecoveryDialog(){if(recoveryReason() || recoveryConfirmation)return;const scope=recoveryScope(selectedRow),r=selectedRow.cleanup.recovery;recoveryConfirmation={scope:{...scope},path:selectedPath,button:recoveryPanel.button};$('recovery-dialog-book').textContent=`${selectedRow.review?.title || selectedRow.title_clue || 'Book'} — ${selectedRow.review?.canonical_author || 'Author unavailable'}`;$('recovery-dialog-size').textContent=`${scope.count} original tracks · ${recoverySpace(scope.bytes)} on C:`;$('recovery-dialog-location').textContent=r.location || 'Unavailable';$('recovery-dialog').showModal?.();$('recovery-cancel').focus?.();}
@@ -1948,10 +2112,10 @@ function updateRetry(){
 function retryQueueCopy(row){const item=queuedFor(row) || (queueRunning(row)?queueState.running:null) || {action:queuePresses.get(row?.id)?.action};return rowActions[item?.action==='cleanup'?'cleanup':item?.action==='repair'?'repair':'retry'];}
 function retryQueueFace(row,mode){
   const copy=retryQueueCopy(row),title=queueTitle(row);
-  if(mode==='queued')return {label:`${copy.label} queued`,title:`${copy.label} is queued. It starts when ${queueP(queueBlocker(queuedFor(row)))} finishes.`,aria:`${copy.label} queued: ${title}`};
+  if(mode==='queued')return {label:`${copy.label} queued`,title:`${copy.label} is queued. ${blockerSentence(queueBlocker(queuedFor(row))).text}`,aria:`${copy.label} queued: ${title}`};
   return {label:copy.pending,title:copy.note,aria:`${copy.pending}: ${title}`};
 }
-function retryBlockedTip(copy){const kind=pageBlocker();return `Queue this ${String(copy?.label || 'Retry').toLowerCase()}. ${queueS(kind)}; it starts when ${queueP(kind)} finishes.`;}
+function retryBlockedTip(copy){return `Queue this ${String(copy?.label || 'Retry').toLowerCase()}. ${blockerSentence(pageBlocker()).text}`;}
 function keptByChoice(row){const job={...row.creation.job,kept:true};delete job.attention;delete job.keep;return {...row,creation:{...row.creation,job}};}
 function queuedByRetry(row){const job={...row.creation.job,state:'Queued',stage:'queued',reason:''};delete job.retry;delete job.repair;delete job.attention;return {...row,status:'Queued',creation:{...row.creation,status:'Queued',job}};}
 async function retryFromRow(row,button=null){
@@ -2416,7 +2580,7 @@ function bulkPassSentence(pass){
 async function startReleaseSelected(items){
   if(releaseRun || ended || recoveryDisconnected || !items.length)return;
   if(busy){pressLater('toolbar:release-selected','release_selected','',()=>startReleaseSelected(items));message(laterLine(laterFor('toolbar:release-selected')));return;}  // ruling 35
-  releaseRun=true;busy=true;$('release-selected-status').textContent='';controls();
+  releaseRun=true;busy=true;pageRun={kind:'release_selected',done:null,total:null,started:Date.now()};$('release-selected-status').textContent='';controls();
   let text='',warn=false;
   try{
     const answer=await request('/api/audiobook/release-selected',{library:'Audiobooks',items:items.map(row=>({id:row.id,revision:row.revision}))});
@@ -2426,7 +2590,7 @@ async function startReleaseSelected(items){
     text=`Discarded ${released.toLocaleString()} of ${items.length.toLocaleString()} saved reviews.${bulkPassSentence(pass)}${pass?.action==='blocked' || pass?.visit==='next_run'?'':' Find them under Status: Started over.'}`+(failed?` ${failed.toLocaleString()} were not changed. Check their status.`:'');
     retryEpoch++;
   }catch(error){text=error.httpStatus?"The reviews weren't discarded. Check the status above.":lostLine('discard');warn=true;if(!error.httpStatus)refreshFailed(error);}
-  finally{releaseRun=false;busy=false;}
+  finally{releaseRun=false;busy=false;pageRun=null;}
   const status=$('release-selected-status');status.textContent=text;status.classList?.toggle?.('retry-refused',warn);renderAutomatic();controls();
   if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
   controls();status.focus?.({preventScroll:true});
@@ -2526,8 +2690,9 @@ function renderAttentionGroups(){
     const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked.`+(state?.automatic_processing?.can_start===true?` ${automaticStartWord()} automatic processing to check ${n===1?'it':'them'}.`:'');
     if(sweep.textContent!==text)sweep.textContent=text;sweep.hidden=!text;}
   const queueLine=$('queue-line');
-  if(queueLine){const n=queueState.queued.length,p=n?queueP(queueBlocker(queueState.queued[0])):'';
-    const text=!n?'':n===1?`1 action queued. It runs when ${p} finishes.`:`${n.toLocaleString()} actions queued. They run one at a time when ${p} finishes.`;
+  if(queueLine){const n=queueState.queued.length,first=queueState.queued[0],said=n?blockerSentence(queueBlocker(first)).text:'';
+    // 0.30.0 (Judy's spec 2.3): the queue strip says the same sentence as the book row and the Waiting list.
+    const text=!n?'':n===1?`1 action waiting. ${said}`:`${n.toLocaleString()} actions waiting, one at a time. First: ${queueWord(first.action)}: ${first.title || 'a book'}. ${said}`;
     if(queueLine.textContent!==text)queueLine.textContent=text;queueLine.hidden=!text;}
   const run=bulkRun(),running=run?.state==='running';
   if(retryAllRun && !retryAllRun.ended && run?.id===retryAllRun.id && !running)finishRetryAll(run);
@@ -2631,9 +2796,14 @@ function reconcileAutomaticRequest(automatic){
 }
 function setText(id,value){if($(id).textContent!==value)$(id).textContent=value;}
 function automaticPhase(value){return {discovery:'discovery',research:'metadata research',conversion:'audiobook jobs',paused:'saving pending work',completed:'finishing the pass'}[value] || 'pending work';}
-const PENDING_NOTICE={conversion:'Automatic processing will start by itself when audiobook conversion finishes or is paused. Starting also resumes any queued audiobook jobs.',
-  scan:'Automatic processing will start by itself when the library scan ends or is stopped.',stopping:'Automatic processing will start again by itself once it has stopped.'};
-function startPending(automatic){const kind=automatic?.start_pending?.kind;return Object.hasOwn(PENDING_NOTICE,kind)?kind:null;}
+// A pending start (O12). 0.30.0 (Judy's spec 1.6 and 5): the Waiting list's line, which names the one conversion row.
+function pendingNotice(kind){
+  if(kind==='conversion'){const conversions=liveRows(workOf()).filter(row=>row.kind==='conversion' && ['running','pausing'].includes(row.state));return conversions.length===1?`It starts when ${rowName(conversions[0])} finishes or is paused.`:'It starts when audiobook conversion finishes or is paused.';}
+  if(kind==='scan')return 'It starts when the library scan ends or is stopped.';
+  if(kind==='stopping')return 'It starts when automatic processing has stopped.';
+  return '';
+}
+function startPending(automatic){const kind=automatic?.start_pending?.kind;return ['conversion','scan','stopping'].includes(kind)?kind:null;}
 function researchChecking(){return !ended && !recoveryDisconnected && state?.automatic_processing?.state==='Running' && Number.isInteger(state?.automatic_processing?.research?.researching) && state.automatic_processing.research.researching>0;}
 function renderAutomaticEligibility(){
   const automatic=state?.automatic_processing;
@@ -2646,7 +2816,7 @@ function renderAutomaticEligibility(){
   else if(automaticRequest==='start')reason=verb+' requested. Waiting for the app to respond.';
   else if(draftLeaseFailure || (manualDraftLease?.active && !manualDraftLease.confirmed))reason='';
   // A pending start (O12): the notice says what it waits for, in place of the block reason; Start stays disabled.
-  else if(startPending(automatic))reason=PENDING_NOTICE[startPending(automatic)];
+  else if(startPending(automatic))reason=pendingNotice(startPending(automatic));
   else if(automatic.can_start!==true)reason=automatic.start_block_reason || verb+' availability is unknown. Waiting for the local server.';
   setText('automatic-start-reason',reason);
   $('automatic-start-reason').hidden=$('library').value!=='Audiobooks' || !reason;
@@ -4485,6 +4655,14 @@ async function showInList(target){
 // ---- Section 2.5: the panel's own saves, each with its line beside the button.
 let trackSave=null,choiceSave=null;  // {at} while Save track review / Save choices wait
 let metaSaveResult=null;  // {text, warn} for #review-note after Save preview metadata
+// 0.30.0 (Judy's spec 7; Sergei 2026-11-18, answer 6 = leave): an Author unclear book saved with its author still blank leaves
+// Needs attention, as before; the Save line says so, so he is not surprised.
+function leftAttentionLine(before,after){
+  const was=askOf(before);if(!was || askKind(was)!=='author_unclear' || !after)return '';
+  const ask=askOf(after);if(ask && askKind(ask)==='author_unclear')return '';
+  const blank=!['author','canonical_author'].some(field=>String(after.review?.[field] ?? '').trim());
+  return blank?` «${String(after.review?.title || '').trim() || askName(before)}» left Needs attention. Its author is still blank.`:'';
+}
 function savedFieldsLine(before,review){
   const labels={original_language:'Original work language',canonical_author:'Author for Artist tag',narrator:'Reader / narrator',genre:'Ebook main genre',topic:'Nonfiction topic',multi_author:'Cycle has multiple authors',
     title:'Canonical title',author:'Author folder name',universe:'Universe',series:'Series / cycle',number:'Number in series',anthology:'Short-story collection'};
@@ -4640,23 +4818,19 @@ async function takeBackRule(rule){
 // engine's memory, so a reload, a filter change or a second look read the same state from /api/state. The row says what
 // it waits for and has its own Cancel; a queued action never opens a dialog, moves focus or makes a sound when it runs;
 // its outcome lands in the row, the strip line and a polite announcement. Every check runs again when it runs.
-const QUEUE_WORDS={operation:['The app is working on another action','the current action'],scan:['A scan is running','the scan'],
-  retry_run:['A retry run is in progress','the retry run'],approve_run:['A bulk approval is in progress','the bulk approval'],book:['This book is being processed',"this book's processing"],
-  // Ruling 35 (provisional copy, sent to Judy): what a queued press also waits for.
-  loading:['Books Arranger is still loading','loading'],jobs:['Audiobook conversion is running','the conversion'],automatic:['Automatic processing is running','automatic processing']};
+// 0.30.0 (Judy's spec 2.1): what a queued press waits for is said by one builder (blockerSentence), never a word table.
 // The word of each queued action (ruling 35), for its queued line, Cancel and outcome.
 const QUEUE_ACTION_WORDS={cleanup:'Retry cleanup',retry:'Retry',repair:'Repair',delete:'Delete',approve:'Approve',convert:"Convert what's there",separate:'Keep as separate books',
   scan_again:'Scan again',dismiss:'Remove from list',move:'Move',destination:'Move',copy:'Remove this copy',names:'Save',names_forget:'Forget',scan_start:'Start scanning',scan_resume:'Resume scanning'};
 function queueWord(action){return QUEUE_ACTION_WORDS[action] || 'An action';}
 // The kind's words (1.2). An unknown kind reads as operation; the bulk approval runs in this page, so the page names it.
-function queueKind(kind){const known=Object.hasOwn(QUEUE_WORDS,kind || '')?kind:'operation';return known==='operation' && askBulk?'approve_run':known;}
-function queueS(kind){return QUEUE_WORDS[queueKind(kind)][0];}
-function queueP(kind){return QUEUE_WORDS[queueKind(kind)][1];}
 function queueTitle(row){return row?.title_clue || row?.review?.title || 'Book';}
 function queuedFor(row,action){const item=row?queueState.queued.find(entry=>entry.book_id===row.id):null;return item && (!action || item.action===action)?item:null;}
 function queueRunning(row,action){const r=queueState.running;return !!row && r?.book_id===row.id && (!action || r.action===action);}
 function queueAhead(item){const position=Number(item?.position);return Number.isInteger(position) && position>1?position-1:0;}
-function queueBlocker(item){return item?.blocker?.kind;}
+// The blocker object of a queued action ({kind, cause, title, book_id, count}); an unnamed press of this page held by the
+// bulk approval is that run (the page owns its row).
+function queueBlocker(item){const b=item?.blocker;if(!b || typeof b!=='object')return {kind:'operation',cause:'operation'};return (b.cause || b.kind)==='operation' && askBulk?{...b,cause:'approve_run'}:b;}
 function deleteQueued(row){return !!(queuedFor(row,'delete') || queueRunning(row,'delete'));}
 const QUEUE_SIBLING='A delete is queued for this book. Cancel it to use this.';
 // Its mirror on Delete book (Judy's implementation check, N1): a queued Retry or Repair on the row.
@@ -4697,9 +4871,13 @@ function pressBlocker(){
 function laterLine(item){
   if(!loadingActive && item.why==='file')return `${laterWord(item.kind)} queued: a file is open in another program. ${LATER_WHY.file}`;
   if(!loadingActive && item.why && LATER_WHY[item.why])return `${laterWord(item.kind)} queued. ${LATER_WHY[item.why]}`;
-  const blocker=loadingActive?'loading':item.waitFor?.()?'the scan':pressBlocker();
-  return `${laterWord(item.kind)} queued. ${blocker?`It runs when ${blocker} finishes.`:'It runs when the app is free.'}`;
+  // 0.30.0 (Judy's spec 2.3): the one blocker sentence; a press of this page that holds it is named as before.
+  const name=loadingActive || item.waitFor?.()?'':pressBlocker();
+  const blocker=loadingActive?{kind:'loading',cause:'loading'}:item.waitFor?.()?{kind:'scan',cause:'scan'}:name==='Approve selected'?{kind:'approve_run',cause:'approve_run'}
+    :name==='Retry all'?retryRunBlocker():name?{kind:'page',cause:'page',title:name}:null;
+  return `${laterWord(item.kind)} queued. ${blocker?blockerSentence(blocker).text:'It runs when the app is free.'}`;
 }
+function retryRunBlocker(){const run=bulkRun(),left=Number.isInteger(run?.total) && Number.isInteger(run?.done)?Math.max(0,run.total-run.done):null;return {kind:'retry_run',cause:'retry_run',count:left};}
 function pageHeld(waitFor){return pressBusy() || !!LS && loadingActive || !!waitFor?.();}
 function pressLater(key,kind,title,run,waitFor=null,why=''){
   if(laterFor(key))return laterFor(key);
@@ -4754,12 +4932,14 @@ function drainLater(){
   Promise.resolve().then(()=>{drainingPress=item;try{return item.run();}finally{drainingPress=null;}}).catch(()=>{}).finally(()=>{laterRunning=false;controls();});
 }
 // What a Retry or Delete pressed now would wait for, as far as the page knows. The engine's answer decides.
+// 0.30.0: the blocker object a press made now would get ({kind, cause, …}, as the engine's), or null.
 function pageBlocker(){
-  if(state?.active_library)return 'scan';
-  if(bulkRunning() || retrySelectedRun)return 'retry_run';
-  if(askBulk)return 'approve_run';
-  if(queueState.queued.length)return queueBlocker(queueState.queued[0]) || 'operation';
-  if(queueState.running || pressBusy() || deletePending)return 'operation';
+  if(state?.active_library)return {kind:'scan',cause:'scan'};
+  if(bulkRunning() || retrySelectedRun)return retryRunBlocker();
+  if(askBulk)return {kind:'approve_run',cause:'approve_run'};
+  if(queueState.queued.length)return queueBlocker(queueState.queued[0]);
+  if(queueState.running)return {kind:'operation',cause:'action',title:queueState.running.title || '',book_id:queueState.running.book_id};
+  if(pressBusy() || deletePending)return {kind:'operation',cause:'operation'};
   return null;
 }
 function queueAnnounce(text){const p=$('queue-announce');if(!p)return;if(p.textContent===text)p.textContent='';p.textContent=text;}
@@ -4890,13 +5070,10 @@ function queueHint(row){
   const late=[...queueLate.values()].find(item=>item.book_id===row.id);if(late && (queuedFor(row) || queueRunning(row)))return late.text;
   const item=queuedFor(row);
   if(item){
-    const p=queueP(queueBlocker(item)),n=queueAhead(item),ahead=n?`, ${n.toLocaleString()} ahead`:'';
-    if(item.action==='delete')return `Delete queued${ahead}. Nothing is deleted yet. It runs when ${p} finishes.`;
-    if(item.action==='copy')return `Remove this copy queued${ahead}. Nothing is deleted yet. It runs when ${p} finishes.`;
-    if(['retry','repair'].includes(item.action))return `${item.action==='repair'?'Repair':'Retry'} queued${ahead}. Starts when ${p} finishes.`;
-    // Ruling 35 (provisional copy, sent to Judy): his values are kept with the queued press.
-    if(item.action==='names')return `Save names queued${ahead} until ${p} finishes. These edits are waiting in memory, not saved yet.`;
-    return `${queueWord(item.action)} queued${ahead}. Choices are waiting in memory, not saved yet. It runs when ${p} finishes.`;
+    // 0.30.0 (Judy's spec 2.3): one form for every action, the same sentence as the Waiting list and the queue strip.
+    const n=queueAhead(item),ahead=n?`${n.toLocaleString()} ahead. `:'',said=blockerSentence(queueBlocker(item)).text;
+    if(item.action==='names')return `Save names queued. ${ahead}${said} These edits are waiting in memory, not saved yet.`;
+    return `${queueWord(item.action)} queued. ${ahead}${said}`;
   }
   const running=queueState.running;if(!queueRunning(row))return null;
   if(running.action==='delete' || running.action==='copy'){const n=Number(running.n) || 0;return n===0?'Removing this book…':n===1?'Deleting 1 file…':`Deleting ${n.toLocaleString()} files…`;}
@@ -5045,11 +5222,11 @@ function updateDeleteButton(id){
   updateQueueCancel(entry.cancel,row,['delete','copy']);
   if(lost)(nextRowButton(button.parentElement,button) || $('filter')).focus?.({preventScroll:true});
   if(hidden)return;
-  const item=queuedFor(row,mode),blocker=state==='blocked'?pageBlocker() || 'operation':null,word=mode==='copy'?'Remove this copy':'Delete';
+  const item=queuedFor(row,mode),blocker=state==='blocked'?pageBlocker() || {kind:'operation',cause:'operation'}:null,word=mode==='copy'?'Remove this copy':'Delete';
   const label=state==='pending'?ASK_PENDING[mode][0]:state==='queued'?`${word} queued`:state==='running'?'Deleting…':state==='next'?ASK_PENDING[mode][0]:ASK_LABELS[mode];
   const title={offline:'Local server unavailable.',next:"Checking another book's files. This book's opens right after.",pending:sortedText(ASK_PENDING[mode][1]),ready:deleteTip(offer,mode),
-    queued:`${word} is queued. Nothing is deleted until it runs, when ${queueP(queueBlocker(item))} finishes.`,running:"Deleting can't be stopped.",
-    blocked:mode==='copy'?`Remove this copy. ${queueS(blocker)}, so the removal is queued after you confirm.`:`Delete this book. ${queueS(blocker)}, so the delete is queued after you confirm.`,
+    queued:`${word} is queued. Nothing is deleted until it runs. ${blockerSentence(queueBlocker(item)).text}`,running:"Deleting can't be stopped.",
+    blocked:mode==='copy'?`Remove this copy. ${blocker?blockerSentence(blocker).running:''}, so the removal is queued after you confirm.`:`Delete this book. ${blocker?blockerSentence(blocker).running:''}, so the delete is queued after you confirm.`,
     sibling:queuedFor(row)?.action==='repair'?QUEUE_SIBLING_REPAIR:QUEUE_SIBLING_RETRY}[state];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',(state==='queued'?'Delete queued':state==='running'?'Deleting':ASK_LABELS[mode])+': '+queueTitle(row));
@@ -5110,12 +5287,12 @@ function showDeleteState(kind,data={}){
     setText('delete-dialog-last',d.last==='all'?"The originals are already gone. The app's working files are the last copy of this book's audio.":"Some originals are already gone. The app's working files hold the last copy of that audio.");
     const when=blocked?' when it runs':'';
     setText('delete-dialog-files',n===0?'No files will be deleted from your disk.':n===1?`This file (${sizeText(d.bytes)}) will be deleted from your disk${when}. The app can't undo this.`:`These ${n.toLocaleString()} files (${sizeText(d.bytes)}) will be deleted from your disk${when}. The app can't undo this.`);
-    if(blocked){setText('delete-dialog-blocked',`${queueS(blocked)}, so this delete waits its turn.`);setText('delete-dialog-recheck',n===0?'The app checks this book again first. If it differs, nothing is deleted.':'The app checks this book and these files again first. If anything differs, nothing is deleted.');}
+    if(blocked){setText('delete-dialog-blocked',`${blockerSentence(blocked).running}, so this delete waits its turn.`);setText('delete-dialog-recheck',n===0?'The app checks this book again first. If it differs, nothing is deleted.':'The app checks this book and these files again first. If anything differs, nothing is deleted.');}
     setText('delete-dialog-folder',d.stay===1?"1 other item stays where it is. It belongs to another book, or the app can't tell whose it is.":`${d.stay.toLocaleString()} other items stay where they are. They belong to other books, or the app can't tell whose they are.`);
     setText('delete-dialog-forget',t.forget);
     deleteListing(d);
     setText('delete-confirm',kind==='deleting'?'Deleting...':kind==='queuing'?'Queuing…':blocked?(n===0?'Queue delete':`Queue delete of ${deleteCount(n)}`):t.confirm(n));
-    confirm.title=blocked?(n===0?'Queue removing this book from the app. No files are touched.':`Queue this delete. It runs when ${queueP(blocked)} finishes, after the app checks the book and files again. The app can't undo it.`):t.tip(n);
+    confirm.title=blocked?(n===0?'Queue removing this book from the app. No files are touched.':`Queue this delete. ${blockerSentence(blocked).text} The app checks the book and files again first. The app can't undo it.`):t.tip(n);
     if((kind==='deleting' || kind==='queuing') && !Number.isFinite(d.at))d.at=Date.now();
     deleteStatusLine();
     if(kind==='deleting'){confirm.setAttribute('aria-disabled','true');cancel.setAttribute('aria-disabled','true');cancel.title="Deleting can't be stopped.";}
@@ -5147,7 +5324,7 @@ function openDeleteDialog(row,preview,mode='delete'){
   const sorted=preview?.sorted && typeof preview.sorted==='object' && typeof preview.sorted.path==='string'?preview.sorted:null;
   deleteDialog={id:row.id,row,mode,files,paths:files.map(file=>file.path),folders,n:files.length,bytes:Number(preview?.bytes) || 0,
     last:mode==='delete' && ['all','some'].includes(preview?.last_copy)?preview.last_copy:null,stay:Math.max(0,Math.floor(Number(preview?.stay?.items) || 0)),sorted,state:'confirm',
-    blocked:mode==='delete' && typeof preview?.blocked?.kind==='string'?preview.blocked.kind:null};  // what a queued delete waits for (Judy 1.5)
+    blocked:mode==='delete' && typeof preview?.blocked?.kind==='string'?preview.blocked:null};  // what a queued delete waits for (Judy 1.5): the blocker object (0.30.0)
   // Remove this copy is offered only beside a proof made now: without one the dialog opens refused, never confirmable.
   const refusal=preview?.refusal || (mode==='copy' && !sorted?{code:'refused'}:null);
   if(refusal){const line=deleteRefusalText(refusal,mode);showDeleteState('refused',{line,files:refusal.files});deleteNotes.set(row.id,{text:line,warn:true});}
@@ -5374,7 +5551,8 @@ function closeApproveDialog(){if(!approveConfirm)return;approveConfirm=null;$('a
 async function runApproveSelected(){
   const confirm=approveConfirm,button=$('approve-confirm');if(!confirm || button.getAttribute?.('aria-disabled')==='true' || askBulk)return;
   button.setAttribute('aria-disabled','true');approveConfirm=null;$('approve-dialog').close?.();
-  const items=confirm.items,n=items.length;let approved=0;askBulk=true;askNote(`Approving ${plural(n,'book','books')}.`);controls();
+  const items=confirm.items,n=items.length;let approved=0;askBulk=true;askNote(`Approving ${plural(n,'book','books')}.`);
+  pageRun={kind:'approve_selected',done:0,total:n,started:Date.now()};controls();  // 0.30.0: its row (A9), counted by this page
   for(const row of items){
     if(ended || recoveryDisconnected)break;
     askPendings.set(row.id,{id:row.id,kind:'approve',at:Date.now()});updateAskRows();
@@ -5384,9 +5562,9 @@ async function runApproveSelected(){
     try{const answer=await bookDecision(row,'approve',{title:null,author:null,names:null,without_missing:false,choice:null,path:shown || null});
       askSettled(askRows.get(row.id) || {row},'approve',answer,{},draft!==decisionPacked({ask:askDrafts.get(row.id) || {},names:namesState.get(row.id)?.draft || {}}) || !sameDecisionRow(rows.find(item=>item.id===row.id),row));selectedBooks.delete(row.id);approved++;}
     catch(error){askResults.set(row.id,{text:error.decisionUnknown?error.message:'Approval not saved: '+(error.httpStatus?askErrorText(error,'approve',row):error.message),warn:true});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}}
-    finally{askPendings.delete(row.id);}
+    finally{askPendings.delete(row.id);if(pageRun?.kind==='approve_selected')pageRun.done++;}
   }
-  askBulk=false;
+  askBulk=false;pageRun=null;
   // Count only acknowledged durable decisions, independently of later jobs.
   askNote(`Approval saved for ${approved.toLocaleString()} of ${n.toLocaleString()} books.`+(approved<n?' Other decisions remain listed with their reasons.':''));
   batchCounts();$('group-'+attentionGroup).focus?.({preventScroll:true});
@@ -5655,12 +5833,13 @@ function setupManualConversion(){
     const note=accepted && !editing?[stateLabel(accepted),accepted.reason].filter(Boolean).join(' · '):'';
     line('manual-editor-status', [editor.note,editing && changed?'Unsaved changes.':'',note].filter(Boolean).join(' '));
     const jobs=state?.audiobook_jobs;
-    const activity=accepted?.job_id && accepted.job_id===jobs?.current_job_id && Array.isArray(state.activities)?
-      state.activities.find(row=>['conversion','cleanup'].includes(row.kind) && row.state!=='attention'):null;
+    // 0.30.0: its row in work (conversion or cleanup of this job), read at this poll.
+    const activity=accepted?.job_id && accepted.job_id===jobs?.current_job_id?
+      workOf().rows.find(row=>['conversion','cleanup'].includes(row.kind) && row.job_id===accepted.job_id):null;
     $('manual-job-progress').hidden=!activity;
     if(activity){
-      const finishing=activity.done>=activity.total && activity.total>0;
-      const step=activityStep(activity,finishing),detail=activityDetail(activity,finishing),bar=$('manual-job-bar');
+      const finishing=measured(activity) && activity.done>=activity.total && ['running','pausing'].includes(activity.state);
+      const step=workStep(activity,finishing),detail=workDetail(activity,finishing),bar=$('manual-job-bar');
       line('manual-job-stage',step);line('manual-job-measure',detail);
       bar.setAttribute('aria-valuetext',[step,detail].filter(Boolean).join(', '));
       if(detail && activity.done>=0)bar.value=Math.min(99,Math.floor(activity.done/activity.total*100));

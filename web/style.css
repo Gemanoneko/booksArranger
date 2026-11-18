@@ -237,3 +237,5 @@ button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--d
 #manual-track-list .check, #manual-editable .check {
   margin-block: 2px;
 }
+/* 0.30.0 (Judy's spec 1.3, 1.6, 3.2, 3.3): every running row (scrolls past 8), the Waiting list, the counts' age cue, the unread line. */
+#jobs-rows{max-height:600px;overflow-y:auto}#jobs-rows:focus-visible{outline:3px solid var(--focus);outline-offset:2px}#jobs-fresh{margin-left:auto;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}#jobs-fresh.behind{color:var(--warning)}#jobs-unread{color:var(--warning);margin:4px 0 0}#jobs-wait{list-style:none;margin:4px 0 0;padding:0}.wait-label{font-weight:600}.wait-row .hold-text p{white-space:normal}

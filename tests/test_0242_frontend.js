@@ -23,21 +23,26 @@ const answer=body=>({ok:true,status:200,json:async()=>body});
 
   // A real start check takes priority over saved paused cleanup; no invented count/bar/clock.
   stateWith({start_admission:{state:'checking',generation:9},maintenance:{phase:'Checking the audiobook before source-folder cleanup',job_id:'old',title:'Earlier book',state:'checking',cancel_requested:false}});
-  run("state.activities=[{kind:'cleanup',state:'paused',step:'originals',done:0,total:19,unit:'files',step_started_at:1}];renderJobs();controls()");
-  assert.ok(get('jobs-status').textContent.includes('Checking pending audiobook work'));
+  // 0.30.0 (Judy's spec 1.5): the engine's work rows; the start check is "Checking books before conversion", the check
+  // before cleanup names its book, a paused cleanup is its own paused row after them.
+  run("state.work={rows:[{id:'cleanup:old',kind:'cleanup',state:'paused',step:'originals',done:0,total:19,unit:'files',started:1,subject:'Older book'},{id:'start_check',kind:'start_check',state:'running',step:'checking_pending',started:1},{id:'maintenance:old',kind:'maintenance',state:'running',subject:'Earlier book',job_id:'old',started:1}],waiting:[],counts:{cleanups_paused:1},unread:[]};renderJobs();controls()");
+  assert.ok(get('jobs-status').textContent.startsWith('Paused · 2 tasks running · Cleanup paused for 1 book'),get('jobs-status').textContent);  // the queue is paused; the check and its cleanup check still run
   assert.equal(get('pause-jobs').disabled,false);assert.equal(get('resume-jobs').disabled,true);
   assert.equal(get('pause-jobs').title,'Pause the start checks and keep pending work. The current read may finish before stopping.');
-  assert.equal(get('jobs-rows').children[0].dataset.kind,'admission');
-  assert.equal(run("activityRows.get('admission').bar.hidden"),false);assert.equal(run("activityRows.get('admission').bar.value ?? null"),null,'0.29.0: a phase-only row slides');assert.equal(run("activityRows.get('admission').time.hidden"),true);
-  assert.equal(run("activityRows.get('maintenance').subject.textContent"),'Earlier book');
-  assert.equal(run("activityRows.get('maintenance').detail.textContent"),'');
-  assert.equal(run("activityRows.get('cleanup').detail.textContent"),'0 of 19 files');
+  assert.deepEqual(get('jobs-rows').children.map(item=>item.dataset.id),['cleanup:old','start_check','maintenance:old'],"the engine's order, keyed by id");
+  assert.equal(run("activityRows.get('start_check').label.textContent"),'Checking books before conversion');
+  assert.equal(run("activityRows.get('start_check').bar.hidden"),false);assert.equal(run("activityRows.get('start_check').bar.value ?? null"),null,'no count: the bar slides');assert.equal(run("activityRows.get('start_check').time.hidden"),false,'its clock ticks');
+  assert.equal(run("activityRows.get('maintenance:old').subject.textContent"),'Earlier book');assert.equal(run("activityRows.get('maintenance:old').label.textContent"),'Checking audiobook before cleanup: ');
+  assert.equal(run("activityRows.get('cleanup:old').step.textContent"),'Paused - Resume audiobook jobs to continue');
+  assert.equal(run("activityRows.get('maintenance:old').detail.textContent"),'');
+  assert.equal(run("activityRows.get('cleanup:old').detail.textContent"),'0 of 19 files');
   assert.equal(get('pause-jobs').getAttribute('aria-describedby'),'jobs-help jobs-status');
-  stateWith({start_admission:{state:'running'}});assert.equal(run("activityRows.has('admission')"),false);assert.equal(run("activityRows.has('maintenance')"),false);
+  stateWith({start_admission:{state:'running'}});assert.equal(run("activityRows.has('start_check')"),false);assert.equal(run("activityRows.has('maintenance:old')"),false);  // rows come only from work
   stateWith({start_admission:{state:'stale'}});assert.ok(get('jobs-help').textContent.includes('Start checks stopped. Pending work is kept.'));
   stateWith({start_admission:{state:'closing'}});assert.equal(get('resume-jobs').disabled,true);assert.equal(get('resume-jobs').title,'Books Arranger is closing. Pending work is kept.');
   stateWith({maintenance:{state:'stopping',cancel_requested:true,phase:'Checking finished output'}});assert.equal(get('pause-jobs').disabled,true);assert.ok(get('jobs-help').textContent.startsWith('Stopping finished-book checks…'));
-  for(const total of [null,-1,0,'4',NaN]){context.fixture={maintenance:{state:'checking',completed:0,total}};assert.equal(run("checkActivities([],fixture)[0].phase_only"),true);}
+  // 0.30.0: a count that is not a real positive number is not a count; the bar slides.
+  for(const total of [null,-1,0,'4',NaN]){context.fixture={id:'maintenance:x',kind:'maintenance',state:'running',done:0,total,started:1};assert.equal(run('measured(fixture)'),false);}
 
   // One Resume in flight; Pause is independently reachable once a real backend check is known.
   let resumeAnswer,pauseAnswer;const sent=[];const originalFetch=context.fetch;
@@ -96,8 +101,8 @@ const answer=body=>({ok:true,status:200,json:async()=>body});
   for(const [origin,copy] of [['automatic','with the automatic names'],['user','with your approved names'],['unknown','converting.']]){context.failure={httpStatus:409,body:{code:'book_converting',job_origin:origin}};const line=run("askErrorText(failure,'approve',fixture)");assert.ok(line.includes(copy));assert.ok(line.endsWith('Your new names were not applied.'));}
   assert.equal(run("namesSavedText(fixture,{outcome:'replanned'})"),'Names saved. Approve to queue this book with these names.');
   group.admission_error=undefined;group.chapter_corrections=[{file:'source.m4b',chapter_title:'Last',original_end:999,corrected_end:4}];group.audiobook_ready=false;assert.ok(!run('technicalText(fixture)').includes('corrected in the audiobook'));group.audiobook_ready=true;assert.ok(run('technicalText(fixture)').startsWith('Final chapter end corrected in the audiobook. Chapter names and start times are kept.'));
-  group.chapter_check={phase:'Checking source audio',reason:'terminal_chapter_end',file:'source.m4b'};run('rows=[fixture];renderJobs()');assert.equal(run("activityRows.get('chapter').label.textContent"),'Checking source audio: ');assert.equal(run("activityRows.get('chapter').bar.hidden"),false);assert.ok(run('technicalText(fixture)').startsWith('Checking source audio:'));
-  delete group.chapter_check;run('renderJobs()');assert.equal(run("activityRows.has('chapter')"),false,'no stale checking row after callback ends');run('rows=[]');
+  group.chapter_check={phase:'Checking source audio',reason:'terminal_chapter_end',file:'source.m4b'};run("rows=[fixture];state.work={rows:[{id:'chapter_check:j1',kind:'chapter_check',state:'running',subject:'Book',job_id:'j1',started:Date.now()-1000}],waiting:[],counts:{},unread:[]};renderJobs()");assert.equal(run("activityRows.get('chapter_check:j1').label.textContent"),'Checking source audio: ');assert.equal(run("activityRows.get('chapter_check:j1').bar.hidden"),false);assert.ok(run('technicalText(fixture)').startsWith('Checking source audio:'));
+  delete group.chapter_check;run("state.work={rows:[],waiting:[],counts:{},unread:[]};renderJobs()");assert.equal(run("activityRows.has('chapter_check:j1')"),false,'no stale checking row after callback ends');run('rows=[]');
 
   // Protective folders and audio-like leftovers name the actual subject without an automatic retry promise.
   context.cleanupRow={creation:{job:{folder_cleanup:{protected:[{path:'C:/private-fixture/library',reason:'Source library folder is kept'},{path:'C:/private-fixture/library/author',reason:'Top-level source folder is kept'}],retained_details:[{path:'C:/private-fixture/library/author/book',state:'retained_nonempty',reason:'Audio files remain in the folder; retained: bonus.mp3.txt'}],retryable:false,absent_after_intent:1}}}};

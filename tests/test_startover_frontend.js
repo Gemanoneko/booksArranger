@@ -280,7 +280,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
 
   // ---- O12: the notice, Cancel automatic start, and its press (follow-up 4, 1.4).
   setAuto({state:'Idle',can_start:false,start_block_reason:'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.',start_pending:{kind:'conversion'}});
-  assert.equal(get('automatic-start-reason').textContent,'Automatic processing will start by itself when audiobook conversion finishes or is paused. Starting also resumes any queued audiobook jobs.');
+  assert.equal(get('automatic-start-reason').textContent,'It starts when audiobook conversion finishes or is paused.');  // 0.30.0 (Judy's spec 5): the 1.6 automatic_start line
   assert.equal(get('start-automatic').title,get('automatic-start-reason').textContent,'the Start tooltip carries the same sentence');
   assert.equal(get('cancel-automatic-start').hidden,false);assert.equal(get('cancel-automatic-start').disabled,false);
   backend={...backend,automatic_processing:{...backend.automatic_processing,...IDLE,can_start:false,start_block_reason:'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.'}};
@@ -380,7 +380,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(run('laterPresses.length'),0,'no endless retry');run('retryResult=null;controls()');
   // Another request in flight (ruling 35): the press is accepted and waits for it, with Cancel; never "Another operation".
   paint([cleanable]);run('retryPending={key:"other",kind:"retry"};controls()');assert.equal(actionButtons(rowOf('cw'))[1].disabled,false);
-  assert.match(actionButtons(rowOf('cw'))[0].title,/^Queue this retry\. The app is working on another action/,'positive control: Retry sees the other press (0.22.1: it would be queued)');
+  assert.match(actionButtons(rowOf('cw'))[0].title,/^Queue this retry\. It runs when the app is free/,'positive control: Retry sees the other press (0.22.1: it would be queued)');
   const sent=posts.length;await run('clearFromRow(rows[0],[...rowButtons("cand-cw").children].find(b=>b.textContent==="Clear working files" || b.textContent==="Clearing…"))');
   assert.equal(posts.length,sent,'nothing is sent while the other press runs');assert.equal(statusCell(rowOf('cw')).children[0].textContent,'Clear working files queued. It runs when Retry finishes.');
   assert.equal(run('laterPresses.length'),1);run('laterPresses.length=0;retryPending=null;retryResult=null;controls()');

@@ -77,25 +77,29 @@ const texts=element=>element.children.map(child=>child.children.length?child.chi
   run('namesState.delete("n2")');
   assert.equal(run('keepUnderCursor([{id:"a"},{id:"c"}],kept).map(row=>row.id).join(",")'),'a,c','it leaves once the editor is closed');
   assert.equal(run('keepUnderCursor([{id:"a"}],[{id:"a"},{id:"b"}]).map(row=>row.id).join(",")'),'a','a row nobody works on leaves at once');
-  // Item 7 extras (Judy section 7): the check pass row (after 1 s), its folder phase, a move, a queued action, a stall.
-  const view=kind=>run('activityRows.get("'+kind+'")'),line=kind=>[view(kind).label.textContent,view(kind).subject.textContent,view(kind).detail.textContent,view(kind).step.textContent];
-  run('rows=[];queueState={queued:[],running:null};state={...state,source_check:null,source_check_progress:{phase:"checking",done:1,total:412,started:Date.now()}};renderJobs()');
-  assert.equal(view('checks'),undefined,'a pass under 1 s is not shown');
-  run('state={...state,source_check_progress:{phase:"checking",done:120,total:412,started:Date.now()-5000}};renderJobs()');
-  assert.deepEqual(line('checks'),['Checking source folders','','120 of 412 books','Checking 412 books']);
+  // Item 7 extras (Judy section 7), 0.30.0 from the engine's work rows: the check pass row (after 1 s), its folder phase, a
+  // move, a queued action, a stall.
+  const view=id=>run('activityRows.get("'+id+'")'),line=id=>[view(id).label.textContent,view(id).subject.textContent,view(id).detail.textContent,view(id).step.textContent];
+  const work=rows=>run('state={...state,work:'+JSON.stringify({rows,waiting:[],counts:{},unread:[]})+'};renderJobs()');
+  run('rows=[];queueState={queued:[],running:null}');work([{id:'source_check',kind:'source_check',state:'running',done:1,total:412,unit:'books',started:Date.now()}]);
+  assert.equal(view('source_check'),undefined,'a pass under 1 s is not shown');
+  work([{id:'source_check',kind:'source_check',state:'running',done:120,total:412,unit:'books',started:Date.now()-5000}]);
+  assert.deepEqual(line('source_check'),['Checking source folders','','120 of 412 books','Checking 412 books']);
   assert.match(get('jobs-status').textContent,/^Checking source folders · /);
-  run('state={...state,source_check_progress:{phase:"folders",started:Date.now()}};renderJobs()');
-  assert.deepEqual(line('sources'),['Removing source folders','','','Checking leftovers']);assert.equal(view('sources').bar.hidden,false);
-  run('state={...state,source_check_progress:null};rows=[{id:"m",kind:"candidate",title_clue:"Dune",move:{state:"moving",progress:45,target:"Z:/Sorted/Herbert/Dune.m4b"}}];renderJobs()');
-  assert.deepEqual(line('move'),['Moving: ','Dune','45%','Copying to Herbert']);
-  run('updateActivity(activityRows.get("move"),Date.now()+301000)');
-  assert.equal(view('move').step.textContent,'No progress for 5 min','a running row whose detail has not moved for 5 min says so');
-  run('rows=[{id:"b",kind:"candidate",title_clue:"Foo"}];queueState={queued:[],running:{id:"q",book_id:"b",action:"cleanup"}};renderJobs()');
-  assert.deepEqual(line('action').slice(0,2),['Retry cleanup: ','Foo']);
-  // One row per piece of work: while the engine shows the cleanup itself, the queued Retry cleanup is not a second row.
-  run('state={...state,activities:[{id:"cleanup",kind:"cleanup",subject:"Foo",step:"originals",state:"running",done:1,total:4,unit:"files"}]};renderJobs()');
-  assert.equal(view('action'),undefined);assert.equal(view('cleanup').subject.textContent,'Foo');
-  run('state={...state,activities:[]};queueState={queued:[],running:null};rows=[];renderJobs()');
+  work([{id:'source_folders',kind:'source_folders',state:'running',started:Date.now()-2000}]);
+  assert.deepEqual(line('source_folders'),['Removing source folders','','','Checking leftovers']);assert.equal(view('source_folders').bar.hidden,false);
+  run('rows=[{id:"m",kind:"candidate",title_clue:"Dune",move:{state:"moving",progress:45,target:"Z:/Sorted/Herbert/Dune.m4b"}}]');
+  work([{id:'move:q1',kind:'move',subject:'Dune',book_id:'m',state:'running',done:45,total:100,unit:'percent',fraction:0.45,started:Date.now()-2000}]);
+  assert.deepEqual(line('move:q1'),['Moving: ','Dune','45%','Copying to Herbert']);
+  run('updateActivity(activityRows.get("move:q1"),Date.now()+301000)');
+  assert.equal(view('move:q1').step.textContent,'No progress for 5 min','a running row whose detail has not moved for 5 min says so');
+  run('rows=[{id:"b",kind:"candidate",title_clue:"Foo"}];queueState={queued:[],running:{id:"q",book_id:"b",action:"cleanup",title:"Foo"}}');
+  work([{id:'action:q',kind:'action',label_key:'cleanup',subject:'Foo',book_id:'b',state:'running',started:Date.now()-2000}]);
+  assert.deepEqual(line('action:q').slice(0,2),['Retry cleanup: ','Foo']);
+  // One row per piece of work: the engine sends one row for it, the page draws what it sends.
+  work([{id:'cleanup:j',kind:'cleanup',subject:'Foo',job_id:'j',step:'originals',state:'running',done:1,total:4,unit:'files',started:Date.now()-2000}]);
+  assert.equal(view('action:q'),undefined);assert.equal(view('cleanup:j').subject.textContent,'Foo');
+  run('queueState={queued:[],running:null};rows=[]');work([]);
   // The counts keep a leaving row until it leaves the page.
   run('leavingRows.set("n9",{id:"n9",leaving:"name_free"});globalThis.counted={audiobook_jobs:{attention_counts:{name_taken:2}}};leavingCounts(counted)');
   assert.equal(run('counted.audiobook_jobs.attention_counts.name_taken'),3);

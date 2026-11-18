@@ -25,8 +25,9 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const shown=text=>assert.doesNotMatch(text,/Connection interrupted|Local server unavailable|Retrying…/);
 (async()=>{
   assert.equal(run('desktopMode()'),true,'positive control: the desktop window');
-  const passes=[{id:'identity',kind:'identity',total:506},{id:'series',kind:'series',total:12},{id:'scan',kind:'scan',step:'researching',total:40}];
-  run('state='+JSON.stringify({...backend,activities:passes})+';loadingActive=false');
+  // 0.30.0 (Judy's spec 5): the busy notice reads work.rows with the rows' own names, every kind running.
+  const passes=[{id:'finished_check',kind:'finished_check',state:'running',done:3,total:506,started:Date.now()-5000},{id:'series',kind:'series',subject:'Dune',state:'running',done:1,total:12,started:Date.now()-5000},{id:'research',kind:'research',subject:'Foo',state:'running',done:2,total:40,started:Date.now()-5000},{id:'gap_fill',kind:'gap_fill',subject:'Bar',state:'running',started:Date.now()-5000}];
+  run('state='+JSON.stringify({...backend,work:{rows:passes,waiting:[],counts:{},unread:[]}})+';loadingActive=false');
   const known=Date.now()-60000;run('receivedStatus.set("Audiobooks","Discovery: idle · Files cataloged 5");receivedAt.set("Audiobooks",'+known+')');
   const clock=run('wallClock('+known+')');assert.match(clock,/^\d\d:\d\d:\d\d$/);
   // 1. A status read with no answer: nothing for 3 s, then the notice with the named passes, Last update and Last confirmed.
@@ -35,14 +36,14 @@ const shown=text=>assert.doesNotMatch(text,/Connection interrupted|Local server 
   run('pressTick('+(t0+2000)+')');assert.equal(get('connection-notice').textContent,'','under 3 s: nothing');
   run('pressTick('+(t0+4000)+')');
   assert.equal(get('connection-notice').hidden,false);
-  assert.equal(get('connection-notice').textContent,'The app is busy with background work and answers slowly. This page refreshes by itself.\nBusy with: re-checking 506 finished books, updating series on 12 books, researching 40 books.');
+  assert.equal(get('connection-notice').textContent,'The app is busy with background work and answers slowly. This page refreshes by itself.\nBusy with: Re-checking finished audiobooks, Metadata: Updating series: Dune, Researching books: Foo, Looking up book details: Bar.');
   assert.equal(get('status').textContent,'Last update '+clock+' · Discovery: idle · Files cataloged 5');
   assert.match(get('jobs-status').textContent,/^Last confirmed — /);
   run('pressTick('+(t0+150000)+')');
   assert.equal(get('connection-notice').textContent,'No answer for 2 min: the app is busy with background work. Your files are not touched. If it goes on, quit from the tray and open Books Arranger again.');
   assert.equal(run('recoveryDisconnected'),false,'no offline flag for a slow answer');
   // The first answer clears it.
-  answer(ok({...backend,activities:[]}));await reading;await tick();
+  answer(ok({...backend,work:{rows:[],waiting:[],counts:{},unread:[]}}));await reading;await tick();
   assert.equal(get('connection-notice').hidden,true);assert.equal(get('connection-notice').textContent,'');assert.doesNotMatch(get('jobs-status').textContent,/^Last confirmed/);
   // Without named passes there is no second line.
   stateAnswer=()=>new Promise(resolve=>{answer=resolve;});const again=run('refresh()'),t1=Date.now();run('pressTick('+(t1+5000)+')');

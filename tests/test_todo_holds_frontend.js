@@ -229,7 +229,8 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
 
   // Copy: the Copy failure names the key (A1d); the activity line points at the list (A6).
   context.navigator=undefined;await get('copy-technical').handlers.click();assert.equal(get('copy-technical-status').textContent,"Couldn't copy. Select the text and press Ctrl+C.");
-  context.fixture={kind:'conversion',state:'attention',reason:'Full audio decode failed:\n[Parsed_...]'};assert.equal(run('activityStep(fixture,false)'),'On hold — see Needs attention');
+  // 0.30.0: a held conversion is On hold; its line 2 is the plain cause, never the engine's text.
+  context.fixture={state:'Needs attention',current_title:'Held',progress:{phase:'encoding',reason:'Full audio decode failed:\n[Parsed_...]'}};assert.equal(run('holdCause(heldRows(fixture)[0])'),'Stopped. See Needs attention.');
   context.setTimeout=()=>0;
   console.log('PASS to-do 0.22.0 review: three hold chips, one sentence per cause, lists and faces, Change order, Scan again, catch-all, No choice lines, unsaved edits, Retry selected, Still checking, copy');
 })().catch(error=>{console.error(error);process.exitCode=1;});
