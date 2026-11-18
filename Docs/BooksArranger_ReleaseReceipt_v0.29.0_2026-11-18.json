@@ -1,0 +1,61 @@
+{
+  "release_url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.29.0",
+  "source_commit": "0f21134f3b8723d402b13813e0c3bd606a26da8b",
+  "tag": "v0.29.0",
+  "tag_target_commit": "0f21134f3b8723d402b13813e0c3bd606a26da8b",
+  "tag_note": "Lightweight tag, already on origin before the release was created; not moved or recreated. main (7d16b98) carries later doc-only commits.",
+  "version": "0.29.0",
+  "artifact_manifest_sha256": "66b1eb18f476ff07b41d8ec38758f474377ce6f3702b822e9b1ed3e921c91538",
+  "build_id": "e8a77a5b-8087-418d-bf82-3a755e69dbd4",
+  "assets": [
+    {
+      "name": "Books-Arranger-Setup-0.29.0.exe",
+      "sha256": "264ff5c8b02060695f0954c2afd78dc2800b9fdcbbb4a0c416cd207057bf7c4b",
+      "size": 209247068,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.29.0/Books-Arranger-Setup-0.29.0.exe"
+    },
+    {
+      "name": "Books-Arranger-Setup-0.29.0.exe.blockmap",
+      "sha256": "7ac7c2ecd8cb6e2835cbbed96ced5297d6b9fec23f36b9484a1fdbb6157be6a0",
+      "size": 219357,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.29.0/Books-Arranger-Setup-0.29.0.exe.blockmap"
+    },
+    {
+      "name": "latest.yml",
+      "sha256": "dc4ff5db0a23c7c2436c8b97311466865155bc597f5e154b72da532b1ef7ee24",
+      "size": 360,
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.29.0/latest.yml"
+    }
+  ],
+  "verification": "Public release (not a draft). Manifest and the three local files re-hashed against the manifest before upload (all matched). Uploaded asset sizes and GitHub API sha256 digests equal the local files.",
+  "release_route": "B - manual publish of the checked files, authorised by Sergei in chat on 2026-11-18 ('Manual'). Same route as 0.28.12 and 0.28.13. Named-tag only; no --tags push.",
+  "code_review": {
+    "doc": "Docs/BooksArranger_CodeReview_v0.29.0_2026-11-18.md",
+    "reviewer": "Senua",
+    "verdict": "RELEASE CLEAR",
+    "pins": "0f21134 + manifest 66b1eb18..."
+  },
+  "qa": {
+    "reviewer": "Futaba",
+    "verdict": "GO (r3 on edf974f, source)"
+  },
+  "smoke": "Not run. An isolated packaged run was not possible without installing to Sergei's profile or touching his data. Senua verified the installer payload byte-for-byte.",
+  "release_pruning": {
+    "kept": ["v0.29.0", "v0.28.13", "v0.28.12", "v0.28.6"],
+    "deleted_releases_and_remote_tags": ["v0.28.1"],
+    "local_tags_pruned": ["v0.28.1"]
+  },
+  "local_build_cleanup": {
+    "method": "studio-sweep --approved (apply), 3 targets, 1230 files",
+    "removed_bytes": 984250000,
+    "targets": [
+      "dist/builds/e8a77a5b-8087-418d-bf82-3a755e69dbd4 (409 files, 763.73 MB)",
+      "dist/release-artifacts.json",
+      "build-cache/builds/a8162f92-a942-4e1a-b277-52158480f694 (unreferenced 0.28.13 runtime, 820 files, 220.45 MB)"
+    ],
+    "kept": [
+      "build-cache/runtime-pointer.json and build-cache/builds/22408b02-4085-42ad-8197-7fc15ae517a4 (pointer and the runtime it names are kept together for the next pack)"
+    ],
+    "free_space_change": "I: 118.76 GB -> 119.72 GB (+986.86 MB, statfs)"
+  }
+}

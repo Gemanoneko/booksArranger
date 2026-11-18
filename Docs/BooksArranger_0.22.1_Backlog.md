@@ -282,3 +282,7 @@ Sergei explicitly requested logging only: no investigation, implementation, test
 - **Always show what is running.** Sergei (2026-11-17): whenever anything runs, show a progress bar and say exactly what is running. Seen: Audiobook jobs says "Running · 0 queued", "Removing originals: Похититель детей — On hold — Cannot refresh protected file identity", and "Stop automatic processing queued. It runs when the current action finishes", with no visible clue what the current action is.
 - **Say clearly when nothing is left without Sergei.** Sergei (2026-11-17): when nothing more can happen until he reviews the Needs attention list, the app says so plainly.
 - **Restart-intent feature** (carried from `Team/Docs/Session_2026-11-16_Recap.md` § Parked / next version). Built on branch `feature/restart-intent` (9522858), pulled from 0.28.13 after 11 failing checks. Senua's R-M1..R-M4 and R-m1..R-m6 (in `Docs/BooksArranger_CodeReview_v0.28.13_2026-11-16.md`) must be fixed first: auto-start of a paused run on upgrade, auto-start of the NAS backlog, restart after a rollback, 2 broken tests.
+
+## Backlog after 0.29.0 (Sergei, 2026-11-18)
+
+- **Gone books leave the Held and Candidate changed filters too** (Futaba O-r3-1; Sergei: yes). 0.29.0 hides them from Needs attention and All candidates only. Still list-only; books with a job never hidden.
