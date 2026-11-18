@@ -157,6 +157,7 @@ class SharedSnapshot:
 
 _BULK_LOCK=threading.Lock()    # Retry all: its run record and thread
 _REPAIR_LOCK=threading.Lock()  # M4B repair checks: pending ids and the checker thread
+_RESTORED=threading.local()     # 0.30.0: a queued action restored from before a restart runs on this thread (restored_press)
 JOB_ONLY_FIELDS=('job_id','attempt_id','m4b_repair')  # never produced by the review's build_manifest
 _PURGE_LOCK=threading.RLock()  # one recovery purge at a time (the converter's and the sweep's never overlap)
 _WORKING_LOCK=threading.Lock()  # the working-folder classification cache and the folders whose clear failed
@@ -1094,7 +1095,9 @@ class MergeService:
         never hashes unrelated completed books under the foreground operation lock.
         pressed=False: a start no press made (the restart restore and the run it restored). Until Sergei's first own
         start in this launch, it leaves every cleanup that was already waiting alone (Senua R-M2, the NAS backlog).
+        0.30.0: inside restored_press (a queued action saved before a restart) it starts nothing.
         """
+        if getattr(_RESTORED,'active',False):return {'state':'held','reason':'restored press'}
         generation=self._capture_start_generation() if start_generation is None else start_generation
         result=self._resume_guarded(generation,pending_owner,False,pressed)
         if recheck:
@@ -2648,8 +2651,19 @@ class MergeService:
             value=dict(value,reason=reason+'; could not save start failure: '+str(failure));self.jobs.report_priority(value)
         return value
 
+    @contextlib.contextmanager
+    def restored_press(self):
+        """0.30.0 (Sergei, Q4: remember): a queued action saved before a restart runs inside this, on the action queue's thread.
+        It does its own work (a Retry still requeues its book next) but never starts the conversion queue or the cleanup
+        backlog: after a restart they start only by the restart intent's rules (Senua R-M1..R-M3, S-m8), never because a
+        press from the earlier session came back."""
+        before=getattr(_RESTORED,'active',False);_RESTORED.active=True
+        try:yield
+        finally:_RESTORED.active=before
+
     def _resume_later(self):
         """One existing scheduler owner; a newer request behind it gets explicit retryable busy."""
+        if getattr(_RESTORED,'active',False):return None  # a restored press starts nothing (restored_press)
         try:generation=self._capture_start_generation()
         except StartRefused as error:return self._record_start_failure(error)
         with _BULK_LOCK:

@@ -2,8 +2,8 @@
 
 A press while another operation ran was refused ("Another operation is in progress.", or a scan's refusal) or waited
 inside its request past the page's 15 s, which then said "Connection interrupted". Now Retry, Repair and Delete book are
-accepted and queued: one queue, first in first out, one action at a time, held by the engine in memory only (Sergei,
-Q1: Quit and updates drop it; nothing is deleted or started while he is away). An action runs when nothing blocks it,
+accepted and queued: one queue, first in first out, one action at a time, held by the engine (Sergei, Q1, 0.22.1: Quit
+and updates dropped it; since 0.30.0 it is kept across a restart, below). An action runs when nothing blocks it,
 through the same call its press makes, so every check runs again at run time: Retry and Repair the revision and the job,
 Delete book the revision, the confirmed files and folders, shared files, Sorted and the source drive. A delete the
 book or the files no longer match is cancelled before the first file. Each outcome is kept for the page until it
@@ -12,8 +12,21 @@ acknowledges it or 24 h pass, so a reload still shows it.
 Blocker kinds (Judy 1.2; the page words them): 'scan' a library scan runs; 'retry_run' Retry all or Retry selected
 runs (Retry and Repair only); 'book' the book itself is converting, queued for conversion or being researched (Delete
 only); 'operation' another operation holds the app's operation lock (Delete only: Retry and Repair take no lock), or
-another queued action runs. A fresh press while others wait goes to the back even when nothing blocks it."""
+another queued action runs. A fresh press while others wait goes to the back even when nothing blocks it.
+
+0.30.0 (Sergei, Q4: remember): the waiting actions are kept in the catalog (QueueStore) and come back at the next start
+(restore), across Quit, Restart to update and a crash. Quit and an update stop the queue (nothing runs while the app
+closes) but no longer drop it. Each restored action runs its checks again when it runs, as always, and never starts the
+conversion queue or the cleanup backlog itself (MergeService.restored_press): whether they start after a restart is the
+restart intent's decision alone (Senua R-M1..R-M3, S-m8). A saved queue another session closed over (an older version run
+in between, a rollback round trip) is dropped, each action with an outcome. Moves keep their own journal (book_move):
+a queued move is cancelled at the next start, with its own line, as before."""
+import contextlib
 import copy
+import datetime
+import json
+import sqlite3
+import sys
 import threading
 import time
 import uuid
@@ -45,6 +58,74 @@ class QueueFull(ValueError):
     pass
 
 
+# 0.30.0: what is kept across a restart. Not 'move': a move has its own journal and recovery (book_move.recover).
+PERSIST = tuple(action for action in ACTIONS if action != 'move')
+WRITER = 'action-queue-v1'
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+class QueueStore:
+    """The waiting actions in the catalog: one row each, in queue order, and one meta row (writer, last save, clean close)."""
+
+    def __init__(self, database):
+        self.database = database
+
+    @contextlib.contextmanager
+    def _db(self):
+        from scanner import connect  # the catalog's own guards (never during a storage relocation) and busy wait
+        with connect(self.database, timeout=5) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS action_queue_saved(position INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, action TEXT NOT NULL, '
+                       'book_id TEXT NOT NULL, title TEXT NOT NULL, args TEXT NOT NULL, queued_at REAL NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS action_queue_meta(id INTEGER PRIMARY KEY CHECK(id=1), writer TEXT NOT NULL, saved_at TEXT NOT NULL, closed_at TEXT)')
+            yield db
+
+    def save(self, items, closing=False):
+        """Replace the saved queue with items (oldest first). closing: the app is closing cleanly now (after the shell recorded
+        its shutdown), so a later shutdown record that is not ours means another session ran since."""
+        with self._db() as db:
+            db.execute('DELETE FROM action_queue_saved')
+            db.executemany('INSERT INTO action_queue_saved VALUES(?,?,?,?,?,?,?)',
+                           [(n, item['id'], item['action'], item['book_id'], item.get('title') or '', json.dumps(item['args'], ensure_ascii=False),
+                             float(item.get('queued_at') or time.time())) for n, item in enumerate(items)])
+            stamp = _now().isoformat()
+            db.execute('INSERT INTO action_queue_meta(id,writer,saved_at,closed_at) VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET '
+                       'writer=excluded.writer,saved_at=excluded.saved_at,closed_at=excluded.closed_at', (WRITER, stamp, stamp if closing else None))
+
+    def load(self):
+        """(items, why_dropped or None). why_dropped: 'foreign' (not this format's writer) or 'stale' (a desktop shutdown was
+        recorded after the queue was last saved or cleanly closed: another session ran in between, as after a rollback to a
+        version that keeps no queue)."""
+        with self._db() as db:
+            meta = db.execute('SELECT writer,saved_at,closed_at FROM action_queue_meta WHERE id=1').fetchone()
+            rows = db.execute('SELECT id,action,book_id,title,args,queued_at FROM action_queue_saved ORDER BY position').fetchall()
+            shutdown = None
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='desktop_shutdown'").fetchone():
+                found = db.execute('SELECT at FROM desktop_shutdown WHERE id=1').fetchone()
+                shutdown = found[0] if found else None
+        items = []
+        for identity, action, book_id, title, args, queued_at in rows:
+            try:
+                values = json.loads(args)
+            except ValueError:
+                continue
+            if action in PERSIST and isinstance(values, dict):
+                items.append({'id': identity, 'action': action, 'book_id': book_id, 'title': title, 'args': values, 'queued_at': queued_at})
+        if not items:
+            return [], None
+        if meta is None or meta[0] != WRITER:
+            return items, 'foreign'
+        last = max(stamp for stamp in (meta[1], meta[2]) if stamp)
+        try:
+            if shutdown and datetime.datetime.fromisoformat(shutdown) > datetime.datetime.fromisoformat(last):
+                return items, 'stale'
+        except ValueError:
+            return items, 'stale'
+        return items, None
+
+
 def _free(lock):
     """True when no other thread holds lock (an RLock: the probe holds it for an instant, never waits)."""
     if lock is None:
@@ -56,7 +137,7 @@ def _free(lock):
 
 
 class ActionQueue:
-    def __init__(self, server, poll=POLL):
+    def __init__(self, server, poll=POLL, store=None):
         self.server = server
         self.poll = poll
         self.lock = threading.Lock()
@@ -67,6 +148,13 @@ class ActionQueue:
         self.approval_receipts = {}
         self.thread = None
         self.closed = False
+        # 0.30.0: the catalog keeps the waiting actions (QueueStore). Default: the server's catalog; none without one.
+        database = getattr(getattr(server, 'inventory', None), 'database', None)
+        self.store = store if store is not None else QueueStore(database) if isinstance(database, (str, bytes)) or hasattr(database, '__fspath__') else None
+        self._save_lock = threading.Lock()
+        self._version = 0
+        self._saved = 0
+        self.restored = False
 
     # ------------------------------------------------------------------ what an action waits for
     def blocker(self, action, book_id, held=0, job_id=None):
@@ -211,7 +299,9 @@ class ActionQueue:
             self.items.append(item)
             self._start()
             self.changed.notify_all()
-            return self._answer(item)
+            answer = self._answer(item)
+        self._persist()
+        return answer
 
     def _answer(self, item):
         if item is self.running:return {'queued':True,'id':item['id'],'running':True}
@@ -253,13 +343,14 @@ class ActionQueue:
     def cancel(self, identity):
         """{'cancelled': True}, or None when it is no longer waiting (it started, ended or never was): too late."""
         with self.lock:
-            for index, item in enumerate(self.items):
-                if item['id'] == identity:
-                    del self.items[index]
-                    self.changed.notify_all()
-                    self._forget_move(item)
-                    return {'cancelled': True}
-        return None
+            found = next((index for index, item in enumerate(self.items) if item['id'] == identity), None)
+            if found is None:
+                return None
+            item = self.items.pop(found)
+            self.changed.notify_all()
+        self._persist()
+        self._forget_move(item)
+        return {'cancelled': True}
 
     def _forget_move(self, item):
         """A queued move taken back (Cancel, Quit, an update): its journal says cancelled, so the row stops saying queued."""
@@ -311,6 +402,8 @@ class ActionQueue:
         value = {key: item[key] for key in ('id', 'action', 'book_id', 'title')}
         if item['action'] in ('delete', 'copy'):
             value['n'] = len(item['args'].get('paths') or [])
+        if item.get('restored'):
+            value['restored'] = True  # 0.30.0: queued before the last restart
         return value
 
     def _prune(self):
@@ -324,37 +417,112 @@ class ActionQueue:
             self.thread.start()
 
     def drop(self):
-        """Quit or Restart to update has begun: every waiting action is dropped without running (Q1; the update's
-        confirm said so). The worker stays: a cancelled update keeps the app running with an empty queue."""
+        """Quit or Restart to update has begun: nothing waiting runs while the app closes (the worker waits while the server
+        closes). 0.30.0 (Sergei, Q4: remember): the waiting actions are kept, saved, for the next start, and a cancelled
+        update runs them as before. Only a queued move is taken back here: its journal says cancelled, as before."""
         with self.lock:
-            dropped = list(self.items)
-            self.items.clear()
+            moves = [item for item in self.items if item['action'] == 'move']
+            self.items = [item for item in self.items if item['action'] != 'move']
             self.changed.notify_all()
-        for item in dropped:
+        self._persist()
+        for item in moves:
             self._forget_move(item)
 
     def close(self):
-        """Quit, update and shutdown: the waiting actions are dropped without running (Q1). One already running finishes
-        (it holds a control admission, which shutdown waits for)."""
+        """Quit, update and shutdown: nothing waiting runs any more; the queue is saved with a clean-close stamp (after the
+        shell recorded its shutdown), so the next start takes it back. One already running finishes (it holds a control
+        admission, which shutdown waits for)."""
         with self.lock:
             self.closed = True
-            self.items.clear()
             self.changed.notify_all()
             thread = self.thread
+        self._persist(closing=True)
+        with self.lock:
+            self.items.clear()
         if thread is not None and thread is not threading.current_thread():
             thread.join(1)
+
+    # ------------------------------------------------------------------ kept across a restart (0.30.0)
+    def _persist(self, closing=False):
+        """Save the waiting actions (in order, moves left out). Never raises: a catalog that cannot take it now is tried
+        again by the worker; the queue in memory is unchanged either way."""
+        if self.store is None or not self.restored:
+            return  # never before restore(): it would write over the queue the last session saved
+        with self.lock:
+            self._version += 1
+            version = self._version
+            items = [copy.deepcopy(item) for item in self.items if item['action'] in PERSIST]
+        with self._save_lock:
+            if version < self._saved:
+                return  # a newer snapshot is already saved
+            try:
+                self.store.save(items, closing=closing)
+                self._saved = version
+            except Exception as error:
+                try:
+                    print(f'Books Arranger could not save the queued actions: {error}', file=sys.stderr, flush=True)
+                except Exception:
+                    pass
+
+    def unsaved(self):
+        with self.lock:
+            return self.store is not None and self.restored and self._saved < self._version
+
+    def restore(self):
+        """0.30.0: the actions saved before the last close come back, oldest first, ahead of any press made since (while
+        loading). Each runs every check again when its turn comes and never starts the queue itself (restored). A saved queue
+        another session closed over ('stale') or in another format ('foreign') is dropped, each action with an outcome (code
+        restore_stale, restore_foreign). Returns the number taken back. Once per server."""
+        if self.store is None or self.restored:
+            return 0
+        try:
+            saved, why = self.store.load()
+        except Exception as error:
+            # Not marked restored: nothing is saved over a queue that could not be read (this launch keeps it in memory).
+            try:
+                print(f'Books Arranger could not read the queued actions saved before: {error}', file=sys.stderr, flush=True)
+            except Exception:
+                pass
+            return 0
+        self.restored = True
+        now = time.time()
+        with self.lock:
+            kept = []
+            if why:
+                for item in saved:
+                    self.outcomes.append({'id': item['id'], 'action': item['action'], 'book_id': item['book_id'], 'title': item['title'], 'at': now,
+                                          'result': 'refused', 'code': 'restore_' + why})
+            else:
+                taken = {entry['book_id'] for entry in self.items} | ({self.running['book_id']} if self.running is not None else set())
+                kept = [dict(item, restored=True, blocker='loading') for item in saved if item['book_id'] not in taken]
+                self.items[0:0] = kept
+            self._prune()
+            if kept:
+                self._start()
+                self.changed.notify_all()
+        self._persist()
+        return len(kept)
 
     def _work(self):
         while True:
             with self.lock:
                 while not self.closed and not self.items:
-                    self.changed.wait()
+                    # A save the catalog refused (a cancelled last action, say) is tried again every poll until it lands.
+                    self.changed.wait(self.poll if self.store is not None and self._saved < self._version else None)
+                    if self.store is not None and self._saved < self._version:
+                        break
                 if self.closed:
                     return
-                if self.server.closing:
-                    self.items.clear()  # Quit or an update has begun: dropped, never run
-                    continue
-                head = self.items[0]
+                if not self.items or self.server.closing:
+                    head = None
+                    if self.server.closing:
+                        self.changed.wait(self.poll)  # Quit or an update has begun: nothing runs; the queue is kept (0.30.0)
+                else:
+                    head = self.items[0]
+            if self.unsaved():
+                self._persist()  # a save the catalog refused is tried again
+            if head is None:
+                continue
             kind = self.item_blocker(head)
             with self.lock:
                 if self.closed:
@@ -368,9 +536,12 @@ class ActionQueue:
                     continue
                 self.items.pop(0)
                 self.running = head
+            self._persist()  # it runs now: an action is never run twice after a crash
             if not self._admit():
                 with self.lock:
                     self.running = None
+                    self.items.insert(0, head)  # the app began closing meanwhile: it waits, kept for the next start
+                self._persist()
                 continue
             try:
                 outcome = self._run(head)
@@ -379,12 +550,14 @@ class ActionQueue:
             blocker = self.blocker_after(head) if outcome is None else None
             with self.lock:
                 self.running = None
-                if outcome is None and not self.closed and not self.server.closing:
+                if outcome is None:
                     head['blocker'] = blocker
                     self.items.insert(0, head)  # a blocker came back between the look and the run: it waits again
-                elif outcome is not None:
+                else:
                     self.outcomes.append(outcome)
                     self._prune()
+            if outcome is None:
+                self._persist(closing=self.closed)
             invalidate = getattr(self.server, 'invalidate_status', None)
             if callable(invalidate):
                 try:
@@ -420,6 +593,13 @@ class ActionQueue:
     def _run(self, item):
         """The outcome for the page, or None when a blocker refused it (it is queued again at the front)."""
         merge = self.server.merge
+        # 0.30.0: an action restored from before a restart does its own work only; the conversion queue and the cleanup
+        # backlog start after a restart only by the restart intent's rules (Senua R-M1..R-M3, S-m8).
+        quiet = getattr(merge, 'restored_press', None) if item.get('restored') else None
+        with quiet() if callable(quiet) else contextlib.nullcontext():
+            return self._run_now(item, merge)
+
+    def _run_now(self, item, merge):
         args = item['args']
         outcome = {'id': item['id'], 'action': item['action'], 'book_id': item['book_id'], 'title': item['title'], 'at': time.time()}
         if item['action'] in SERVER_RUN:

@@ -169,6 +169,17 @@ class LoadingServerTests(unittest.TestCase):
             self.wait_for(lambda: self.server.loading.view()['step'] == 'session')
         self.assertTrue(self.server.loading.view()['restart_safe'])
 
+    def test_queued_actions_saved_before_the_restart_wait_again_from_the_catalog_step_0_30_0(self):
+        # Sergei, Q4 (remember): the queue saved at the last close comes back while loading, waiting for loading to end.
+        from action_queue import QueueStore
+        QueueStore(self.inventory.database).save([{'id': str(uuid.uuid4()), 'action': 'retry', 'book_id': 'book-1', 'title': 'Дюна',
+                                                   'args': {'revision': 1, 'job_id': str(uuid.uuid4())}, 'queued_at': time.time()}])
+        self.serve()
+        self.wait_for(lambda: self.server.loading.view()['step'] == 'session')
+        queued = self.server.actions.view()['queued_actions']
+        self.assertEqual([(item['book_id'], item['title'], item.get('restored'), item['blocker']['kind']) for item in queued],
+                         [('book-1', 'Дюна', True, 'loading')])
+
     def test_changing_controls_are_refused_while_loading_with_the_pages_sentence(self):
         self.serve()
         for route, body in (('/api/scan/start', {'library': 'Audiobooks'}), ('/api/automatic/start', {}),

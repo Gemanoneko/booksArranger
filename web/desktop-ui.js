@@ -102,8 +102,8 @@
   if(approvals)lines.push(approvals===1?'An approval in progress stops, and the book is not approved. Press Approve again afterwards.':`${approvals} approvals in progress stop, and those books are not approved. Press Approve again afterwards.`);
   if(busy.scanning)lines.push('Scanning the library. It stops. Continue it with Resume scanning.');
   if(['Running','Stopping'].includes(busy.automatic))lines.push('Automatic processing stops. Press Start automatic processing to continue.');
-  const queued=Array.isArray(desktop.queued_actions)?desktop.queued_actions.length:Number(desktop.queued_actions)||0;
-  if(queued)lines.push(queued===1?'1 queued action is dropped. Press it again afterwards.':`${queued} queued actions are dropped. Press them again afterwards.`);
+  // 0.30.0 (Sergei, Q4: remember): queued actions are kept across the update and wait again afterwards, so the confirm no
+  // longer says they are dropped (Sergei: no "lost on restart" note is needed).
   return {known:true,lines};
  }
  function buttons(u,desktop){

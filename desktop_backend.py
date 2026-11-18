@@ -190,7 +190,8 @@ class DesktopControl:
             getattr(automatic,'stop_work',automatic.stop)(origin='closing')
 
     def _drop_queue(self):
-        """Quit and Restart to update drop the queued Retry, Repair and Delete book presses (Sergei, Q1; Judy 1.8)."""
+        """Quit and Restart to update stop the queued presses (nothing runs while the app closes). 0.30.0 (Sergei, Q4:
+        remember): they are kept for the next start (ActionQueue.drop); only a queued move is taken back, as before."""
         actions = getattr(self.server, 'actions', None)
         if actions is not None:
             actions.drop()

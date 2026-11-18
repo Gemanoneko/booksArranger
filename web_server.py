@@ -303,6 +303,7 @@ class BrowserServer(ThreadingHTTPServer):
         try:
             self.merge = self._open_merge()
             self._start_background()
+            self._restore_queue()
         except BaseException:
             try:
                 if self.merge is not None:
@@ -413,6 +414,16 @@ class BrowserServer(ThreadingHTTPServer):
         # Published-book hashing reads every finished book from the library share; it must not delay health.
         if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()
 
+    def _restore_queue(self):
+        """The queued actions saved before the last close come back (ActionQueue.restore); never fatal."""
+        from storage_relocation_native import retained_runtime
+        if self.closing or retained_runtime(self.inventory.database):
+            return
+        try:
+            self.actions.restore()
+        except Exception as error:
+            print(f'Books Arranger could not take back the queued actions: {error}', file=sys.stderr, flush=True)
+
     def _restore_saved_work(self, merge):
         from storage_relocation_native import retained_runtime
         if self.closing or retained_runtime(self.inventory.database):
@@ -442,6 +453,9 @@ class BrowserServer(ThreadingHTTPServer):
         loading = self.loading
         try:
             self._load_catalog(loading)
+            # 0.30.0 (Sergei, Q4: remember): the queued actions saved before the last close wait again ('loading' until
+            # loading ends), ahead of any press made while loading. Read here, in the catalog step: it needs the catalog only.
+            self._restore_queue()
             loading.begin('session', 0, 'items')
             merge = self._open_merge(progress=lambda done, total: loading.advance(done, total))
             if loading.abort.is_set():

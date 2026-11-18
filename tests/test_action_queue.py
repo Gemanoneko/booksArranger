@@ -1,7 +1,7 @@
 """Queued Retry, Repair and Delete book (0.22.1, backlog items 2 and 3; Judy's spec, section 1).
 
 A press while another operation runs is accepted and queued, not refused: one queue, first in first out, one action at
-a time, in memory only (Quit and updates drop it). The run goes through the same call the press makes, so its checks
+a time, kept across a restart since 0.30.0 (PersistentQueueTests). The run goes through the same call the press makes, so its checks
 run again; each outcome is kept until the page acknowledges it. Stub services and a stub server; the real delete and
 the HTTP routes are in test_book_delete.QueuedDeleteTests and test_web."""
 import threading, time, unittest, uuid
@@ -478,27 +478,25 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(until(lambda: len(self.queue.view()['queue_outcomes']) == 1))
         self.assertEqual(self.queue.view()['queue_outcomes'][0]['result'], 'done')
 
-    def test_quit_and_updates_drop_the_queue_without_running_anything(self):
+    def test_quit_and_updates_stop_the_queue_without_running_or_dropping_it(self):
+        # 0.30.0 (Sergei, Q4: remember): Quit and Restart to update no longer drop the waiting actions; nothing runs while the
+        # app closes, and a cancelled update runs them as before. Only a queued move is taken back (its own journal).
         self.server.scanning = True
         self.retry(0); self.delete(1)
-        self.assertEqual(self.queue.count(), 2)
+        move = self.queue.enqueue('move', self.book[2], 'Book 2', {'move_id': 'move-1'})
+        cancelled = []; self.server.merge.cancel_move = cancelled.append
+        self.server.closing = True  # Quit or an update has begun
         self.queue.drop()
         self.server.scanning = False
-        time.sleep(.1)
-        self.assertEqual((self.queue.view()['queued_actions'], self.server.merge.calls), ([], []))
-        # Control: a queue that is not dropped runs.
-        self.server.scanning = True
-        self.retry(2)
-        self.server.closing = True  # Quit or an update has begun: the worker drops what waits
-        self.server.scanning = False
-        self.assertTrue(until(lambda: self.queue.view()['queued_actions'] == []))
-        self.assertEqual(self.server.merge.calls, [])
+        time.sleep(.2)
+        self.assertEqual([item['action'] for item in self.queue.view()['queued_actions']], ['retry', 'delete'], 'kept, the move taken back')
+        self.assertEqual((self.server.merge.calls, cancelled), ([], ['move-1']))
+        self.assertTrue(move['queued'])
         with self.assertRaises(ValueError):
-            self.retry(3)
-        self.server.closing = False
-        self.server.scanning = True
-        self.retry(3); self.server.scanning = False
-        self.assertTrue(until(lambda: len(self.server.merge.calls) == 1), 'positive control: the same queue runs when nothing closes it')
+            self.retry(3)  # no new press while closing
+        self.server.closing = False  # the update was cancelled
+        self.assertTrue(until(lambda: len(self.server.merge.calls) == 2), 'the same queue runs once the app is not closing')
+        self.assertEqual([name for name, _ in self.server.merge.calls], ['retry', 'delete'])
 
     def test_outcomes_stay_until_acknowledged_or_a_day_passes(self):
         self.server.scanning = True
@@ -554,6 +552,112 @@ class QueueTests(unittest.TestCase):
         self.assertIsNone(self.queue.blocker('cleanup', own))
         self.assertIsNone(self.queue.item_blocker({'action': 'cleanup', 'book_id': own, 'args': {'job_id': own}}))
         self.assertEqual(self.queue.blocker('cleanup', other), 'jobs')
+
+
+class PersistentQueueTests(unittest.TestCase):
+    """0.30.0 (Sergei, Q4: remember): the waiting actions are kept in a private catalog and come back at the next start."""
+    def setUp(self):
+        import pathlib, tempfile
+        area = pathlib.Path(__file__).resolve().parents[1] / 'scratch' / 'action-queue-store-tests'
+        area.mkdir(parents=True, exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(dir=area); self.addCleanup(self.temp.cleanup)
+        self.database = str(pathlib.Path(self.temp.name) / 'catalog.sqlite3')
+        self.book = [str(uuid.uuid4()) for _ in range(4)]
+        self.job = [str(uuid.uuid4()) for _ in range(4)]
+
+    def server(self, started=True):
+        """One launch: its queue, restored at once (as the server does when loading ends) unless started=False."""
+        server = Server(); server.inventory = SimpleNamespace(database=self.database)
+        queue = ActionQueue(server, poll=.02); self.addCleanup(queue.close)
+        if started:
+            queue.restore()
+        return server, queue
+
+    def press(self, queue, n, action='retry'):
+        return queue.enqueue(action, self.book[n], 'Book %d' % n, {'revision': 3, 'job_id': self.job[n]})
+
+    def saved(self):
+        return [(item['action'], item['book_id']) for item in action_queue.QueueStore(self.database).load()[0]]
+
+    def shutdown(self, when):
+        from scanner import connect
+        import pause_state
+        with connect(self.database) as db:
+            pause_state.record_shutdown(db, 'quit')
+            db.execute('UPDATE desktop_shutdown SET at=?', (when.isoformat(),))
+
+    def test_waiting_actions_are_saved_and_come_back_in_order_after_a_restart(self):
+        server, queue = self.server()
+        server.scanning = True
+        self.press(queue, 0); self.press(queue, 1, 'repair'); self.press(queue, 2)
+        self.assertEqual(self.saved(), [('retry', self.book[0]), ('repair', self.book[1]), ('retry', self.book[2])])
+        queue.cancel(queue.view()['queued_actions'][1]['id'])
+        self.assertEqual(self.saved(), [('retry', self.book[0]), ('retry', self.book[2])], 'Cancel takes it out of the saved queue too')
+        self.shutdown(action_queue._now() - __import__('datetime').timedelta(seconds=5))  # the shell's record, before the close
+        queue.close()
+        self.assertEqual(self.saved(), [('retry', self.book[0]), ('retry', self.book[2])], 'Quit keeps it')
+        # The next start: a press made while loading keeps its place behind the restored ones, and is not saved over them.
+        later, again = self.server(started=False)
+        later.scanning = True
+        self.press(again, 3)
+        self.assertEqual(again.restore(), 2)
+        self.assertEqual(again.restore(), 0, 'once per start')
+        view = again.view()['queued_actions']
+        self.assertEqual([(item['book_id'], item.get('restored', False)) for item in view],
+                         [(self.book[0], True), (self.book[2], True), (self.book[3], False)])
+        restored = []
+        later.merge.restored_press = lambda: mock.MagicMock(__enter__=lambda *_: restored.append(len(later.merge.calls)), __exit__=lambda *_: False)
+        later.merge.answers = {'retry': {'position': 1}}
+        later.scanning = False
+        self.assertTrue(until(lambda: len(later.merge.calls) == 3))
+        self.assertEqual([args[1] for _name, args in later.merge.calls], [self.book[0], self.book[2], self.book[3]], 'checks again, in order')
+        self.assertEqual(restored, [0, 1], 'only the restored ones run as restored presses (they start nothing)')
+        self.assertTrue(until(lambda: self.saved() == []), 'what ran is no longer saved')
+
+    def test_a_saved_queue_another_session_closed_over_is_dropped_with_an_outcome(self):
+        # Senua R-M3's shape: saved here, then a version that keeps no queue ran and quit (its shutdown record is later),
+        # then this version again. The presses from before that are not run.
+        import datetime
+        server, queue = self.server()
+        server.scanning = True
+        self.press(queue, 0); self.press(queue, 1)
+        queue.close()
+        self.shutdown(action_queue._now() + datetime.timedelta(seconds=5))
+        later, again = self.server(started=False)
+        self.assertEqual(again.restore(), 0)
+        self.assertEqual(again.view()['queued_actions'], [])
+        self.assertEqual([(item['book_id'], item['result'], item['code']) for item in again.view()['queue_outcomes']],
+                         [(self.book[0], 'refused', 'restore_stale'), (self.book[1], 'refused', 'restore_stale')])
+        self.assertEqual(self.saved(), [])
+        self.assertEqual(later.merge.calls, [])
+        # Positive control: a crash (no clean close, the last shutdown record from before) keeps them.
+        self.shutdown(action_queue._now() - datetime.timedelta(seconds=60))
+        server, queue = self.server(); server.scanning = True
+        self.press(queue, 2)
+        later, again = self.server(started=False); later.scanning = True
+        self.assertEqual(again.restore(), 1)
+
+    def test_an_action_is_taken_out_of_the_saved_queue_when_it_starts(self):
+        server, queue = self.server()
+        server.scanning = True
+        self.press(queue, 0)
+        server.merge.gate = gate = threading.Event(); self.addCleanup(gate.set)
+        server.scanning = False
+        self.assertTrue(until(lambda: queue.view()['queue_running'] is not None))
+        self.assertTrue(until(lambda: self.saved() == []), 'running: never run twice after a crash')
+        gate.set()
+
+    def test_a_restored_press_starts_no_queue(self):
+        from merge_service import MergeService
+        merge = MergeService.__new__(MergeService)
+        merge._capture_start_generation = mock.Mock(side_effect=RuntimeError('a start began'))
+        with merge.restored_press():
+            self.assertIsNone(merge._resume_later())
+            self.assertEqual(merge.resume(), {'state': 'held', 'reason': 'restored press'})
+        merge._capture_start_generation.assert_not_called()
+        for start in (merge._resume_later, merge.resume):  # positive control: outside it, the real start path runs
+            with self.assertRaisesRegex(RuntimeError, 'a start began'):
+                start()
 
 
 if __name__ == '__main__':

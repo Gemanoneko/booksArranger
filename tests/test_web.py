@@ -217,7 +217,7 @@ class BrowserTests(unittest.TestCase):
             self.assertEqual((state['queue_running'],state['queue_outcomes']),(None,[]))
             self.assertEqual(self.json_call('/api/queue/cancel',{'id':second['id']}),(200,{'cancelled':True}))
             self.assertEqual(self.json_call('/api/queue/cancel',{'id':second['id']}),(409,{'error':'It has already started.','code':'started'}),'gone: too late')
-            self.server.actions.drop()
+            self.assertEqual(self.json_call('/api/queue/cancel',{'id':first['id']}),(200,{'cancelled':True}))  # 0.30.0: Quit no longer empties the queue
         self.assertEqual(self.call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job,'queue':'yes'})[0],400,'an explicit boolean')
         self.assertEqual(self.call('/api/candidate/delete-preview',{'library':'Audiobooks','id':other,'revision':2,'queue':True,'mode':'copy'})[0],200,'ruling 35: Remove this copy queues too')
         # Retry all leaves queued presses out (Judy 1.3); with nothing queued it is asked exactly as before.

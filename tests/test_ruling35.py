@@ -152,8 +152,8 @@ class QueuedPressTests(unittest.TestCase):
             self.queue.enqueue('approve',self.book,'Fixture',{},receipt=(key,expires))
         self.server.scanning=True
         key=str(uuid.uuid4())
-        self.queue.enqueue('approve',self.book,'Fixture',{},receipt=(key,expires))
-        self.queue.drop()
+        queued=self.queue.enqueue('approve',self.book,'Fixture',{},receipt=(key,expires))
+        self.queue.cancel(queued['id'])  # 0.30.0: Quit no longer drops a waiting approval (it is kept); Cancel takes it back
         self.assertEqual(self.queue.reconcile_approval(key,self.book,'approve',expires),{'unknown':True})
         with self.assertRaisesRegex(ValueError,'already reached'):
             self.queue.enqueue('approve',self.book,'Fixture',{},receipt=(key,expires))

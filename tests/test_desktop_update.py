@@ -107,9 +107,9 @@ class RequestTests(unittest.TestCase):
         self.assertIs(value.thread, thread, 'one update, not two')
         value.cancel_update()
 
-    def test_the_confirm_names_the_queued_actions_and_quit_or_the_update_drops_them(self):
-        # 0.22.1 (Judy 1.8 and 2.4; Sergei, Q1): queued Retry and Delete presses are counted for the update's confirm, the
-        # app is not idle while any waits, and Restart to update or Quit drops them without running one.
+    def test_queued_actions_keep_the_app_busy_and_quit_or_the_update_keeps_them_without_running_one(self):
+        # 0.22.1 (Judy 1.8 and 2.4): queued Retry and Delete presses are counted, and the app is not idle while any waits.
+        # 0.30.0 (Sergei, Q4: remember): Restart to update and Quit keep them (saved for the next start) and run none.
         from action_queue import ActionQueue
         for leave in ('update', 'quit'):
             server, _ = engine(scanning=True)
@@ -126,8 +126,8 @@ class RequestTests(unittest.TestCase):
                 value.prepare_update()
             else:
                 value.quit()
-            self.assertEqual(server.actions.count(), 0, leave)
-            self.assertEqual(server.actions.view()['queued_actions'], [], leave)
+            self.assertEqual(server.actions.count(), 2, leave)
+            self.assertEqual([item['book_id'] for item in server.actions.view()['queued_actions']], ['book-1', 'book-2'], leave)
             if leave == 'update':
                 value.cancel_update()
             else:
