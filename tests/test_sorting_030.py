@@ -415,7 +415,11 @@ class SeriesFolderBackfillTests(unittest.TestCase):
 
     def setUp(self):
         import test_series_backfill as base
-        temp = tempfile.TemporaryDirectory(dir=base.AREA)
+        # A short private folder: the book goes one folder deeper (Author/Series/), and the gate's own scratch path is
+        # about 20 characters longer than a checkout's, which took it past the Windows output path limit there.
+        short = Path(__file__).resolve().parents[1] / 'scratch' / 's'
+        short.mkdir(parents=True, exist_ok=True)
+        temp = tempfile.TemporaryDirectory(dir=short, prefix='')
         self.addCleanup(temp.cleanup)
         original = base.Library.__init__.__globals__['propose']
 

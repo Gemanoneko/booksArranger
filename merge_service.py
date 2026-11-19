@@ -1823,8 +1823,14 @@ class MergeService:
 
     def _retained_cleanup_job(self,job_id):
         from storage_relocation_native import retained_job,retained_runtime
-        if not retained_runtime(self.inventory.database):return False
-        if retained_job(self.inventory.database,job_id):return True
+        database=getattr(self.inventory,'database',None)
+        if database is None:return False  # no catalog, no relocation (a stand-in engine)
+        # An unreadable relocation record keeps the copies this pass, and never ends the retention worker (it ran
+        # unguarded inside the sweep: one failed read stopped every later purge until restart).
+        try:
+            if not retained_runtime(database):return False
+            if retained_job(database,job_id):return True
+        except (sqlite3.Error,OSError,ValueError):return True
         if not hasattr(self,'replacements'):return False
         return any(relation and self._retained_relation(relation) for relation in
                    (self.replacements.get(parent=job_id),self.replacements.get(new_job=job_id)))

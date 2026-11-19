@@ -26,7 +26,7 @@ class IntegrationTests(unittest.TestCase):
 
     def queued(self,error,origin='unknown'):
         merge=SimpleNamespace(approve_book=Mock(side_effect=error),candidate_status=lambda identity:{'job_origin':origin})
-        server=SimpleNamespace(merge=merge,actions=SimpleNamespace(blocker=lambda *a,**kw:None))
+        server=SimpleNamespace(merge=merge,actions=SimpleNamespace(blocker=lambda *a,**kw:None,item_blocker=lambda *a,**kw:None))  # 0.30.0: run_queued asks by item
         return BrowserServer.run_queued(server,{'action':'approve','book_id':'book','args':{'revision':1}})
 
     def test_queued_chapter_refusal_keeps_exact_source_predicate(self):

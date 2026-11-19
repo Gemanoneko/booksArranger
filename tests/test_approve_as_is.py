@@ -38,11 +38,13 @@ class ApproveFixture(unittest.TestCase):
         return self.service.reviews.page()['rows']
 
     def wait(self):
-        limit=time.monotonic()+60
+        # 180 s: a real FFmpeg conversion takes about 20 s alone, but the gate runs ten workers at once (0.30.0's entry check
+        # saw a part-set job pass 60 s under that load). A hang still fails here.
+        limit=time.monotonic()+180
         while True:
             status=self.service.state()
             if status['state'] not in ('Running','Pausing') and not status.get('queued') and not status.get('cleanup_active'):return
-            if time.monotonic()>limit:self.fail('Private Approve job exceeded 60 s')
+            if time.monotonic()>limit:self.fail('Private Approve job exceeded 180 s')
             time.sleep(.05)
 
     def start_and_wait(self):
