@@ -288,7 +288,7 @@ class ActionQueue:
     def _head_kind(self):
         if self.running is not None:
             return 'operation'
-        return self.items[0]['blocker'] if self.items else 'operation'
+        return (self.items[0]['blocker'] or 'operation') if self.items else 'operation'  # behind a head that waits for nothing: the head
 
     # ------------------------------------------------------------------ presses
     def enqueue(self, action, book_id, title, args, always=False, receipt=None):
@@ -338,7 +338,9 @@ class ActionQueue:
             if len(self.items) >= LIMIT:
                 raise QueueFull('Too many queued actions. Wait for some to run.')
             item = {'id': str(uuid.uuid4()), 'action': action, 'book_id': book_id, 'title': title, 'args': copy.deepcopy(args),
-                    'queued_at': time.time(), 'blocker': kind or self._head_kind()}
+                    'queued_at': time.time(), 'blocker': kind or (self._head_kind() if self.items or self.running is not None else None)}
+            # QA D1 (0.30.0): nothing blocks it and nothing is ahead (an always-queued Approve or Join): it waits for nothing.
+            # It named the queue's own 'operation', and the answer then named the action itself as what it waited for.
             if receipt is not None:self.approval_receipts[key]=(book_id,action,expires,item['id'])
             self.items.append(item)
             self._start()
@@ -358,7 +360,7 @@ class ActionQueue:
 
     def _answer(self, item):
         if item is self.running:return {'queued':True,'id':item['id'],'running':True}
-        return {'queued': True, 'id': item['id'], 'position': self.items.index(item) + 1, 'blocker': {'kind': item['blocker']}}
+        return {'queued': True, 'id': item['id'], 'position': self.items.index(item) + 1, 'blocker': {'kind': item['blocker']} if item['blocker'] else None}
 
     def _receipt_clock(self, expires):
         now = int(time.time()*1000)
@@ -466,8 +468,8 @@ class ActionQueue:
         """For /api/state: the waiting actions in order, the one running, and the outcomes not yet acknowledged."""
         with self.lock:
             self._prune()
-            queued = [self._shown(item) | {'position': index + 1, 'blocker': {'kind': item['blocker']}} for index, item in enumerate(self.items)]
-            running = None if self.running is None else self._shown(self.running)
+            queued = [self._shown(item) | {'position': index + 1, 'blocker': {'kind': item['blocker']} if item['blocker'] else None} for index, item in enumerate(self.items)]
+            running = None if self.running is None else self._shown(self.running) | self._progress()
             outcomes = copy.deepcopy(self.outcomes)
         return {'queued_actions': queued, 'queue_running': running, 'queue_outcomes': outcomes}
 
@@ -683,8 +685,24 @@ class ActionQueue:
             server.merge_admissions -= 1
             server.control_condition.notify_all()
 
+    def _progress(self):
+        """0.30.0 (Futaba's QA A): how far the running press has got, as its worker thread reported it (press_progress):
+        {'done', 'total', 'unit'}, or nothing."""
+        import press_progress
+        found = press_progress.read(self.__dict__.get('_runner_ident'))
+        return {'done': found[0], 'total': found[1], 'unit': found[2]} if found else {}
+
     def _run(self, item):
         """The outcome for the page, or None when a blocker refused it (it is queued again at the front)."""
+        import press_progress
+        self._runner_ident = threading.get_ident()
+        press_progress.clear()
+        try:
+            return self._run_counted(item)
+        finally:
+            press_progress.clear()
+
+    def _run_counted(self, item):
         merge = self.server.merge
         # 0.30.0: an action restored from before a restart does its own work only; the conversion queue and the cleanup
         # backlog start after a restart only by the restart intent's rules (Senua R-M1..R-M3, S-m8).

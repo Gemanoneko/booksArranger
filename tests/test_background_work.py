@@ -195,5 +195,60 @@ class WorkTests(unittest.TestCase):
         self.assertEqual((work['waiting'][0]['count'], work['waiting'][0]['at']), (3, 1795000000000))
 
 
+class PressCountTests(unittest.TestCase):
+    """0.30.0 (Futaba's QA A): a running press that reports its count (press_progress) has an amount on its row."""
+
+    def test_the_running_press_count_reaches_its_row(self):
+        import press_progress, threading
+        from action_queue import ActionQueue
+        queue = ActionQueue.__new__(ActionQueue)
+        queue._runner_ident = threading.get_ident()
+        self.assertEqual(queue._progress(), {}, 'nothing reported: no amount')
+        press_progress.report(3, 300)
+        try:
+            self.assertEqual(queue._progress(), {'done': 3, 'total': 300, 'unit': 'files'})
+        finally:
+            press_progress.clear()
+        self.assertEqual(queue._progress(), {}, 'cleared when the press ends')
+        database = Path(tempfile.mkdtemp(dir=AREA)) / 'catalog.sqlite3'
+        with contextlib.closing(sqlite3.connect(database)) as db, db:
+            db.execute('CREATE TABLE audio_jobs(job_id TEXT PRIMARY KEY,manifest TEXT)')
+            db.execute('CREATE TABLE book_groups(id TEXT PRIMARY KEY,evidence TEXT)')
+        server = SimpleNamespace(merge=Engine(database), active_library='Audiobooks')
+        running = {'id': 'q1', 'action': 'approve', 'book_id': 'b1', 'title': 'Дюна', 'done': 3, 'total': 300, 'unit': 'files'}
+        work = view(server, jobs_state(), {'state': 'Idle'}, {'queued_actions': [], 'queue_running': running}, False, None, None, None, 1000)
+        row = next(row for row in work['rows'] if row['id'] == 'action:q1')
+        self.assertEqual((row['done'], row['total'], row['unit']), (3, 300, 'files'))
+
+
+class SnapshotFreshnessTests(unittest.TestCase):
+    """0.30.0 (Futaba's QA A; Sergei's answer 2, the cue "only when behind"): counts a quiet app reuses are confirmed
+    current at every poll, so their age is 0; counts a computation the catalog has moved past keep their real age."""
+
+    def service(self):
+        import merge_service
+        s = merge_service.MergeService.__new__(merge_service.MergeService)
+        s.token = 't1'
+        s._quiet_token = lambda create=False: s.token
+        s.quiet_max_age = lambda: 300.0
+        s.state = lambda: {'n': 1}
+        return s
+
+    def test_an_idle_app_reads_current_and_a_slow_refresh_shows_its_age(self):
+        s = self.service()
+        s.status_snapshot(max_age=0.0)
+        token, kept_at, value, began = s._quiet_state
+        s._quiet_state = (token, kept_at - 45, value, began - 45)  # computed 45 s ago; nothing changed since
+        s.status_snapshot(max_age=0.0)
+        self.assertLess(s.snapshot_info()['snapshot_age_ms'], 1000, 'quiet: the counts are current, no cue')
+        # A commit since (a new token) and the shared computation still answering with the old one: its real age shows.
+        s.token = 't2'
+        s._status_shared = SimpleNamespace(get=lambda compute, max_age: ('t1', {'n': 1}, time.monotonic() - 45), _flight=object())
+        s.status_snapshot(max_age=0.0)
+        info = s.snapshot_info()
+        self.assertGreaterEqual(info['snapshot_age_ms'], 44000, 'behind: the cue shows')
+        self.assertTrue(info['refreshing'])
+
+
 if __name__ == '__main__':
     unittest.main()

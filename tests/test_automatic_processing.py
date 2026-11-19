@@ -299,6 +299,12 @@ class AutoTests(unittest.TestCase):
             wakes.append(state['next_retry_at']);now[0]+=delay;return False
         with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto,stop_when_held=False)
         self.assertEqual(wakes,[100005,100020]);self.assertEqual(attempts,{'A Book':2,'B Book':2});self.assertEqual(state['state'],'Completed');merge.approve_automatic.assert_not_called()  # ruling 5: held until changed
+    def test_the_book_is_named_from_the_moment_research_takes_it(self):
+        # 0.30.0 (Futaba's QA A): the first research row read "Researching books · 1 of 27 books · Working" with no book.
+        seen=[];auto,merge,inv=self.fake_merge()
+        merge.candidate_status=lambda id:(seen.append(dict(auto.current or {})),None)[1]
+        auto.start();self.wait_auto(auto)
+        self.assertTrue(seen,'positive control: research took a book');self.assertTrue(seen[0].get('title'),seen[0])
     def test_stop_during_armed_wait_preserves_pending_and_restart_stays_paused(self):
         auto,merge,inv=self.fake_merge(lambda *_:{'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':time.time()+3600}})
         auto.start();deadline=time.monotonic()+3

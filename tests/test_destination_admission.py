@@ -191,6 +191,17 @@ class QueuedDestinationNative(unittest.TestCase):
     def test_queued_old_root_explicit_retry_actual_ready(self):self.check_retry(self.base/'Sorted Queue')
     def test_queued_same_root_old_layout_explicit_retry_actual_ready(self):self.check_retry(None)
 
+    def test_the_manifest_reports_each_source_it_checks_0_30_0(self):
+        # 0.30.0 (Futaba's QA A): an Approve of a 300-file book showed only a sliding "Saving the approval" for minutes;
+        # the source check reports its count to the running press (press_progress).
+        from unittest import mock
+        import press_progress
+        row=self.ready();calls=[]
+        with mock.patch.object(press_progress,'report',side_effect=lambda done,total,unit='files':calls.append((done,total))):
+            self.service.reviews.build_manifest('Audiobooks',row['id'],row['revision'])
+        self.assertTrue(calls,'the check reported its count');total=calls[0][1]
+        self.assertEqual(calls,[(n,total) for n in range(total)])
+
 import test_replacement_jobs as replacement_fixtures
 class QueuedReplacementRoute(unittest.TestCase):
     setUp=replacement_fixtures.ReplacementTests.setUp;tearDown=replacement_fixtures.ReplacementTests.tearDown;record=replacement_fixtures.ReplacementTests.record;insert_job=replacement_fixtures.ReplacementTests.insert_job;admit=replacement_fixtures.ReplacementTests.admit

@@ -20,7 +20,7 @@ SAME_TITLE_VERSION = 'same-title-v4'  # v2: Senua's 0.22.0 review G1, G2; v3: N4
 SAME_ALBUM_VERSION = 'same-album-v4'  # v2: Senua's 0.22.0 review G3; v3: N6 (the works check for a plain album group too); v4: N11 (chapter-named title tags are no works)
 # Ruling 19a (Sergei 2026-10-24): explicitly marked .m4b parts with their own chapters are joined, chapters kept; the
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
-M4B_PARTS_VERSION = 'm4b-parts-v3'  # v3: 0.30.0 item 7, albums that differ only by a trailing part number are one set
+M4B_PARTS_VERSION = 'm4b-parts-v4'  # v3: 0.30.0 item 7, albums that differ only by a trailing part number are one set; v4: QA D2 (repaired tag text) and C2 (the album part numbers order such a set)
 # 0.22.1, item 9: a clean file-name sequence orders a book (track_order); a single file has no order conflict.
 # Ruling 68 (0.24.0): one source folder is one book (folder_unit); mis-encoded tags are read repaired (tag_text).
 TAG_REPAIR_VERSION = 'tag-repair-v1'
@@ -400,12 +400,27 @@ def _without_part_number(album):
     return match[1].strip() if match else album
 
 
-def _album_without_part_number(item):
-    """A copy of the member whose album tag has its trailing part number removed (only for the split rules' check)."""
-    tags = dict(item['metadata'].get('tags', {}))
-    for name in list(tags):
-        if name.casefold() == 'album':
-            tags[name] = _without_part_number(' '.join(str(tags[name]).split()))
+def album_part_number(album):
+    """0.30.0 QA C2: the trailing part number of an album ("... Darwin's Blade 2" -> 2), else None (_without_part_number's
+    rule: one or two digits set apart from the name)."""
+    text = ' '.join(str(album or '').split())
+    match = _TRAILING_PART_NUMBER.match(text)
+    digits = re.search(r'(\d{1,2})\s*$', text) if match else None
+    return int(digits[1]) if digits else None
+
+
+# 0.30.0 QA C2: the order basis of a part set whose album tags differ only by their part numbers (item 7) and carry no
+# track numbers: those numbers are the order (source_identity.source_gate reads it, one recording in that order).
+ALBUM_PART_BASIS = 'part numbers in the album tags'
+
+
+def _repaired_member(item, strip_album=False):
+    """0.30.0 QA D2: a copy of the member with its tags as the repaired text (tag_text: cp1251 stored as Latin-1 reads as it
+    was written), keys casefolded, for the split rules' check, which compares tags exactly; strip_album: the album without
+    its trailing part number (item 7: the only way the albums of such a set differ)."""
+    tags = dict(tag_text.tags(item['metadata']))
+    if strip_album and isinstance(tags.get('album'), str):
+        tags['album'] = _without_part_number(' '.join(tags['album'].split()))
     return dict(item, metadata=dict(item['metadata'], tags=tags))
 
 
@@ -429,7 +444,8 @@ def _part_sets(members,scopes,assigned,separate,taken):
     clusters={}
     for path,item in members.items():
         if path in assigned or path in separate or Path(path).suffix.lower()!='.m4b' or counts[scopes[path]]!=1:continue
-        tags={k.casefold():' '.join(str(v).split()) for k,v in item['metadata'].get('tags',{}).items()}
+        # QA D2: the repaired tag text; raw, one part's album or artist mis-encoded (cp1251 stored as Latin-1) split one book 2+3.
+        tags={k:' '.join(str(v).split()) for k,v in tag_text.tags(item['metadata']).items()}
         album=unicodedata.normalize('NFC',tags.get('album','')).casefold()
         if not album:continue
         artist=unicodedata.normalize('NFC',tags.get('artist','')).casefold()
@@ -451,17 +467,21 @@ def _part_sets(members,scopes,assigned,separate,taken):
         if len(items)>PART_SET_MAX:continue
         stems=[unicodedata.normalize('NFC',Path(m['path']).stem).casefold() for m in items]
         if len(set(stems))!=len(stems):continue  # the same part twice (two copies under one name)
-        # Item 7: the split rules compare the album without the part number, which is the only way the albums differ.
-        checked=[_album_without_part_number(m) for m in items] if (unit,album,artist) in merged else items
+        # Item 7: the split rules compare the album without the part number, which is the only way the albums differ; D2:
+        # they compare the repaired tag text.
+        checked=[_repaired_member(m,(unit,album,artist) in merged) for m in items]
         reasons=split_books.check(sorted(checked,key=lambda m:m['path']))['reasons']
         if any(r.startswith(HARD_REFUSALS) for r in reasons):continue
         def number(value):
             match=re.match(r'^\s*(\d{1,4})',str(value or ''))
             return int(match[1]) if match else None
-        tags=[{k.casefold():v for k,v in m['metadata'].get('tags',{}).items()} for m in items]
+        tags=[tag_text.tags(m['metadata']) for m in items]
         tracks=[(number(t.get('disc') or t.get('discnumber')) or 1,number(t.get('track') or t.get('tracknumber'))) for t in tags]
+        parts=[album_part_number(t.get('album')) for t in tags] if (unit,album,artist) in merged else []
         if all(t is not None for _,t in tracks) and len(set(tracks))==len(tracks):
             positions,basis=tracks,'embedded track numbers'
+        elif parts and None not in parts and len(set(parts))==len(parts):
+            positions,basis=[(1,n) for n in parts],ALBUM_PART_BASIS  # C2: the album part numbers ("… Blade 1", "… Blade 2")
         else:
             named=[re.findall(r'\d{1,4}',Path(m['path']).stem) for m in items]
             positions=[(1,int(n[-1])) if n else None for n in named];basis='numbers in the file names'

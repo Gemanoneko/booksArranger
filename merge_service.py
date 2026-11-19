@@ -653,13 +653,18 @@ class MergeService:
         with _QUIET_LOCK:
             kept=self.__dict__.get('_quiet_state')
             if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():
-                self._served_at=kept[3];return copy.deepcopy(kept[2])
+                # 0.30.0 (Futaba's QA A): the same quiet token means no catalog commit and nothing running since the counts
+                # were computed, so they are confirmed current now; their age is not the computation's (the cue read
+                # "behind" most of the time on an idle app).
+                self._served_at=time.monotonic();return copy.deepcopy(kept[2])
         with _QUIET_LOCK:
             if self.__dict__.get('_closing'):raise StatusUnavailable('Books Arranger is closing')
             shared=self.__dict__.setdefault('_status_shared',SharedSnapshot())
         # 0.30.0: each answer carries when its computation began (snapshot_info), so the page can say how old it is.
         started,value,began=shared.get(lambda:(lambda began:(self._quiet_token(),self.state(),began))(time.monotonic()),max_age)
-        self._served_at=began
+        # Confirmed current when the computation's quiet token is still this poll's (no commit, nothing running between);
+        # otherwise the counts are as old as their computation (a slow or busy refresh shows its real age).
+        self._served_at=time.monotonic() if token is not None and started==token else began
         if token is not None and started==token:
             with _QUIET_LOCK:self._quiet_state=(token,time.monotonic(),copy.deepcopy(value),began)
         return value
