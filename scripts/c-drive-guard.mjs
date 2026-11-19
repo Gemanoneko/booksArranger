@@ -6,6 +6,14 @@
 // Cheap by design: one directory listing per place, twice. It sees what is still there at the end, not an entry made and
 // removed during the run. A place that cannot be listed (C:\Windows\Temp is closed to a normal account) is reported as not
 // checked, never as passed.
+// Inside folders that were already there (Senua 0.30.0 m5): every folder or file in those places whose NAME only Books
+// Arranger uses (OWN below: Books Arranger, books-*, BA-*, BASF-*, codex-books-*) is walked too, to a bounded depth and
+// entry count, and a new entry or a file whose size or time changed fails the run. That covers the app's own C: folders
+// (%APPDATA%\Books Arranger, %LOCALAPPDATA%\books-arranger-updater, the installer's records in %LOCALAPPDATA%\Programs) and
+// any folder a run of ours left. Other programs' folders (npm-cache, electron, Microsoft, ...) are still read only by name
+// at the top: other programs write inside them all the time (another studio's npm wrote two logs into npm-cache\_logs within
+// 15 minutes on 2026-11-19), so watching inside them would fail runs on their work. A write of ours inside one of them,
+// or a change to an existing top-level file there, is not seen; nothing the check starts runs npm, electron-builder or pip.
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 
 // What our runs may still write on C:, each because it cannot live on I:. Exact paths; nothing else is allowed.
@@ -22,9 +30,14 @@ export const OUR_TEMP_PREFIXES=Object.freeze(['tmp','n-','sr','ds','do','bm','ca
  'zone-','installation-paths-','lock-pin-','portable-paths-','qa-entry-','c-drive-guard-']);
 const escape=text=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const SHAPED=new RegExp('^(?:'+OUR_TEMP_PREFIXES.map(escape).join('|')+')(?:[a-z0-9_]{8}|[A-Za-z0-9]{6})','u');
-// Names only our runs use, whatever follows: books-*, ba-*/BA-*, BASF-*, codex-books-*, SQLite's etilqs_* temp files.
-const MARKED=/^(?:books|ba[-_]|basf|codex-books|etilqs_|\.books-arranger)/i;
-export function isOurTempName(name){return MARKED.test(name)||SHAPED.test(name);}
+// Names only Books Arranger uses, whatever follows: Books Arranger, books-*, ba-*/BA-*, BASF-*, codex-books-*. (SQLite's
+// etilqs_* temporary files are not here: any program's SQLite makes them, and one from another program sat in the real
+// Temp on 2026-11-19.)
+const OWN=/^(?:books|ba[-_]|basf|codex-books|\.books-arranger)/i;
+export function isOwnName(name){return OWN.test(name);}
+export function isOurTempName(name){return OWN.test(name)||SHAPED.test(name);}
+// How far the guard reads inside one folder of ours: the app's own C: folders hold about 200 entries.
+export const INSIDE_LIMITS=Object.freeze({entries:5000,depth:8});
 
 const key=p=>path.win32.normalize(p).replace(/[\\]+$/,'').toLowerCase();
 
@@ -56,6 +69,8 @@ export function cDrivePlaces({home=os.userInfo().homedir,systemDrive='C:',startT
   {dir:path.win32.join(drive+'\\','Program Files'),mode:'any',label:'C:\\Program Files'},
   {dir:path.win32.join(drive+'\\','Program Files (x86)'),mode:'any',label:'C:\\Program Files (x86)'},
   {dir:path.win32.join(drive+'\\','Users'),mode:'any',label:'C:\\Users'},
+  // The installer's records (books-arranger-installation.json and the others) and its old per-user install folder.
+  {dir:path.win32.join(local,'Programs'),mode:'ours',label:'%LOCALAPPDATA%\\Programs'},
  ];
  // The Temp folder this check was started with, when it is another folder on C: (its children get the check's own).
  for(const temp of startTemp)if(temp&&path.win32.isAbsolute(temp)&&key(temp).startsWith(drive.toLowerCase())&&!places.some(p=>key(p.dir)===key(temp)))
@@ -68,24 +83,67 @@ function list(dir){
  catch(error){return error.code==='ENOENT'?{names:new Set(),absent:true,why:null}:{names:null,absent:false,why:error.code||error.message};}
 }
 
-export function startCDriveGuard({places=cDrivePlaces(),exceptions=C_DRIVE_EXCEPTIONS}={}){
- const before=places.map(place=>({place,...list(place.dir)}));
+// A file's size and time, 'dir' for a folder (its entries are compared instead), 'link' for a link (never followed).
+function signature(file){
+ try{const s=fs.lstatSync(file);return s.isSymbolicLink()?'link':s.isDirectory()?'dir':s.size+':'+s.mtimeMs;}
+ catch(error){return error.code==='ENOENT'?null:'unreadable';}
+}
+// One folder or file of ours: every entry under it, at most limits.entries. A folder that cannot be read, or one at
+// limits.depth, is closed: what is under it is not compared. Over the entry limit the folder is not compared at all.
+function walk(root,limits){
+ const items=new Map(),top=signature(root);let over=null,count=0;
+ if(top===null)return null;
+ items.set('',top);
+ const stack=top==='dir'?[['',0]]:[];
+ while(stack.length&&!over){
+  const [relative,depth]=stack.pop();let names;
+  try{names=fs.readdirSync(path.join(root,relative)).sort();}catch{items.set(relative,'unreadable');continue;}
+  for(const name of names){
+   if(++count>limits.entries){over='over '+limits.entries+' entries';break;}
+   const inner=relative?path.join(relative,name):name,sig=signature(path.join(root,inner));
+   if(sig==='dir'&&depth+1>=limits.depth)items.set(inner,'deep');
+   else{items.set(inner,sig);if(sig==='dir')stack.push([inner,depth+1]);}
+  }
+ }
+ return {items,over};
+}
+const isFile=sig=>typeof sig==='string'&&!['dir','link','unreadable','deep'].includes(sig);
+const under=(relative,parents)=>parents.some(p=>p===''||relative.startsWith(p+path.sep));
+
+export function startCDriveGuard({places=cDrivePlaces(),exceptions=C_DRIVE_EXCEPTIONS,limits=INSIDE_LIMITS}={}){
+ const inside=listing=>listing.names?new Map([...listing.names].filter(isOwnName).map(name=>[name,walk(path.join(listing.dir,name),limits)])):new Map();
+ const before=places.map(place=>{const listing={place,dir:place.dir,...list(place.dir)};return {...listing,inside:inside(listing)};});
  return {places,finish(){
   const violations=[],allowed=[],notChecked=[],allow=new Map(exceptions.map(e=>[key(e.path),e]));
-  const report=(p,place)=>{const exception=allow.get(key(p));if(exception)allowed.push({path:p,reason:exception.reason});else violations.push({path:p,place});};
+  const report=(p,place,kind)=>{const exception=allow.get(key(p));if(exception)allowed.push({path:p,reason:exception.reason});else violations.push({path:p,place,kind});};
+  let read=0;
   for(const start of before){
    const {place}=start,end=list(place.dir);
    if(start.names===null||end.names===null){notChecked.push({dir:place.dir,why:start.why||end.why});continue;}
    // A place that was not there at the start and is now: the place itself is the new entry.
-   if(start.absent&&!end.absent){report(place.dir,place);continue;}
-   for(const name of end.names)if(!start.names.has(name)&&(place.mode==='any'||isOurTempName(name)))report(path.join(place.dir,name),place);
+   if(start.absent&&!end.absent){report(place.dir,place,'new');continue;}
+   for(const name of end.names)if(!start.names.has(name)&&(place.mode==='any'||isOurTempName(name)))report(path.join(place.dir,name),place,'new');
+   // Inside each folder (or file) of ours that was there at the start and still is.
+   for(const [name,first] of start.inside){
+    const root=path.join(place.dir,name),last=end.names.has(name)?walk(root,limits):null;
+    if(!first||!last)continue;  // gone: removing is not a write
+    if(first.over||last.over){notChecked.push({dir:root,why:'partly checked: '+(first.over||last.over)});continue;}
+    read+=last.items.size;
+    const closed=[...first.items].filter(([,sig])=>sig==='unreadable'||sig==='deep').map(([relative])=>relative);
+    for(const [relative,sig] of last.items){
+     if(under(relative,closed))continue;
+     const was=first.items.get(relative),file=relative?path.join(root,relative):root;
+     if(was===undefined)report(file,place,'new');
+     else if(isFile(sig)&&isFile(was)&&sig!==was)report(file,place,'changed');
+    }
+   }
   }
   const lines=[];
-  for(const v of violations)lines.push('C: guard: NEW on C: during this run: '+v.path+' (in '+v.place.label+')');
+  for(const v of violations)lines.push('C: guard: '+(v.kind==='changed'?'CHANGED':'NEW')+' on C: during this run: '+v.path+' (in '+v.place.label+')');
   for(const a of allowed)lines.push('C: guard: allowed C: exception present: '+a.path+' ('+a.reason+')');
   for(const n of notChecked)lines.push('C: guard: not checked: '+n.dir+' ('+n.why+')');
-  if(!violations.length)lines.push('C: guard: nothing new on C: in '+(places.length-notChecked.length)+' checked places');
-  const error=violations.length?'Nothing a check runs may write to C: (Sergei, 2026-11-19). New on C: during this run: '+violations.map(v=>v.path).join(', ')+
+  if(!violations.length)lines.push('C: guard: nothing new on C: in '+(places.length-notChecked.filter(n=>places.some(p=>p.dir===n.dir)).length)+' checked places and '+read+' entries inside folders of ours');
+  const error=violations.length?'Nothing a check runs may write to C: (Sergei, 2026-11-19). New or changed on C: during this run: '+violations.map(v=>v.path).join(', ')+
    '. If one is not from this run (another program), check its time and run again.':null;
   return {violations,allowed,notChecked,lines,error};
  }};

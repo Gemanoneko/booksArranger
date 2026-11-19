@@ -53,6 +53,35 @@ const root=fs.mkdtempSync(path.join(scratch,'c-drive-guard-'));
   assert.deepEqual(result.allowed.map(a=>a.path),[allowed]);
   fs.rmdirSync(allowed);fs.rmdirSync(allowed+'-sibling');
 
+  // 4b. Senua 0.30.0 m5: a write INSIDE a folder that was already there. Folders and files whose names only Books Arranger
+  // uses (Books Arranger, books-*, BA-*, BASF-*, codex-books-*) are walked at the start and the end: a new entry at any depth,
+  // or a file whose size or time changed, fails the run and is named. Another program's folder is still read only by its
+  // name at the top, so its own work inside it never fails a run (and a write of ours there is not seen).
+  const own=path.join(anyDir,'Books Arranger'),record=path.join(anyDir,'books-arranger-installation.json'),otherApp=path.join(anyDir,'SomeOtherApp');
+  fs.mkdirSync(path.join(own,'Local Storage','leveldb'),{recursive:true});fs.writeFileSync(path.join(own,'desktop-settings.json'),'{}');
+  fs.writeFileSync(record,'{"a":1}');fs.mkdirSync(otherApp);
+  run=guard.startCDriveGuard({places,exceptions:[]});
+  fs.writeFileSync(path.join(own,'Local Storage','leveldb','leak.log'),'x');
+  fs.writeFileSync(path.join(own,'desktop-settings.json'),'{"dataDir":"C:\\\\x"}');
+  fs.writeFileSync(record,'{"a":22}');
+  fs.writeFileSync(path.join(otherApp,'its-own-log.txt'),'x');
+  result=run.finish();
+  assert.deepEqual(result.violations.map(v=>v.path).sort(),[path.join(own,'Local Storage','leveldb','leak.log'),path.join(own,'desktop-settings.json'),record].sort());
+  assert.ok(result.lines.some(l=>l.includes('NEW on C: during this run: '+path.join(own,'Local Storage','leveldb','leak.log'))),result.lines.join('\n'));
+  assert.ok(result.lines.some(l=>l.includes('CHANGED on C: during this run: '+path.join(own,'desktop-settings.json'))),result.lines.join('\n'));
+  assert.ok(result.error.includes(record));
+  // The write removed (the changed files stay as they now are): the next run passes.
+  fs.rmSync(path.join(own,'Local Storage','leveldb','leak.log'));
+  run=guard.startCDriveGuard({places,exceptions:[]});
+  assert.deepEqual(run.finish().violations,[]);
+  // Bounded: a folder of ours over the entry limit is reported as partly checked, never failed on what was not read.
+  run=guard.startCDriveGuard({places,exceptions:[],limits:{entries:2,depth:8}});
+  fs.writeFileSync(path.join(own,'late.txt'),'x');
+  result=run.finish();
+  assert.deepEqual(result.violations,[]);
+  assert.ok(result.notChecked.some(n=>n.dir===own&&/over 2 entries/.test(n.why)),JSON.stringify(result.notChecked));
+  fs.rmSync(path.join(own,'late.txt'));fs.rmSync(otherApp,{recursive:true});fs.rmSync(own,{recursive:true});fs.rmSync(record);
+
   // 5. The committed exception list: each entry is absolute, on C:, has a reason, and none is a whole folder the guard watches.
   const defaults=guard.cDrivePlaces();
   for(const e of guard.C_DRIVE_EXCEPTIONS){
@@ -65,6 +94,8 @@ const root=fs.mkdtempSync(path.join(scratch,'c-drive-guard-'));
   const home=require('node:os').userInfo().homedir;
   assert.ok(defaults.some(p=>p.dir.toLowerCase()==='c:\\'&&p.mode==='any'));
   assert.ok(defaults.some(p=>p.dir.toLowerCase()===path.win32.join(home,'AppData','Local','Temp').toLowerCase()&&p.mode==='ours'));
+  // Where the installer keeps its records (books-arranger-installation.json and the others beside it): our names there.
+  assert.ok(defaults.some(p=>p.dir.toLowerCase()===path.win32.join(home,'AppData','Local','Programs').toLowerCase()&&p.mode==='ours'));
   for(const p of defaults)assert.ok(/^c:\\/i.test(p.dir)&&p.label,'place '+JSON.stringify(p));
 
   // 7. Every temporary name prefix our tests and engine use is recognised in Temp, as Python (8 characters) and Node
@@ -82,8 +113,10 @@ const root=fs.mkdtempSync(path.join(scratch,'c-drive-guard-'));
    assert.ok(guard.isOurTempName(prefix+'k3_9xq0a'),'Python-made name with prefix '+JSON.stringify(prefix));
    assert.ok(guard.isOurTempName(prefix+'AbC123'),'Node-made name with prefix '+JSON.stringify(prefix));
   }
-  for(const name of ['tmpk3_9xq0a','etilqs_4f2a9c','codex-books-2026-10-20','BA-Portable-0287-x','BASF-c057a522e3','books-main-OitQOh'])assert.ok(guard.isOurTempName(name),name);
-  for(const name of ['tmp1A2B.tmp','codex-clipboard-0e8f.png','claude','node-compile-cache','python-languageserver-cancellation','SomeOtherApp-2026.log'])assert.ok(!guard.isOurTempName(name),name);
+  for(const name of ['tmpk3_9xq0a','codex-books-2026-10-20','BA-Portable-0287-x','BASF-c057a522e3','books-main-OitQOh'])assert.ok(guard.isOurTempName(name),name);
+  // etilqs_* is SQLite's temporary file for ANY program (one from another program sat in the real Temp on 2026-11-19), so
+  // it is not ours: counting it would fail a run on another program's work.
+  for(const name of ['tmp1A2B.tmp','codex-clipboard-0e8f.png','claude','node-compile-cache','python-languageserver-cancellation','SomeOtherApp-2026.log','etilqs_4f2a9c'])assert.ok(!guard.isOurTempName(name),name);
 
   // 8. The desktop check wires it: its side chain gets a private TEMP, and the guard spans the whole run.
   const check=fs.readFileSync(path.join(repo,'scripts','check-desktop.mjs'),'utf8');
