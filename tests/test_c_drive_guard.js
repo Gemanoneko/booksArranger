@@ -34,10 +34,15 @@ const root=fs.mkdtempSync(path.join(scratch,'c-drive-guard-'));
   fs.rmdirSync(path.join(anyDir,'BA-left-from-before'));
   result=run.finish();
   const named=result.violations.map(v=>v.path).sort();
-  assert.deepEqual(named,[path.join(anyDir,'BASF-c057a522e3'),path.join(missing),path.join(temp,'books-main-AbC123'),path.join(temp,'tmpk3_9xq0a')].sort());
+  assert.deepEqual(named,[path.join(anyDir,'BASF-c057a522e3'),path.join(missing),path.join(temp,'books-main-AbC123')].sort());
   assert.ok(result.error,'the guard fails the run');
   for(const p of named)assert.ok(result.error.includes(p),'the failure names '+p);
   assert.ok(result.lines.some(line=>line.includes('the C: drive root')));
+  // Python's default temporary name (tmp + 8): any program's Python makes these (two empty ones from another program
+  // appeared in the real Temp within 6 minutes on 2026-11-19), so it is named in a note but never fails the run.
+  assert.deepEqual(result.notes.map(n=>n.path),[path.join(temp,'tmpk3_9xq0a')]);
+  assert.ok(result.lines.some(line=>line.includes('note: new in the real user Temp folder, not counted: '+path.join(temp,'tmpk3_9xq0a'))),result.lines.join('\n'));
+  assert.ok(!result.error.includes('tmpk3_9xq0a'));
 
   // 3. Removing the write makes the next run pass (the same guard, nothing else changed).
   fs.rmSync(path.join(anyDir,'BASF-c057a522e3'),{recursive:true});fs.rmSync(path.join(temp,'books-main-AbC123'),{recursive:true});fs.rmSync(path.join(temp,'tmpk3_9xq0a'));fs.rmSync(missing,{recursive:true});
@@ -113,7 +118,8 @@ const root=fs.mkdtempSync(path.join(scratch,'c-drive-guard-'));
    assert.ok(guard.isOurTempName(prefix+'k3_9xq0a'),'Python-made name with prefix '+JSON.stringify(prefix));
    assert.ok(guard.isOurTempName(prefix+'AbC123'),'Node-made name with prefix '+JSON.stringify(prefix));
   }
-  for(const name of ['tmpk3_9xq0a','codex-books-2026-10-20','BA-Portable-0287-x','BASF-c057a522e3','books-main-OitQOh'])assert.ok(guard.isOurTempName(name),name);
+  for(const name of ['codex-books-2026-10-20','BA-Portable-0287-x','BASF-c057a522e3','books-main-OitQOh'])assert.ok(guard.isOurTempName(name),name);
+  assert.ok(!guard.isOurTempName('tmpk3_9xq0a')&&guard.isPythonDefaultTempName('tmpk3_9xq0a')&&!guard.isPythonDefaultTempName('tmp1A2B.tmp'));
   // etilqs_* is SQLite's temporary file for ANY program (one from another program sat in the real Temp on 2026-11-19), so
   // it is not ours: counting it would fail a run on another program's work.
   for(const name of ['tmp1A2B.tmp','codex-clipboard-0e8f.png','claude','node-compile-cache','python-languageserver-cancellation','SomeOtherApp-2026.log','etilqs_4f2a9c'])assert.ok(!guard.isOurTempName(name),name);

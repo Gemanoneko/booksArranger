@@ -23,7 +23,9 @@ export const C_DRIVE_EXCEPTIONS=Object.freeze([]);
 
 // Temporary names our tests and engine make (Python tempfile: prefix + 8 of [a-z0-9_]; Node mkdtemp: prefix + 6 of
 // [A-Za-z0-9]). tests/test_c_drive_guard.js scans the sources for every prefix and fails if one is missing here.
-export const OUR_TEMP_PREFIXES=Object.freeze(['tmp','n-','sr','ds','do','bm','case-','.books-arranger-','audio-read-',
+// Python's default name (tmp + 8) is not here: any program's Python makes it (two empty ones from another program appeared
+// in the real Temp within 6 minutes on 2026-11-19), so a new one is named in a note and never fails the run.
+export const OUR_TEMP_PREFIXES=Object.freeze(['n-','sr','ds','do','bm','case-','.books-arranger-','audio-read-',
  'cleanup-','controls-','current-package-','durable-decisions-','git-alias-','installer-snapshot-','move-integration-source-',
  'move-integration-target-','mp3-staging-','multisource-','nas-dispose-','nas-removal-','owned-','package-retention-','progress-',
  'producer-core-','publication-native-','relocation-source-','relocation-target-','retention-','selected-temp-','uninstall-launch-',
@@ -36,6 +38,7 @@ const SHAPED=new RegExp('^(?:'+OUR_TEMP_PREFIXES.map(escape).join('|')+')(?:[a-z
 const OWN=/^(?:books|ba[-_]|basf|codex-books|\.books-arranger)/i;
 export function isOwnName(name){return OWN.test(name);}
 export function isOurTempName(name){return OWN.test(name)||SHAPED.test(name);}
+export function isPythonDefaultTempName(name){return /^tmp[a-z0-9_]{8}(?:$|\.)/.test(name);}
 // How far the guard reads inside one folder of ours: the app's own C: folders hold about 200 entries.
 export const INSIDE_LIMITS=Object.freeze({entries:5000,depth:8});
 
@@ -114,7 +117,7 @@ export function startCDriveGuard({places=cDrivePlaces(),exceptions=C_DRIVE_EXCEP
  const inside=listing=>listing.names?new Map([...listing.names].filter(isOwnName).map(name=>[name,walk(path.join(listing.dir,name),limits)])):new Map();
  const before=places.map(place=>{const listing={place,dir:place.dir,...list(place.dir)};return {...listing,inside:inside(listing)};});
  return {places,finish(){
-  const violations=[],allowed=[],notChecked=[],allow=new Map(exceptions.map(e=>[key(e.path),e]));
+  const violations=[],allowed=[],notChecked=[],notes=[],allow=new Map(exceptions.map(e=>[key(e.path),e]));
   const report=(p,place,kind)=>{const exception=allow.get(key(p));if(exception)allowed.push({path:p,reason:exception.reason});else violations.push({path:p,place,kind});};
   let read=0;
   for(const start of before){
@@ -122,7 +125,11 @@ export function startCDriveGuard({places=cDrivePlaces(),exceptions=C_DRIVE_EXCEP
    if(start.names===null||end.names===null){notChecked.push({dir:place.dir,why:start.why||end.why});continue;}
    // A place that was not there at the start and is now: the place itself is the new entry.
    if(start.absent&&!end.absent){report(place.dir,place,'new');continue;}
-   for(const name of end.names)if(!start.names.has(name)&&(place.mode==='any'||isOurTempName(name)))report(path.join(place.dir,name),place,'new');
+   for(const name of end.names){
+    if(start.names.has(name))continue;
+    if(place.mode==='any'||isOurTempName(name))report(path.join(place.dir,name),place,'new');
+    else if(isPythonDefaultTempName(name))notes.push({path:path.join(place.dir,name),place});
+   }
    // Inside each folder (or file) of ours that was there at the start and still is.
    for(const [name,first] of start.inside){
     const root=path.join(place.dir,name),last=end.names.has(name)?walk(root,limits):null;
@@ -140,11 +147,12 @@ export function startCDriveGuard({places=cDrivePlaces(),exceptions=C_DRIVE_EXCEP
   }
   const lines=[];
   for(const v of violations)lines.push('C: guard: '+(v.kind==='changed'?'CHANGED':'NEW')+' on C: during this run: '+v.path+' (in '+v.place.label+')');
+  for(const n of notes)lines.push('C: guard: note: new in '+n.place.label+', not counted: '+n.path+' (Python\'s default temporary name; any program makes these)');
   for(const a of allowed)lines.push('C: guard: allowed C: exception present: '+a.path+' ('+a.reason+')');
   for(const n of notChecked)lines.push('C: guard: not checked: '+n.dir+' ('+n.why+')');
   if(!violations.length)lines.push('C: guard: nothing new on C: in '+(places.length-notChecked.filter(n=>places.some(p=>p.dir===n.dir)).length)+' checked places and '+read+' entries inside folders of ours');
   const error=violations.length?'Nothing a check runs may write to C: (Sergei, 2026-11-19). New or changed on C: during this run: '+violations.map(v=>v.path).join(', ')+
    '. If one is not from this run (another program), check its time and run again.':null;
-  return {violations,allowed,notChecked,lines,error};
+  return {violations,allowed,notChecked,notes,lines,error};
  }};
 }
