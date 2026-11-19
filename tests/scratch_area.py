@@ -30,6 +30,29 @@ def _remove(area):
     shutil.rmtree(area, onexc=_clear_read_only)
 
 
+def module_disposition_owner():
+    """The disposition owner a module's fixture removals need when the module runs alone (Senua 0.30.0 M1).
+
+    The entry check (scripts/check-desktop.mjs) and the targeted runners hold one support owner over the run's scratch for
+    every module, and a second owner over the same files would make each removal ambiguous, so none is added then. Run
+    alone (python -m unittest), the module holds the same kind of owner over its fixture root, from a private folder of
+    its own that goes when the owner closes. Returns an ExitStack; close it in tearDownModule.
+    """
+    import contextlib
+    import uuid
+    from runtime_disposition_owners import context_for, support_dispositions
+    area = Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT', DEFAULT_SCRATCH));area.mkdir(parents=True, exist_ok=True)
+    stack = contextlib.ExitStack()
+    try:
+        context_for(area / 'owner-probe')
+        return stack  # the run's own owner already covers the fixtures
+    except RuntimeError:pass
+    parent = area / ('module-owner-' + uuid.uuid4().hex);parent.mkdir()
+    stack.callback(_remove, parent)
+    stack.enter_context(support_dispositions(parent, [area]))
+    return stack
+
+
 def _clear_read_only(function, path, error):
     """Fixtures make read-only payloads (test_application_publication). Clear that attribute and retry once, only on a
     plain file or folder; anything else, a deny ACL included, still fails the test."""

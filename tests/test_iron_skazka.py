@@ -316,12 +316,17 @@ def intent_status(service,job):
 
 # 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
 def setUpModule():
-    global _sorted_fixture
+    global _sorted_fixture,_owner
     from sorted_fixture import patch_merge_service
+    from scratch_area import module_disposition_owner
+    # Senua 0.30.0 M1: run alone, the fixture removals had no disposition owner (5 cases failed with "Exact file removal
+    # requires one admitted native catalog owner" or its consequences). The shared fixtures keep their catalog in the
+    # fixture folder and make folders there mid-test, which an admitted catalog owner holds, so it is the run's owner.
+    _owner = module_disposition_owner()
     _sorted_fixture = patch_merge_service()
 
 
 def tearDownModule():
-    _sorted_fixture.stop()
+    _sorted_fixture.stop();_owner.close()
 
 if __name__=='__main__':unittest.main()

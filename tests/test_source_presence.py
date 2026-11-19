@@ -12,6 +12,8 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import source_presence
+from catalog_owner import catalog_lock
+from runtime_disposition_owners import admit_catalog
 from scanner import connect
 
 AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'source-presence-tests'
@@ -21,21 +23,28 @@ AREA.mkdir(parents=True, exist_ok=True)
 class CheckPassTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=AREA)
+        self.addCleanup(self.temp.cleanup)  # after the catalog owner below lets go of its files
         base = Path(self.temp.name)
         self.root = base / 'Audiobooks'
         self.root.mkdir()
         (self.root / 'other book').mkdir()
         (self.root / 'other book' / 'keep.mp3').write_bytes(b'audio')  # the root answers with content
-        self.database = base / 'catalog.sqlite3'
+        self.database = base / 'data' / 'catalog.sqlite3'  # its own data folder, as the app's
+        self.database.parent.mkdir()
+        # Where a test moves a book folder out of sight. The catalog owner below holds the library root's ancestors (this
+        # fixture's base included) against writes, as the app's owner does, so it is a folder of its own.
+        self.outside = base / 'outside';self.outside.mkdir()
         with connect(self.database) as db:
             db.execute('CREATE TABLE book_groups(id TEXT PRIMARY KEY,root TEXT,scope TEXT,revision INTEGER,fingerprint TEXT,evidence TEXT,superseded INTEGER DEFAULT 0)')
             db.execute("CREATE TABLE audio_jobs(job_id TEXT,manifest TEXT,state TEXT NOT NULL DEFAULT 'completed',updated TEXT)")
         inventory = SimpleNamespace(database=str(self.database), roots={'Audiobooks': str(self.root)}, source_roots=lambda library: [str(self.root)],
                                     output_root=str(base / 'Sorted'))
         self.merge = SimpleNamespace(inventory=inventory, approval_preview=Mock(), automatic=SimpleNamespace(requeue=Mock()))
-
-    def tearDown(self):
-        self.temp.cleanup()
+        # The app runs this pass under its own admitted catalog owner (the web server's catalog_lock); the fixture
+        # registers the same, so its leftover removals never borrow a test run's support owner (Senua 0.30.0 M1: run
+        # alone, 8 cases failed with "Exact file removal requires one admitted native catalog owner").
+        self.enterContext(catalog_lock(self.database, inventory.roots))
+        self.assertTrue(admit_catalog(self.database))
 
     def book(self, identity, files, folder=None, job=False, title=None):
         folder = self.root.joinpath(*(folder or ('Author', identity)))
@@ -183,7 +192,7 @@ class CheckPassTests(unittest.TestCase):
         # Senua D-M1: files restored unchanged (Recycle Bin, a folder moved back, a short drive drop) hash to the recorded
         # fingerprint, so only testing the paths again can tell "back" from "still gone".
         folder, paths = self.book('back', ['01.mp3', '02.mp3'])
-        away = Path(self.temp.name) / 'away'
+        away = self.outside / 'away'
         os.rename(folder, away)
         self.assertEqual([item['id'] for item in self.run_pass()['removed']], ['back'])
         self.assertEqual(self.dismissed(), {'back'})
@@ -336,7 +345,7 @@ class CheckPassTests(unittest.TestCase):
         self.run_pass(now=0.0)
         watched = lambda: [w['folder'] for w in source_presence._watched(str(self.database))]
         self.assertEqual(watched(), [str(folder)])
-        away = Path(self.temp.name) / 'away'
+        away = self.outside / 'away'
         os.rename(folder, away)  # the folder cannot be seen, as when the drive drops after the probe
         answering = {'path': str(self.root), 'available': True, 'empty': False}
         gone = {'path': str(self.root), 'available': False, 'empty': False}
