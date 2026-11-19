@@ -21,7 +21,7 @@ from native_io import DirectoryBoundary, ProtectedFiles, VerifiedFile, ordinary
 from review_backend import CandidateReviewService
 from scanner import connect
 from metadata import propose
-from source_cleanup import CleanupJobs, packed
+from source_cleanup import ANCESTRY_HOLD, CleanupJobs, packed
 from review_backend import member_key, NEEDS_GROUPS, JOB_GROUPS
 from conversion_progress import approved_scope,completed_book,phase_progress
 from replacement_jobs import Replacements,digest as record_digest,now as replacement_now
@@ -1628,6 +1628,9 @@ class MergeService:
             except Exception as error:self._cleanup_failed(relation['id'],error)  # the durable records retain the reason
 
     HELD_FOR_METADATA=('Download marker native identity differs','Unknown download marker contents preserved')
+    # 0.30.0 F1: a cleanup held for its recovery folder's recorded ancestry (Sergei's Brom cleanup, refused under 0.29.0
+    # after the storage moves) is checked again by this sweep too, once per Start; CleanupJobs._work decides.
+    RECHECKED_HOLDS=HELD_FOR_METADATA+(ANCESTRY_HOLD,)
 
     def _finish_held_cleanups(self,generation=None):
         """Only an existing admitted Start intent can authorize this automatic held-cleanup sweep."""
@@ -1636,7 +1639,7 @@ class MergeService:
         if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
         if not allow():
             self._settle_folder_jobs();return
-        rows=[row for row in self.cleanup._rows("SELECT id,job_id,reason FROM source_cleanup WHERE state='needs_attention'") if row['reason'] in self.HELD_FOR_METADATA and row['id'] not in self._purge_tried]
+        rows=[row for row in self.cleanup._rows("SELECT id,job_id,reason FROM source_cleanup WHERE state='needs_attention'") if row['reason'] in self.RECHECKED_HOLDS and row['id'] not in self._purge_tried]
         try:kept=self._kept_by_choice([row['job_id'] for row in rows]) if rows else set()
         except (sqlite3.Error,AttributeError):kept=None
         held=[] if kept is None else [row['id'] for row in rows if row['job_id'] not in kept]

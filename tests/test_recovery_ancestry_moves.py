@@ -15,11 +15,15 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
+from types import SimpleNamespace
 import unittest
 import uuid
 
+from merge_service import MergeService
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile
+from scanner import connect
 from scratch_area import DEFAULT_SCRATCH, remove_own_area
 from source_cleanup import CleanupJobs
 from storage_relocation import _key, parse_manifest
@@ -200,6 +204,149 @@ class RecoveryAncestryAcrossMovesTests(MovesReplay, unittest.TestCase):
                 self.check(self.data, recorded)
         with self.assertRaisesRegex(BoundaryError, REFUSED):
             self.check(self.data, self.stale)
+
+
+@unittest.skipUnless(os.name == 'nt', 'Windows native identities and junctions')
+class HeldBeforeTheFixTests(MovesReplay, unittest.TestCase):
+    """Futaba's 0.30.0 F1: Sergei's Brom cleanup was refused under 0.29.0 and held. The item B fix decides only when the
+    check runs again, and nothing ran it again: Resume, Retry cleanup and a restart all left the held row as it was."""
+
+    def policy(self):
+        self.policy_calls += 1
+        refused = self.refuse_from is not None and self.policy_calls >= self.refuse_from
+        return (None if refused else str(self.sorted)), (str(self.library),)
+
+    def worker(self, data):
+        return CleanupJobs(data / 'inventory.sqlite3', data / 'source-recovery', lambda db, intent: True,
+                           contextlib.nullcontext, output_policy=self.policy)
+
+    def book(self, data, count=3):
+        """A completed published book whose cleanup enrols at `data`, with its recovery copies made and its originals
+        still in place (its library and Sorted folder are, like Z:, untouched by the storage moves)."""
+        self.library = self.area / 'Library';self.library.mkdir()
+        self.sorted = self.area / 'Sorted';self.sorted.mkdir()
+        self.sources = []
+        for index in range(count):
+            path = self.library / ('%02d.mp3' % index);path.write_bytes(bytes([65 + index]) * 4096);facts = path.stat()
+            self.sources.append({'path': str(path), 'size': facts.st_size, 'modified': str(facts.st_mtime_ns),
+                                 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+        final = self.sorted / 'Brom.m4b';final.write_bytes(b'validated fixture output')
+        with DirectoryBoundary(self.sorted, final.parent) as boundary:parent = boundary.identities
+        digest = hashlib.sha256(final.read_bytes()).hexdigest();size = final.stat().st_size
+        validation = {'passed': True, 'checks': 'Output checks passed', 'profile': 'fixture', 'sha256': digest, 'size': size,
+                      'tags': {'media_type': '2', 'title': 'Brom', 'artist': 'Author'}, 'source_pcm_frames': [100] * count,
+                      'source_pcm_rate': 100, 'decoded_duration': count, 'duration_tolerance': .01, 'chapters': []}
+        job = {'job_id': 'brom', 'state': 'completed',
+               'manifest': {'root': str(self.library), 'output_root': str(self.sorted), 'sources': self.sources,
+                            'cover': {'path': str(final), 'sha256': digest}, 'profile': 'fixture',
+                            'metadata': {'title': 'Brom', 'canonical_author': 'Author'}, 'chapters': []},
+               'output': {'root': str(self.sorted), 'final_path': str(final), 'size': size, 'sha256': digest,
+                          'parent_identity': parent, 'validation': validation}}
+        self.policy_calls, self.refuse_from = 0, 3  # enrolment, the run's start, then its first removal is refused
+        with connect(data / 'inventory.sqlite3') as db:
+            db.execute('CREATE TABLE IF NOT EXISTS owned_artifacts(path TEXT PRIMARY KEY,job_id TEXT,kind TEXT,sha256 TEXT,size INTEGER)')
+        jobs = self.worker(data)
+        try:
+            id = jobs.enroll(job, {})
+            with self.assertRaisesRegex(BoundaryError, 'No sorted output folder'):jobs.run(id)
+        finally:
+            jobs.close()
+        self.refuse_from = None
+        self.assertEqual(self.members(data, id), ['backup_verified'] * count, 'positive control: every recovery copy is made')
+        return id
+
+    @staticmethod
+    def catalog(data):
+        return contextlib.closing(sqlite3.connect(data / 'inventory.sqlite3'))
+
+    def members(self, data, id):
+        with self.catalog(data) as db:
+            return [row[0] for row in db.execute('SELECT state FROM cleanup_members WHERE cleanup_id=? ORDER BY path', (id,))]
+
+    def row(self, id):
+        with self.catalog(self.data) as db:
+            return db.execute('SELECT state,reason FROM source_cleanup WHERE id=?', (id,)).fetchone()
+
+    def sweep(self, worker, started=True):
+        """The held-cleanup sweep the retention pass runs once the queue is idle (MergeService._finish_held_cleanups);
+        only an admitted Start (`started`) authorizes it."""
+        service = MergeService.__new__(MergeService)
+        service.jobs = SimpleNamespace(_thread=None);service.cleanup = worker;service._purge_tried = set()
+        service._kept_by_choice = lambda job_ids: set();service._settle_folder_jobs = lambda: None
+        service._start_allowed = lambda generation: started
+        service._finish_held_cleanups()
+        if worker.thread is not None:
+            worker.thread.join(120);self.assertFalse(worker.thread.is_alive())
+
+    def originals_kept(self):
+        return all(Path(source['path']).exists() for source in self.sources)
+
+    def test_a_cleanup_held_under_0_29_0_is_checked_again_and_finishes(self):
+        id = self.book(self.old_root / SCOPE)  # 29 Oct: enrolled, recovery copies made, originals still in place
+        self.move_explicitly()
+        runtime = self.move_portably()
+        with self.catalog(self.data) as db:
+            backups = [row[0] for row in db.execute('SELECT backup FROM cleanup_members WHERE cleanup_id=?', (id,))]
+            self.assertTrue(backups and all(Path(path).parent == self.data / 'source-recovery' / id for path in backups),
+                            'the portable move rewrote the recovery copies\' current paths')
+            # The row exactly as 0.29.0's hold() left it after the refusal: needs attention, that reason, no hold cause.
+            with db:db.execute("UPDATE source_cleanup SET state='needs_attention',reason=?,updated=? WHERE id=?",
+                               (REFUSED, '2026-11-18T10:09:00.000000+00:00', id))
+            self.assertEqual(db.execute('SELECT count(*) FROM source_cleanup_holds WHERE cleanup_id=?', (id,)).fetchone()[0], 0)
+        honest = json.loads(self.intent(id))
+        self.admit(*runtime)
+        worker = self.worker(self.data)  # a restart: startup changes nothing and starts nothing
+        self.assertEqual(tuple(self.row(id)), ('needs_attention', REFUSED));self.assertIsNone(worker.thread)
+        self.sweep(worker, started=False)  # no Start pressed: the held cleanup is left alone
+        self.assertIsNone(worker.thread);self.assertEqual(tuple(self.row(id)), ('needs_attention', REFUSED))
+        # Negative controls: what the relocation records do not prove stays held, with the same reason, nothing removed.
+        root = next(i for i, row in enumerate(honest['recovery_identity']) if _key(row[0]) == _key(str(self.old_root)))
+        forged = json.loads(json.dumps(honest));forged['recovery_identity'][root][1:] = self.elsewhere[-2][1:]
+        self.set_intent(id, forged)
+        self.sweep(worker)
+        self.assertEqual(tuple(self.row(id)), ('needs_attention', REFUSED), 'forged ancestry');self.assertTrue(self.originals_kept())
+        self.set_intent(id, honest)
+        native.close()  # the recovery folder replaced while the app is closed: same name, same bytes, another folder
+        (self.data / 'source-recovery').rename(self.data / 'moved-aside')
+        shutil.copytree(self.data / 'moved-aside', self.data / 'source-recovery')
+        self.admit(*runtime);worker = self.worker(self.data)
+        self.sweep(worker)
+        self.assertEqual(tuple(self.row(id)), ('needs_attention', REFUSED), 'replaced recovery folder');self.assertTrue(self.originals_kept())
+        native.close()
+        shutil.rmtree(self.data / 'source-recovery');(self.data / 'moved-aside').rename(self.data / 'source-recovery')
+        self.admit(*runtime);worker = self.worker(self.data)
+        # A cleanup whose restore began is never run again by the sweep (it would remove originals Sergei asked back).
+        with self.catalog(self.data) as db, db:
+            db.execute("UPDATE cleanup_members SET restore_intent=? WHERE cleanup_id=? AND path=?",
+                       (json.dumps({'identity': [1, 0, 1]}), id, self.sources[0]['path']))
+        self.sweep(worker)
+        self.assertEqual(tuple(self.row(id)), ('needs_attention', REFUSED), 'restore begun');self.assertTrue(self.originals_kept())
+        with self.catalog(self.data) as db, db:
+            db.execute("UPDATE cleanup_members SET restore_intent='' WHERE cleanup_id=?", (id,))
+        # The honest held row: the next admitted Start checks it again and the relocation-aware check lets it finish.
+        self.sweep(worker)
+        self.assertEqual(tuple(self.row(id)), ('completed', ''))
+        self.assertFalse(any(Path(source['path']).exists() for source in self.sources))
+        self.assertEqual(self.members(self.data, id), ['removed'] * len(self.sources))
+        self.assertTrue(all((self.data / 'source-recovery' / id / ('%05d.mp3' % index)).is_file() for index in range(len(self.sources))))
+
+    def intent(self, id):
+        with self.catalog(self.data) as db:
+            return db.execute('SELECT intent FROM source_cleanup WHERE id=?', (id,)).fetchone()[0]
+
+    def set_intent(self, id, intent):
+        with self.catalog(self.data) as db, db:
+            db.execute('UPDATE source_cleanup SET intent=? WHERE id=?', (json.dumps(intent, ensure_ascii=False, sort_keys=True, separators=(',', ':')), id))
+
+
+def setUpModule():
+    global _owner
+    from scratch_area import module_disposition_owner
+    _owner = module_disposition_owner()  # the originals' removal needs one when this module runs alone (Senua 0.30.0 M1)
+
+
+def tearDownModule():
+    _owner.close()
 
 
 if __name__ == '__main__':

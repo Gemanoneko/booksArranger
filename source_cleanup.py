@@ -33,6 +33,8 @@ class OutputIdentityUnavailable(BoundaryError):
 LEGACY_BUSY='database is locked'
 # The reason a cleanup carries when its remaining originals were positively kept (CleanupJobs.hold).
 RETAINED_HOLD='The audiobook is verified, but safe removal of the remaining originals could not be verified. The remaining originals were kept.'
+# The refusal when the recovery folder is not the one the cleanup recorded at enrolment (_recovery_boundary, restore).
+ANCESTRY_HOLD='Persisted recovery ancestry changed'
 # Seconds to wait before the second and third attempt of a cleanup run that hit a busy catalog.
 RETRY_WAITS=(5,15)
 # Senua M2: answers of the no-replace rename call itself that prove it did not rename (access denied, sharing or lock
@@ -455,7 +457,10 @@ class CleanupJobs:
         # Senua 0.21.3 F1: a cleanup refused only because this process had no valid output folder runs again here;
         # every check runs again before any copy or removal, so a setting that is still missing refuses again.
         from source_config import CONFIGURATION_REFUSALS
-        retried=('Additional filesystem streams require review; original retained','Download marker native identity differs','Unknown download marker contents preserved')+CONFIGURATION_REFUSALS
+        # 0.30.0 F1 (Sergei's Brom cleanup): a cleanup held because its recovery folder did not match the one it recorded
+        # (ANCESTRY_HOLD) is checked again too. Before 0.30.0 a storage move alone caused that refusal; the relocation-aware
+        # check (_recovery_boundary) decides again and a folder no record proves holds it again with the same reason.
+        retried=('Additional filesystem streams require review; original retained','Download marker native identity differs','Unknown download marker contents preserved',ANCESTRY_HOLD)+CONFIGURATION_REFUSALS
         rows=self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason IN (%s)) ORDER BY created"%','.join('?'*len(retried)),retried)
         if identity_retry is not None:
             if selected!=[identity_retry] or not (self.identity_retry(identity_retry) or {}).get('allowed'):return
@@ -465,6 +470,8 @@ class CleanupJobs:
             if self.stop.is_set():break
             from storage_relocation_native import retained_job
             if retained_job(self.database,row['job_id']):continue
+            # Never one whose restore began: running it would remove originals Sergei asked back.
+            if row['state']=='needs_attention' and row['reason']==ANCESTRY_HOLD and self._restore_begun(row['id']):continue
             self.current=row['id']
             try:
                 self.run_with_retry(row['id'])
@@ -473,6 +480,9 @@ class CleanupJobs:
             finally:self.phases.pop(row['id'],None);self.current=None
         handoff=after_drain if after_drain is not None else self.after_drain
         if follow_audio and not self.stop.is_set() and handoff:handoff()
+    def _restore_begun(self,id):
+        """A restore of this cleanup's originals began (the same test as the startup reclassifications)."""
+        return bool(self._rows("SELECT 1 FROM cleanup_members WHERE cleanup_id=? AND (state IN ('restore_intended','restored') OR COALESCE(restore_intent,'')!='') LIMIT 1",(id,)))
     @staticmethod
     def _match(handle,source,stored=None,approved=None):
         facts=handle.facts()
@@ -545,7 +555,7 @@ class CleanupJobs:
         rb=stack.enter_context(DirectoryBoundary(self.root.anchor,recovery,create=True))
         if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery root identity changed')
         from storage_relocation_native import ancestry_match
-        if not ancestry_match(rb,intent['recovery_identity'],operation_path=recovery,prefix=True):raise BoundaryError('Persisted recovery ancestry changed')
+        if not ancestry_match(rb,intent['recovery_identity'],operation_path=recovery,prefix=True):raise BoundaryError(ANCESTRY_HOLD)
         return rb
     def _run(self,id,marked):
         row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))[0];intent=json.loads(row['intent']);manifest=intent['manifest'];out=intent['output']
@@ -817,7 +827,7 @@ class CleanupJobs:
                 with DirectoryBoundary(self.root.anchor,backup.parent) as rb,VerifiedFile(backup) as held,\
                      DirectoryBoundary(root,path.parent,rename_destination=remote_drive(path)) as boundary:
                     from storage_relocation_native import ancestry_match
-                    if not ancestry_match(rb,intent['recovery_identity'],operation_path=backup,prefix=True):raise BoundaryError('Persisted recovery ancestry changed')
+                    if not ancestry_match(rb,intent['recovery_identity'],operation_path=backup,prefix=True):raise BoundaryError(ANCESTRY_HOLD)
                     if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery ancestor identity drifted before restoration')
                     if held.facts()['size']!=source['size'] or held.sha256()!=source['sha256']:raise BoundaryError('Recovery copy changed')
                     if path.exists():
