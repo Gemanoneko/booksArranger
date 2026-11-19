@@ -915,7 +915,8 @@ class CandidateReviewService:
         activity=self.__dict__.setdefault('_chapter_activity',{})
         try:
             if not joined:return {'chapters':source_chapters(member['path'],self.cache,stop,float(member.get('duration') or 0)),'terminal_end_correction':None}
-            # 0.30.0: a damaged .m4b part is planned on its repaired copy, as its conversion repairs it (audio_pipeline).
+            # 0.30.0: a damaged .m4b part is planned from its own chapter track, never copied here: this runs under group_lock up
+            # to four times per book (Senua M5). Its conversion repairs it once and proves the last end (audio_pipeline).
             return part_chapter_plan(member['path'],self.cache,stop,float(member.get('duration') or 0),source=source,
                 on_check=lambda value:activity.__setitem__(row['id'],copy.deepcopy(value)))
         except ChapterValidationError as error:

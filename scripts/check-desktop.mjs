@@ -110,6 +110,7 @@ patterns.push('test_quit_bound.py');  // 0.30.0 item F: Quit closes within secon
 patterns.push('test_sorting_030.py');  // 0.30.0 sorting items 2-8: series folder moves on approval, series wait, root series folder, one author folder, original series names, trailing part albums, no 30-hour limit
 patterns.push('test_scope_view.py');  // 0.30.0 item E: the Book metadata line from scope_view (repaired text), never the grouping key
 patterns.push('test_damaged_part_repair.py');  // 0.30.0 item C: a damaged M4B part is repaired on a working copy before its join (manual and automatic)
+patterns.push('test_damage_ruling.py');  // Sergei's ruling 2026-11-19: container-only damage with proven intact audio converts normally; unrepairable damage says re-acquire
 patterns.push('test_book_join.py');  // 0.30.0 item D: Join into one book (the record, every 8.5 effect in one transaction, the wait behind a converting part) and answer 9's Cancel
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time

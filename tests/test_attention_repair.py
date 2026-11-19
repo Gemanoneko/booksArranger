@@ -100,12 +100,14 @@ class ClassificationTests(Base):
 
     def test_provable_damage_is_can_repair_never_retry(self):
         job_id,_=self.l.failed()
-        found={'state':'repairable','reason':REFUSED,'damage':['The chapter list pointed to missing track 3.'],
-               'repairs':[{'kind':'dangling_chapter_reference','track_id':1,'removed':[3],'kept':[2],'description':'The chapter list pointed to missing track 3.'}]}
+        # Sergei's ruling on damaged parts (2026-11-19): only damage to the audio itself is "Damaged — can repair" (the cut
+        # final frames, replaced with silence); container-only damage is no damage (DamageRulingRowTests).
+        found={'state':'repairable','reason':REFUSED,'damage':['The file ends 2 bytes early.'],
+               'repairs':[{'kind':'truncated_final_frames','frames':1,'replaced_ticks':1024,'timescale':44100,'description':'The file ends 2 bytes early.'}]}
         with patch.object(m4b_repair,'classify',return_value=found):
             value=self.summary()[job_id]
             self.assertEqual(value['group'],'repair');self.assertNotIn('retry',value)
-            self.assertEqual(value['damage'],[{'kind':'dangling_chapter_reference','removed':[3],'description':'The chapter list pointed to missing track 3.'}])
+            self.assertEqual(value['damage'],[{'kind':'truncated_final_frames','frames':1,'replaced_ticks':1024,'timescale':44100,'description':'The file ends 2 bytes early.'}])
             self.assertEqual(value['repair'],{'allowed':True,'reason':''})
             self.l.jobs._thread=ALIVE
             try:self.assertEqual(self.summary()[job_id]['repair'],{'allowed':True,'reason':''},'accepted while a book is being created')
