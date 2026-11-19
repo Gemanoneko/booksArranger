@@ -508,11 +508,15 @@ def _repair_part_copy(source,workdir,stop,expected_sha256,duration,on_fraction=l
             verified=m4b_preservation.verify_candidate(plan,read_at,os.fstat(check.fileno()).st_size,candidate_read,stop.is_set)
         if verified['sha256']!=receipt['sha256'] or verified['source_sha256']!=receipt['source_sha256']:raise ValidationError('Repaired part bytes changed')
     on_fraction(.5)
-    silence=None
+    silence=intact=None
+    stream=next(s for s in probe(source,workdir,stop)['streams'] if s.get('codec_type')=='audio')
+    encoding={'sample_rate':int(stream['sample_rate']),'channels':stream.get('channels'),'channel_layout':stream.get('channel_layout')}
     if m4b_repair.silenced(plan):
-        stream=next(s for s in probe(source,workdir,stop)['streams'] if s.get('codec_type')=='audio')
-        encoding={'sample_rate':int(stream['sample_rate']),'channels':stream.get('channels'),'channel_layout':stream.get('channel_layout')}
         _,_,silence=m4b_repair.prove_silenced_tail(source,candidate,plan,workdir,stop,duration,encoding,evidence=copied_audio_evidence,run=run_owned)
+    else:
+        # Container-only repair (Sergei's ruling, 2026-11-19): the audio is proven intact, as the single-file preservation
+        # proves it (prove_audio_intact).
+        intact=prove_audio_intact(source,candidate,plan,workdir,stop,duration,encoding)
     on_fraction(.8)
     decoded=decoded_duration(candidate,workdir,stop,duration)
     on_fraction(1)
@@ -520,22 +524,43 @@ def _repair_part_copy(source,workdir,stop,expected_sha256,duration,on_fraction=l
     return {'name':candidate.name,'path':str(candidate),'sha256':receipt['sha256'],'size':receipt['size'],'duration':decoded,
             'proof':{'kind':'m4b_part_repair','schema':PART_REPAIR_SCHEMA,'file':source.name,'source_path':str(source),
                      'source_sha256':receipt['source_sha256'],'working_sha256':receipt['sha256'],'repairs':repairs,
-                     'note':' '.join(item['description'] for item in repairs),'silence_proof':silence,'decoded_duration':decoded}}
+                     'note':' '.join(item['description'] for item in repairs),'silence_proof':silence,'decoded_duration':decoded,
+                     'container_only':intact is not None,'audio_intact':intact}}
+
+def prove_audio_intact(source,candidate,plan,stage,stop,duration,encoding):
+    """Sergei's ruling on damaged parts (2026-11-19): a container-only fix may treat a file as undamaged only when its audio
+    is proven intact by full decodes, never assumed. Requires container-only kinds (m4b_repair.CONTAINER_ONLY); then the
+    original and the fixed copy have equal copied-audio evidence (decoder configuration, every packet's relative timing,
+    presentation), the copy's packet count equals the audio track's complete sample table, and both decode completely under
+    -xerror to identical native PCM (native_pcm_evidence). Raises ValidationError otherwise; returns the evidence."""
+    if not m4b_repair.container_only([dict(item) for item in plan.repairs]):raise ValidationError('Not a container-only repair')
+    audio=next(track for track in plan.tracks if track['handler']==b'soun')
+    source_evidence=copied_audio_evidence(source,stage,stop,duration,source_relative=True)
+    output_evidence=copied_audio_evidence(candidate,stage,stop,duration,source_relative=True)
+    if source_evidence!=output_evidence:raise ValidationError('Container fix changed decoder, packets or presentation')
+    if output_evidence['relative_packet_timing']['packet_count']!=audio['samples']:raise ValidationError('Container fix: audio packets do not match the complete sample table')
+    source_pcm=native_pcm_evidence(source,stage,stop,duration,encoding)
+    output_pcm=native_pcm_evidence(candidate,stage,stop,duration,encoding)
+    if source_pcm!=output_pcm:raise ValidationError('Container fix changed the complete decoded audio')
+    return {'packets':output_evidence['relative_packet_timing'],'samples':audio['samples'],'native_pcm':output_pcm}
 
 def _plan_part_repairs(manifest,stop,report=None):
     """Once per attempt, before any part is read in full: which .m4b parts of a joined book the repair applies to (header and
     movie-box reads only), so the step can say "N of M parts" from its start."""
     current=getattr(_ARTIFACTS,'current',None)
     if not current or len(current)<6 or 'damaged' in current[5]:return
-    damaged=[]
+    damaged=[];quiet=[]
     for index,item in enumerate(manifest.get('sources') or []):
         if not _joined_part(manifest,item.get('path','')):continue
         if stop.is_set():raise Paused('Part check paused; this book restarts')
         try:diagnosis=m4b_repair.diagnose_path(item['path'],stop)
         except InterruptedError as error:raise Paused('Part check paused; this book restarts') from error
         except OSError:continue  # unreadable: the source checks below say so
-        if diagnosis['state']=='repairable':damaged.append(index)
-    current[5].update(damaged=damaged,done=0,report=report)
+        if diagnosis['state']=='repairable':
+            # Sergei's ruling (2026-11-19): a container-only shape is no damage: fixed quietly (its audio proven intact), never
+            # a "Repairing a damaged part" step; only parts whose audio is damaged count in "N of M parts".
+            (quiet if m4b_repair.container_only(diagnosis) else damaged).append(index)
+    current[5].update(damaged=damaged,quiet=quiet,done=0,report=report)
 
 def _repaired_part(manifest,item,path,stage,stop,duration,source_index):
     """The repaired working copy of this source when it is a damaged part (made once per attempt), else None."""
@@ -546,11 +571,12 @@ def _repaired_part(manifest,item,path,stage,stop,duration,source_index):
         if digest(Path(stage)/cached['name'],stop)!=cached['sha256']:raise ValidationError('Repaired M4B part changed before use')
         return cached
     state=current[5]
-    if source_index not in state.get('damaged',()):return None
+    quiet=source_index in state.get('quiet',())
+    if source_index not in state.get('damaged',()) and not quiet:return None
     total=len(state['damaged']);name=Path(item['path']).name;sent=[None]
     def tell(fraction,force=False):
         now=time.monotonic()
-        if state.get('report') is None or not force and sent[0] is not None and now-sent[0]<.5:return
+        if quiet or state.get('report') is None or not force and sent[0] is not None and now-sent[0]<.5:return
         sent[0]=now
         try:state['report']({'phase':'repairing','completed':state['done'],'total':total,'unit':'parts','fraction':min(1.0,(state['done']+fraction)/total),'file':name})
         except Exception:pass  # Progress display only.
@@ -560,30 +586,43 @@ def _repaired_part(manifest,item,path,stage,stop,duration,source_index):
     except (ValueError,KeyError,TypeError,StopIteration) as error:
         raise PartRepairError('failed',item['path'],source_index,len(manifest['sources']),error) from error
     if record is None:raise PartRepairError('failed',item['path'],source_index,len(manifest['sources']),'The repair no longer applies to these bytes')
+    if quiet and record['proof'].get('container_only') is not True:
+        raise PartRepairError('failed',item['path'],source_index,len(manifest['sources']),'The container fix needed an audio repair')
     record['kind']='m4b_part';record['proof']['source_index']=source_index
-    current[4][key]=record;state['done']+=1;tell(0,True)
+    current[4][key]=record
+    if not quiet:
+        state['done']+=1;tell(0,True)
     return record
 
 def part_chapter_plan(path,workdir,stop,duration,*,source=None,on_check=None):
-    """A joined part's chapter plan (verified_source_chapters). 0.30.0: a damaged .m4b part with chapters is planned on its
-    repaired copy, as its conversion will repair it; the copy is made and removed in a private folder under workdir. The
-    original is only read. The plan carries no correction receipt for it (the conversion proves the copy again)."""
+    """A joined part's chapter plan (verified_source_chapters).
+
+    Senua's 0.30.0 review M5: this used to make a full repaired copy of a damaged part (stream, re-read, decode, delete) on
+    every call, and build_manifest runs it up to four times per book under group_lock (the converter's guard), while the
+    attempt repairs the part again. Now a damaged .m4b part (read-only diagnosis: header and movie-box reads) is never copied
+    here: its chapters are read and checked from its own chapter track, which no repair changes. Only a last chapter that runs
+    past the damaged audio cannot be proven without the repair: the plan keeps its declared boundaries with the last end at
+    the part's duration and says so (repaired_terminal); the conversion repairs the part once, outside every lock, proves that
+    end on the repaired copy (the terminal correction's full decode) and checks every other boundary against this plan."""
     path=Path(path)
     if path.suffix.lower()=='.m4b':
         try:diagnosis=m4b_repair.diagnose_path(path,stop)
         except InterruptedError as error:raise Paused('Chapter check paused') from error
         except OSError:diagnosis={'state':'unreadable'}
-        if diagnosis['state']=='repairable' and probe(path,workdir,stop).get('chapters'):
-            folder=Path(workdir)/(PART_REPAIR_PREFIX+uuid.uuid4().hex);folder.mkdir()
-            try:
-                record=_repair_part_copy(path,folder,stop,(source or {}).get('sha256'),duration)
-                if record is not None:
-                    copy_path=Path(record['path'])
-                    checked=verified_source_chapters(copy_path,folder,stop,duration,source={'sha256':record['sha256'],'size':record['size'],
-                        'modified':fingerprint(copy_path)['modified']},on_check=on_check)
-                    return {'chapters':checked['chapters'],'terminal_end_correction':None}
-            finally:shutil.rmtree(folder,ignore_errors=True)
+        if diagnosis['state']=='repairable':
+            chapters=probe(path,workdir,stop).get('chapters',[])
+            try:return {'chapters':_checked_chapters(path,chapters,duration),'terminal_end_correction':None}
+            except ChapterValidationError as failure:
+                found=failure.chapter_diagnostic
+                if found['predicate']!='end_exceeds_audio' or found['chapter_index']!=len(chapters)-1:raise
+            return {'chapters':_checked_chapters(path,chapters,duration,terminal_end=duration),'terminal_end_correction':None,'repaired_terminal':True}
     return verified_source_chapters(path,workdir,stop,duration,source=source,on_check=on_check)
+
+
+def _same_except_last_end(checked,planned):
+    """The repaired-terminal comparison: every chapter equal, the last one's start and title too; only its end is the repair's."""
+    if not checked or len(checked)!=len(planned) or checked[:-1]!=planned[:-1]:return False
+    return {k:v for k,v in checked[-1].items() if k!='end'}=={k:v for k,v in planned[-1].items() if k!='end'}
 
 
 def _source_duration(manifest,item,path,stage,stop,duration,*,source_index=None):
@@ -1253,7 +1292,12 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
                 name=repaired['name'];bound={'sha256':repaired['sha256'],'size':repaired['size'],'modified':fingerprint(stage/name)['modified']}
             checked=verified_source_chapters(stage/name,stage,stop,duration,source=bound,
                 on_check=lambda value:progress('Checking source audio',{'chapter_check':value}))
-            if checked['chapters']!=part['chapters']:raise ValidationError('Part chapters differ from the frozen plan')
+            if checked['chapters']!=part['chapters']:
+                # Senua M5: a damaged part whose last chapter ran past its audio was planned without a repair; its last end is
+                # proven here, on the repaired copy, by the terminal correction's full decode. Every other boundary must match.
+                if not (part.get('repaired_terminal') is True and name!=original_copies[index] and checked['terminal_end_correction']
+                        and _same_except_last_end(checked['chapters'],part['chapters'])):
+                    raise ValidationError('Part chapters differ from the frozen plan')
             if checked['terminal_end_correction']:
                 terminal_corrections.append(checked['terminal_end_correction']|{'source_path':item['path']}|({'repaired_part':True} if name!=original_copies[index] else {}))
         chapters=joined_part_chapters(parts,durations)
@@ -1333,8 +1377,17 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
         with VerifiedFile(source) as held_source,open(source,'rb') as incoming:
             source_facts=held_source.facts()
             def read_at(offset,count):incoming.seek(offset);return incoming.read(count)
-            plan=m4b_preservation.plan(source_facts['size'],read_at,tags,cover_bytes,m4b_repair.approved_repairs(manifest))
-            repair_note=m4b_repair.confirm(manifest,plan)
+            approved=m4b_repair.approved_repairs(manifest);fixed=None
+            try:plan=m4b_preservation.plan(source_facts['size'],read_at,tags,cover_bytes,approved)
+            except m4b_preservation.Refused:
+                # Sergei's ruling on damaged parts (2026-11-19): container-only damage (m4b_repair.CONTAINER_ONLY) is no damage.
+                # Diagnosed read-only; the fix is applied here and the audio proven intact below before the book converts.
+                if approved:raise
+                diagnosis=m4b_repair.diagnose(source_facts['size'],read_at)
+                if not m4b_repair.container_only(diagnosis):raise
+                fixed=frozenset(item['kind'] for item in diagnosis['repairs'])
+                plan=m4b_preservation.plan(source_facts['size'],read_at,tags,cover_bytes,fixed)
+            repair_note=m4b_repair.confirm(manifest,plan) if fixed is None else None
             if shutil.disk_usage(stage).free<source_facts['size']+plan.tail_padding+len(plan.appended_media)+len(plan.appended_movie)+16*1024*1024:
                 raise OSError(errno.ENOSPC,'Insufficient space for the single metadata candidate; originals retained')
             plan_generated(output)
@@ -1361,6 +1414,14 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
                     source_pcm=native_pcm_evidence(source,stage,stop,expected,encoding)
                     output_pcm=native_pcm_evidence(output,stage,stop,expected,encoding)
                     if source_pcm!=output_pcm:raise ValidationError('Preservation changed complete native decoded audio')
+                    if fixed is not None:
+                        # The audio intact (prove_audio_intact's rules): equal packets, presentation and complete strict
+                        # decodes above, and every packet of the audio track's sample table readable.
+                        audio=next(track for track in plan.tracks if track['handler']==b'soun')
+                        if output_evidence['relative_packet_timing']['packet_count']!=audio['samples']:
+                            raise ValidationError('Container fix: audio packets do not match the complete sample table')
+                        fixed={'repairs':[dict(item) for item in plan.repairs],'note':' '.join(item['description'] for item in plan.repairs),
+                               'audio_intact':{'packets':output_evidence['relative_packet_timing'],'samples':audio['samples'],'native_pcm':output_pcm}}
                 raw=probe(output,stage,stop);duration,profile=audio_info(raw)
                 if profile!=(encoding.get('codec','aac'),str(encoding['sample_rate']),encoding['channels']):
                     raise ValidationError('Preserved output audio profile is incorrect')
@@ -1385,6 +1446,7 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
                   'native_pcm_evidence':output_pcm,'copied_audio_evidence':output_evidence,'metadata_preservation':receipt,
                   'checks':'Output checks passed','device':'Apple Books sync not checked','tags':actual_tags}
                 if repair_note:validation['damage_repair']=repair_note
+                if fixed is not None:validation['container_fix']=fixed  # no damage label: the book converted normally
                 remember_generated(output,receipt['sha256'],receipt['size'])
                 return output,validation
     except m4b_preservation.Refused as error:raise ValidationError('M4B preservation requires review: '+str(error)) from error

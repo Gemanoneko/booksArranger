@@ -2428,8 +2428,9 @@ class MergeService:
             result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
             return {'job_id':job_id,'requeued':False,**result}
         if capability.get('can_confirm_origin') is True:raise RetryRefused('No confirmation is saved for this book.','origin_unconfirmed')
-        from audio_jobs import tag_repair_retry
-        if self._m4b_parent(job_id,identity,revision,tag_repair_retry) is not None:
+        from audio_jobs import tag_repair_retry,container_fix_retry
+        # Sergei's ruling (2026-11-19): a container-only "damaged" M4B is retried through the normal route, as an Iron Inferno MP3.
+        if self._m4b_parent(job_id,identity,revision,lambda row:tag_repair_retry(row) or container_fix_retry(row)) is not None:
             result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
             return {'job_id':job_id,'requeued':False,**result}
         import destination_admission
@@ -2824,9 +2825,9 @@ class MergeService:
             manifest=json.loads(rows[0]['manifest'])
             if target and 'id' in target and (target['id']!=manifest['candidate_id'] or target['revision']!=manifest['candidate_revision']):return None
             try:
-                from audio_jobs import tag_repair_retry
+                from audio_jobs import tag_repair_retry,container_fix_retry
                 recovery=(current.get('producer_recovery') or {}).get('state') in {'ready','isolated_retained'}
-                if kind=='retry' and self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),(lambda row:row['state']=='needs attention' and not row['output']) if recovery else tag_repair_retry) is not None:
+                if kind=='retry' and self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),(lambda row:row['state']=='needs attention' and not row['output']) if recovery else lambda row:tag_repair_retry(row) or container_fix_retry(row)) is not None:
                     return 'next' if self._request_m4b_readmission(job_id,'retry').get('accepted') else None
                 if self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),(m4b_repair.eligible if kind=='repair' else failed_m4b_retry.eligible)) is not None:
                     self._m4b_refusal_gate(job_id,kind)
@@ -4837,7 +4838,10 @@ class MergeService:
             capability=self.producer_recovery.status(parent_job_id)
             if capability['state'] in {'ready','isolated_retained'}:return self._admit_new_retry(parent,recovery=True)
             import failed_m4b_retry
-            if not failed_m4b_retry.eligible(parent):return self._admit_new_retry(parent)
+            from audio_jobs import container_fix_retry
+            # Sergei's ruling (2026-11-19): container-only damage takes the normal route (a new job that fixes and proves it),
+            # never the preservation retry, whose plan without repairs would refuse the same container.
+            if container_fix_retry(parent) or not failed_m4b_retry.eligible(parent):return self._admit_new_retry(parent)
             return self._retry_preserved_m4b(parent,time.time(),in_worker=True)
         return self._repair_damaged_m4b(parent,time.time(),in_worker=True)
 
@@ -4849,10 +4853,10 @@ class MergeService:
         self._reacquire_admission(job_id=job_id)
         self._no_scan()
         from failed_m4b_retry import eligible
-        from audio_jobs import tag_repair_retry
+        from audio_jobs import tag_repair_retry,container_fix_retry
         import m4b_readmission
         parent=next(iter(self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))),None)
-        if parent and tag_repair_retry(parent):
+        if parent and (tag_repair_retry(parent) or container_fix_retry(parent)):
             # Iron Inferno: queued once, by itself; a request already saved, refused or admitted is never repeated.
             with self.jobs._db() as db:known=m4b_readmission._exists(db) and db.execute('SELECT 1 FROM m4b_readmissions WHERE parent_job_id=?',(job_id,)).fetchone() is not None
             if not known:

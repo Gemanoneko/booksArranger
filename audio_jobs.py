@@ -103,12 +103,10 @@ def media_failure(row,journal,manifest,group,remedy=None,repair=None):
     part=failure.get('part_repair')
     if isinstance(part,dict) and part.get('kind') in ('unrepairable','failed') and isinstance(part.get('source_index'),int) \
             and 0<=part['source_index']<len(sources) and isinstance(sources[part['source_index']],dict) and sources[part['source_index']].get('path')==part.get('source_path'):
-        # 0.30.0 (Judy 9): a damaged M4B part of a joined book; the row says the window's sentence.
+        # 0.30.0 (Judy 9; Sergei's ruling 2026-11-19): a damaged M4B part of a joined book that the app cannot repair: re-acquire.
         path=part['source_path'];filename=Path(path).name
         code='m4b_part_unrepairable' if part['kind']=='unrepairable' else 'm4b_part_repair_failed'
-        hint=(filename+" is damaged and can't be repaired safely. Replace it with an intact copy." if code=='m4b_part_unrepairable' else
-              'The repaired part '+filename+' failed its check.')
-        return {'schema':'books-media-failure-v1','code':code,'source_path':path,'filename':filename,'status':'Stopped — M4B source failed check','hint':hint,
+        return {'schema':'books-media-failure-v1','code':code,'source_path':path,'filename':filename,'status':REACQUIRE_STATUS,'hint':reacquire_hint(filename),
                 'source_index':part['source_index'],'source_count':len(sources),'next_step':'intact_source'}
     if remedy and remedy.get('kind')=='replace_source':
         path=remedy['path'];code='invalid_m4b_source' if Path(path).suffix.lower() in {'.m4b','.m4a'} else 'source_decode_failed'
@@ -119,13 +117,37 @@ def media_failure(row,journal,manifest,group,remedy=None,repair=None):
         if code:path=sources[0]['path']
     if not code:return None
     filename=Path(path).name
-    status={'m4b_feature_unsupported':"Can't convert — M4B feature unsupported",'invalid_m4b_source':'Stopped — M4B source failed check','source_decode_failed':'Stopped — source audio check failed'}[code]
-    hint=(filename+' has a chapter image the app cannot preserve yet. Try again after an app update.' if code=='m4b_feature_unsupported' else
-          filename+' failed its media check. Replace it with an intact copy.' if code=='invalid_m4b_source' else
-          filename+' failed its full audio check. Check or replace that file with an intact copy.')
+    # Sergei's ruling on damaged parts (2026-11-19): a damaged file the app can't repair, whose damage blocks conversion or whose
+    # audio is damaged, tells him plainly to re-acquire the book (the "Need to reacquire" wording). An M4B feature the app
+    # does not support yet is no damage.
+    status={'m4b_feature_unsupported':"Can't convert — M4B feature unsupported",'invalid_m4b_source':REACQUIRE_STATUS,'source_decode_failed':REACQUIRE_STATUS}[code]
+    hint=(filename+' has a chapter image the app cannot preserve yet. Try again after an app update.' if code=='m4b_feature_unsupported' else reacquire_hint(filename))
     return {'schema':'books-media-failure-v1','code':code,'source_path':path,'filename':filename,'status':status,'hint':hint,
             'source_index':remedy.get('source_index') if remedy else 0,'source_count':len(sources),
             'next_step':'app_update' if code=='m4b_feature_unsupported' else 'intact_source'}
+
+
+REACQUIRE_STATUS='Need to reacquire'
+
+
+def reacquire_hint(filename):
+    """The re-acquire sentence (the "Need to reacquire" rows' own words) for one damaged file."""
+    return filename+' is damaged and cannot be repaired safely. Delete the book, then get a new copy.'
+
+
+def container_fix_retry(row):
+    """Sergei's ruling on damaged parts (2026-11-19): a single .m4b whose only damage is container-only (its read-only check
+    found m4b_repair.CONTAINER_ONLY kinds alone) is no damaged book. One stopped before this build is "ready to retry", never
+    "Damaged — can repair": Retry, Retry all or an automatic run admits one separate new job through the normal route (as
+    tag_repair_retry), whose conversion fixes the container and proves the audio intact. Nothing starts by itself."""
+    try:
+        import m4b_repair
+        if not m4b_repair.eligible(row):
+            return False
+        repair, _ = _m4b_fields(row)
+        return m4b_repair.container_only(repair)
+    except Exception:
+        return False
 
 
 def tag_repair_retry(row):
@@ -414,7 +436,9 @@ def repair_record(job):
         output = job.get('output') if isinstance(job.get('output'), dict) else {}
         validation = output.get('validation') if isinstance(output.get('validation'), dict) else {}
         # 0.30.0: damaged M4B parts repaired before their join (audio_pipeline part repair), applied in the verified output.
-        parts = [item for item in validation.get('source_working_repairs') or [] if isinstance(item, dict) and item.get('kind') == 'm4b_part_repair']
+        # Container-only part fixes are no damage (Sergei's ruling 2026-11-19): never in the Repaired list.
+        parts = [item for item in validation.get('source_working_repairs') or [] if isinstance(item, dict) and item.get('kind') == 'm4b_part_repair'
+                 and item.get('container_only') is not True]
         if parts and not isinstance(binding, dict):
             patched = [{key: item[key] for key in ('kind', 'padding', 'removed', 'frames', 'replaced_ticks', 'timescale') if key in item}
                        for part in parts for item in part.get('repairs') or [] if isinstance(item, dict)]
@@ -1013,8 +1037,11 @@ class AudioJobs:
             binding = manifest.get('m4b_repair') if isinstance(manifest, dict) else None
             repair_child = shapes[row['job_id']] is not None and isinstance(binding, dict) and binding.get('user_requested') is True
             check, check_reason = None, ''
-            if repair and repair.get('state') == 'repairable':
+            container = container_fix_retry(row)  # Sergei's ruling 2026-11-19: no damage, no Repair; Retry takes the normal route
+            if repair and repair.get('state') == 'repairable' and not container:
                 group, cause = 'repair', None
+            elif container and not repair_child:
+                group, cause = 'retry', None
             elif repair_child:
                 group, cause, repair = 'repair', None, {'repairs': binding.get('repairs') or []}  # Repair again, as itself
             elif shapes[row['job_id']] is not None:
