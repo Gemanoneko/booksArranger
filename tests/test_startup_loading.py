@@ -73,7 +73,13 @@ class LoadingServerTests(unittest.TestCase):
     def tearDown(self):
         self.gate.set()
         if self.server is not None:
-            self.server.shutdown()
+            # The app's own close (stops loading, the queue and every background pass the load started) before the catalog
+            # folder goes: since 0.30.0 the load also restores the saved queue and starts the passes in retained mode, and a
+            # pass still reading the catalog made the folder's removal fail (WinError 32).
+            try:
+                self.server.finish_shutdown()
+            except Exception:
+                self.server.shutdown()
             self.server.server_close()
         self.temp.cleanup()
 
@@ -179,6 +185,8 @@ class LoadingServerTests(unittest.TestCase):
         queued = self.server.actions.view()['queued_actions']
         self.assertEqual([(item['book_id'], item['title'], item.get('restored'), item['blocker']['kind']) for item in queued],
                          [('book-1', 'Дюна', True, 'loading')])
+        # Taken back before teardown: once loading ends the restored Retry would run while the catalog folder is removed.
+        self.assertEqual(self.server.actions.cancel(queued[0]['id']), {'cancelled': True})
 
     def test_changing_controls_are_refused_while_loading_with_the_pages_sentence(self):
         self.serve()
