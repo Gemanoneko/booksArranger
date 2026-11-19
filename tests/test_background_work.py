@@ -211,7 +211,9 @@ class PressCountTests(unittest.TestCase):
         finally:
             press_progress.clear()
         self.assertEqual(queue._progress(), {}, 'cleared when the press ends')
-        database = Path(tempfile.mkdtemp(dir=AREA)) / 'catalog.sqlite3'
+        AREA.mkdir(parents=True, exist_ok=True)  # this class runs before WorkTests, whose setUp made the folder
+        temp = tempfile.TemporaryDirectory(dir=AREA); self.addCleanup(temp.cleanup)
+        database = Path(temp.name) / 'catalog.sqlite3'
         with contextlib.closing(sqlite3.connect(database)) as db, db:
             db.execute('CREATE TABLE audio_jobs(job_id TEXT PRIMARY KEY,manifest TEXT)')
             db.execute('CREATE TABLE book_groups(id TEXT PRIMARY KEY,evidence TEXT)')
