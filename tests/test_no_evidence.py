@@ -16,7 +16,7 @@ from pathlib import Path
 import manual_metadata
 from scan_wait import finish_scan
 
-AREA = Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT', 'C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared')) / 'no-evidence-tests'
+AREA = Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT', str(Path(__file__).resolve().parents[1]/'scratch'))) / 'no-evidence-tests'
 PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
 
 

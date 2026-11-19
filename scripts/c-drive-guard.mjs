@@ -1,0 +1,92 @@
+// The desktop check's C: guard (Sergei, 2026-11-19: nothing we run may write to C: again, except what cannot be written
+// on I:). Before 0.30.0, fixture roots on C: (C:\BA-*, C:\BASF-*, about 20 GB) and test folders in the real user Temp
+// (books-main-*, codex-books-2026-10-20) were left by our runs. The check now points every child's TEMP at its own scratch
+// (scripts/check-desktop.mjs); this guard proves it: it lists a few C: places at the start and again at the end, and a new
+// entry fails the run, named by its full path.
+// Cheap by design: one directory listing per place, twice. It sees what is still there at the end, not an entry made and
+// removed during the run. A place that cannot be listed (C:\Windows\Temp is closed to a normal account) is reported as not
+// checked, never as passed.
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+
+// What our runs may still write on C:, each because it cannot live on I:. Exact paths; nothing else is allowed.
+// Empty since 0.30.0: nothing the desktop check starts needs C:. (Outside the check, the release's GitHub CLI login under
+// %APPDATA%\GitHub CLI and Windows' own records are not written by these checks; see the Brief, 0.30.0.)
+export const C_DRIVE_EXCEPTIONS=Object.freeze([]);
+
+// Temporary names our tests and engine make (Python tempfile: prefix + 8 of [a-z0-9_]; Node mkdtemp: prefix + 6 of
+// [A-Za-z0-9]). tests/test_c_drive_guard.js scans the sources for every prefix and fails if one is missing here.
+export const OUR_TEMP_PREFIXES=Object.freeze(['tmp','n-','sr','ds','do','bm','case-','.books-arranger-','audio-read-',
+ 'cleanup-','controls-','current-package-','durable-decisions-','git-alias-','installer-snapshot-','move-integration-source-',
+ 'move-integration-target-','mp3-staging-','multisource-','nas-dispose-','nas-removal-','owned-','package-retention-','progress-',
+ 'producer-core-','publication-native-','relocation-source-','relocation-target-','retention-','selected-temp-','uninstall-launch-',
+ 'zone-','installation-paths-','lock-pin-','portable-paths-','qa-entry-','c-drive-guard-']);
+const escape=text=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+const SHAPED=new RegExp('^(?:'+OUR_TEMP_PREFIXES.map(escape).join('|')+')(?:[a-z0-9_]{8}|[A-Za-z0-9]{6})','u');
+// Names only our runs use, whatever follows: books-*, ba-*/BA-*, BASF-*, codex-books-*, SQLite's etilqs_* temp files.
+const MARKED=/^(?:books|ba[-_]|basf|codex-books|etilqs_|\.books-arranger)/i;
+export function isOurTempName(name){return MARKED.test(name)||SHAPED.test(name);}
+
+const key=p=>path.win32.normalize(p).replace(/[\\]+$/,'').toLowerCase();
+
+// Inputs the checks only read. Any other BOOKS_* path names a place a test writes (C:\BASF-* came from such a root).
+const READ_ONLY_INPUTS=new Set(['BOOKS_QA_RUNTIME_ROOT','BOOKS_MP3_REAL_FIXTURE','BOOKS_QA_TARGET_PYTHON','BOOKS_QA_TARGET_BACKEND']);
+// Refused before anything runs: a BOOKS_* fixture or work root on C: while the checkout is elsewhere. A checkout on C:
+// (the laptop's approved root, C:/Antigravity Projects) keeps its fixtures beside it, so it is not refused there.
+export function cDriveEnvRefusal(env,root,systemDrive='C:'){
+ const drive=systemDrive.replace(/[\\/:]+$/,'').toLowerCase()+':';
+ if(path.win32.resolve(root).toLowerCase().startsWith(drive))return null;
+ const onC=Object.entries(env).filter(([name,value])=>/^BOOKS_/i.test(name)&&!READ_ONLY_INPUTS.has(name.toUpperCase())&&
+  typeof value==='string'&&/^[a-z]:[\\/]/i.test(value)&&value.slice(0,2).toLowerCase()===drive);
+ return onC.length?'Refusing to run the checks: '+onC.map(([name,value])=>name+'='+value).join(', ')+
+  ' is on C:, where nothing a check runs may write (Sergei, 2026-11-19). Use a folder beside this checkout or under I:/AI Projects.':null;
+}
+
+// The places checked by default, from the real profile (os.userInfo, never TEMP or USERPROFILE: the check redirects those).
+export function cDrivePlaces({home=os.userInfo().homedir,systemDrive='C:',startTemp=[process.env.TEMP,process.env.TMP]}={}){
+ const drive=systemDrive.replace(/[\\/:]+$/,'')+':',local=path.win32.join(home,'AppData','Local'),roaming=path.win32.join(home,'AppData','Roaming');
+ const realTemp=path.win32.join(local,'Temp');
+ const places=[
+  {dir:drive+'\\',mode:'any',label:'the C: drive root'},
+  {dir:realTemp,mode:'ours',label:'the real user Temp folder'},
+  {dir:path.win32.join(drive+'\\','Windows','Temp'),mode:'ours',label:'the Windows Temp folder'},
+  {dir:home,mode:'any',label:'the user profile folder'},
+  {dir:local,mode:'any',label:'%LOCALAPPDATA%'},
+  {dir:roaming,mode:'any',label:'%APPDATA%'},
+  {dir:path.win32.join(drive+'\\','ProgramData'),mode:'any',label:'C:\\ProgramData'},
+  {dir:path.win32.join(drive+'\\','Program Files'),mode:'any',label:'C:\\Program Files'},
+  {dir:path.win32.join(drive+'\\','Program Files (x86)'),mode:'any',label:'C:\\Program Files (x86)'},
+  {dir:path.win32.join(drive+'\\','Users'),mode:'any',label:'C:\\Users'},
+ ];
+ // The Temp folder this check was started with, when it is another folder on C: (its children get the check's own).
+ for(const temp of startTemp)if(temp&&path.win32.isAbsolute(temp)&&key(temp).startsWith(drive.toLowerCase())&&!places.some(p=>key(p.dir)===key(temp)))
+  places.push({dir:path.win32.normalize(temp),mode:'ours',label:'the Temp folder this check was started with'});
+ return places;
+}
+
+function list(dir){
+ try{return {names:new Set(fs.readdirSync(dir)),absent:false,why:null};}
+ catch(error){return error.code==='ENOENT'?{names:new Set(),absent:true,why:null}:{names:null,absent:false,why:error.code||error.message};}
+}
+
+export function startCDriveGuard({places=cDrivePlaces(),exceptions=C_DRIVE_EXCEPTIONS}={}){
+ const before=places.map(place=>({place,...list(place.dir)}));
+ return {places,finish(){
+  const violations=[],allowed=[],notChecked=[],allow=new Map(exceptions.map(e=>[key(e.path),e]));
+  const report=(p,place)=>{const exception=allow.get(key(p));if(exception)allowed.push({path:p,reason:exception.reason});else violations.push({path:p,place});};
+  for(const start of before){
+   const {place}=start,end=list(place.dir);
+   if(start.names===null||end.names===null){notChecked.push({dir:place.dir,why:start.why||end.why});continue;}
+   // A place that was not there at the start and is now: the place itself is the new entry.
+   if(start.absent&&!end.absent){report(place.dir,place);continue;}
+   for(const name of end.names)if(!start.names.has(name)&&(place.mode==='any'||isOurTempName(name)))report(path.join(place.dir,name),place);
+  }
+  const lines=[];
+  for(const v of violations)lines.push('C: guard: NEW on C: during this run: '+v.path+' (in '+v.place.label+')');
+  for(const a of allowed)lines.push('C: guard: allowed C: exception present: '+a.path+' ('+a.reason+')');
+  for(const n of notChecked)lines.push('C: guard: not checked: '+n.dir+' ('+n.why+')');
+  if(!violations.length)lines.push('C: guard: nothing new on C: in '+(places.length-notChecked.length)+' checked places');
+  const error=violations.length?'Nothing a check runs may write to C: (Sergei, 2026-11-19). New on C: during this run: '+violations.map(v=>v.path).join(', ')+
+   '. If one is not from this run (another program), check its time and run again.':null;
+  return {violations,allowed,notChecked,lines,error};
+ }};
+}

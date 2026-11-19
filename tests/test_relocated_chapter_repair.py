@@ -16,7 +16,7 @@ from audio_pipeline import digest
 from chapter_repair import restore,recover
 from publication_binding import PublicationBindings
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'relocated-chapter'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'relocated-chapter'
 AREA.mkdir(parents=True,exist_ok=True)
 
 

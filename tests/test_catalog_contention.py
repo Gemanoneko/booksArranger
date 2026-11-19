@@ -17,7 +17,7 @@ import sqlite_retry
 from scanner import Inventory,connect
 from scan_wait import finish_scan
 
-SCRATCH=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'catalog-contention'
+SCRATCH=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'catalog-contention'
 
 
 def busy(code=sqlite3.SQLITE_BUSY):

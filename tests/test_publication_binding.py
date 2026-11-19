@@ -12,7 +12,7 @@ import test_publication_locations as fixture_module
 
 class PublicationBindingTests(unittest.TestCase):
     def setUp(self):
-        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'publication-binding'
+        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'publication-binding'
         area.mkdir(parents=True,exist_ok=True)
         self.folder=tempfile.TemporaryDirectory(dir=area);self.addCleanup(self.folder.cleanup)
         self.path=str(Path(self.folder.name)/'catalog.sqlite')

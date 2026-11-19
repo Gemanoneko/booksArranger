@@ -15,7 +15,7 @@ from pathlib import Path
 
 import publication_locations as p
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'publication-locations'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'publication-locations'
 
 
 def packed(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))

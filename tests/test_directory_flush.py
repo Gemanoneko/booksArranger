@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from native_io import DirectoryBoundary,BoundaryError,kernel,FileInfo
 from ctypes import wintypes as W
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'directory-flush'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'directory-flush'
 
 class DirectoryFlushTests(unittest.TestCase):
     def setUp(self):

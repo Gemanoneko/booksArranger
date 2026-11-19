@@ -11,7 +11,7 @@ import failed_m4b_retry
 import m4b_repair
 from manifest_compatibility import equivalent_manifest,normalized_output_root
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'manifest-compatibility'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'manifest-compatibility'
 
 
 def encoded(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))

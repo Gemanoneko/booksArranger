@@ -39,13 +39,14 @@ class OperatorNativeTests(unittest.TestCase):
         default = Path(__file__).resolve().parents[1] / 'scratch'
         area = Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT', str(default)))
         area.mkdir(parents=True, exist_ok=True)
-        # Only the cross-drive case takes the C: source root (Sergei's one exception, 2026-11-17); every other operator case
-        # keeps its source beside its target, as before.
-        cross = self._testMethodName == 'test_cross_drive_content_only_copy_refuses_without_acl_mutation'
-        source_area = Path(os.environ.get('BOOKS_OPERATOR_C_ROOT', str(area))) if cross else area
-        source_area.mkdir(parents=True, exist_ok=True)
         self.tag = 'storage-operator-' + uuid.uuid4().hex
         self.area = area / self.tag; self.area.mkdir()
+        # 0.30.0 (Sergei 2026-11-19: nothing we run writes to C:). The cross-drive case took its source from a C: root
+        # (BOOKS_OPERATOR_C_ROOT; it left C:\BASF-* behind). What a content-only copy to another drive meets is a target
+        # whose inherited permissions differ from the source's, so that case now builds exactly that on one volume, inside
+        # its own area, and removes it afterwards. Every other operator case keeps its source beside its target, as before.
+        cross = self._testMethodName == 'test_cross_drive_content_only_copy_refuses_without_acl_mutation'
+        source_area = self.other_permissions_parent() if cross else area
         self.source = source_area / (self.tag + '-source')
         (self.source / 'data').mkdir(parents=True)
         self.target = self.area / 'target'
@@ -95,6 +96,16 @@ class OperatorNativeTests(unittest.TestCase):
                 with NativeItem(path, directory=path.is_dir()) as item:
                     if security.has_write_fence(item):fenced.append(str(path))
         return fenced
+
+    def other_permissions_parent(self):
+        """A folder in this case's own area whose children inherit one permission more than the target's (Everyone may
+        read extended attributes), as a folder on another drive would differ. Its fixture is removed after the case."""
+        parent = self.area / 'other-permissions'; parent.mkdir()
+        icacls = Path(os.environ.get('SystemRoot', 'C:\\Windows')) / 'System32' / 'icacls.exe'
+        result = subprocess.run([str(icacls), str(parent), '/grant', '*S-1-1-0:(OI)(CI)(REA)'],
+                                capture_output=True, timeout=20, creationflags=0x08000000)
+        self.assertEqual(result.returncode, 0, result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace'))
+        return parent
 
     def args(self):
         return (self.source, self.target, ['data'], 'data/inventory.sqlite3', self.work)
@@ -243,8 +254,10 @@ class OperatorNativeTests(unittest.TestCase):
                 restore.assert_not_called()
 
     def test_cross_drive_content_only_copy_refuses_without_acl_mutation(self):
-        if self.source.drive.casefold()==self.target.drive.casefold():
-            self.skipTest('Requires explicit C: source / I: target fixture roots')
+        """A copy to another drive, on one volume: the source's folder gives its items one inherited permission the
+        target's does not (other_permissions_parent), so the content-only copy lands with different security."""
+        self.addCleanup(self.remove_fixture)
+        self.assertEqual(self.source.parent, self.area / 'other-permissions')
         prepared=self.prepare();shutil.copytree(self.source,self.target)
         self.backup=self.source.with_name(self.source.name+'-original');self.source.rename(self.backup)
         self.receipts.append(str(self.manifest)+'.source-fence.json')

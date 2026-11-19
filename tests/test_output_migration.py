@@ -25,7 +25,7 @@ from native_io import DirectoryBoundary,FileInfo,VerifiedFile,kernel
 import output_migration as migration
 import publication_locations as locations
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'output-migration'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'output-migration'
 
 
 class SimulatedCrash(BaseException):pass

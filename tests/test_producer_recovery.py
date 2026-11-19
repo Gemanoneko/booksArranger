@@ -7,7 +7,7 @@ from working_lifecycle import WorkingLifecycle
 
 class RecoveryTests(unittest.TestCase):
     def setUp(self):
-        base=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'producer-recovery';base.mkdir(parents=True,exist_ok=True);self.base=Path(tempfile.mkdtemp(prefix='producer-core-',dir=base));self.db=self.base/'catalog.sqlite';self.stage=self.base/'cache'/'audio-staging';self.stage.mkdir(parents=True)
+        base=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'producer-recovery';base.mkdir(parents=True,exist_ok=True);self.base=Path(tempfile.mkdtemp(prefix='producer-core-',dir=base));self.db=self.base/'catalog.sqlite';self.stage=self.base/'cache'/'audio-staging';self.stage.mkdir(parents=True)
         self.job=str(uuid.uuid4());self.attempt=str(uuid.uuid4());self.candidate=str(uuid.uuid4());self.source=self.base/'original.m4b';self.source.write_bytes(b'original intact')
         self.manifest={'job_id':self.job,'candidate_id':self.candidate,'root':str(self.base),'sources':[{'path':str(self.source),'sha256':hashlib.sha256(self.source.read_bytes()).hexdigest(),'size':self.source.stat().st_size}]}
         with self.connection() as db:

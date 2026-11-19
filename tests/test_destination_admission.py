@@ -7,7 +7,7 @@ from audio_jobs import AudioJobs
 from merge_service import MergeService
 import destination_admission as d
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'destination-admission'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'destination-admission'
 class DestinationAdmission(unittest.TestCase):
     def setUp(self):
         AREA.mkdir(parents=True,exist_ok=True);self.base=Path(tempfile.mkdtemp(dir=AREA));self.root=self.base/'audio';self.root.mkdir();self.target=self.base/'Sorted';self.target.mkdir();self.source=self.root/'original.mp3';self.source.write_bytes(b'original retained')

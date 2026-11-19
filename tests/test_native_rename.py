@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import native_io as native
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'native-rename'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'native-rename'
 
 
 @unittest.skipUnless(os.name=='nt','Windows native rename required')

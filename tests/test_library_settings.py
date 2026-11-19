@@ -8,7 +8,7 @@ from desktop_settings import configure_sources
 from scanner import DEFAULT_ROOTS
 import web_server
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'library-settings-tests'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'library-settings-tests'
 
 class SourceSettingsTests(unittest.TestCase):
     def setUp(self):

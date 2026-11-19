@@ -56,7 +56,7 @@ class CandidateEvidenceIntegration(unittest.TestCase):
         from pathlib import Path
         from scanner import Inventory,connect
         from review_backend import CandidateReviewService
-        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'manual-evidence-tests'
+        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'manual-evidence-tests'
         area.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(dir=area) as temp:
             base=Path(temp);audio=base/'audio';audio.mkdir();(audio/'book.mp3').write_bytes(b'private synthetic fixture')
@@ -95,7 +95,7 @@ class CandidateEvidenceIntegration(unittest.TestCase):
         from scanner import Inventory
         from review_backend import CandidateReviewService
         from encoding_policy import AUTOMATIC_PROFILE
-        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'manual-evidence-tests';area.mkdir(parents=True,exist_ok=True)
+        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'manual-evidence-tests';area.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(dir=area) as temp:
             base=Path(temp);audio=base/'audio';audio.mkdir();(audio/'book.m4b').write_bytes(b'synthetic manifest admission fixture, not real audio')
             (audio/'cover.png').write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='))
@@ -127,7 +127,7 @@ class CandidateEvidenceIntegration(unittest.TestCase):
         from pathlib import Path
         from scanner import Inventory
         from review_backend import CandidateReviewService
-        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'manual-evidence-tests';area.mkdir(parents=True,exist_ok=True)
+        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'manual-evidence-tests';area.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(dir=area) as temp:
             base=Path(temp);audio=base/'audio';audio.mkdir();output=base/'sorted';output.mkdir()
             (audio/'source.mp3').write_bytes(b'synthetic source scope fixture')

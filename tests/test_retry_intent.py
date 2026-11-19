@@ -8,7 +8,7 @@ from scanner import connect,Inventory
 from merge_service import MergeService
 from retry_intent import bind,validate,digest
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'retry-intent'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'retry-intent'
 class RetryIntent(unittest.TestCase):
     ready=fixtures.MergeTests.ready;wait=fixtures.MergeTests.wait
     def setUp(self):

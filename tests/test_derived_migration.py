@@ -19,7 +19,7 @@ from migration_operation import MigrationOperation
 from migration_planning import prepare,write_plan
 from scanner import connect
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'derived-migration'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'derived-migration'
 
 
 class DerivedMigration(unittest.TestCase):

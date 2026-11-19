@@ -74,7 +74,7 @@ class TagPlanTests(unittest.TestCase):
                 encode.assert_not_called()
         self.assertEqual(manifest,before)
     def test_completion_callback_distinguishes_media_exit_from_context_and_bounds_failure(self):
-        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/('mp3-completion-'+uuid.uuid4().hex)
+        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/('mp3-completion-'+uuid.uuid4().hex)
         area.mkdir(parents=True)
         @contextlib.contextmanager
         def failed_context(_):

@@ -24,7 +24,7 @@ from scanner import connect
 from replacement_media import prepare_replacement
 from test_replacement_media import frozen_plan
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'relocated-replacement'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'relocated-replacement'
 AREA.mkdir(parents=True,exist_ok=True)
 
 

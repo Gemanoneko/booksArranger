@@ -9,7 +9,7 @@ import uuid
 from unittest.mock import Mock,patch
 import test_merge_http as fixture
 
-AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'producer-http'
+AREA=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'producer-http'
 
 
 class ProducerRecoveryHTTP(unittest.TestCase):

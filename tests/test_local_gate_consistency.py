@@ -5,7 +5,7 @@ import unittest
 
 from source_identity import source_gate
 
-ROOT=Path('C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/local-gate-fixtures')
+ROOT=Path(__file__).resolve().parents[1]/'scratch'/'local-gate'
 CONFLICT='Sources disagree on the title or author'
 
 # Saved v0.19.0 title/author shapes, not a whitelist used by production code.

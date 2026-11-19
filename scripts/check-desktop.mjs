@@ -6,11 +6,18 @@ import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsRepo
 import {liveCatalogRefusal} from './gate-source-guard.mjs';
 import {trackGateScratch} from './gate-scratch.mjs';
 import {CANONICAL_NODE_ENTRIES,phaseAccounting} from './qa-phase-contract.mjs';
+import {startCDriveGuard,cDriveEnvRefusal} from './c-drive-guard.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // Process startup and preparation consume the same absolute envelope as side checks and workers.
 const gateStart=performance.timeOrigin,deadline=gateDeadline(gateStart,process.env.BOOKS_QA_CHECK_DEADLINE_MS);
 // A live checkout (data/ holds its catalog) is refused before anything is read, copied or written (2026-10-24).
 {const refusal=liveCatalogRefusal(root);if(refusal){fs.writeSync(2,refusal+'\n');process.exit(1);}}
+// Sergei 2026-11-19: nothing a check runs may write to C:. The guard lists a few C: places now and again after the last
+// child has ended (scripts/c-drive-guard.mjs); a new entry fails the run, named by its path. Every child's TEMP is in
+// this run's own scratch: the side chain's sideTemp below, each Python worker's scratch/tmp. A BOOKS_* fixture root on C:
+// is refused first, before anything is made.
+{const refusal=cDriveEnvRefusal(process.env,root);if(refusal){fs.writeSync(2,refusal+'\n');process.exit(1);}}
+const cDrive=startCDriveGuard();
 const fixture=JSON.parse(fs.readFileSync(path.join(root,'scripts/qa-runtime.json'),'utf8'));
 // The QA runtime is identified by the pinned hashes below; its folder is machine-local. BOOKS_QA_RUNTIME_ROOT names a
 // folder holding python/ and ffmpeg/ (the pinned default lived in a worktree that no longer exists).
@@ -24,13 +31,12 @@ const fixtureRootMap = {"test_automatic_processing.AREA":"scratch/a","test_local
 // scripts run in one chain beside the Python workers; they used to run before and after them, on the deadline's critical
 // path. Same checks, in the same order inside the chain, each bounded by the same deadline, and a failure still fails the
 // gate, but only after every Python worker and the chain have finished.
-const sideEnv={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
+// 2026-11-19: the chain's TEMP is this run's own scratch/side-temp, removed at the end. It used to inherit the caller's
+// TEMP, and tests/main-startup.test.mjs left books-main-* folders in the real user Temp on C:.
+const gateScratch=trackGateScratch(root),sideTemp=gateScratch.claim('scratch/side-temp');
+const inheritedEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^(TEMP|TMP|TMPDIR)$/i.test(key)));
+const sideEnv={...inheritedEnv,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||''),TEMP:sideTemp,TMP:sideTemp,TMPDIR:sideTemp};
 function runAsync(exe,args){return new Promise(resolve=>{if(deadline<=Date.now()){resolve({status:null,error:null,timedOut:true,stdout:'',stderr:''});return;}const out=[],err=[];let error=null,timedOut=false;const child=spawn(exe,args,{cwd:root,env:sideEnv,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));child.stdout.on('data',d=>out.push(d));child.stderr.on('data',d=>err.push(d));child.on('error',e=>{error=e.message;});child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});});}
-// Containment is a prerequisite, not a test racing the workers it protects.
-// This script only parses source and inert controls; no native key rename runs.
-const containment=await runAsync(python,['-I','-B',path.join(root,'tests','test_registry_rename_containment.py')]);
-if(containment.error||containment.timedOut||containment.status!==0)throw Error('Registry rename containment refused before worker startup: '+(containment.error||containment.stderr||containment.status));
-console.log('Registry rename containment preflight passed before aggregate worker startup');
 const syntaxFiles=['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js','desktop/startup.js','web/load-state.js','desktop/folder-picker.js'],nodeTests=[...CANONICAL_NODE_ENTRIES];
 const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)||name==='uninstall-launch-contract.test.mjs').sort();
 function sideChecks(){return (async()=>{const log=[];let failure=null,nodeOutput='';
@@ -167,10 +173,18 @@ function inventory(directory,relative=''){
 }
 // 2026-10-29: the gate removes the scratch it made when it ends, pass or fail (scripts/gate-scratch.mjs). A failure keeps
 // only the worker copies it names as its evidence and says so. Every run used to leave its 13 worker copies behind.
-const gateScratch=trackGateScratch(root);let gateError=null,passLine=null;
+// (gateScratch itself is made above, with the side chain's TEMP.)
+let gateError=null,passLine=null;
 const phases=phaseAccounting(nodeTests);  // all18 prior entries accounted for, plus the additive pure contract
 try{
 fs.mkdirSync(gateScratch.claim('scratch/source-fallback-2026-10-11'),{recursive:true});gateScratch.claim('scratch/f');  // the side chain's fixture root
+fs.mkdirSync(sideTemp);  // fresh or refuse, like each worker copy; the containment preflight below is its first user
+// Containment is a prerequisite, not a test racing the workers it protects (inside this block since 2026-11-19, so a
+// refusal still removes the scratch made above).
+// This script only parses source and inert controls; no native key rename runs.
+const containment=await runAsync(python,['-I','-B',path.join(root,'tests','test_registry_rename_containment.py')]);
+if(containment.error||containment.timedOut||containment.status!==0)throw Error('Registry rename containment refused before worker startup: '+(containment.error||containment.stderr||containment.status));
+console.log('Registry rename containment preflight passed before aggregate worker startup');
 const inputs=inventory(root),batches=pythonBatches(patterns);
 const side=sideChecks();  // beside the Python workers (see sideChecks)
 const workers=batches.map((batch,i)=>{
@@ -242,5 +256,9 @@ passLine='BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({phases,python_cases:pyt
 }catch(error){gateError=error;}
 const tidy=gateScratch.finish(Boolean(gateError));
 for(const line of tidy.lines){if(gateError||tidy.left.length)console.error(line);else console.log(line);}
+// After every child has ended and the scratch is gone: anything new on C: fails the run, named by its path.
+const cDriveResult=cDrive.finish();
+for(const line of cDriveResult.lines){if(gateError||cDriveResult.error)console.error(line);else console.log(line);}
 if(gateError)throw gateError;  // the same error and exit code as before, after the cleanup
+if(cDriveResult.error)throw Error(cDriveResult.error);
 console.log(passLine);

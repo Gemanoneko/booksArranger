@@ -118,7 +118,7 @@ class MigrationPlanningTests(unittest.TestCase):
         self.assertEqual(status['jobs'][0]['output'],original)
 
     def test_plan_publication_never_overwrites_and_pinned_read_rejects_change(self):
-        base=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'migration-plan-publication';base.mkdir(parents=True,exist_ok=True)
+        base=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'migration-plan-publication';base.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(dir=base) as name:
             folder=Path(name);path=folder/'plan.json'
             plan={'database':str(folder/'data'/'catalog.sqlite'),'roots':{'Audiobooks':str(folder/'source')},'publications':[],'held':[]}

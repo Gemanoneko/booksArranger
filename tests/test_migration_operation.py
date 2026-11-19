@@ -15,7 +15,7 @@ import test_publication_locations as fixture
 
 class MigrationOperationTests(unittest.TestCase):
     def setUp(self):
-        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'migration-operation';area.mkdir(parents=True,exist_ok=True)
+        area=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'migration-operation';area.mkdir(parents=True,exist_ok=True)
         self.temp=tempfile.TemporaryDirectory(dir=area);self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name)
         data=self.base/'data';data.mkdir();self.database=data/'catalog.sqlite'
         f=fixture.PublicationLocationsTests();f.setUp();self.addCleanup(f.doCleanups);self.f=f

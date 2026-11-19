@@ -8,7 +8,7 @@ from native_io import VerifiedFile,DirectoryBoundary,BoundaryError
 from source_cleanup import single_stream
 from test_m4b_preservation import fixture,add_chapter_graph,unpack
 
-SCRATCH=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'attention-audio-admission'
+SCRATCH=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(Path(__file__).resolve().parents[1]/'scratch')))/'attention-audio-admission'
 
 class ReadAdmissionTests(unittest.TestCase):
     def setUp(self):

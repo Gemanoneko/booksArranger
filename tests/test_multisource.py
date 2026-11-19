@@ -10,7 +10,7 @@ from scanner import Inventory, connect
 from scan_wait import finish_scan
 from source_config import load_source_config, normalize_sources
 
-SCRATCH=Path('C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared')
+SCRATCH=Path(__file__).resolve().parents[1]/'scratch'/'multisource'
 
 
 class MultiSourceTests(unittest.TestCase):
