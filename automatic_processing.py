@@ -788,6 +788,9 @@ class AutomaticProcessing:
                   try:row=self.merge.reviews._row('Audiobooks',identity)
                   except ValueError:
                       checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                  # 0.30.0 (Futaba's QA A): the book is named from the moment it is taken, not only once its research starts
+                  # (the first row read "Researching books · 1 of 27 books · Working" with no book).
+                  self.current={'title':row.get('title_clue') or '','source':None,'stage':None}
                   if row.get('manual_conversion'):
                       checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
                   job=self.merge.candidate_status(identity)

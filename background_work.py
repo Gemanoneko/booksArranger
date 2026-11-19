@@ -242,8 +242,10 @@ class Reader:
                                       fraction=percent / 100 if type(percent) in (int, float) and 0 <= percent <= 100 else None,
                                       **_amount(percent, 100, 'percent')))
             else:
+                # 0.30.0 (Futaba's QA A): a press that reports its count (press_progress) has an amount, e.g. an Approve's files.
                 self.rows.append(_row(id='action:' + running['id'], kind='action', label_key=running.get('action'), subject=running.get('title') or '',
-                                      book_id=running.get('book_id'), count=running.get('n')))
+                                      book_id=running.get('book_id'), count=running.get('n'),
+                                      **_amount(running.get('done'), running.get('total'), running.get('unit') or 'files')))
         for item in self.queue.get('queued_actions') or []:
             if isinstance(item, dict):
                 self.waiting.append(_item(id='action:' + item['id'], kind='action', label_key=item.get('action'), subject=item.get('title') or '',

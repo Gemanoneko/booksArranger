@@ -943,8 +943,12 @@ class CandidateReviewService:
                 reasons=[reason for reason in reasons if reason!=collision]
             if reasons:raise ValueError('; '.join(reasons))
             members={m['member_key']:m for m in row['members']};sources=[]
+            # 0.30.0 (Futaba's QA A): the running press shows how many source files are checked (press_progress).
+            import press_progress
+            checking=[key for key in row['track_order'] if key in row['included']]
             for key in row['track_order']:
                 if key not in row['included']:continue
+                press_progress.report(len(sources),len(checking))
                 m=members[key];stored=ctx['source_hashes'][key];proof=held.get(os.path.normcase(os.path.abspath(m['path'])))
                 if proof is not None:
                     if proof['sha256']!=stored['sha256']:raise ValueError('Source changed — review required')

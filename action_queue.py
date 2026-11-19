@@ -467,7 +467,7 @@ class ActionQueue:
         with self.lock:
             self._prune()
             queued = [self._shown(item) | {'position': index + 1, 'blocker': {'kind': item['blocker']}} for index, item in enumerate(self.items)]
-            running = None if self.running is None else self._shown(self.running)
+            running = None if self.running is None else self._shown(self.running) | self._progress()
             outcomes = copy.deepcopy(self.outcomes)
         return {'queued_actions': queued, 'queue_running': running, 'queue_outcomes': outcomes}
 
@@ -683,8 +683,24 @@ class ActionQueue:
             server.merge_admissions -= 1
             server.control_condition.notify_all()
 
+    def _progress(self):
+        """0.30.0 (Futaba's QA A): how far the running press has got, as its worker thread reported it (press_progress):
+        {'done', 'total', 'unit'}, or nothing."""
+        import press_progress
+        found = press_progress.read(self.__dict__.get('_runner_ident'))
+        return {'done': found[0], 'total': found[1], 'unit': found[2]} if found else {}
+
     def _run(self, item):
         """The outcome for the page, or None when a blocker refused it (it is queued again at the front)."""
+        import press_progress
+        self._runner_ident = threading.get_ident()
+        press_progress.clear()
+        try:
+            return self._run_counted(item)
+        finally:
+            press_progress.clear()
+
+    def _run_counted(self, item):
         merge = self.server.merge
         # 0.30.0: an action restored from before a restart does its own work only; the conversion queue and the cleanup
         # backlog start after a restart only by the restart intent's rules (Senua R-M1..R-M3, S-m8).
