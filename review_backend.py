@@ -429,7 +429,8 @@ class CandidateReviewService:
                 self.page_local.jobs[job['manifest']['candidate_id']]={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],
                     'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False}),'destination':job_destination(job['manifest'])}
                 if isinstance(job['manifest'].get('retry_intent'),dict):self.page_local.jobs[job['manifest']['candidate_id']]['retry_parent_job_id']=job['manifest']['retry_intent'].get('parent_job_id')
-                if job['manifest'].get('m4b_repair'):
+                # 0.30.0: damaged M4B parts repaired before their join show in the same Repaired list.
+                if job['manifest'].get('m4b_repair') or ((job.get('output') or {}).get('validation') or {}).get('source_working_repairs'):
                     from audio_jobs import repair_record;repaired=repair_record(job)
                     if repaired:self.page_local.jobs[job['manifest']['candidate_id']]['repaired']=repaired
             if status=='output_attention' and hasattr(self.jobs,'attention_summary'):attention=self.jobs.attention_summary(retry=False)
@@ -910,11 +911,12 @@ class CandidateReviewService:
             return self._write(row,ctx,effect=effect)
 
     def source_chapter_plan(self,row,member,source,stop,*,joined):
-        from audio_pipeline import source_chapters,verified_source_chapters,ChapterValidationError
+        from audio_pipeline import source_chapters,part_chapter_plan,ChapterValidationError
         activity=self.__dict__.setdefault('_chapter_activity',{})
         try:
             if not joined:return {'chapters':source_chapters(member['path'],self.cache,stop,float(member.get('duration') or 0)),'terminal_end_correction':None}
-            return verified_source_chapters(member['path'],self.cache,stop,float(member.get('duration') or 0),source=source,
+            # 0.30.0: a damaged .m4b part is planned on its repaired copy, as its conversion repairs it (audio_pipeline).
+            return part_chapter_plan(member['path'],self.cache,stop,float(member.get('duration') or 0),source=source,
                 on_check=lambda value:activity.__setitem__(row['id'],copy.deepcopy(value)))
         except ChapterValidationError as error:
             error.admission_error={'chapter_diagnostic':copy.deepcopy(error.chapter_diagnostic)}

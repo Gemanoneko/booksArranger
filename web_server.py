@@ -40,7 +40,7 @@ def version():
 
 CLEANUP_STEPS = {'recovery copies', 'originals', 'temporary', 'folders', 'former outputs', 'verifying replacement', 'retiring former outputs'}
 # Conversion steps as the four steps shown to the user (Step N of 4); measured sub-steps share their step.
-CONVERSION_STEPS = {'checking sources': 1, 'preparing': 1, 'source copies': 1, 'checking audio': 2, 'matching format': 2, 'normalizing': 2,
+CONVERSION_STEPS = {'checking sources': 1, 'repairing': 1, 'preparing': 1, 'source copies': 1, 'checking audio': 2, 'matching format': 2, 'normalizing': 2,
                     'joined audio': 2, 'creating': 3, 'encoding': 3, 'checking': 4, 'copying': 4, 'publishing': 4}
 ACTIVITY_STATES = {'Running': 'running', 'Pausing': 'pausing', 'Paused': 'paused', 'Needs attention': 'attention'}
 ACTIVITY_ORDER = {'conversion': 0, 'cleanup': 1, 'identity': 2, 'series': 3, 'scan': 4}

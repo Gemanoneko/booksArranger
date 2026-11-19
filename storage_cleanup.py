@@ -18,8 +18,9 @@ from scanner import connect
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, VerifiedDirectory, DirectoryNotEmptyError, DirectoryDispositionUnsupported, ordinary
 from source_cleanup import packed, stamp, single_stream
 from storage_relocation_native import facts_match, retained_job, retained_path, managed_read_path
-# The MP3 trailing-tag repair's private copy and proof (audio_pipeline._mp3_tag_copy); exact producer receipts decide their bytes.
-TAG_REPAIR=re.compile(r'tag-repair-[0-9a-f]{32}\.(?:mp3|json)')
+# The MP3 trailing-tag repair's private copy and proof (audio_pipeline._mp3_tag_copy), and (0.30.0) a damaged M4B part's repaired
+# copy (audio_pipeline._repair_part_copy); exact producer receipts decide their bytes.
+TAG_REPAIR=re.compile(r'tag-repair-[0-9a-f]{32}\.(?:mp3|json)|part-repair-[0-9a-f]{32}\.m4b')
 
 TERMINAL = {'removed', 'absent_after_intent'}
 # Ruling 76b (Sergei 2026-10-31): a folder cleanup an earlier version finished ('completed' or 'unsupported') while it kept a
