@@ -100,6 +100,83 @@ class PlanReviewTests(SortedCatalog):
                          [(job, 'Kept as published while the data folder move is unfinished; left as it is')])
 
 
+class QAFindingTests(SortedCatalog):
+    """Futaba's 0.30.0 QA: C1 (the series language decided from FantLab's own cycle when the book's language is Unknown)
+    and C3 (an unlisted or refused book in an approval says so)."""
+
+    def test_c1_an_unknown_language_book_takes_the_cycles_original_name(self):
+        import author_rules, sorting_moves
+        from test_sorting_030 import cycle
+        job = self.book("Rowling J. K\\Гарри Поттер и философский камень - Rowling J. K.m4b", 'Rowling J. K', 'Гарри Поттер и философский камень', language='Unknown')
+        with contextlib.closing(sqlite3.connect(self.database)) as db:
+            cycle(db, 3650, 'Гарри Поттер', 'Harry Potter', 'en')
+            cycle(db, 100, 'Дозоры', 'Дозоры', 'ru')
+            db.commit()
+            manifest = json.loads(db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?', (job,)).fetchone()[0])
+            series = {'name': 'Гарри Поттер', 'number': '1', 'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work3650'}
+            review = sorting_moves.canonical(db, manifest, author_rules.load(self.database), series)[0]
+            self.assertEqual(review['series'], 'Harry Potter', 'was «Гарри Поттер»: only an "Other" language was looked at')
+            russian = sorting_moves.canonical(db, manifest, None, {'name': 'Дозоры', 'number': '1', 'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work100'})[0]
+            self.assertEqual(russian['series'], 'Дозоры', 'a cycle written in Russian keeps its name')
+            manifest['metadata']['original_language'] = 'Russian'
+            self.assertEqual(sorting_moves.canonical(db, manifest, None, series)[0]['series'], 'Гарри Поттер', 'a book recorded as a Russian original keeps it')
+
+    def test_c3_an_unlisted_or_refused_book_in_an_approval_says_so(self):
+        from merge_service import MergeService
+        listed = self.book('Роулинг Джоан\\Listed - Роулинг Джоан.m4b', 'Роулинг Джоан', 'Listed', language='Unknown')
+        refused = self.book('Роулинг Джоан\\Gone - Роулинг Джоан.m4b', 'Роулинг Джоан', 'Gone', language='Unknown', create=False)
+        moved = []
+        merge = MergeService.__new__(MergeService)
+        merge.inventory = SimpleNamespace(database=self.database, output_root=str(self.sorted), worker=None)
+        merge._sorting_move = lambda job_id, target: moved.append(job_id) or {'state': 'move_queued'}
+        seen = merge.sorting_moves()
+        answer = merge.sorting_moves_apply(seen['digest'], [listed, refused, 'job-unknown'])
+        self.assertEqual(moved, [listed])
+        self.assertEqual([(r['job_id'], r['state'], r.get('reason', '')) for r in answer['results']],
+                         [(listed, 'move_queued', ''), (refused, 'refused', 'The audiobook is not where the catalog says'),
+                          ('job-unknown', 'not_listed', 'Not in the list')])
+
+
+class ScriptTests(unittest.TestCase):
+    """scripts/sorting_moves.py: it names the app and port it talks to, and the list's digest and count, before it
+    approves anything; any book not moved makes it exit with an error (C3)."""
+
+    def run_script(self, argv, plan, results):
+        import io, importlib.util
+        spec = importlib.util.spec_from_file_location('sorting_moves_script', Path(__file__).resolve().parents[1] / 'scripts' / 'sorting_moves.py')
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        calls = []
+
+        def call(port, path, data, token):
+            calls.append(path)
+            return plan if path == '/api/sorting-moves' else {'digest': data['digest'], 'results': results}
+        out = io.StringIO()
+        with mock.patch.object(script, '_token', return_value='t'), mock.patch.object(script, '_call', side_effect=call), \
+                mock.patch.object(script, '_health', return_value={'application': 'Books Arranger', 'version': '0.30.0', 'pid': 42, 'port': 5210}), \
+                mock.patch('sys.stdout', out):
+            code = script.main(argv)
+        return code, out.getvalue(), calls
+
+    def plan(self):
+        return {'schema': 'books-sorting-moves-v1', 'output_root': 'Z:\\S', 'items': [{'job_id': 'a', 'from': 'x', 'to': 'y', 'items': ['author']}], 'refused': [],
+                'counts': {'series': 0, 'author': 1, 'series_language': 0, 'moves': 1, 'refused': 0},
+                'refused_counts': {'series': 0, 'author': 0, 'series_language': 0}, 'digest': 'd' * 64}
+
+    def test_it_names_the_app_the_list_and_fails_when_a_book_did_not_move(self):
+        code, text, calls = self.run_script(['--apply', 'd' * 64, '--job', 'a', '--job', 'zz'], self.plan(),
+                                            [{'job_id': 'a', 'state': 'move_queued'}, {'job_id': 'zz', 'state': 'not_listed', 'reason': 'Not in the list'}])
+        self.assertIn('127.0.0.1:5210', text)
+        self.assertIn('Books Arranger 0.30.0', text)
+        self.assertIn('d' * 64, text)
+        self.assertIn('1 book', text)
+        self.assertLess(text.index('127.0.0.1:5210'), text.index('zz not_listed'), 'named before anything is approved')
+        self.assertEqual(calls, ['/api/sorting-moves', '/api/sorting-moves/apply'])
+        self.assertNotEqual(code, 0, 'was 0: a book not moved said nothing')
+        code, _, _ = self.run_script(['--apply', 'd' * 64], self.plan(), [{'job_id': 'a', 'state': 'move_queued'}])
+        self.assertEqual(code, 0, 'positive control: everything moved')
+
+
 class FollowUpRetryTests(SeriesFolderBackfillTests):
     """M2: a follow-up move refused for a passing reason (Quit, a move already running, the queue) is tried again by the
     next pass; only a lasting refusal is recorded."""
