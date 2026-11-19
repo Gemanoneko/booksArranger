@@ -493,15 +493,23 @@ def join(service, items, title, author=None):
     effects = {'queued': 0, 'failed': 0, 'requests': 0, 'approvals': 0}
     kind = None
     jobs = service.jobs
-    with service.inventory.group_lock, connect(service.inventory.database) as db:
-        db.execute('BEGIN IMMEDIATE')
+    database = service.inventory.database
+    marks = json.dumps(ids)
+
+    def changed(db):
+        """Every part is still the book he selected, in this root. Returns how many are approved."""
+        count = 0
         for part in ordered:
             current = db.execute('SELECT revision,superseded,approved,root FROM book_groups WHERE id=?', (part['id'],)).fetchone()
             if current is None or current['superseded']:
                 raise Refused('gone', 'Join cancelled: ' + _cause_text('gone', part['title']) + ' Nothing was joined.', part['title'])
             if current['revision'] != part['revision'] or current['root'] != root:
                 raise Refused('changed', 'Join cancelled: ' + _cause_text('changed', part['title']) + ' Nothing was joined.', part['title'])
-            effects['approvals'] += approved(db, part['id'])
+            count += approved(db, part['id'])
+        return count
+
+    def record_join(db):
+        """The join's own catalog writes, before its regroup (the plan below and the real write make the same ones)."""
         groups.setup(db)
         book_restart.ensure(db)
         setup(db)
@@ -516,55 +524,92 @@ def join(service, items, title, author=None):
         record(db, root, join_id, members, title, len(ordered), prior)
         # The parts stop being books: their approvals and saved values go with them (as Keep as separate books and ruling
         # 71d's regroup drop a set's), so a part never comes back approved.
-        marks = json.dumps(ids)
         db.execute("UPDATE book_groups SET review='',approved=0,changed=0,revision=revision+1 WHERE id IN (SELECT value FROM json_each(?))", (marks,))
         if _table(db, 'candidate_context'):
             db.execute('DELETE FROM candidate_context WHERE id IN (SELECT value FROM json_each(?))', (marks,))
-        groups.sync(db, root)
-        joined = db.execute('SELECT * FROM book_groups WHERE root=? AND scope=? AND superseded=0', (root, group_scope)).fetchone()
-        if joined is None or [m['path'] for m in json.loads(joined['evidence'])['members']] != paths:
-            raise Refused('failed', 'Join cancelled: these books could not be recorded as one book. Nothing was joined.')
-        left = db.execute('SELECT count(*) FROM book_groups WHERE superseded=0 AND id IN (SELECT value FROM json_each(?))', (json.dumps(ids),)).fetchone()[0]
-        if left:
-            raise Refused('failed', 'Join cancelled: these books could not be recorded as one book. Nothing was joined.')
-        row = {'id': joined['id'], 'members': [{'path': path} for path in paths]}
-        entries = [('book', 'title', title, '', '', '')]
-        if author:
-            entries.append(('book', 'author', author, '', '', ''))
-        if 'series' in names:
-            entries += [('book', 'series', names['series'], '', '', ''), ('book', 'number', names['number'], '', '', '')]
-        entered_names.save_in_transaction(db, row, entries)
-        # Answer 8 (review): automatic processing holds the joined book for his approval, as a Save in Edit names does.
-        context = {'names_approval_pending': {'revision': joined['revision'], 'fingerprint': joined['fingerprint']}, 'joined_by_you': {'join_id': join_id, 'at': _stamp()}}
-        db.execute('CREATE TABLE IF NOT EXISTS candidate_context(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data TEXT NOT NULL)')
-        db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)', (joined['id'], joined['revision'], json.dumps(context, ensure_ascii=False)))
-        # Last, under the conversion queue's lock until the commit: a part's job is either claimed before (Busy, nothing
-        # joined) or sees the join (set aside, so it never starts). Not waited for: a press that holds that lock while it
-        # waits for this transaction's writer would wait on us; it is tried again shortly instead.
+
+    def revision(db):
+        found = db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() if _table(db, 'book_catalog_revision') else None
+        return found[0] if found else None
+
+    # Senua's 0.30.0 review, M6: the join held the catalog writer across a whole regroup of the root and then waited up to
+    # 5 s for the conversion queue's lock, the reverse of the app's order (the converter, Edit names' Save and the regroup
+    # pass take the queue lock, then the catalog writer). A converter holding that lock while it waited for the writer
+    # stalled both for 5 s, wasted the regroup and made the join retry. Now, as groups.presync does: the regroup's inputs
+    # are planned with the join's writes in a write transaction rolled back at once, the groups are built from a read
+    # snapshot with no writer held, and only then, in the app's order (the queue lock, then the writer), one short
+    # transaction makes every write and stores the planned groups. It is still all or nothing; anything that changed
+    # meanwhile (the files, another book's approval) is regrouped in that same transaction instead (the old slow path).
+    with service.inventory.group_lock:
+        planned = built = base = None
+        for _attempt in range(3):
+            with connect(database) as db:
+                db.execute('BEGIN IMMEDIATE')
+                base = revision(db)
+                changed(db)
+                record_join(db)
+                planned = groups._sync_inputs(db, root)
+                db.execute('ROLLBACK')
+            with connect(database) as db:
+                db.execute('BEGIN')
+                if revision(db) == base:
+                    built = groups._sync_build(db, root, planned)
+                db.execute('ROLLBACK')
+            if built is not None:
+                break
         lock = getattr(jobs, '_lock', None)
-        if lock is not None and not lock.acquire(timeout=5):
+        if lock is not None and not lock.acquire(timeout=30):
             raise Busy('The conversion queue is busy. The join waits its turn.')
         try:
-            claimed, checking = (getattr(jobs, '_claimed', None), (dict(getattr(jobs, '_priority_status', None) or {}))) if jobs is not None else (None, {})
-            checking = checking.get('job_id') if checking.get('state') == 'checking' else None
-            now = _stamp()
-            for part in ordered:
-                found = facts(db, part['id'], claimed, checking)
-                if found['state'] == 'converting':
-                    raise Busy('«%s» is converting. The join waits its turn.' % part['title'])
-                if found['state'] == 'finished':
-                    raise Refused('finished', 'Join cancelled: ' + _cause_text('finished', part['title']) + ' Nothing was joined.', part['title'])
-                effects['queued'] += found['queued']
-                effects['failed'] += found['failed']
-                effects['requests'] += found['request']
-                kind = kind or found['request_kind']
-                for job in found['jobs']:
-                    if job['state'] == 'pending':
-                        db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'", (JOIN_REASON, now, job['job_id']))
-                    db.execute('INSERT OR IGNORE INTO audio_job_set_aside VALUES(?,?,?,?,?)', (job['job_id'], part['id'], part['revision'], 'join', now))
-                for parent, _child, _state, _kind in found['requests']:
-                    m4b_readmission.withdraw(db, parent, time.time(), any_state=True)
-            db.commit()
+            with connect(database) as db:
+                db.execute('BEGIN IMMEDIATE')
+                if revision(db) != base:
+                    built = None  # the files changed since the plan: regrouped below, in this transaction
+                effects['approvals'] = changed(db)
+                record_join(db)
+                actual = groups._sync_inputs(db, root)
+                if built is None or actual != planned:
+                    built = groups._sync_build(db, root, actual)
+                groups._sync_write(db, root, revision(db), built, actual)
+                joined = db.execute('SELECT * FROM book_groups WHERE root=? AND scope=? AND superseded=0', (root, group_scope)).fetchone()
+                if joined is None or [m['path'] for m in json.loads(joined['evidence'])['members']] != paths:
+                    raise Refused('failed', 'Join cancelled: these books could not be recorded as one book. Nothing was joined.')
+                left = db.execute('SELECT count(*) FROM book_groups WHERE superseded=0 AND id IN (SELECT value FROM json_each(?))', (marks,)).fetchone()[0]
+                if left:
+                    raise Refused('failed', 'Join cancelled: these books could not be recorded as one book. Nothing was joined.')
+                row = {'id': joined['id'], 'members': [{'path': path} for path in paths]}
+                entries = [('book', 'title', title, '', '', '')]
+                if author:
+                    entries.append(('book', 'author', author, '', '', ''))
+                if 'series' in names:
+                    entries += [('book', 'series', names['series'], '', '', ''), ('book', 'number', names['number'], '', '', '')]
+                entered_names.save_in_transaction(db, row, entries)
+                # Answer 8 (review): automatic processing holds the joined book for his approval, as a Save in Edit names does.
+                context = {'names_approval_pending': {'revision': joined['revision'], 'fingerprint': joined['fingerprint']}, 'joined_by_you': {'join_id': join_id, 'at': _stamp()}}
+                db.execute('CREATE TABLE IF NOT EXISTS candidate_context(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data TEXT NOT NULL)')
+                db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)', (joined['id'], joined['revision'], json.dumps(context, ensure_ascii=False)))
+                # Under the conversion queue's lock until the commit: a part's job is either claimed before (Busy, nothing
+                # joined) or sees the join (set aside, so it never starts).
+                claimed, checking = (getattr(jobs, '_claimed', None), (dict(getattr(jobs, '_priority_status', None) or {}))) if jobs is not None else (None, {})
+                checking = checking.get('job_id') if checking.get('state') == 'checking' else None
+                now = _stamp()
+                for part in ordered:
+                    found = facts(db, part['id'], claimed, checking)
+                    if found['state'] == 'converting':
+                        raise Busy('«%s» is converting. The join waits its turn.' % part['title'])
+                    if found['state'] == 'finished':
+                        raise Refused('finished', 'Join cancelled: ' + _cause_text('finished', part['title']) + ' Nothing was joined.', part['title'])
+                    effects['queued'] += found['queued']
+                    effects['failed'] += found['failed']
+                    effects['requests'] += found['request']
+                    kind = kind or found['request_kind']
+                    for job in found['jobs']:
+                        if job['state'] == 'pending':
+                            db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'", (JOIN_REASON, now, job['job_id']))
+                        db.execute('INSERT OR IGNORE INTO audio_job_set_aside VALUES(?,?,?,?,?)', (job['job_id'], part['id'], part['revision'], 'join', now))
+                    for parent, _child, _state, _kind in found['requests']:
+                        m4b_readmission.withdraw(db, parent, time.time(), any_state=True)
+                db.commit()
         finally:
             if lock is not None:
                 lock.release()
