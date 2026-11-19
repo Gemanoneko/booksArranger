@@ -18,7 +18,7 @@ from sqlite_retry import transaction
 from native_io import BoundaryError, DirectoryBoundary as NativeBoundary, VerifiedFile as NativeFile, ordinary, kernel
 from source_cleanup import packed, stamp, single_stream
 from audio_jobs import JobWorkingHold
-from storage_relocation_native import facts_match, retained_job
+from storage_relocation_native import facts_match, retained_job, retained_job_ids
 
 
 class ProducerNotClosed(BoundaryError, JobWorkingHold):
@@ -823,7 +823,10 @@ class WorkingLifecycle:
         self._background_thread = threading.get_ident()
         try:
             states=('closed','published') if storage is not None else ('closed',)
-            for attempt in self._rows("SELECT * FROM working_attempts WHERE state IN ("+','.join('?' for _ in states)+") ORDER BY updated LIMIT ?", (*states,limit)):
+            # 0.30.0 item A: retained jobs are left out of the query, not skipped after it, so a retained oldest attempt
+            # no longer takes the whole limit and stops every later one (housekeeping runs in retained-runtime mode now).
+            held=json.dumps(sorted(retained_job_ids(self.database)))
+            for attempt in self._rows("SELECT * FROM working_attempts WHERE state IN ("+','.join('?' for _ in states)+") AND job_id NOT IN (SELECT value FROM json_each(?)) ORDER BY updated LIMIT ?", (*states,held,limit)):
                 if retained_job(self.database,attempt['job_id']):
                     continue
                 try:

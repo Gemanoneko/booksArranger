@@ -94,6 +94,10 @@ class ChallengeDetected(ValueError):pass
 # transaction took 10.3-10.5 s on the live copy) is a short wait for that book or request, never the end of a run.
 CATALOG_BUSY_REASON='The catalog was busy; this book is checked again in a minute'
 CATALOG_BUSY_WAIT=60
+# 0.30.0 item 3 (Sergei 2026-11-18): a book whose every series source was only closed waits for its series, at most this
+# many times in a row; then it is published without one as before (series backfill looks it up later).
+SERIES_WAIT_REASON='Waiting for the series: its sources are busy. The app tries again by itself.'
+SERIES_WAIT_LIMIT=3
 
 
 def catalog_busy(error):
@@ -954,7 +958,8 @@ class PublicResearch:
         gaps=[gap for gap in ('original_title','series') if gap in (filled.get('unfilled') or ()) and not (gap=='original_title' and his)]
         if not gaps:return filled
         base=edition_volume(title)[0];scratch={'sources':[],'evidence':[],'reasons':[]};budget={'remaining':self.HELD_TRANSLATION_BUDGET}
-        try:self._gap_fill_once({'gaps':gaps,'fields':{'author':{'partial':bool(fields['author'].get('partial'))}}},base,author,stop,budget,[],progress,scratch)
+        waits=[]
+        try:asked=self._gap_fill_once({'gaps':gaps,'fields':{'author':{'partial':bool(fields['author'].get('partial'))}}},base,author,stop,budget,waits,progress,scratch)
         except InterruptedError:raise  # a pause stops research here, as any request does
         except Exception:return filled  # best effort: the book is filed as the cache had it
         result['translation_lookup']={'title':base,'author':author,'gaps':gaps,'requests':self.HELD_TRANSLATION_BUDGET-budget['remaining'],
@@ -962,6 +967,14 @@ class PublicResearch:
         again={'sources':[]};found=self._gap_fill(local,title,author,stop,{'remaining':0},[],progress,again)
         known={(source.get('url'),source.get('api_url')) for source in result['sources']}
         result['sources'].extend(source for source in again['sources'] if (source.get('url'),source.get('api_url')) not in known)
+        series_asked=asked.get('series_asked') or []
+        if 'series' in gaps and not found.get('series') and series_asked and all(outcome=='limited' for _,outcome in series_asked):
+            # 0.30.0 item 3 (Sergei 2026-11-18): every series source asked was only rate-limited (the app's bounds, the site's
+            # pause or pacing) and none answered: the book waits for its series (_local_lookup) instead of being published
+            # without one. A source that answered "no series" (or something unusable), or one that could not be reached at
+            # all, publishes as before.
+            wait=_wait(waits,budget.get('answered'))
+            if wait:found=dict(found,series_wait=wait,series_closed=[source for source,_ in series_asked])
         return found
 
     def _part_set(self,row,root,stop):
@@ -1563,6 +1576,15 @@ class PublicResearch:
                 original={'state':'none','title':''}
         result['work']=work
         if original is not None:result['original_title']=original
+        if names and names[0]!=NO_AUTHOR and not typed_author and fields['author'].get('state') not in ('entered','approved'):
+            # 0.30.0 item 5 (Sergei 2026-11-18): one author folder per author, the Latin surname-first form the library
+            # already uses ("Rowling J. K"), whichever source answered: a rule's name, or the same words surname first
+            # (canonical_names.author; never a guess). His typed or approved spelling is his answer and stays.
+            import canonical_names
+            filed,_=canonical_names.author(names[0],self.rules())
+            if filed and filed!=names[0]:
+                names=[filed]+names[1:]
+                if filed not in authors:authors.append(filed);work['author_aliases']=author_variants(authors)
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
         facts['research_version']=RESEARCH_VERSION  # ruling 71f: a job planned under this research needs no re-check
@@ -1615,6 +1637,20 @@ class PublicResearch:
         # Nothing waits for a source (0.22.1): the missing fields were read from the cache, the rest is filled later.
         result['wait']=None
         result['gap_wait']=None
+        series_wait=filled.get('series_wait')
+        if series_wait and not review['series'] and not result['reasons']:
+            # 0.30.0 item 3 (Sergei 2026-11-18): every series source research asked was only closed (paused, limited, busy):
+            # the book waits for its series ("Waiting for source", the wait's own retry time) instead of being published
+            # without one. The wait ends: the sources are asked again at its retry time, and after SERIES_WAIT_LIMIT waits
+            # in a row the book is published without a series as before (series backfill then finds it). A source that
+            # answered "no series" never makes it wait.
+            waited=row.get('_series_waits',0)
+            waited=waited if type(waited) is int and 0<=waited<1000 else 0
+            if waited<SERIES_WAIT_LIMIT:
+                result['reasons']=[SERIES_WAIT_REASON];result['wait']=dict(series_wait);result['series_waits']=waited+1
+                facts['gap_search']['series_wait']={'sources':list(filled.get('series_closed') or []),'tries':waited+1}
+            else:
+                facts['gap_search']['series_wait']={'sources':list(filled.get('series_closed') or []),'tries':waited,'published_without':True}
         return result
 
     def fill_gaps(self,ask,gaps,stop,budget,progress=lambda *_:None):
@@ -1670,13 +1706,26 @@ class PublicResearch:
             progress('FantLab','Filling missing original title')
             catalog=attempt('fantlab',lambda:self._gap_fantlab(title,author,partial,stop,budget,result))
             if catalog:found['catalog']=catalog
+        # 0.30.0 item 3: what each series source did: 'answered' (a series, "none", or an answer it could not use),
+        # 'limited' (only rate-limited: the app's own request bounds, the site's pause or its pacing) or 'closed' (any
+        # other closure: unreachable, the catalog busy).
+        asked=found['series_asked']=[]
+        def series_attempt(source,function):
+            before,seen=len(found['closed']),len(waits)
+            value=attempt(source,function)
+            if len(found['closed'])==before:asked.append((source,'answered'))
+            else:
+                wait=waits[-1] if len(waits)>seen else None
+                limited=wait is not None and (wait.kind in ('app_limit','source_pause') or wait.reason=='Public source cooling down')
+                asked.append((source,'limited' if limited else 'closed'))
+            return value
         if 'series' in gaps:
             # Sergei 2026-10-18: Goodreads is the series source; FantLab's cycle only when Goodreads has none.
             progress('Goodreads','Filling missing series position')
-            series=attempt('goodreads',lambda:self._series_goodreads(title,author,stop,budget,result))
+            series=series_attempt('goodreads',lambda:self._series_goodreads(title,author,stop,budget,result))
             if not series:
                 progress('FantLab','Filling missing series position')
-                series=attempt('fantlab',lambda:self._series_fantlab(title,author,partial,stop,budget,result))
+                series=series_attempt('fantlab',lambda:self._series_fantlab(title,author,partial,stop,budget,result))
             if series:found['series']=series
         if 'original_title' in gaps and not found.get('catalog'):
             progress('Wikidata','Filling missing original-work facts')
@@ -1686,13 +1735,13 @@ class PublicResearch:
                 # referenced series-only adapter below owns that separate gap.
                 if not found.get('catalog') and entry.get('language'):found['catalog']=entry
         if 'series' in gaps and not found.get('series'):
-            series=attempt('wikidata',lambda:self._series_wikidata(title,author,stop,budget,result))
+            series=series_attempt('wikidata',lambda:self._series_wikidata(title,author,stop,budget,result))
             if series:found['series']=series
             if not series:
-                series=attempt('publisher',lambda:self._series_publisher(title,author,stop,budget,result))
+                series=series_attempt('publisher',lambda:self._series_publisher(title,author,stop,budget,result))
                 if series:found['series']=series
             if not series:
-                series=attempt('litres',lambda:self._series_litres(title,author,stop,budget,result))
+                series=series_attempt('litres',lambda:self._series_litres(title,author,stop,budget,result))
                 if series:found['series']=series
         if 'author_full' in gaps and not found.get('catalog'):
             for source,function in (('openlibrary',self._gap_openlibrary),('googlebooks',self._gap_googlebooks),('itunes',self._gap_itunes)):
@@ -1889,7 +1938,9 @@ class PublicResearch:
         if not isinstance(cycle,dict) or not isinstance(cycle.get('children'),list):raise ValueError('Malformed catalog cycle')
         numbered=[c for c in cycle['children'] if isinstance(c,dict) and c.get('deep')==1 and c.get('work_type_id')==work.get('work_type_id') and not c.get('plus')]
         position=next((index for index,child in enumerate(numbered,1) if child.get('work_id')==work['work_id']),None)
-        name=text(cycles[0].get('work_name'))
+        # 0.30.0 item 6 (Sergei 2026-11-18): the series in the language it was written in ("Harry Potter", not «Гарри Поттер»).
+        import canonical_names
+        name=text(canonical_names.series_original(cycle) or cycles[0].get('work_name'))
         if not position or not name:return None
         citation='https://fantlab.ru/work'+str(cycles[0]['work_id'])
         self._gap_receipt(api,result,citation,['series','number'])

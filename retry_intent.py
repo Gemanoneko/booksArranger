@@ -1,5 +1,6 @@
 """Explicit new conversion intent; frozen failed work and author credits stay immutable."""
 import copy,hashlib,json,os
+from manifest_compatibility import same_value  # 0.30.0 sort-1: a frozen data-folder location meets its place after the moves
 from organization import frozen_plan,POLICY
 
 def packed(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))
@@ -15,7 +16,7 @@ def bind(parent,fresh,output_root,*,retention=None,dispose=False):
     if any(key in prior or key in fresh for key in ('replacement_id','replacement_parent_job_id')):raise ValueError('Replacement destination requires its exact authorized lineage; generic route Retry is unavailable')
     if parent['state']!='needs attention' or parent.get('output') or json.loads(parent['journal']).get('publication_intent') or digest(prior)!=parent['manifest_hash']:raise ValueError('Failed parent publication/source binding changed')
     without_route=lambda value:{key:item for key,item in reviewed(value).items() if key not in {'output_root','destination'}}
-    if fresh['job_id']==parent['job_id'] or without_route(prior)!=without_route(fresh):raise ValueError('Frozen approved source/review/cover/policy changed; failed intent retained')
+    if fresh['job_id']==parent['job_id'] or not same_value(without_route(prior),without_route(fresh)):raise ValueError('Frozen approved source/review/cover/policy changed; failed intent retained')
     approved=reviewed(fresh);routing=dict(approved['metadata'],organization_policy=POLICY)
     destination=frozen_plan(approved,output_root,routing)['path']
     target=copy.deepcopy(fresh);target['output_root']=str(output_root);target['destination']=destination
@@ -30,7 +31,7 @@ def bind(parent,fresh,output_root,*,retention=None,dispose=False):
 def validate(manifest,current,output_root):
     try:
         binding=manifest['retry_intent'];approved=binding['approved_manifest']
-        if binding['schema']!='books-explicit-retry-intent-v1' or binding['approved_manifest_sha256']!=digest(approved) or approved!=reviewed(current):return False
+        if binding['schema']!='books-explicit-retry-intent-v1' or binding['approved_manifest_sha256']!=digest(approved) or not same_value(approved,reviewed(current)):return False
         if binding['routing_policy_version']!=POLICY or binding['target_root']!=str(output_root):return False
         routing=dict(approved['metadata'],organization_policy=POLICY)
         if binding['routing_review']!=routing or binding['destination']!=frozen_plan(approved,output_root,routing)['path']:return False

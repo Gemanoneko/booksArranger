@@ -544,6 +544,11 @@ def retained_job(database, job_id):
     return retained_runtime(database) and job_id in current().retained_jobs
 
 
+def retained_job_ids(database):
+    """Every retained job of this catalog (empty outside retained-runtime mode), for a query that must skip them all."""
+    return current().retained_jobs if retained_runtime(database) else frozenset()
+
+
 def retained_path(path, *, parent=False):
     context=current()
     if not context or not context.retained:return None
@@ -689,6 +694,27 @@ def disposed_history_location_match(current, historical):
         _context.require_normal_operation()
         return _key(str(current))==_key(_context.namespace.current_path(historical))
     except RelocationRefused:
+        return False
+
+
+def data_location_match(left, right):
+    """Two recorded strings name the same place in the application data folder (0.30.0 sort-1).
+
+    Bridged only through the selected relocation's own records: the sealed
+    manifest's source and target roots and, after a portable move, the binding's
+    data folder, its origin and every earlier data folder it lists (aliases), so
+    a path recorded before any number of recorded moves meets its current place.
+    Location only: no read, write or disposal authority. Library roots and any
+    other path outside the relocated data folder match only themselves.
+    """
+    if left==right:return True
+    context=_context
+    if context is None or not isinstance(left,str) or not isinstance(right,str):return False
+    try:
+        if _key(context.logical_location(left))!=_key(context.logical_location(right)):return False
+        context.require_normal_operation()
+        return True
+    except ValueError:  # RelocationRefused: outside the relocated data folder, or no live verified catalog
         return False
 
 
