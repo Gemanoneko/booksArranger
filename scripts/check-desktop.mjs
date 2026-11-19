@@ -100,6 +100,7 @@ patterns.push('test_live_status.py','test_background_work.py');  // 0.30.0: the 
 patterns.push('test_recovery_ancestry_moves.py');  // 0.30.0 item B: a cleanup recorded before both storage moves still finds its recovery folder (Brom)
 patterns.push('test_quit_bound.py');  // 0.30.0 item F: Quit closes within seconds; it waits only for real work and says what (waiting_for)
 patterns.push('test_sorting_030.py');  // 0.30.0 sorting items 2-8: series folder moves on approval, series wait, root series folder, one author folder, original series names, trailing part albums, no 30-hour limit
+patterns.push('test_scope_view.py');  // 0.30.0 item E: the Book metadata line from scope_view (repaired text), never the grouping key
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])

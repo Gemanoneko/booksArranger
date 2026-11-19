@@ -78,6 +78,24 @@ function createQuitProgress({ now = () => Date.now() } = {}) {
   },
  };
 }
+// 0.30.0 item F follow-up: an accepted Quit always ends. Per status poll (createQuitProgress facts) this says when the shell
+// stops the engine safely instead of waiting on: 'blocked' at once (the close failed: before, an error box and a half-closed
+// app); 'bound' when work is still named QUIT_WAIT_BOUND_MS after it was first named. The book Sergei chose to finish
+// ("Quit after this book": keepConversion) is waited for as before; the bound starts when it is no longer named. A poll
+// that names nothing resets the clock. null: go on waiting.
+const QUIT_WAIT_BOUND_MS = 15000;
+function createQuitBound({ keepConversion = false, boundMs = QUIT_WAIT_BOUND_MS, now = () => Date.now() } = {}) {
+ let since = null;
+ return {
+  observe(facts) {
+   if (facts && facts.blocked) return 'blocked';
+   const waiting = facts && Array.isArray(facts.waiting) ? facts.waiting : [];
+   if (!waiting.length || keepConversion && waiting.some((item) => item.kind === 'conversion')) { since = null; return null; }
+   if (since === null) since = now();
+   return now() - since >= boundMs ? 'bound' : null;
+  },
+ };
+}
 // Quit anyway: the engine's immediate safe stop (POST /api/desktop/stop-now, as at a Windows sign-out: the book in progress
 // converts again next time; an open file change still ends first), then the shell waits for its own engine host and ends
 // it past its bound (endEngine: endOwnEngine on our own child). An engine that does not answer is stopped through its pipe.
@@ -86,4 +104,4 @@ async function quitNow({ post, endEngine }) {
  try { answer = await post(); } catch { /* its pipe closes next: the same safe stop */ }
  return { answer, engine: await endEngine() };
 }
-module.exports = { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, quitWaiting, createQuitProgress, quitNow };
+module.exports = { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, quitWaiting, createQuitProgress, createQuitBound, QUIT_WAIT_BOUND_MS, quitNow };
