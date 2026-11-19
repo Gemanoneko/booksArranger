@@ -205,7 +205,11 @@ class SeriesBackfill:
 
     def _follow_up(self, job_id):
         """0.30.0 item 2: after an approved book's series was written into it ('done'), its move into the series folder
-        (MergeService.sorting_follow_up: the app's usual verified move, only to the path Sergei approved). Recorded once."""
+        (MergeService.sorting_follow_up: the app's usual verified move, only to the path Sergei approved). Recorded once, when
+        the answer lasts. Senua's 0.30.0 review, M2: a refusal that passes ('later': Quit, the queue, a move already running,
+        a busy catalog) or an unexpected error was recorded for good, and the pass never came back (it retries only rows
+        with no follow_up): the book stayed in its old folder under its new name. Now it is noted (follow_up_wait) and the
+        next pass asks again."""
         entry = self.entry(job_id)
         if not entry or entry['state'] != 'done':
             return
@@ -216,10 +220,14 @@ class SeriesBackfill:
         if not callable(hook):
             return
         try:
-            answer = hook(job_id, record['approved_target'], record.get('new_path'))
+            answer = dict(hook(job_id, record['approved_target'], record.get('new_path')) or {})
         except Exception as error:
-            answer = {'state': 'refused', 'reason': (str(error) or type(error).__name__)[:300]}
-        self._set(job_id, 'done', '', dict(record, follow_up=dict(answer or {}, at=_stamp())))
+            answer = {'state': 'later', 'reason': (str(error) or type(error).__name__)[:300]}
+        if answer.get('state') == 'later':
+            self._set(job_id, 'done', '', dict(record, follow_up_wait=dict(answer, at=_stamp())))
+            return
+        record = {key: value for key, value in record.items() if key != 'follow_up_wait'}
+        self._set(job_id, 'done', '', dict(record, follow_up=dict(answer, at=_stamp())))
 
     # ------------------------------------------------------------------ pass
     def candidates(self):

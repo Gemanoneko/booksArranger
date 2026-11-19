@@ -190,14 +190,14 @@ class DamagedPartTests(unittest.TestCase):
         self.assertTrue(draft['originals_untouched'])
         self.assertEqual({path.name: facts(path) for path in (first, second)}, before)
         self.assertTrue(draft['reopen_allowed'])
-        self.assertFalse(draft['retry_allowed'], 'the same bytes stop the same way; Reopen draft replaces or leaves out the file')
+        self.assertFalse(draft['retry_allowed'], "Sergei's ruling 2026-11-19: no Retry; the line says to get a new copy")
         job = next(job for job in self.service.jobs.status()['jobs'] if job['job_id'] == queued['job_id'])
         failure = json.loads(self.service.jobs._rows('SELECT journal FROM audio_jobs WHERE job_id=?', (job['job_id'],))[0]['journal'])['failure']
         self.assertEqual(failure['part_repair']['kind'], 'unrepairable')
         self.assertFalse(failure['retryable'], 'never retried by the hour on its own')
         media = self.service.jobs.attention_summary([job['job_id']])[job['job_id']].get('media_failure')
         self.assertEqual((media['code'], media['filename']), ('m4b_part_unrepairable', second.name))
-        self.assertEqual(media['hint'], second.name + " is damaged and can't be repaired safely. Replace it with an intact copy.")
+        self.assertEqual((media['status'], media['hint']), ('Need to reacquire', second.name + ' is damaged and cannot be repaired safely. Delete the book, then get a new copy.'))
 
     def joined(self, damaged, *, terminal=True):
         """A joined-book manifest over private parts (as test_terminal_chapters' join), the second part damaged."""
@@ -214,7 +214,7 @@ class DamagedPartTests(unittest.TestCase):
         manifest = {'job_id': str(uuid.uuid4()), 'candidate_id': str(uuid.uuid4()), 'candidate_revision': 1, 'root': str(self.root / 'library'),
                     'destination': str(self.root / 'library' / 'final.m4b'), 'profile': AUTOMATIC_PROFILE, 'encoding_policy': freeze_automatic_policy(sources),
                     'sources': sources, 'cover': {'path': str(cover), 'sha256': pipeline.digest(cover)}, 'comments': '', 'chapters': [],
-                    'part_chapters': [{'name': str(i), 'chapters': plan['chapters']} for i, plan in enumerate(plans)],
+                    'part_chapters': [{'name': str(i), 'chapters': plan['chapters'], **({'repaired_terminal': True} if plan.get('repaired_terminal') else {})} for i, plan in enumerate(plans)],
                     'metadata': {'title': 'Впусти меня', 'canonical_author': 'Линдквист Йон Айвиде'}}
         return manifest, parts
 

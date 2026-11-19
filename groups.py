@@ -386,12 +386,16 @@ def _folder_names_another_author(path,start,index):
         return not (same_person(who,start) or compare_names(who,start) or _shares_surname(who,start))
     return False
 
-_TRAILING_PART_NUMBER = re.compile(r'^(.*?[^\W\d_].*?)[\s_.,:;#№-]*\d{1,3}\s*$')
+# Senua's 0.30.0 review, m1: a part marker is a number of one or two digits set apart from the name by a space or a
+# separator; a longer number is part of the title ("Metro 2033" and "Metro 2034" were both cut to "metro 2", "Book 1984" to
+# "book 1", "Warhammer 40000" to "warhammer 40": the lazy name took the leading digits and the rule the last 1-3).
+_TRAILING_PART_NUMBER = re.compile(r'^(.*?[^\W\d_].*?)[\s_.,:;#№-]+(?<!\d)\d{1,2}\s*$')
 
 
 def _without_part_number(album):
     """0.30.0 item 7: the album without a trailing part number ("dale stewart 04 - darwin's blade 1" -> "dale stewart 04 -
-    darwin's blade"); an album that is only a number («1408») or ends in none stays as it is."""
+    darwin's blade"); an album that is only a number («1408»), ends in a longer number («Metro 2033») or in none stays as
+    it is."""
     match = _TRAILING_PART_NUMBER.match(album)
     return match[1].strip() if match else album
 

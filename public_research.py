@@ -1584,7 +1584,9 @@ class PublicResearch:
             # already uses ("Rowling J. K"), whichever source answered: a rule's name, or the same words surname first
             # (canonical_names.author; never a guess). His typed or approved spelling is his answer and stays.
             import canonical_names
-            filed,_=canonical_names.author(names[0],self.rules())
+            # Senua's 0.30.0 review, m2: a rule Sergei scoped to a folder counts in the book's own folder.
+            folder=ntpath.dirname(str((row.get('members') or [{}])[0].get('path') or ''))
+            filed,_=canonical_names.author(names[0],self.rules(),folder)
             if filed and filed!=names[0]:
                 names=[filed]+names[1:]
                 if filed not in authors:authors.append(filed);work['author_aliases']=author_variants(authors)

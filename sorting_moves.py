@@ -63,7 +63,10 @@ def canonical(db, manifest, rules, series=None):
         notes.append('series %s %s (%s)' % (series['name'], series['number'], series.get('provider') or 'source'))
     credit = review.get('author') or review.get('canonical_author') or ''
     if credit and not _entered(facts, 'author') and not review.get('anthology') and not review.get('multi_author'):
-        filed, why = canonical_names.author(credit, rules)
+        # Senua's 0.30.0 review, m2: a rule scoped to a folder counts in the book's own (source) folder.
+        sources = manifest.get('sources') or [{}]
+        folder = ntpath.dirname(str((sources[0] if isinstance(sources[0], dict) else {}).get('path') or ''))
+        filed, why = canonical_names.author(credit, rules, folder)
         if filed and filed != credit:
             review['author'] = filed
             if review.get('canonical_author') == credit:
@@ -167,10 +170,16 @@ def _held_series(db):
     return found
 
 
-def plan(db, output_root, rules=None, exists=os.path.lexists):
+RETAINED = 'Kept as published while the data folder move is unfinished; left as it is'
+SAME_TARGET = 'Another listed book would get the same name; left as it is'
+
+
+def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset()):
     """Every finished book in Audiobooks Sorted that the app now files elsewhere: {'schema', 'output_root', 'items': [...],
     'refused': [...], 'counts', 'digest'}. An item: {'job_id', 'from', 'to', 'items', 'why'}; a refusal: {'job_id', 'from',
-    'refused', 'items'}. Read only (the catalog; exists() on the listed paths)."""
+    'refused', 'items'}. Read only (the catalog; exists() on the listed paths). retained: the retained jobs of a catalog in
+    retained-runtime mode (storage_relocation_native.retained_job_ids); each is left as published (Senua's 0.30.0 review,
+    M3, as series backfill and the other passes leave them)."""
     items, refused = [], []
     if not output_root or not _table(db, 'audio_jobs'):
         return _answer(output_root, items, refused)
@@ -210,13 +219,22 @@ def plan(db, output_root, rules=None, exists=os.path.lexists):
         if not found:
             continue
         if 'refused' not in found:
-            why = ('Part of a replacement or a newer version; left as it is' if row['job_id'] in replaced else
+            why = (RETAINED if row['job_id'] in retained else
+                   'Part of a replacement or a newer version; left as it is' if row['job_id'] in replaced else
                    'Files kept at your choice; left as they are' if row['job_id'] in kept else
                    'The audiobook is not where the catalog says' if not exists(found['from']) else
                    'A file with the new name is already there' if exists(found['to']) else '')
             if why:
                 found = dict(found, refused=why)
         (refused if 'refused' in found else items).append(found)
+    # Senua's 0.30.0 review, m3: two listed books with one target would leave the second move failing at run time (the
+    # move never overwrites); the list Sergei approves must be one that can run whole, so neither is listed to move.
+    targets = {}
+    for item in items:
+        targets.setdefault(key(item['to']), []).append(item)
+    clash = {id(item) for group in targets.values() if len(group) > 1 for item in group}
+    refused += [dict(item, refused=SAME_TARGET) for item in items if id(item) in clash]
+    items = [item for item in items if id(item) not in clash]
     return _answer(output_root, items, refused)
 
 

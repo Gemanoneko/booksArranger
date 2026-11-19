@@ -771,9 +771,10 @@ class Mover:
         return removed
 
     # ------------------------------------------------------------------ recovery (engine start)
-    def recover(self):
+    def recover(self, skip=None):
         """Reconcile every move a restart interrupted. Returns the moves it touched; self.unfinished says why each move it
-        could not finish stays journaled (ruling 73k)."""
+        could not finish stays journaled (ruling 73k). skip(move): True leaves that move journaled as it is, untouched
+        (MergeService: a move of a retained job or through a retained path in retained-runtime mode)."""
         self.unfinished = {}
         with self.connect() as db:
             if not have(db):
@@ -781,6 +782,9 @@ class Mover:
             open_moves = [_row(r) for r in db.execute('SELECT * FROM book_moves WHERE state NOT IN (%s) ORDER BY created_utc' % ','.join('?' for _ in TERMINAL), TERMINAL)]
         done = []
         for move in open_moves:
+            if skip is not None and skip(move):
+                self.unfinished[move['move_id']] = {'cause': 'catalog', 'detail': 'Left for the data folder move to finish'}
+                continue
             try:
                 done.append(self.reconcile(move))
             except Exception as error:  # never stops startup; the move stays as it is, the book reads as before

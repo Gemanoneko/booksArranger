@@ -430,7 +430,7 @@ class ClearFirstTests(Base):
     def test_repair_and_retry_all_clear_first(self):
         job_id, manifest, source, cover = self.book('repair')
         attempt, directory = self.stage(job_id, manifest, source, cover)
-        found = {'state': 'repairable', 'reason': REFUSED, 'damage': ['d'], 'repairs': [{'kind': 'dangling_chapter_reference', 'description': 'd'}]}
+        found = {'state': 'repairable', 'reason': REFUSED, 'damage': ['d'], 'repairs': [{'kind': 'truncated_final_frames', 'description': 'd'}]}  # audio damage (ruling 2026-11-19)
         with patch.object(m4b_repair, 'classify', return_value=found):
             self.assertEqual((self.summary(job_id)['group'], self.summary(job_id)['repair']), ('repair', {'allowed': True, 'reason': ''}))
             with patch.object(WorkingLifecycle, 'retire', side_effect=BoundaryError('kept')):
