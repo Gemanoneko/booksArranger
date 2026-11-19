@@ -75,7 +75,10 @@ def canonical(db, manifest, rules, series=None):
                 facts['authors'] = [filed]
             reasons.append('author')
             notes.append('author folder "%s" (%s)' % (filed, why))
-    if review.get('series') and review.get('original_language') == 'Other' and not _entered(facts, 'series'):
+    # Futaba's 0.30.0 QA, C1: a book whose language is Unknown (HP 1) was looked at only when 'Other', so the plan showed
+    # «Гарри Поттер» until a re-lookup. FantLab's own cycle decides (its language and original name, series_in_original);
+    # only a book recorded as a Russian original keeps its name without asking.
+    if review.get('series') and review.get('original_language') != 'Russian' and not _entered(facts, 'series'):
         source = (facts or {}).get('series_source') or {}
         provider = (series or {}).get('provider') or source.get('provider')
         url = (series or {}).get('source_url') or source.get('url') or source.get('source_url')

@@ -309,6 +309,96 @@ class CloseBoundTests(unittest.TestCase):
         store.save.assert_called_once_with([], closing=True)
 
 
+def shutdown_stand_in(admissions=1):
+    """A BrowserServer for finish_shutdown alone: presses held (merge_admissions), nothing else to close."""
+    server = object.__new__(web_server.BrowserServer)
+    lock = threading.Lock()
+    server.control_lock, server.control_condition = lock, threading.Condition(lock)
+    server.merge_admissions, server.loading, server.merge = admissions, None, None
+    server.inventory = SimpleNamespace(stop=Mock(), worker=None)
+    server.shutdown = Mock()
+    return server
+
+
+class FileChangeCloseTests(unittest.TestCase):
+    """Senua's 0.30.0 review, M4 (ruling 27: a file change finishes once begun). A safe stop (Quit anyway, a sign-out, the
+    shell's pipe closing) waits for an open file change to its own end, never past critical_sections.FILE_CHANGE_BOUND, so
+    an accepted Quit still always ends."""
+
+    def press_in(self, server, section, holds):
+        """A press holding its admission, inside one file change (section) until holds is set."""
+        import critical_sections
+        opened = threading.Event()
+
+        def press():
+            with critical_sections.critical(section):
+                opened.set(); holds.wait(10)
+            with server.control_condition:
+                server.merge_admissions -= 1; server.control_condition.notify_all()
+        threading.Thread(target=press, name='fixture-press', daemon=True).start()
+        self.assertTrue(opened.wait(5))
+
+    def test_a_press_inside_a_file_change_is_waited_for_to_its_end_past_the_press_bound(self):
+        import critical_sections
+        server, holds = shutdown_stand_in(), threading.Event()
+        self.addCleanup(holds.set)
+        self.press_in(server, critical_sections.DELETE, holds)
+        threading.Timer(1.2, holds.set).start()
+        with patch.object(web_server.BrowserServer, 'ADMISSIONS_CLOSE', .3):
+            started = time.monotonic()
+            server.finish_shutdown()  # before: TimeoutError at 0.3 s, and the shell then ended the engine mid-delete
+            self.assertGreaterEqual(time.monotonic() - started, 1.0, 'waited for the delete loop to end')
+        server.shutdown.assert_called_once_with()
+
+    def test_a_file_change_past_its_ceiling_still_ends_the_shutdown(self):
+        import critical_sections
+        server, holds = shutdown_stand_in(), threading.Event()
+        self.addCleanup(holds.set)
+        self.press_in(server, critical_sections.DELETE, holds)
+        with patch.object(web_server.BrowserServer, 'ADMISSIONS_CLOSE', .2), patch.object(critical_sections, 'FILE_CHANGE_BOUND', .8):
+            started = time.monotonic()
+            with self.assertRaisesRegex(TimeoutError, 'A press is still running'):
+                server.finish_shutdown()
+            self.assertGreaterEqual(time.monotonic() - started, .7)
+            self.assertLess(time.monotonic() - started, 2.5, 'the ceiling ends it: an accepted Quit always ends')
+        server.shutdown.assert_not_called()
+
+    def test_close_stops_the_file_workers_then_waits_for_an_open_change_to_end(self):
+        import critical_sections
+        merge = MergeService.__new__(MergeService)
+        merge.jobs, merge.cleanup = SimpleNamespace(_stop=threading.Event()), SimpleNamespace(stop=threading.Event())
+        holds, opened = threading.Event(), threading.Event()
+        self.addCleanup(holds.set)
+
+        def tag_edit():
+            with critical_sections.critical(critical_sections.TAG_EDIT):
+                opened.set(); holds.wait(10)
+        threading.Thread(target=tag_edit, daemon=True).start()
+        self.assertTrue(opened.wait(5))
+        threading.Timer(.6, holds.set).start()
+        started = time.monotonic()
+        merge._close_file_changes()
+        self.assertGreaterEqual(time.monotonic() - started, .5, 'the tag edit ended first')
+        self.assertTrue(merge.jobs._stop.is_set() and merge.cleanup.stop.is_set(), 'no new file change begins')
+        self.assertEqual(critical_sections.open_sections(), [])
+        # The ceiling: a change that does not end is left after FILE_CHANGE_BOUND.
+        stuck = threading.Event()
+        self.addCleanup(stuck.set)
+        opened.clear()
+
+        def removal():
+            with critical_sections.critical(critical_sections.CLEANUP):
+                opened.set(); stuck.wait(10)
+        hung = threading.Thread(target=removal, daemon=True); hung.start()
+        self.assertTrue(opened.wait(5))
+        with patch.object(critical_sections, 'FILE_CHANGE_BOUND', .3):
+            started = time.monotonic()
+            merge._close_file_changes()
+            self.assertLess(time.monotonic() - started, 1.5)
+        stuck.set(); hung.join(5)
+        self.assertEqual(critical_sections.open_sections(), [])
+
+
 class AutomaticCloseTests(unittest.TestCase):
     def test_the_stopped_runs_last_wait_ends_when_the_app_closes(self):
         auto = AutomaticProcessing.__new__(AutomaticProcessing)

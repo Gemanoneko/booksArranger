@@ -37,3 +37,22 @@ def open_sections():
     """The names of the steps open now, sorted."""
     with _LOCK:
         return sorted(_OPEN)
+
+
+# Senua's 0.30.0 review, M4: a close (Quit, Quit anyway, a sign-out, the shell's pipe closing) waits for a step open here to
+# reach its own end, never past this ceiling. Each step is one bounded file operation (two writes of a few MB, one
+# original's removal with its checks, one book's delete loop, one rename): seconds, a minute on a slow share. Past the
+# ceiling the step is treated as hung and the close goes on, so an accepted Quit always ends. The shell keeps the same
+# bound (desktop/quit-watch.js FILE_CHANGE_BOUND_MS).
+FILE_CHANGE_BOUND = 300.0
+
+
+def wait_closed(deadline, poll=.1):
+    """Wait until no step is open, or until time.monotonic() reaches deadline. True when none is open."""
+    import time
+    while open_sections():
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        time.sleep(min(poll, left))
+    return True
