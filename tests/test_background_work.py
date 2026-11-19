@@ -203,6 +203,7 @@ class PressCountTests(unittest.TestCase):
         from action_queue import ActionQueue
         queue = ActionQueue.__new__(ActionQueue)
         queue._runner_ident = threading.get_ident()
+        press_progress.clear()  # an earlier test on this thread (the gate runs many modules in one process) may have reported
         self.assertEqual(queue._progress(), {}, 'nothing reported: no amount')
         press_progress.report(3, 300)
         try:
