@@ -2188,6 +2188,45 @@ def folder_structure(row, root, index=None, rules=None, folder=''):
             'series_folder': series, 'files_name_title': files, 'uncredited': uncredited}
 
 
+# 0.30.0 item 4 (Sergei 2026-11-18): "64. Книга 3 - Гарри Поттер и узник Азкабана (Александр Клюквин)" directly in a
+# root-level series folder: the uploader's number, "Книга N", then the title (a reader in brackets at the end).
+_ROOT_SERIES_BOOK = re.compile(r'^\s*\d{1,6}\s*\.\s+(?:книга|кн\.|book)\s*[#№]?\s*(\d{1,3})\s*[.:\-–—]\s*(\S.*)$', re.I)
+
+
+def root_series_folder(row, root, rules=None):
+    """0.30.0 item 4: {'series', 'position', 'title', 'reader', 'series_folder', 'book_name'} when the book sits at
+    <Series>\\NN. Книга N - <Title> (<Reader>)\\<files> directly below its source root («Harry Potter\\64. Книга 3 - …»);
+    else None. The first folder is the series and "Книга N" its number: a clue for the series, never the author. A first
+    folder that names a person the files credit (an author folder), a rule names, a collection or a container is no
+    series."""
+    members = row.get('members') or []
+    if not members:
+        return None
+    paths = [_relative_parts(m['path'], root) for m in members]
+    if any(p is None or len(p) != 3 for p in paths) or len({tuple(norm(x) for x in p[:2]) for p in paths}) != 1:
+        return None
+    series, book = text(paths[0][0]), text(paths[0][1])
+    if not re.search(r'[^\W\d_]{2}', series) or norm(series) in CONTAINER_NAMES or norm(series) in NOT_PEOPLE \
+            or COLLECTION_FOLDER.search(series) or DISC.search(series) or universe_of(series):
+        return None
+    name, reader = book, ''
+    tail = _READER_TAIL.search(name)
+    if tail:
+        reader, name = text(tail[1]), text(name[:tail.start()])
+    match = _ROOT_SERIES_BOOK.match(name)
+    if not match:
+        return None
+    title = clean_title(text(match[2]))
+    if not title or not re.search(r'[^\W\d_]{2}', title) or PART_FOLDER.search(name):
+        return None
+    credits = [text(_tags(m).get(key)) for m in members[:3] for key in AUTHOR_TAGS]
+    if any(c and (compare_names(c, series) or _shares_surname(c, series)) for c in credits):
+        return None  # "Stephen King\64. Книга 3 - …": the folder is the author the files credit, not a series
+    if rules is not None and rules.rule_id(series, ''):
+        return None  # Sergei answered for this name as a person or a collection (ruling 12)
+    return {'series': series, 'position': str(int(match[1])), 'title': title, 'reader': reader, 'series_folder': series, 'book_name': book}
+
+
 _BARE_NUMBER = re.compile(r'(?:\s*[-_.,]\s*|\s+)\d{1,3}\s*$')
 
 
@@ -2438,6 +2477,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     # series and the book's place in it, the author, and the title when the tags do not (or carry the translation of a
     # title the folder names in Latin letters, ruling 16).
     structure = folder_structure(row, root, index, rules, folder_text) if not (part and part['title']) else None
+    # 0.30.0 item 4: «Harry Potter\64. Книга 3 - …» at the library root names the series and the number, never the author.
+    root_series = root_series_folder(row, root, rules) if not structure and not part else None
     if structure:
         title, replaced = _structured_title(title, structure, [structure['author'], tag_title_author], index)
         if replaced:
@@ -2625,6 +2666,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     for component in components:
         if component['kind'] not in ('folder', 'parent folder') or filename_identity(component['value'] + '.x').get('author'):
             continue
+        if root_series and norm(component['value']) == norm(root_series['series_folder']):
+            continue  # item 4: the root series folder ("Harry Potter") is the series, never the author
         person = _person_folder(component, index)
         if person and title and title_key(person) != title_key(title['value']):
             offer(person, 'folder name', 'folder_name', 'folder')
@@ -2776,6 +2819,13 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                             'sources': [{'kind': 'folder structure', 'value': structure['series_folder']}]}
         fields['number'] = {'state': 'green', 'value': structure['position'], 'how': 'the book\'s number in its series folder',
                             'sources': [{'kind': 'folder structure', 'value': structure['book_name']}]}
+        from_folders = True
+    elif root_series and (fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
+        # 0.30.0 item 4: «Harry Potter\64. Книга 3 - Гарри Поттер и узник Азкабана (Александр Клюквин)».
+        fields['series'] = {'state': 'green', 'value': root_series['series'], 'how': 'the series folder at the library root (Series / NN. Книга N - Title)',
+                            'sources': [{'kind': 'folder structure', 'value': root_series['series_folder']}]}
+        fields['number'] = {'state': 'green', 'value': root_series['position'], 'how': 'the "Книга N" in the book\'s folder name',
+                            'sources': [{'kind': 'folder structure', 'value': root_series['book_name']}]}
         from_folders = True
     # Ruling 41 (Sergei 2026-10-27, "2. Yes"): a name that reads "Series N. Title" fills Series, Number and Title itself and
     # the series never stays inside the title; the book files without a question once its series is confirmed (ruling 52,

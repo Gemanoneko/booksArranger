@@ -160,7 +160,10 @@ LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names', '/api/aut
 # the author rules, a delete preview that is not queued) change nothing, so their reply no longer throws away the shared
 # status computation (Handler.response, status_control): under load every panel read restarted it from the beginning.
 READ_ONLY_POSTS = frozenset(LOOKING | {'/api/candidate/routing-preview', '/api/candidate/approve-preview', '/api/candidate/delete-preview',
-                                       '/api/candidate/join-preview'})
+                                       '/api/candidate/join-preview','/api/sorting-moves'})
+# 0.30.0 sorting moves (Sergei 2026-11-18, items 2, 5 and 6): the planned list (read) and its approval (moves only the books of
+# the exact list Sergei saw, named by its digest). Nothing moves a book in Sorted without that approval.
+SORTING_ROUTES = ('/api/sorting-moves', '/api/sorting-moves/apply')
 def approve_code(text):
     """Each Approve gate its own code (2026-10-26, «Спящие красавицы»: every other refusal read "Approve was not accepted"), so
     the row names the real reason and the next step. Unknown gates answer 'refused' and the row shows the engine's sentence."""
@@ -356,10 +359,10 @@ class BrowserServer(ThreadingHTTPServer):
         return merge
 
     def _check_sources(self, merge, **options):
-        """The 0.29.0 check pass, never fatal: a failure leaves every book listed and every folder in place."""
-        from storage_relocation_native import retained_runtime
+        """The 0.29.0 check pass, never fatal: a failure leaves every book listed and every folder in place.
+        0.30.0 item A: it runs in retained-runtime mode too (see Retained-runtime passes, below)."""
         check = getattr(merge, 'check_sources', None)
-        if check is None or self.closing or retained_runtime(self.inventory.database):
+        if check is None or self.closing:
             return None
         try:
             return check(**options)
@@ -418,19 +421,26 @@ class BrowserServer(ThreadingHTTPServer):
         Senua S-m9: started at once it saw the worker alive and never ran). A scan started meanwhile ends with its own pass."""
         self._check_sources_later(after=threading.current_thread())
 
+    # Retained-runtime passes (0.30.0 item A). v0.28.2 turned every background pass off while the catalog runs in
+    # retained-runtime mode (historical staging, chapter-repair, cover and series-backfill files the storage move copied
+    # without resume or disposal authority), as a blanket guard beside its per-job ones; later passes copied the gate. A
+    # portable installation is always in that mode (its binding needs a source detach, and a detach needs the retained
+    # registration), so since Sergei's 14 Nov move none of these ran. Each runs again: the source check, housekeeping
+    # (recovery purge, working and finished-book cleanup, series backfill, optional fields), the published-book check
+    # with its regroup pass, the restart restore and the queued-actions restore. A retained job is left alone by each,
+    # as by its retry, cleanup and recovery purge since v0.28.2 (retained_job), and native_io refuses to write or delete
+    # a retained file whatever asks. Move recovery stays off in that mode (MergeService.__init__): not reviewed here.
     def _start_background(self):
-        from storage_relocation_native import retained_runtime
         # 0.29.0 (Judy section 0): a finished scan runs the check pass.
         self.inventory.after_scan = self._check_sources_after_scan
-        if retained_runtime(self.inventory.database):return
         if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
         # Published-book hashing reads every finished book from the library share; it must not delay health.
         if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()
 
     def _restore_queue(self):
-        """The queued actions saved before the last close come back (ActionQueue.restore); never fatal."""
-        from storage_relocation_native import retained_runtime
-        if self.closing or retained_runtime(self.inventory.database):
+        """The queued actions saved before the last close come back (ActionQueue.restore); never fatal. Each repeats its
+        own checks when it runs (a retained job's Retry is refused there) and starts no queue."""
+        if self.closing:
             return
         try:
             self.actions.restore()
@@ -438,8 +448,8 @@ class BrowserServer(ThreadingHTTPServer):
             print(f'Books Arranger could not take back the queued actions: {error}', file=sys.stderr, flush=True)
 
     def _restore_saved_work(self, merge):
-        from storage_relocation_native import retained_runtime
-        if self.closing or retained_runtime(self.inventory.database):
+        # The restart-intent rules decide what resumes; the conversion queue never takes a retained job.
+        if self.closing:
             return
         restore=getattr(merge,'restore_work_after_restart',None)
         if restore is not None:
@@ -1546,6 +1556,20 @@ class Handler(BaseHTTPRequestHandler):
                 text=str(error)
                 self.response(409,{'error':text,'code':'changed' if 'Candidate changed' in text or 'Source files changed' in text else 'refused'});return
             self.response(200,result);return
+        if path=='/api/sorting-moves':
+            # 0.30.0: the books in Sorted the app now files elsewhere (items 2, 5, 6) and those left as they are. Reads only.
+            self.shape(data,set())
+            self.response(200,self.server.merge.sorting_moves());return
+        if path=='/api/sorting-moves/apply':
+            # 0.30.0: Sergei's explicit approval of the list he saw (its digest); job_ids narrows it to some of its books.
+            self.shape(data,{'digest'},{'job_ids'})
+            ids=data.get('job_ids')
+            if ids is not None and (not isinstance(ids,list) or not 1<=len(ids)<=2000 or any(not isinstance(i,str) or not 1<=len(i)<=100 for i in ids)):
+                raise ValueError('job_ids lists the books to move')
+            try:result=self.server.merge.sorting_moves_apply(data['digest'],ids)
+            except ValueError as error:
+                self.response(409,{'error':str(error),'code':'changed' if 'changed' in str(error) else 'refused'});return
+            self.response(200,result);return
         if path=='/api/author-rules':
             # 0.22.3 (Judy 4.1, Senua M5): the author rules research learned online that are in force, newest first. Reads only.
             self.shape(data,set())
@@ -1726,7 +1750,7 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
                          '/api/candidate/destination','/api/candidate/join-preview','/api/candidate/join','/api/audiobook/retry-cancel',
-                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rules','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,
+                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rules','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,*SORTING_ROUTES,
                          '/api/audiobook/resume-cancel','/api/audiobook/recovery/cancel',
                          '/api/manual-conversion/inspect','/api/manual-conversion/save','/api/manual-conversion/queue',
                          '/api/manual-conversion/discard','/api/manual-conversion/retry','/api/manual-conversion/reopen'}

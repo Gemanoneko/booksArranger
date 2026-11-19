@@ -97,9 +97,13 @@ async function boot({ setup = false, flags = ['--show-inactive'], lock = true, u
  const server = http.createServer((req, res) => {
   engine.requests.push(req.url);
   const body = req.url === '/api/health' ? { application: 'Books Arranger', version: '0.22.1', pid: engine.pid, instance: 'a'.repeat(32), port }
-   : req.url === '/api/desktop/status' ? { phase: engine.phase || 'running', error: '', busy: null, idle: false, loading: engine.loading, update: engine.update || null }
-   : req.url === '/api/desktop/update' ? (engine.phase = 'pausing', engine.update = { phase: 'pausing', waiting: [], critical: [], elapsed: 0, safe_seconds: 90, stopped: [] }, { phase: 'pausing', update: engine.update }) : { error: 'no' };
-  res.writeHead(body.error ? 404 : 200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
+   : req.url === '/api/desktop/status' ? { phase: engine.phase || 'running', error: engine.error || '', busy: engine.busy || null, idle: false, loading: engine.loading, update: engine.update || null,
+     ...(engine.waiting_for ? { waiting_for: engine.waiting_for } : {}) }
+   : req.url === '/api/desktop/update' ? (engine.phase = 'pausing', engine.update = { phase: 'pausing', waiting: [], critical: [], elapsed: 0, safe_seconds: 90, stopped: [] }, { phase: 'pausing', update: engine.update })
+   // 0.30.0 item F: Quit is taken (the phase it then reports is the test's), and a safe stop takes over.
+   : req.url === '/api/desktop/quit' && engine.takesQuit ? (engine.phase = engine.quitPhase || 'finishing', { phase: 'finishing' })
+   : req.url === '/api/desktop/stop-now' && engine.takesQuit ? (engine.phase = 'stopping', engine.stoppedAt = Date.now(), { phase: 'stopping' }) : { error: 'no' };
+  res.writeHead(body.error === 'no' ? 404 : 200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));  // a status carries its own error text
  });
  const answer = () => new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
  const invoke = (name, ...args) => handlers[name]({ sender: log.windows[0].webContents }, ...args);
@@ -353,4 +357,53 @@ test('diagnostic copy reaches the actual main handler only for the app while gen
   let allowed=null;t.log.permissionHandler({},'clipboard-sanitized-write',value=>allowed=value);assert.equal(allowed,false);
   assert.throws(()=>t.handlers['books:copy-diagnostics']({sender:{getURL:()=>t.firstFrame}},text),/Unknown desktop control sender/);assert.deepEqual(t.log.clipboard,[text]);
  }finally{await t.close();}
+});
+
+// 0.30.0 item F follow-up: an accepted Quit always ends. A failed close ('blocked') and work still named past the bound
+// end in the same safe stop (stop-now, then the engine's pipe, the tray says "stopping safely"); the book Sergei chose to
+// finish is still waited for. No new dialog or wording.
+async function loadedEngine(t) {
+ const child = await until(() => t.log.spawns[0], 3000, 'the engine launch');
+ t.engine.loading = { ...t.engine.loading, step: 'done', parts: { library: true, status: true, books: true, attention: true, jobs: true }, took_ms: 1000 };
+ t.engine.takesQuit = true;
+ child.prove(t.engine.pid); await t.answer();
+ await until(() => t.log.trays[0]?.tips.at(-1) === 'Books Arranger', 8000, 'the catalog loaded');
+ return child;
+}
+test('a Quit whose close fails stops safely and exits: no half-closed app', async () => {
+ const t = await boot();
+ try {
+  const child = await loadedEngine(t);
+  t.engine.quitPhase = 'blocked'; t.engine.error = 'A press is still running; ownership retained'; t.engine.waiting_for = [{ kind: 'press', title: '' }];
+  await t.invoke('books:quit');
+  await until(() => t.log.exits.length, 15000, 'the exit');
+  assert.deepEqual(t.log.exits, [0]);
+  assert.ok(t.engine.requests.includes('/api/desktop/stop-now'), 'the engine is told to stop now');
+  assert.equal(child.stdin.ended, true, 'then its pipe closes');
+  const tips = t.log.trays[0].tips;
+  assert.ok(tips.includes('Books Arranger — stopping safely'), tips.join(' | '));
+  assert.ok(!tips.includes('Books Arranger — Quit blocked'), 'no blocked Quit left behind');
+ } finally { await t.close(); }
+});
+test('Quit waits for the book he chose to finish, then stops safely when other work is still named after 15 s', async () => {
+ const t = await boot();
+ try {
+  const child = await loadedEngine(t);
+  t.engine.busy = { converting: true, current_title: 'Дюна' };
+  t.engine.waiting_for = [{ kind: 'conversion', title: 'Дюна' }];
+  await sleep(1200);  // past the shell's shared status answer (1 s): Quit reads the converting book
+  t.appEvents['second-instance']({}, ['--quit']);  // the same Quit as the tray's "Quit after this book", no prompt
+  await until(() => t.engine.requests.includes('/api/desktop/quit'), 6000, 'the Quit sent');
+  await sleep(4000);
+  assert.ok(!t.engine.requests.includes('/api/desktop/stop-now'), 'the chosen book is waited for');
+  assert.deepEqual(t.log.exits, []);
+  const switched = Date.now();
+  t.engine.phase = 'parking'; t.engine.waiting_for = [{ kind: 'cleanup', title: '' }];
+  await until(() => t.log.exits.length, 25000, 'the exit');
+  assert.deepEqual(t.log.exits, [0]);
+  const waited = t.engine.stoppedAt - switched;
+  assert.ok(waited >= 14000 && waited < 20000, 'stopped safely after the bound, counted from the book\'s end: ' + waited + ' ms');
+  assert.equal(child.stdin.ended, true);
+  assert.ok(t.log.trays[0].tips.includes('Books Arranger — stopping safely'));
+ } finally { await t.close(); }
 });

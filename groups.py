@@ -20,7 +20,7 @@ SAME_TITLE_VERSION = 'same-title-v4'  # v2: Senua's 0.22.0 review G1, G2; v3: N4
 SAME_ALBUM_VERSION = 'same-album-v4'  # v2: Senua's 0.22.0 review G3; v3: N6 (the works check for a plain album group too); v4: N11 (chapter-named title tags are no works)
 # Ruling 19a (Sergei 2026-10-24): explicitly marked .m4b parts with their own chapters are joined, chapters kept; the
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
-M4B_PARTS_VERSION = 'm4b-parts-v2'
+M4B_PARTS_VERSION = 'm4b-parts-v3'  # v3: 0.30.0 item 7, albums that differ only by a trailing part number are one set
 # 0.22.1, item 9: a clean file-name sequence orders a book (track_order); a single file has no order conflict.
 # Ruling 68 (0.24.0): one source folder is one book (folder_unit); mis-encoded tags are read repaired (tag_text).
 TAG_REPAIR_VERSION = 'tag-repair-v1'
@@ -386,6 +386,25 @@ def _folder_names_another_author(path,start,index):
         return not (same_person(who,start) or compare_names(who,start) or _shares_surname(who,start))
     return False
 
+_TRAILING_PART_NUMBER = re.compile(r'^(.*?[^\W\d_].*?)[\s_.,:;#№-]*\d{1,3}\s*$')
+
+
+def _without_part_number(album):
+    """0.30.0 item 7: the album without a trailing part number ("dale stewart 04 - darwin's blade 1" -> "dale stewart 04 -
+    darwin's blade"); an album that is only a number («1408») or ends in none stays as it is."""
+    match = _TRAILING_PART_NUMBER.match(album)
+    return match[1].strip() if match else album
+
+
+def _album_without_part_number(item):
+    """A copy of the member whose album tag has its trailing part number removed (only for the split rules' check)."""
+    tags = dict(item['metadata'].get('tags', {}))
+    for name in list(tags):
+        if name.casefold() == 'album':
+            tags[name] = _without_part_number(' '.join(str(tags[name]).split()))
+    return dict(item, metadata=dict(item['metadata'], tags=tags))
+
+
 PART_SET_MAX = 30
 # Split-rule refusals no chapter list can answer: the files stay books of their own.
 HARD_REFUSALS = ('parts are in different places', 'a part is unavailable or unreadable', 'mixed ', 'audio profile unknown',
@@ -411,13 +430,26 @@ def _part_sets(members,scopes,assigned,separate,taken):
         if not album:continue
         artist=unicodedata.normalize('NFC',tags.get('artist','')).casefold()
         clusters.setdefault((split_books.unit(path)[0],album,artist),[]).append(item)
+    # 0.30.0 item 7 (Sergei 2026-11-18): album tags that differ only by a trailing part number («Dale Stewart 04 - Darwin's
+    # Blade 1», «… 2», no track numbers) are one set too; its chapters decide what it is, as for any set. Albums that are
+    # all the same keep their own scope (no regroup of a set that was already one).
+    trailing={}
+    for unit,album,artist in clusters:
+        trailing.setdefault((unit,_without_part_number(album),artist),[]).append(album)
+    merged=set()
+    for (unit,base,artist),albums in trailing.items():
+        if len(albums)<2:continue
+        clusters[(unit,base,artist)]=[item for album in albums for item in clusters.pop((unit,album,artist))]
+        merged.add((unit,base,artist))
     found=[]
     for (unit,album,artist),items in sorted(clusters.items(),key=lambda kv:repr(kv[0])):
         if len(items)<2:continue
         if len(items)>PART_SET_MAX:continue
         stems=[unicodedata.normalize('NFC',Path(m['path']).stem).casefold() for m in items]
         if len(set(stems))!=len(stems):continue  # the same part twice (two copies under one name)
-        reasons=split_books.check(sorted(items,key=lambda m:m['path']))['reasons']
+        # Item 7: the split rules compare the album without the part number, which is the only way the albums differ.
+        checked=[_album_without_part_number(m) for m in items] if (unit,album,artist) in merged else items
+        reasons=split_books.check(sorted(checked,key=lambda m:m['path']))['reasons']
         if any(r.startswith(HARD_REFUSALS) for r in reasons):continue
         def number(value):
             match=re.match(r'^\s*(\d{1,4})',str(value or ''))
@@ -951,7 +983,81 @@ def _sync_write(connection,root,revision,groups,inputs):
             connection.execute('UPDATE book_groups SET approved=0,changed=1,revision=revision+1 WHERE id=?',(old['id'],))
     connection.execute('INSERT OR REPLACE INTO book_group_sync VALUES(?,?)',(root,revision))
 
-def render(row,root,coverage,retired=None):
+# 0.30.0, Judy's spec section 10: the details panel's "Book metadata" line said the grouping key itself (a path, a \x1f, Album
+# and Artist tags read as Latin-1). scope_view is what the page prints instead, from the repaired tag text (tag_text); the key
+# is unchanged and never printed. Kinds: album, single_file, volume, split_book, filename_work, numbered_set, standalone
+# (Judy's table), same_title, folder, anthology (groupings her table does not name; the page words them from existing copy),
+# other (an older or manual key: only the album sentence).
+SCOPE_KINDS=('album','single_file','volume','split_book','filename_work','numbered_set','standalone','same_title','folder','anthology','other')
+# A volume's recorded reason (part_sets.decide, or Sergei's Keep as separate books) in the spec's plain words.
+VOLUME_BASES={'each file names its own work':'each file names its own work','each file starts again at chapter 1':'each file starts again at chapter 1',
+              'each file ends with its own afterword':'each file ends with its own afterword','no chapters to compare':'there are no chapters to compare'}
+KEPT_WORDS='you chose Keep as separate books'
+
+def _scope_kind(scope):
+    tags=str(scope or '').split('\x1fProvisional subgroup ')[0].split('\x1f')[1:]
+    tag=tags[0] if tags else ''
+    if tag=='Single audiobook file':return 'single_file'
+    if tag=='Volume of a series':return 'volume'
+    if tag.startswith('Split book'):return 'split_book'
+    if tag.startswith(('Album ','Same album ','Part set ')):return 'album'
+    if tag.startswith('Filename work '):return 'filename_work'
+    if tag.startswith(('Numbered set ','Unverified numbered source set')):return 'numbered_set'
+    if tag.startswith('Same title '):return 'same_title'
+    if tag in ('Source folder','Folder remainder'):return 'folder'
+    if tag.startswith('Named anthology volume '):return 'anthology'
+    if tag=='Standalone source':return 'standalone'
+    return 'other'
+
+def _shown(value):
+    return ' '.join(value.split()) if isinstance(value,str) and value.strip() else None
+
+def _track(tags):
+    """(track, total) of one file's track tag ("2/5", "2", "02 of 5"), with tracktotal/totaltracks; None where absent."""
+    raw=tags.get('track') or tags.get('tracknumber')
+    match=re.match(r'^\s*0*(\d{1,4})\s*(?:(?:/|of)\s*0*(\d{1,4}))?\s*$',str(raw)) if raw not in (None,'') else None
+    if not match:return None,None
+    total=match[2] or next((str(tags[k]).strip() for k in ('tracktotal','totaltracks') if str(tags.get(k) or '').strip().isdigit()),None)
+    track=int(match[1]);total=int(total) if total else None
+    return (track if track>0 else None),(total if total and total>0 else None)
+
+def scope_view(evidence,volumes=None):
+    """{kind, album, artist, track, track_total, basis, repaired, folders, title, author} for one candidate's evidence.
+    volumes: {path: recorded volume reason} (volume_bases); without it a volume's basis is None (never invented). album and
+    artist (album artist, else artist, as partition() reads them) are the first file's repaired tags; track only for a
+    one-file book; title/author: the file name's work (filename_work) or the shared title tag (same_title); basis: a volume's
+    reason in plain words, a folder unit's decision (one, ask, remainder); repaired: a shown tag value was repaired text."""
+    import tag_text
+    scope=evidence.get('scope','');kind=_scope_kind(scope);members=evidence.get('members') or []
+    first=members[0] if members else {};metadata=first.get('metadata') or {}
+    tags=tag_text.tags(metadata);fixed=tag_text.repaired(metadata)
+    artist_key=next((key for key in ('album_artist','albumartist','artist') if _shown(tags.get(key))),None)
+    album=_shown(tags.get('album'));artist=_shown(tags.get(artist_key)) if artist_key else None
+    track,total=_track(tags) if len(members)==1 else (None,None)
+    shown=['album',artist_key];title=author=basis=None
+    if kind=='filename_work' and first.get('filename'):
+        from source_identity import filename_identity
+        parsed=filename_identity(first['filename']);title=_shown(parsed.get('title'));author=_shown(parsed.get('author'))
+    elif kind=='same_title':
+        title=_shown(tags.get('title'));shown.append('title')
+    if kind=='volume':
+        recorded=str((volumes or {}).get(first.get('path')) or '')
+        basis=KEPT_WORDS if recorded.startswith(KEPT_BASIS) else VOLUME_BASES.get(recorded)
+    elif kind=='folder':
+        decision=(evidence.get('folder_unit') or {}).get('kind')
+        basis=decision if decision in ('one','ask','remainder') else None
+    folders=list(dict.fromkeys(str(Path(m['path']).parent) for m in members if isinstance(m,dict) and m.get('path')))
+    return {'kind':kind,'album':album,'artist':artist,'track':track,'track_total':total,'basis':basis,
+            'repaired':any(key in fixed and _shown(tags.get(key)) for key in shown if key),'folders':folders,'title':title,'author':author}
+
+def volume_bases(connection,root):
+    """{path: recorded reason} of the separate-volume facts that still match their files (volume_parts' rule)."""
+    if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='part_volumes'").fetchone():return {}
+    return {r[0]:r[1] for r in connection.execute("""SELECT v.path,v.basis FROM part_volumes v JOIN files f ON f.root=v.root AND f.path=v.path
+        WHERE v.root=? AND v.size=f.size AND v.modified=CAST(f.modified AS TEXT) AND f.error='' AND f.missing=0""",(root,))}
+
+def render(row,root,coverage,retired=None,volumes=None):
+    """volumes: {path: recorded volume reason} (volume_bases) for scope_view; a caller without the catalog passes none."""
     evidence=json.loads(row['evidence'])
     review=json.loads(row['review']) if row['review'] else None
     first=evidence['members'][0]
@@ -975,13 +1081,14 @@ def render(row,root,coverage,retired=None):
       'approval_reason':'; '.join(reasons),'can_approve':not reasons and not retired_count,
       'retired_source_count':retired_count,'all_sources_retired':retired_count==len(evidence['members']),
       'active_members':[m for m in evidence['members'] if not m['intentionally_retired']],
+      'scope_view':scope_view(evidence,volumes),
       'coverage':'Scanned scope complete; recording completeness unverified' if coverage else 'Based on files scanned so far'}
 
 def page(connection,root,limit=100,offset=0,search='',status='all',coverage=False,ids=None,hidden=None):
     """ids: only these candidates are rendered (the caller prefiltered them cheaply); None renders all. hidden: candidate
     ids left out of the rows and the total (books the check pass took off the list, Futaba M-5)."""
     sync(connection,root)
-    retired=retired_sources(connection,root)
+    retired=retired_sources(connection,root);volumes=volume_bases(connection,root)
     if hidden:
         if ids is not None:ids=set(ids)-set(hidden)
         else:
@@ -989,17 +1096,17 @@ def page(connection,root,limit=100,offset=0,search='',status='all',coverage=Fals
             if status=='all' and not search:
                 total=connection.execute('SELECT count(*) FROM book_groups WHERE root=? AND superseded=0 AND id NOT IN (SELECT value FROM json_each(?))',(root,skip)).fetchone()[0]
                 rows=connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 AND id NOT IN (SELECT value FROM json_each(?)) ORDER BY scope LIMIT ? OFFSET ?',(root,skip,limit,offset))
-                return {'rows':[render(row,root,coverage,retired) for row in rows],'total':total}
+                return {'rows':[render(row,root,coverage,retired,volumes) for row in rows],'total':total}
     if ids is not None:
         # Only the prefiltered rows are read (a full read was about 120 MB on the real catalog).
         chosen=json.dumps(sorted(str(identity) for identity in ids))
-        values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 AND id IN (SELECT value FROM json_each(?)) ORDER BY scope',(root,chosen))]
+        values=[render(row,root,coverage,retired,volumes) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 AND id IN (SELECT value FROM json_each(?)) ORDER BY scope',(root,chosen))]
         return {'rows':values[offset:offset+limit],'total':len(values)}
     if status=='all' and not search:
         total=connection.execute('SELECT count(*) FROM book_groups WHERE root=? AND superseded=0',(root,)).fetchone()[0]
         rows=connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope LIMIT ? OFFSET ?',(root,limit,offset))
-        return {'rows':[render(row,root,coverage,retired) for row in rows],'total':total}
-    values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope',(root,)) if not hidden or row['id'] not in hidden]
+        return {'rows':[render(row,root,coverage,retired,volumes) for row in rows],'total':total}
+    values=[render(row,root,coverage,retired,volumes) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope',(root,)) if not hidden or row['id'] not in hidden]
     filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
       'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] and not item['missing'] for item in row['members']),
       'changed':lambda row:row['changed']}
@@ -1031,8 +1138,8 @@ def page_sources(connection,roots,limit=100,offset=0,search='',status='all',cove
     else:
         total=None
         records=connection.execute('SELECT * FROM book_groups WHERE '+clause+order,args).fetchall()
-    retirements={root:retired_sources(connection,root) for root in {row['root'] for row in records}}
-    values=[render(row,row['root'],coverage.get(row['root'],False),retirements[row['root']]) for row in records]
+    retirements={root:retired_sources(connection,root) for root in {row['root'] for row in records}};volumes={root:volume_bases(connection,root) for root in retirements}
+    values=[render(row,row['root'],coverage.get(row['root'],False),retirements[row['root']],volumes[row['root']]) for row in records]
     if total is not None:return {'rows':values,'total':total}
     filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
       'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] and not item['missing'] for item in row['members']),
@@ -1057,4 +1164,4 @@ def save(connection,root,identity,revision,review,approve=False):
         proposed=render(fresh,root,False,retired_sources(connection,root))
         if not proposed['can_approve']:raise ValueError(proposed['approval_reason'])
         connection.execute('UPDATE book_groups SET approved=1 WHERE id=?',(identity,))
-    return render(connection.execute('SELECT * FROM book_groups WHERE id=?',(identity,)).fetchone(),root,False,retired_sources(connection,root))
+    return render(connection.execute('SELECT * FROM book_groups WHERE id=?',(identity,)).fetchone(),root,False,retired_sources(connection,root),volume_bases(connection,root))

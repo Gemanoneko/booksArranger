@@ -1374,11 +1374,17 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
         with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
             author_rules.append(db,'same_as','Джон Рональд Руэл Толкин',target='Tolkien J. R. R.',actor='assistant',source='https://fantlab.ru/work1669');db.commit()
         first=self.lookup(books['Хранители. Летопись первая'])
-        self.assertEqual(first['reasons'],[])
+        # 0.30.0 item 3 (Sergei 2026-11-18): every series source only paused: the book waits for its series (it used to be
+        # filed at once without one). It still never waits for the English title (ruling 38): the title it has.
+        from public_research import SERIES_WAIT_REASON
+        self.assertEqual(first['reasons'],[SERIES_WAIT_REASON])
+        self.assertTrue(first['wait'])
         self.assertEqual((first['review']['canonical_author'],first['review']['title'],first['review']['series']),('Tolkien J. R. R.','Хранители. Летопись первая',''))
         asked=len(calls)
-        self.assertEqual(self.lookup(books['Две твердыни. Летопись вторая'])['reasons'],[])
+        self.assertEqual(self.lookup(books['Две твердыни. Летопись вторая'])['reasons'],[SERIES_WAIT_REASON])
         self.assertEqual(len(calls),asked,'no request to a paused source')
+        # After the bounded number of waits it is filed at once under the title it has, without a series, as before.
+        self.assertEqual(self.lookup(dict(books['Хранители. Летопись первая'],_series_waits=3))['reasons'],[])
 
     def test_an_english_title_found_with_the_authors_spelling_carries_its_original_language(self):
         # The ruling-39 lookup's record names the English title: the policy records English as the original language,
@@ -1387,7 +1393,8 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
         books,_=self.books(closed=('api.fantlab.ru','www.goodreads.com','www.wikidata.org','html.duckduckgo.com','www.litres.ru'))
         found={'state':'found','name':'J. R. R. Tolkien','title':'The Return of the King','source_url':'https://fantlab.ru/work1669'}
         with mock.patch.object(self.research,'_author_latin',return_value=found):
-            result=self.lookup(books['Возвращение государя. Летопись третья'])
+            # 0.30.0 item 3: its series sources are paused, so it would wait for the series; past the bounded waits it is filed.
+            result=self.lookup(dict(books['Возвращение государя. Летопись третья'],_series_waits=3))
         self.assertEqual((result['reasons'],result['review']['title'],result['metadata_facts']['original_language']['value']),([],'The Return of the King','en'))
         self.assertEqual(evidence_missing(result),set())
         self.assertIn({'field':'original_language','cited_value':'en','source_url':'https://fantlab.ru/work1669'},

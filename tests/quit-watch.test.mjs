@@ -94,6 +94,46 @@ test('Quit anyway is the engine\'s safe stop, then the shell waits for its own h
  const fs=await import('node:fs');const main=fs.readFileSync(new URL('../desktop/main.js',import.meta.url),'utf8');
  const anyway=main.slice(main.indexOf('async function quitAnyway()'),main.indexOf('// Quit while loading closes at once'));
  assert.match(anyway,/'\/api\/desktop\/stop-now'/);assert.match(anyway,/endLoadingEngine\(30000\)/);assert.match(anyway,/finishExit\(0\)/);
- const watch=main.slice(main.indexOf('async function watchQuit()'),main.indexOf('async function quitAnyway()'));
+ const watch=main.slice(main.indexOf('async function watchQuit('),main.indexOf('async function quitAnyway()'));
  assert.match(watch,/progress\.observe\(status\)/,'every Quit status poll keeps what it waits for');
+});
+
+// 0.30.0 item F follow-up: a failed close ('blocked') no longer leaves a half-closed app behind an error box, and Quit no
+// longer waits without end for work Sergei did not choose to finish. Both end in the same safe stop (Quit anyway).
+const {createQuitBound,QUIT_WAIT_BOUND_MS}=createRequire(import.meta.url)('../desktop/quit-watch.js');
+const facts=(waiting,phase='finishing')=>({phase,waiting,blocked:phase==='blocked',error:phase==='blocked'?'A press is still running; ownership retained':''});
+test('a failed close stops safely at once, whatever it waits for',()=>{
+ assert.equal(typeof createQuitBound,'function','the bound exists');
+ const clock={t:0};const bound=createQuitBound({keepConversion:true,now:()=>clock.t});
+ assert.equal(bound.observe(facts([{kind:'conversion',title:'Дюна'}])),null);
+ assert.equal(bound.observe(facts([{kind:'press',title:''}],'blocked')),'blocked','even with the chosen book still named');
+ assert.equal(createQuitBound({now:()=>0}).observe(facts([],'blocked')),'blocked');
+});
+test('the book he chose to finish is waited for as before; any other work stops safely after the bound',()=>{
+ assert.equal(QUIT_WAIT_BOUND_MS,15000);
+ const clock={t:0};const kept=createQuitBound({keepConversion:true,now:()=>clock.t});
+ for(clock.t=0;clock.t<=3600000;clock.t+=60000)assert.equal(kept.observe(facts([{kind:'conversion',title:'Дюна'},{kind:'cleanup',title:''}])),null,'an hour on the chosen book: still waiting');
+ // The chosen book is done; its cleanup still runs: the bound starts now, not at the Quit.
+ const start=clock.t;assert.equal(kept.observe(facts([{kind:'cleanup',title:''}])),null);
+ clock.t=start+14000;assert.equal(kept.observe(facts([{kind:'cleanup',title:''}])),null);
+ clock.t=start+15000;assert.equal(kept.observe(facts([{kind:'cleanup',title:''}])),'bound');
+ // No book chosen (Quit with nothing converting, or a status that did not answer): a conversion is bounded like the rest.
+ clock.t=0;const plain=createQuitBound({now:()=>clock.t});
+ assert.equal(plain.observe(facts([{kind:'conversion',title:'Дюна'}])),null);
+ clock.t=15000;assert.equal(plain.observe(facts([{kind:'conversion',title:'Дюна'}])),'bound');
+ // Nothing named resets the clock; a list that changes does not.
+ clock.t=0;const quiet=createQuitBound({now:()=>clock.t});
+ assert.equal(quiet.observe(facts([{kind:'scan',title:''}])),null);clock.t=10000;assert.equal(quiet.observe(facts([])),null);
+ clock.t=20000;assert.equal(quiet.observe(facts([{kind:'press',title:''}])),null);
+ clock.t=30000;assert.equal(quiet.observe(facts([{kind:'critical',title:'move'}])),null);
+ clock.t=35000;assert.equal(quiet.observe(facts([{kind:'critical',title:'move'}])),'bound');
+});
+test('the shell stops safely through Quit anyway on a failed close and past the bound, and keeps the chosen book',()=>{
+ return import('node:fs').then(fs=>{
+  const main=fs.readFileSync(new URL('../desktop/main.js',import.meta.url),'utf8');
+  const watch=main.slice(main.indexOf('async function watchQuit('),main.indexOf('async function quitAnyway()'));
+  assert.match(watch,/bound\.observe\(facts\)/);assert.match(watch,/return quitAnyway\(\)/);
+  assert.ok(!/reportError\(/.test(watch),'no error box and no half-closed app on a failed close');
+  assert.match(main,/watchQuit\(\{ keepConversion: busy\.converting === true \}\)/,'the book is kept only when Quit was accepted while it converted');
+ });
 });

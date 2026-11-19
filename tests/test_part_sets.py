@@ -66,7 +66,8 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(tolkien, ('ask', 'book_words'))
         terror = self.decision(['01. Крозье', '15. Франклин'], ['16. Крозье', '28. Пеглар'], ['29. Ирвинг', '47. Пеглар'], ['48. Гудсир', '67. Талириктуг'],
                                titles=['Террор 1', 'Террор 2', 'Террор 3', 'Террор 4'])
-        self.assertEqual(terror, ('ask', 'long'), 'continuing, but four 8-hour files: over 30 hours')
+        # 0.30.0 item 8 (Sergei 2026-11-18): the 30-hour limit is removed; four 8-hour files continuing are one book.
+        self.assertEqual(terror, ('join', 'chapter numbering continues'), 'continuing; its length no longer holds it')
         chest = self.decision(['Маленький Мук', 'Карлик Нос'], ['Конек-горбунок'], titles=['Сундучок первый', 'Сундучок второй'],
                               credits=['Вильгельм Гауф | Чтец Один', 'Пётр Ершов | Чтец Два'], hours=2)
         self.assertEqual(chest, ('ask', 'authors'))

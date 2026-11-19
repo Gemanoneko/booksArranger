@@ -48,6 +48,17 @@ ALBUM, GROUPING, SORT_ALBUM, TRACK = b'\xa9alb', b'\xa9grp', b'soal', b'trkn'
 PASS_WAIT = 600
 START_DELAY = 120  # after startup: the published check and the queue come first
 TEMP_PREFIX = '.books-arranger-series-'
+# 0.30.0 item 2 (Sergei 2026-11-18): a series whose folder is another folder than the one the book was published in (every
+# books-hierarchy-v2 book: Author\Series\) never passed ("The recorded series paths do not share their original parent").
+# Moving an existing book in Sorted waits for Sergei's approval of the listed moves (sorting_moves): until then the book is
+# held with this reason and left exactly as it is. Approved (approve()), the series is written into the file in its own
+# folder as before (retag, proofs, no-replace rename, catalog), then the app's usual verified move (book_move) takes it into
+# its series folder (MergeService.sorting_follow_up).
+MOVE_WAITS = 'Series found. Moving it into its series folder waits for your approval.'
+# The reason the 81 books were held by that bug. Such a book is looked up once more (a lookup only: its file is never touched
+# without approval), so its series is found again under 0.30.0's rules (item 6: the original-language name) and it then
+# waits for approval with MOVE_WAITS.
+OLD_FOLDER_REASON = 'The recorded series paths do not share their original parent'
 
 
 class Held(ValueError):
@@ -171,10 +182,54 @@ class SeriesBackfill:
             db.execute('INSERT OR REPLACE INTO series_backfill VALUES(?,?,?,?,?)',
                        (job_id, state, reason, json.dumps(value, ensure_ascii=False), _stamp()))
 
+    def approve(self, job_id, found, target):
+        """0.30.0 item 2: Sergei approved this book's listed move (sorting_moves). found: the series it is filed under
+        ({'name','number','provider','source_url'}, the original-language name, item 6); target: the path he saw. The held
+        book is looked at again by the next pass with exactly this series (no new lookup), only while the book's manifest is
+        the one he approved. Raises ValueError when the book is not held for this reason."""
+        entry = self.entry(job_id)
+        rows = self._rows('SELECT manifest FROM audio_jobs WHERE job_id=?', (job_id,))
+        if not entry or entry['state'] != 'held' or not rows:
+            raise ValueError('This book is not waiting for a series move; nothing was changed.')
+        record = dict(entry['record'])
+        approved = {key: found[key] for key in ('name', 'number', 'provider', 'source_url') if key in found}
+        approved['receipts'] = record.get('research_receipts') or []
+        approved['deferred_sources'] = record.get('deferred_sources') or []
+        approved.update({key: copy.deepcopy(value) for key, value in (record.get('series_proof') or {}).items()})
+        record.update(move_approved=True, approved_found=approved, approved_target=str(target), approved_binding=encoded(json.loads(rows[0]['manifest']))[1],
+                      approved_utc=_stamp())
+        record.pop('next_attempt', None)
+        record.pop('follow_up', None)
+        self._set(job_id, 'pending', '', record)
+        self.wake.set()
+
+    def _follow_up(self, job_id):
+        """0.30.0 item 2: after an approved book's series was written into it ('done'), its move into the series folder
+        (MergeService.sorting_follow_up: the app's usual verified move, only to the path Sergei approved). Recorded once."""
+        entry = self.entry(job_id)
+        if not entry or entry['state'] != 'done':
+            return
+        record = entry['record']
+        if not record.get('move_approved') or record.get('follow_up'):
+            return
+        hook = getattr(self.merge, 'sorting_follow_up', None)
+        if not callable(hook):
+            return
+        try:
+            answer = hook(job_id, record['approved_target'], record.get('new_path'))
+        except Exception as error:
+            answer = {'state': 'refused', 'reason': (str(error) or type(error).__name__)[:300]}
+        self._set(job_id, 'done', '', dict(record, follow_up=dict(answer or {}, at=_stamp())))
+
     # ------------------------------------------------------------------ pass
     def candidates(self):
-        """Finished books (the newest job of each book) without a series and without a final record."""
-        entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,record FROM series_backfill')}
+        """Finished books (the newest job of each book) without a series and without a final record. Never a retained job
+        (0.30.0 item A: the storage move kept its evidence without authority to change it; its book stays as published)."""
+        from storage_relocation_native import retained_job
+        entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,reason,record FROM series_backfill')}
+        for entry in entries.values():
+            if entry['state'] == 'held' and entry['reason'] == OLD_FOLDER_REASON:
+                entry['state'] = 'deferred'  # 0.30.0 item 2: held by the old bug; looked up once more (see OLD_FOLDER_REASON)
         generation = self._local_generation()
         newest = {}
         for row in self._rows("SELECT job_id,json_extract(manifest,'$.candidate_id') AS candidate FROM audio_jobs ORDER BY created,job_id"):
@@ -182,7 +237,7 @@ class SeriesBackfill:
         result = []
         for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY updated,job_id"):
             manifest = json.loads(row['manifest'])
-            if __import__('publication_reuse').task(manifest):continue
+            if __import__('publication_reuse').task(manifest) or retained_job(self.database, row['job_id']):continue
             review = manifest.get('metadata') or {}
             entry = entries.get(row['job_id'])
             record = json.loads(entry['record']) if entry else {}
@@ -256,6 +311,14 @@ class SeriesBackfill:
                 self.resume(row['job_id'])
             except Later as wait:
                 self._defer(row['job_id'], wait, state=entry['state'])
+        # 0.30.0 item 2: an approved book whose series was written before a restart still gets its approved move.
+        for row in self._rows("SELECT job_id FROM series_backfill WHERE state='done' AND json_extract(record,'$.move_approved') "
+                              "AND json_extract(record,'$.follow_up') IS NULL"):
+            try:
+                self._idle()
+                self._follow_up(row['job_id'])
+            except Later:
+                break
         books = self.candidates()
         jobs = self.merge.jobs.status()['jobs'] if books and getattr(self.merge, 'publications', None) is not None else None
         for index, row in enumerate(books):
@@ -273,6 +336,13 @@ class SeriesBackfill:
                 entry = self.entry(row['job_id'])
                 prior = entry['record'] if entry else {}
                 lookup_generation = self._local_generation()
+                if prior.get('move_approved'):
+                    # 0.30.0 item 2: the series Sergei approved with its move, exactly; never a new lookup.
+                    if prior.get('approved_binding') != encoded(manifest)[1] or not prior.get('approved_found'):
+                        raise Held('The book changed since you approved its move; nothing was changed')
+                    self.progress = {'title': title, 'done': index, 'total': len(books), 'step': 'updating'}
+                    self.apply(row['job_id'], dict(prior['approved_found']))
+                    continue
                 found = prior.get('found') if prior.get('found_binding') == encoded(manifest)[1] and prior.get('found_at', 0) > 0 \
                     and 0 <= self.clock() - prior.get('found_at', 0) <= 7 * 86400 else None
                 found = found or self.lookup(manifest)
@@ -415,6 +485,21 @@ class SeriesBackfill:
             new = ordinary(target['path'])
             if not new.is_relative_to(root) or new.suffix.lower() != '.m4b' or new == old:
                 raise Held('The series name is not a valid audiobook name')
+            if new.parent != old.parent:
+                # 0.30.0 item 2: its series folder is another folder. Only with Sergei's approval of the listed move: the
+                # series is written here under its new name, and the usual verified move takes it to the folder later.
+                entry = self.entry(job_id)
+                prior = entry['record'] if entry else {}
+                if not prior.get('move_approved'):
+                    raise Held(MOVE_WAITS)
+                planned = getattr(self.merge, 'sorting_target', None)
+                if callable(planned) and os.path.normcase(str(planned(job_id, found) or '')) != os.path.normcase(str(prior.get('approved_target'))):
+                    raise Held('The planned place changed since you approved it; look at the list again. Nothing was changed')
+                record.update({key: prior[key] for key in ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc') if key in prior})
+                record['series_folder'] = str(new.parent)
+                new = old.parent / new.name
+                if new == old:
+                    raise Held('The series name is not a valid audiobook name')
             temp = old.parent / (TEMP_PREFIX + job_id + '.m4b')
             record.update(new_path=str(new), temp=str(temp), review=review)
             record.update(root=str(root), parent_identity=output['parent_identity'])
@@ -507,6 +592,8 @@ class SeriesBackfill:
                 self._resume_protected(job_id, record, state, temp, new, old, boundary)
         except (BoundaryError, OSError, Held, KeyError) as error:
             self._set(job_id, 'held', 'Series recovery could not verify the files; remaining copies kept: ' + str(error), record)
+            return
+        self._follow_up(job_id)  # 0.30.0 item 2: an approved book now moves into its series folder
 
     @contextmanager
     def _boundary(self, record):
