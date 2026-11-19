@@ -93,7 +93,7 @@ test('Quit anyway is the engine\'s safe stop, then the shell waits for its own h
  assert.deepEqual(silent,{answer:null,engine:'ended'},'an engine that does not answer is stopped through its pipe');
  const fs=await import('node:fs');const main=fs.readFileSync(new URL('../desktop/main.js',import.meta.url),'utf8');
  const anyway=main.slice(main.indexOf('async function quitAnyway()'),main.indexOf('// Quit while loading closes at once'));
- assert.match(anyway,/'\/api\/desktop\/stop-now'/);assert.match(anyway,/endLoadingEngine\(30000\)/);assert.match(anyway,/finishExit\(0\)/);
+ assert.match(anyway,/'\/api\/desktop\/stop-now'/);assert.match(anyway,/endLoadingEngine\(30000[,)]/);assert.match(anyway,/finishExit\(0\)/);
  const watch=main.slice(main.indexOf('async function watchQuit('),main.indexOf('async function quitAnyway()'));
  assert.match(watch,/progress\.observe\(status\)/,'every Quit status poll keeps what it waits for');
 });
@@ -125,8 +125,56 @@ test('the book he chose to finish is waited for as before; any other work stops 
  clock.t=0;const quiet=createQuitBound({now:()=>clock.t});
  assert.equal(quiet.observe(facts([{kind:'scan',title:''}])),null);clock.t=10000;assert.equal(quiet.observe(facts([])),null);
  clock.t=20000;assert.equal(quiet.observe(facts([{kind:'press',title:''}])),null);
- clock.t=30000;assert.equal(quiet.observe(facts([{kind:'critical',title:'move'}])),null);
- clock.t=35000;assert.equal(quiet.observe(facts([{kind:'critical',title:'move'}])),'bound');
+ clock.t=30000;assert.equal(quiet.observe(facts([{kind:'press',title:''}])),null);
+ clock.t=35000;assert.equal(quiet.observe(facts([{kind:'press',title:''}])),'bound');
+});
+// Senua's 0.30.0 review, M4: a file change the engine names ('critical') when the bound or a failed close says stop is
+// waited for to its own end first, never past FILE_CHANGE_BOUND_MS. Before: stopped at the bound, then the host was ended.
+const {FILE_CHANGE_BOUND_MS,fileChangeNamed}=createRequire(import.meta.url)('../desktop/quit-watch.js');
+test('a file change named when Quit would stop is waited for to its end, then the stop goes on; never past the ceiling',()=>{
+ assert.equal(FILE_CHANGE_BOUND_MS,300000);
+ assert.equal(fileChangeNamed([{kind:'press',title:''},{kind:'critical',title:'a delete'}]),true);assert.equal(fileChangeNamed([{kind:'press',title:''}]),false);
+ const clock={t:0};const bound=createQuitBound({now:()=>clock.t});
+ const deleting=[{kind:'press',title:''},{kind:'critical',title:'a delete'}];
+ assert.equal(bound.observe(facts(deleting)),null);
+ clock.t=15000;assert.equal(bound.observe(facts(deleting)),null,'held: the delete loop is open');
+ clock.t=60000;assert.equal(bound.observe(facts(deleting)),null);
+ clock.t=61000;assert.equal(bound.observe(facts([{kind:'press',title:''}])),'bound','its loop ended: the stop goes on at once');
+ // A change that never ends: the ceiling, counted from when the stop was held.
+ clock.t=0;const hung=createQuitBound({now:()=>clock.t});
+ hung.observe(facts(deleting));clock.t=15000;assert.equal(hung.observe(facts(deleting)),null);
+ clock.t=15000+FILE_CHANGE_BOUND_MS-1000;assert.equal(hung.observe(facts(deleting)),null);
+ clock.t=15000+FILE_CHANGE_BOUND_MS;assert.equal(hung.observe(facts(deleting)),'bound','an accepted Quit still always ends');
+ // A failed close with a file change still open: held the same way.
+ clock.t=0;const failed=createQuitBound({now:()=>clock.t});
+ assert.equal(failed.observe(facts([{kind:'critical',title:'a cleanup'}],'blocked')),null);
+ clock.t=5000;assert.equal(failed.observe(facts([{kind:'press',title:''}],'blocked')),'blocked');
+ // The chosen book is still waited for without the ceiling (its in-place tag edit included).
+ clock.t=0;const kept=createQuitBound({keepConversion:true,now:()=>clock.t});
+ for(clock.t=0;clock.t<=3600000;clock.t+=60000)assert.equal(kept.observe(facts([{kind:'conversion',title:'Дюна'},{kind:'critical',title:'a tag edit'}])),null);
+});
+test('the engine host is not ended while its engine still names an open file change; past the ceiling it is',async()=>{
+ const named=(until)=>async()=>h.clock.t<until;let h;
+ h=host(calls=>calls.includes('kill')?h.clock.t:Infinity);
+ const outcome=await endOwnEngine({...h.options,boundMs:30000,killWaitMs:5000,holdKill:named(50000)});
+ assert.equal(outcome,'ended');assert.deepEqual(h.calls,['pipe','kill']);
+ assert.ok(h.clock.t>=50000&&h.clock.t<57000,'ended once the change was no longer named, not at the 30 s bound: '+h.clock.t);
+ h=host(calls=>calls.includes('kill')?h.clock.t:Infinity);
+ await endOwnEngine({...h.options,boundMs:30000,killWaitMs:5000,holdKill:async()=>true,holdMs:FILE_CHANGE_BOUND_MS});
+ assert.deepEqual(h.calls,['pipe','kill']);assert.ok(h.clock.t>=30000+FILE_CHANGE_BOUND_MS,'the ceiling ends it: '+h.clock.t);
+ h=host(calls=>calls.includes('kill')?h.clock.t:Infinity);
+ await endOwnEngine({...h.options,boundMs:30000,killWaitMs:5000,holdKill:async()=>{throw new Error('no answer');}});
+ assert.ok(h.clock.t<36000,'an engine that does not answer names nothing: '+h.clock.t);
+ h=host(calls=>calls.includes('kill')?h.clock.t:Infinity);
+ await endOwnEngine({...h.options,boundMs:30000,killWaitMs:5000});
+ assert.ok(h.clock.t<36000,'positive control: without a hold, ended at the bound');
+ const fs=await import('node:fs');const main=fs.readFileSync(new URL('../desktop/main.js',import.meta.url),'utf8');
+ const anyway=main.slice(main.indexOf('async function quitAnyway()'),main.indexOf('// Quit while loading closes at once'));
+ assert.match(anyway,/endLoadingEngine\(30000, \{ holdKill: fileChangeOpen \}\)/,'Quit anyway holds the kill for a file change');
+ const refused=main.slice(main.indexOf('async function requestQuit('),main.indexOf('async function fileChangeOpen()'));
+ assert.match(refused,/endLoadingEngine\(30000, \{ holdKill: fileChangeOpen \}\)/,'so does the stop of an engine that refused Quit');
+ const open=main.slice(main.indexOf('async function fileChangeOpen()'),main.indexOf('// HTTP failure never proves'));
+ assert.match(open,/'\/api\/desktop\/status'/);assert.match(open,/catch \{ return false; \}/);
 });
 test('the shell stops safely through Quit anyway on a failed close and past the bound, and keeps the chosen book',()=>{
  return import('node:fs').then(fs=>{

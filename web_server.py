@@ -584,17 +584,22 @@ class BrowserServer(ThreadingHTTPServer):
     ADMISSIONS_CLOSE = 30.0  # seconds a shutdown waits for presses still running (desktop Quit waits for them first, saying so)
 
     def finish_shutdown(self):
+        import critical_sections
         self.stop_loading()  # Quit while loading: nothing else runs yet (Judy 3.2)
-        self.actions.close()  # queued actions are dropped, never run (Q1); one running holds an admission, waited for below
+        # Nothing waiting runs any more; the waiting actions are saved for the next start (0.30.0, Sergei Q4: remember).
+        # One already running holds an admission, waited for below; if it comes back to wait, it is saved in its place.
+        self.actions.close()
         # 0.30.0 item F: bounded like every other wait of the close (it had none). A press still running after the bound
-        # keeps ownership: the close fails as 'blocked', and the desktop status says what still runs.
-        deadline = time.monotonic() + self.ADMISSIONS_CLOSE
+        # keeps ownership: the close fails as 'blocked', and the desktop status says what still runs. Senua's 0.30.0
+        # review, M4: while a file change is open (a Delete book's file loop: critical_sections), the press is waited for to
+        # that change's end, up to critical_sections.FILE_CHANGE_BOUND.
+        started = time.monotonic()
         with self.control_condition:
             while self.merge_admissions:
-                left = deadline - time.monotonic()
-                if left <= 0:
+                waited = time.monotonic() - started
+                if waited >= critical_sections.FILE_CHANGE_BOUND or waited >= self.ADMISSIONS_CLOSE and not critical_sections.open_sections():
                     raise TimeoutError('A press is still running; ownership retained')
-                self.control_condition.wait(timeout=min(.5, left))
+                self.control_condition.wait(timeout=.5)
         self.inventory.stop()
         worker=self.inventory.worker
         if worker and worker.is_alive():

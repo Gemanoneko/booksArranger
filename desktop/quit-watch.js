@@ -39,11 +39,23 @@ async function sendQuit({ post, sleep, now = () => Date.now(), boundMs = 45000, 
 // Futaba's 0.22.3 QA, m-2: Quit ends the shell only once its own engine host has exited. Its pipe closes (the engine's
 // safe stop); after boundMs the host is ended through its own handle (its kill-on-close job takes the engine with it),
 // never by name or PID. 'exited' | 'ended' (it had to be ended) | 'still-running' (even that did not end it in killWaitMs).
-async function endOwnEngine({ exited, closePipe, kill, sleep, onKill = () => {}, now = () => Date.now(), boundMs = 30000, killWaitMs = 5000 } = {}) {
+// Senua's 0.30.0 review, M4: holdKill (async, true while the engine still names an open file change) keeps the host alive
+// past boundMs, polled every second, never past holdMs more (FILE_CHANGE_BOUND_MS): the engine is then ending that change
+// itself (its close waits for it with the same bound). A holdKill that fails reads as false.
+async function endOwnEngine({ exited, closePipe, kill, sleep, onKill = () => {}, now = () => Date.now(), boundMs = 30000, killWaitMs = 5000,
+                              holdKill = async () => false, holdMs = FILE_CHANGE_BOUND_MS } = {}) {
  if (exited()) return 'exited';
  try { closePipe(); } catch { /* host gone */ }
  let deadline = now() + boundMs;
  while (!exited() && now() < deadline) await sleep(200);
+ if (exited()) return 'exited';
+ const held = now() + holdMs;
+ while (!exited() && now() < held) {
+  let open = false;
+  try { open = await holdKill(); } catch { open = false; }
+  if (!open) break;
+  await sleep(1000);
+ }
  if (exited()) return 'exited';
  onKill();
  try { kill(); } catch { /* already gone */ }
@@ -84,15 +96,28 @@ function createQuitProgress({ now = () => Date.now() } = {}) {
 // ("Quit after this book": keepConversion) is waited for as before; the bound starts when it is no longer named. A poll
 // that names nothing resets the clock. null: go on waiting.
 const QUIT_WAIT_BOUND_MS = 15000;
-function createQuitBound({ keepConversion = false, boundMs = QUIT_WAIT_BOUND_MS, now = () => Date.now() } = {}) {
+// Senua's 0.30.0 review, M4 (ruling 27: a file change finishes once begun): when the bound or a failed close says stop, a
+// file change the engine still names ('critical': a tag edit, one original's removal, a Delete book's file loop, a rename)
+// is waited for to its own end first, never past FILE_CHANGE_BOUND_MS; then the stop goes on. The engine waits for the same
+// changes with the same bound (critical_sections.FILE_CHANGE_BOUND), so an accepted Quit still always ends.
+const FILE_CHANGE_BOUND_MS = 300000;
+const fileChangeNamed = (waiting) => Array.isArray(waiting) && waiting.some((item) => item && item.kind === 'critical');
+function createQuitBound({ keepConversion = false, boundMs = QUIT_WAIT_BOUND_MS, fileChangeMs = FILE_CHANGE_BOUND_MS, now = () => Date.now() } = {}) {
  let since = null;
+ let holding = null;
  return {
   observe(facts) {
-   if (facts && facts.blocked) return 'blocked';
    const waiting = facts && Array.isArray(facts.waiting) ? facts.waiting : [];
-   if (!waiting.length || keepConversion && waiting.some((item) => item.kind === 'conversion')) { since = null; return null; }
-   if (since === null) since = now();
-   return now() - since >= boundMs ? 'bound' : null;
+   let stop = null;
+   if (facts && facts.blocked) stop = 'blocked';
+   else if (!waiting.length || keepConversion && waiting.some((item) => item.kind === 'conversion')) since = null;
+   else {
+    if (since === null) since = now();
+    if (now() - since >= boundMs) stop = 'bound';
+   }
+   if (!stop || !fileChangeNamed(waiting)) { holding = null; return stop; }
+   if (holding === null) holding = now();
+   return now() - holding >= fileChangeMs ? stop : null;
   },
  };
 }
@@ -104,4 +129,5 @@ async function quitNow({ post, endEngine }) {
  try { answer = await post(); } catch { /* its pipe closes next: the same safe stop */ }
  return { answer, engine: await endEngine() };
 }
-module.exports = { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, quitWaiting, createQuitProgress, createQuitBound, QUIT_WAIT_BOUND_MS, quitNow };
+module.exports = { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, quitWaiting, createQuitProgress, createQuitBound, QUIT_WAIT_BOUND_MS,
+ FILE_CHANGE_BOUND_MS, fileChangeNamed, quitNow };

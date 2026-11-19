@@ -5720,6 +5720,19 @@ class MergeService:
         if thread is None or thread is threading.current_thread():return None
         thread.join(30 if critical_sections.RENAME in critical_sections.open_sections() else max(0,deadline-time.monotonic()))
 
+    def _close_file_changes(self):
+        """Senua's 0.30.0 review, M4 (ruling 27: a file change finishes once begun). The workers that change files are told
+        to stop first, so none begins another (the converter's in-place tag edit and its inline cleanup, the cleanup
+        worker's removal of each original); then close waits for any change still open (critical_sections: those, a Delete
+        book's file loop, a series rename) to reach its own end, up to critical_sections.FILE_CHANGE_BOUND. Each worker
+        then reaches its checkpoint within the 30 s its own close gives it. Waits only while a change is open."""
+        import critical_sections,sys
+        for flag in (getattr(self.__dict__.get('jobs'),'_stop',None),getattr(self.__dict__.get('cleanup'),'stop',None)):
+            if isinstance(flag,threading.Event):flag.set()  # the stop their close() sets, set now (no lock: a flag)
+        if critical_sections.open_sections() and not critical_sections.wait_closed(time.monotonic()+critical_sections.FILE_CHANGE_BOUND):
+            print('Books Arranger close: a file change was still open after %g s: %s' % (critical_sections.FILE_CHANGE_BOUND,
+                  ', '.join(critical_sections.open_sections())),file=sys.stderr,flush=True)
+
     def close(self):
         # 0.30.0 item F: one bound for all the read-only work below (status computations, book pages, lookups, repair checks);
         # none of it holds close past CLOSE_READS, and none of it raises. Workers that change files or the catalog keep theirs.
@@ -5745,7 +5758,8 @@ class MergeService:
         if repair and repair is not threading.current_thread():repair.join(max(0,reads-time.monotonic()))
         retry=self.__dict__.get('_retry_all_thread')  # Retry all: it changes job rows; Quit waits for it first
         if retry and retry is not threading.current_thread():retry.join(30)
-        if hasattr(self,'automatic'):self.automatic.close()
+        if hasattr(self,'automatic'):self.automatic.close()  # it pauses the queue first, recording the pause's origin
+        self._close_file_changes()
         self._retention_stop.set();self._retention_wake.set()
         if self._retention_thread:
             self._retention_thread.join(30)

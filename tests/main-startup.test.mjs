@@ -407,3 +407,24 @@ test('Quit waits for the book he chose to finish, then stops safely when other w
   assert.ok(t.log.trays[0].tips.includes('Books Arranger — stopping safely'));
  } finally { await t.close(); }
 });
+// Senua's 0.30.0 review, M4 (ruling 27: a file change finishes once begun): before, the bound stopped the engine (and its
+// host was ended 30 s later) whatever it named, an open file change included.
+test('Quit does not stop the engine while it names an open file change; it stops safely once the change has ended', async () => {
+ const t = await boot();
+ try {
+  const child = await loadedEngine(t);
+  t.engine.waiting_for = [{ kind: 'press', title: '' }, { kind: 'critical', title: 'a delete' }];
+  const quitting = t.invoke('books:quit');  // it answers when the Quit has ended: not awaited until then
+  await until(() => t.engine.requests.includes('/api/desktop/quit'), 6000, 'the Quit sent');
+  await sleep(18000);
+  assert.ok(!t.engine.requests.includes('/api/desktop/stop-now'), 'held past the 15 s bound while the delete loop is open');
+  assert.deepEqual(t.log.exits, []);
+  const ended = Date.now();
+  t.engine.waiting_for = [{ kind: 'press', title: '' }];
+  await until(() => t.log.exits.length, 15000, 'the exit');
+  await quitting;
+  assert.deepEqual(t.log.exits, [0]);
+  assert.ok(t.engine.stoppedAt - ended < 4000, 'stopped safely as soon as the change ended: ' + (t.engine.stoppedAt - ended) + ' ms');
+  assert.equal(child.stdin.ended, true);
+ } finally { await t.close(); }
+});

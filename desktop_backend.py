@@ -766,11 +766,13 @@ def _process_running(pid):
         kernel.CloseHandle(handle)
 
 
-def retire_stale_record(database, roots, port):
+def retire_stale_record(database, roots, port, found=None):
     """Preserve one exact, valid dead-owner record under catalog/data ownership.
 
     Called only by web_server's guarded startup after source exclusion and the
     catalog lease. Unknown records are never adopted, renamed or deleted.
+    found (a dict): filled with the retired record's instance and version, the last owner that did not close cleanly
+    (Senua's 0.30.0 review, m6: the saved action queue is stale when that was another version's session).
     """
     import hashlib, uuid
     from catalog_owner import ACTIVE_CATALOG
@@ -816,6 +818,8 @@ def retire_stale_record(database, roots, port):
         publish_no_replace(record, aside, boundary, expected_sha256=digest,
                            expected_size=len(raw), before_rename=exact_generation)
         print('Previous dead Books Arranger ownership record retained as ' + aside.name, flush=True)
+        if found is not None:
+            found.update(instance=value['instance'], version=value['version'])
         return aside
 
 
@@ -853,9 +857,16 @@ def main(argv=None):
     configure_from_environment()
     import web_server
 
+    previous = {}
+
+    def before_start(database, roots, port):
+        return retire_stale_record(database, roots, port, found=previous)
+
     def ready(server):
         server.RequestHandlerClass = handler_class(web_server.Handler, token)
         server.desktop = DesktopControl(server, exit_bound=DesktopControl.EXIT_AFTER)
+        # m6: the last owner that did not close cleanly, for the saved queue's stale check (ActionQueue.restore).
+        server.previous_owner = dict(previous) if previous else None
         lifetime.attach(server.desktop)
 
     def startup_guard(database, roots, port):
@@ -869,7 +880,7 @@ def main(argv=None):
     # This same owned engine keeps the admitted native handles through normal
     # operation. No preliminary process repeats the full fence/member scan.
     with Admission(progress,cancelled=lifetime.lost.is_set) if current() is not None else nullcontext() as admission:
-        web_server.main(argv, ready=ready, before_start=retire_stale_record,
+        web_server.main(argv, ready=ready, before_start=before_start,
                         startup_guard=startup_guard,create_data=mode=='new',admission=admission,before_mutation=lifetime.check)
     return 0
 

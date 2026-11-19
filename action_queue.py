@@ -19,8 +19,10 @@ another queued action runs. A fresh press while others wait goes to the back eve
 closes) but no longer drop it. Each restored action runs its checks again when it runs, as always, and never starts the
 conversion queue or the cleanup backlog itself (MergeService.restored_press): whether they start after a restart is the
 restart intent's decision alone (Senua R-M1..R-M3, S-m8). A saved queue another session closed over (an older version run
-in between, a rollback round trip) is dropped, each action with an outcome. Moves keep their own journal (book_move):
-a queued move is cancelled at the next start, with its own line, as before."""
+in between, a rollback round trip) is dropped, each action with an outcome. Moves keep their own journal (book_move) and are
+never saved here: Quit and an update cancel a queued move as the app closes (drop(): its journal says cancelled, the row
+its own line). Only a cancel that fails there is left to the next start's move recovery (book_move.recover), which does not
+run in retained-runtime mode (Senua's 0.30.0 review, M3)."""
 import contextlib
 import copy
 import datetime
@@ -80,10 +82,13 @@ def _now():
 
 
 class QueueStore:
-    """The waiting actions in the catalog: one row each, in queue order, and one meta row (writer, last save, clean close)."""
+    """The waiting actions in the catalog: one row each, in queue order, and one meta row (writer, last save, clean close,
+    and the saving session's instance and version)."""
 
-    def __init__(self, database):
+    def __init__(self, database, instance=None, version=None):
         self.database = database
+        self.instance = instance if isinstance(instance, str) else None  # this session's (BrowserServer.instance)
+        self.version = version if isinstance(version, str) else None
 
     @contextlib.contextmanager
     def _db(self):
@@ -91,7 +96,12 @@ class QueueStore:
         with connect(self.database, timeout=5) as db:
             db.execute('CREATE TABLE IF NOT EXISTS action_queue_saved(position INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, action TEXT NOT NULL, '
                        'book_id TEXT NOT NULL, title TEXT NOT NULL, args TEXT NOT NULL, queued_at REAL NOT NULL)')
-            db.execute('CREATE TABLE IF NOT EXISTS action_queue_meta(id INTEGER PRIMARY KEY CHECK(id=1), writer TEXT NOT NULL, saved_at TEXT NOT NULL, closed_at TEXT)')
+            db.execute('CREATE TABLE IF NOT EXISTS action_queue_meta(id INTEGER PRIMARY KEY CHECK(id=1), writer TEXT NOT NULL, saved_at TEXT NOT NULL, closed_at TEXT, '
+                       'instance TEXT, version TEXT)')
+            have = {row[1] for row in db.execute('PRAGMA table_info(action_queue_meta)')}
+            for column in ('instance', 'version'):  # a meta row saved before these were kept (0.30.0 builds before m6)
+                if column not in have:
+                    db.execute('ALTER TABLE action_queue_meta ADD COLUMN %s TEXT' % column)
             yield db
 
     def save(self, items, closing=False):
@@ -103,15 +113,18 @@ class QueueStore:
                            [(n, item['id'], item['action'], item['book_id'], item.get('title') or '', json.dumps(item['args'], ensure_ascii=False),
                              float(item.get('queued_at') or time.time())) for n, item in enumerate(items)])
             stamp = _now().isoformat()
-            db.execute('INSERT INTO action_queue_meta(id,writer,saved_at,closed_at) VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET '
-                       'writer=excluded.writer,saved_at=excluded.saved_at,closed_at=excluded.closed_at', (WRITER, stamp, stamp if closing else None))
+            db.execute('INSERT INTO action_queue_meta(id,writer,saved_at,closed_at,instance,version) VALUES(1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET '
+                       'writer=excluded.writer,saved_at=excluded.saved_at,closed_at=excluded.closed_at,instance=excluded.instance,version=excluded.version',
+                       (WRITER, stamp, stamp if closing else None, self.instance, self.version))
 
-    def load(self):
-        """(items, why_dropped or None). why_dropped: 'foreign' (not this format's writer) or 'stale' (a desktop shutdown was
-        recorded after the queue was last saved or cleanly closed: another session ran in between, as after a rollback to a
-        version that keeps no queue)."""
+    def load(self, previous=None):
+        """(items, why_dropped or None). why_dropped: 'foreign' (not this format's writer) or 'stale': another session ran in
+        between, as after a rollback to a version that keeps no queue. Seen two ways: a desktop shutdown was recorded after the
+        queue was last saved or cleanly closed; or (Senua's 0.30.0 review, m6) previous, the ownership record this start found
+        left behind ({'instance', 'version'}: the last owner did not close cleanly, it crashed or was ended), is another
+        session's, of another version than the one that saved the queue. Such a session leaves no shutdown record."""
         with self._db() as db:
-            meta = db.execute('SELECT writer,saved_at,closed_at FROM action_queue_meta WHERE id=1').fetchone()
+            meta = db.execute('SELECT writer,saved_at,closed_at,instance,version FROM action_queue_meta WHERE id=1').fetchone()
             rows = db.execute('SELECT id,action,book_id,title,args,queued_at FROM action_queue_saved ORDER BY position').fetchall()
             shutdown = None
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='desktop_shutdown'").fetchone():
@@ -135,6 +148,8 @@ class QueueStore:
                 return items, 'stale'
         except ValueError:
             return items, 'stale'
+        if isinstance(previous, dict) and meta[3] and previous.get('instance') != meta[3] and previous.get('version') != meta[4]:
+            return items, 'stale'  # m6: a session of another version ran after the save and ended without closing
         return items, None
 
 
@@ -162,7 +177,8 @@ class ActionQueue:
         self.closed = False
         # 0.30.0: the catalog keeps the waiting actions (QueueStore). Default: the server's catalog; none without one.
         database = getattr(getattr(server, 'inventory', None), 'database', None)
-        self.store = store if store is not None else QueueStore(database) if isinstance(database, (str, bytes)) or hasattr(database, '__fspath__') else None
+        self.store = store if store is not None else QueueStore(database, getattr(server, 'instance', None), getattr(server, 'loaded_version', None)) \
+            if isinstance(database, (str, bytes)) or hasattr(database, '__fspath__') else None
         self._save_lock = threading.Lock()
         # 0.30.0: (kind, item) -> the blocker object /api/state gives (background_work.explain_one), for a press's own answer
         # (the server sets it); without it a press's answer carries the kind alone.
@@ -494,14 +510,17 @@ class ActionQueue:
     def close(self):
         """Quit, update and shutdown: nothing waiting runs any more; the queue is saved with a clean-close stamp (after the
         shell recorded its shutdown), so the next start takes it back. One already running finishes (it holds a control
-        admission, which shutdown waits for)."""
+        admission, which shutdown waits for); if it comes back to wait (refused while closing), it is saved in its place.
+
+        Senua's 0.30.0 review, M1: this cleared the waiting actions after saving them. A safe stop (Quit anyway, a Windows
+        sign-out, the shell's pipe closing) closes the queue while an action may still run; when that one came back to wait,
+        the worker put it into the emptied list and saved it alone, over the others (1 of 3 kept). They stay in memory now
+        (closed: nothing runs them), and every save after close is a clean-close one (_persist)."""
         with self.lock:
             self.closed = True
             self.changed.notify_all()
             thread = self.thread
         self._persist(closing=True)
-        with self.lock:
-            self.items.clear()
         if thread is not None and thread is not threading.current_thread():
             thread.join(1)
 
@@ -515,6 +534,7 @@ class ActionQueue:
             self._version += 1
             version = self._version
             items = [copy.deepcopy(item) for item in self.items if item['action'] in PERSIST]
+            closing = closing or self.closed  # M1: once closed, a save keeps the clean-close stamp
         with self._save_lock:
             if version < self._saved:
                 return  # a newer snapshot is already saved
@@ -538,8 +558,9 @@ class ActionQueue:
         restore_stale, restore_foreign). Returns the number taken back. Once per server."""
         if self.store is None or self.restored:
             return 0
+        previous = getattr(self.server, 'previous_owner', None)  # m6: the ownership record this start found left behind
         try:
-            saved, why = self.store.load()
+            saved, why = self.store.load(previous=previous) if isinstance(previous, dict) else self.store.load()
         except Exception as error:
             # Not marked restored: nothing is saved over a queue that could not be read (this launch keeps it in memory).
             try:
@@ -558,6 +579,12 @@ class ActionQueue:
             else:
                 taken = {entry['book_id'] for entry in self.items} | ({self.running['book_id']} if self.running is not None else set())
                 kept = [dict(item, restored=True, blocker='loading') for item in saved if item['book_id'] not in taken]
+                # m6: a saved press for a book that got a new press while loading (one action per row) is not taken back,
+                # and says so with an outcome, as a dropped saved queue does (code restore_replaced; it was dropped silently).
+                for item in saved:
+                    if item['book_id'] in taken:
+                        self.outcomes.append({'id': item['id'], 'action': item['action'], 'book_id': item['book_id'], 'title': item['title'], 'at': now,
+                                              'result': 'refused', 'code': 'restore_replaced'})
                 self.items[0:0] = kept
             self._prune()
             if kept:
@@ -608,19 +635,21 @@ class ActionQueue:
                 continue
             try:
                 outcome = self._run(head)
+                blocker = self.blocker_after(head) if outcome is None else None
+                with self.lock:
+                    self.running = None
+                    if outcome is None:
+                        head['blocker'] = blocker
+                        self.items.insert(0, head)  # a blocker came back between the look and the run: it waits again
+                    else:
+                        self.outcomes.append(outcome)
+                        self._prune()
+                if outcome is None:
+                    # M1: saved before the admission is released, so a shutdown (which waits for admissions) never ends
+                    # the process between the action coming back to wait and its save.
+                    self._persist()
             finally:
                 self._release()
-            blocker = self.blocker_after(head) if outcome is None else None
-            with self.lock:
-                self.running = None
-                if outcome is None:
-                    head['blocker'] = blocker
-                    self.items.insert(0, head)  # a blocker came back between the look and the run: it waits again
-                else:
-                    self.outcomes.append(outcome)
-                    self._prune()
-            if outcome is None:
-                self._persist(closing=self.closed)
             invalidate = getattr(self.server, 'invalidate_status', None)
             if callable(invalidate):
                 try:
@@ -634,8 +663,9 @@ class ActionQueue:
         return self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item))
 
     def blocker_after(self, item):
+        """The blocker of an action that came back to wait, read while it still holds its own admission (held=1, M1)."""
         try:
-            return self.item_blocker(item) or 'operation'
+            return self.item_blocker(item, held=1) or 'operation'
         except Exception:
             return 'operation'
 

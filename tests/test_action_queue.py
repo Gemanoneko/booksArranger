@@ -637,6 +637,95 @@ class PersistentQueueTests(unittest.TestCase):
         later, again = self.server(started=False); later.scanning = True
         self.assertEqual(again.restore(), 1)
 
+    def closed_at(self):
+        from scanner import connect
+        with connect(self.database) as db:
+            return db.execute('SELECT closed_at FROM action_queue_meta WHERE id=1').fetchone()[0]
+
+    def test_a_safe_stop_while_an_action_runs_keeps_every_saved_action(self):
+        # Senua's 0.30.0 review, M1 (her probe): three queued Retry presses, the first one running when a safe stop (Quit
+        # anyway, a sign-out, the shell's pipe closing) closes the queue. Refused while closing, it comes back to wait; the
+        # save then held it alone (1 of 3). Its save also lands before its admission is released: shutdown waits for that.
+        server, queue = self.server()
+        server.scanning = True
+        self.press(queue, 0); self.press(queue, 1); self.press(queue, 2)
+        server.merge.gate = gate = threading.Event(); self.addCleanup(gate.set)
+        server.merge.answers = {'retry': audio_jobs.RetryRefused('Books Arranger is closing')}
+        at_release = []
+        real_release = queue._release
+        queue._release = lambda: (at_release.append(self.saved()), real_release())
+        server.scanning = False
+        self.assertTrue(until(lambda: server.merge.calls), 'the first action is running (admitted, inside its call)')
+        server.closing = True  # stop_now
+        queue.close()          # finish_shutdown's first step, while the action still runs
+        gate.set()
+        self.assertTrue(until(lambda: at_release))
+        every = [('retry', self.book[0]), ('retry', self.book[1]), ('retry', self.book[2])]
+        self.assertEqual(at_release, [every], 'saved, in order, before shutdown can go on')
+        self.assertEqual(self.saved(), every)
+        self.assertIsNotNone(self.closed_at(), 'a clean close: the next start takes them back')
+        self.assertEqual(server.merge.calls, [('retry', ('Audiobooks', self.book[0], 3, self.job[0]))], 'positive control: it did run')
+
+    def test_an_action_the_closing_app_does_not_admit_keeps_its_place_and_the_others(self):
+        # M1, the second path: the app began closing (and closed the queue) between the look and the admission.
+        server, queue = self.server()
+        server.scanning = True
+        self.press(queue, 0); self.press(queue, 1); self.press(queue, 2)
+
+        def admit():
+            server.closing = True
+            queue.close()
+            return False
+        queue._admit = admit
+        server.scanning = False
+        every = [('retry', self.book[0]), ('retry', self.book[1]), ('retry', self.book[2])]
+        self.assertTrue(until(lambda: self.saved() == every and self.closed_at() is not None), (self.saved(), self.closed_at()))
+        self.assertEqual(server.merge.calls, [])
+
+    def test_a_saved_press_a_new_press_replaced_while_loading_says_so(self):
+        # Senua's 0.30.0 review, m6: it was dropped without an outcome line.
+        server, queue = self.server()
+        server.scanning = True
+        self.press(queue, 0); self.press(queue, 1)
+        self.shutdown(action_queue._now() - __import__('datetime').timedelta(seconds=5))
+        queue.close()
+        later, again = self.server(started=False)
+        later.scanning = True
+        self.press(again, 0, 'repair')  # a new press for book 0 while loading
+        self.assertEqual(again.restore(), 1)
+        self.assertEqual([(item['book_id'], item['action']) for item in again.view()['queued_actions']], [(self.book[1], 'retry'), (self.book[0], 'repair')])
+        self.assertEqual([(item['book_id'], item['action'], item['result'], item['code']) for item in again.view()['queue_outcomes']],
+                         [(self.book[0], 'retry', 'refused', 'restore_replaced')])
+
+    def launch(self, instance, version, previous=None):
+        """One launch of a given session (instance, version), the ownership record its start found left behind (previous)."""
+        server = Server(); server.inventory = SimpleNamespace(database=self.database)
+        server.instance, server.loaded_version, server.previous_owner = instance, version, previous
+        queue = ActionQueue(server, poll=.02); self.addCleanup(queue.close)
+        return server, queue
+
+    def test_a_queue_saved_before_another_versions_session_crashed_is_dropped_with_an_outcome(self):
+        # m6: the stale check read only the shutdown record, which a session that crashed or was ended never writes. The
+        # ownership record it left behind (retired at the next start) names it.
+        mine, other = 'a' * 32, 'b' * 32
+        for previous, kept in (({'instance': other, 'version': '0.29.0'}, 0),   # an older version ran after the save, then crashed
+                               ({'instance': mine, 'version': '0.30.0'}, 1),    # positive control: the saving session itself crashed
+                               ({'instance': other, 'version': '0.30.0'}, 1),   # a start of the same version that crashed before restoring
+                               (None, 1)):                                      # the last owner closed cleanly
+            with self.subTest(previous=previous):
+                server, queue = self.launch(mine, '0.30.0')
+                queue.restore()
+                server.scanning = True
+                self.press(queue, 0)  # saved; no clean close: the session crashes
+                later, again = self.launch('c' * 32, '0.30.0', previous)
+                later.scanning = True
+                self.assertEqual(again.restore(), kept)
+                if not kept:
+                    self.assertEqual([(item['book_id'], item['code']) for item in again.view()['queue_outcomes']], [(self.book[0], 'restore_stale')])
+                    self.assertEqual(self.saved(), [])
+                again.close(); queue.close()
+                action_queue.QueueStore(self.database).save([])  # the next case starts from an empty saved queue
+
     def test_an_action_is_taken_out_of_the_saved_queue_when_it_starts(self):
         server, queue = self.server()
         server.scanning = True
