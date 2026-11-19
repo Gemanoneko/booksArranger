@@ -443,6 +443,9 @@ def explain_queue(queue, jobs, merge=None):
     named = {}
     for item in (queue.get('queued_actions') or []) if isinstance(queue, dict) else []:
         blocker = item.get('blocker') if isinstance(item.get('blocker'), dict) else {}
+        if not blocker.get('kind'):
+            item['blocker'] = None  # QA D1: nothing blocks it (it is about to run)
+            continue
         item['blocker'] = explain_one(blocker.get('kind'), item, jobs, running, merge, named)
 
 

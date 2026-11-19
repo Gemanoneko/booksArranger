@@ -208,9 +208,15 @@ def source_gate(row,work):
             elif series.get('name') and series.get('number'):
                 expected=series['name'] if key=='series' else series['number']
                 if norm(value)!=norm(expected):reasons.append('Source series or position conflicts with verified work')
+    # 0.30.0 QA C2 (Darwin's Blade): a part set whose album tags differ only by their part numbers, ordered by those numbers
+    # (groups.ALBUM_PART_BASIS): one recording in that order. Its albums compare without the part number; its order is the
+    # one grouping proved (the members' positions), with no track tags. Other evidence (the artists, a gap) still holds it.
+    import groups
+    album_parts=standing and len(members)>1 and (row.get('part_set') or {}).get('order_basis')==groups.ALBUM_PART_BASIS
     if len(members)>1:
         tags=[tag_text.tags(m['metadata']) for m in members]
-        albums={norm(t.get('album')) for t in tags};artists={norm(t.get('artist')) for t in tags}
+        albums={norm(groups._without_part_number(' '.join(str(t.get('album') or '').split()).casefold()) if album_parts else t.get('album')) for t in tags}
+        artists={norm(t.get('artist')) for t in tags}
         if known_anthology or folder_book:artists={'confirmed anthology story credits' if known_anthology else 'one source folder'}
         if len(artists)>1 and local:
             # Ruling 19 (joined parts): one person spelled two ways ("Иван Петров" / "Петров Иван") is one artist.
@@ -222,7 +228,7 @@ def source_gate(row,work):
         for m in members:
             match=re.match(r'^(\d{1,4})[ _.-]+',m['filename'])
             filename_positions.append(int(match[1]) if match else None)
-        use_filenames=bool(standing and (folder_context or len(albums)==1 and next(iter(albums),'')) and all(p is not None for p in filename_positions))
+        use_filenames=bool(standing and (folder_context or len(albums)==1 and next(iter(albums),'')) and all(p is not None for p in filename_positions)) or album_parts
         named_order=bool(sequence and standing and (folder_context or len(albums)==1 and next(iter(albums),'')))
         if split:
             # Proven above (embedded track numbers, part numbers in the names or disc folders).
