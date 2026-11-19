@@ -6,13 +6,17 @@ Item 5, one author folder per author, in the Latin, surname-first form the libra
 whatever source or script answered. Two names are the same author only when (conservative: a wrong merge is worse than a
 split):
   1. one of Sergei's rules (or a rule research learned) files the credit under the other name: «Роулинг Джоан» and
-     «Джоан Роулинг» are ruled "Rowling J. K" (same_as), followed to its end;
-  2. or both are written with exactly the same words, in any order, case, punctuation and ё/е aside (author_rules.key):
-     "J. K. Rowling" and "Rowling J. K." are one name; the surname-first order of it is the folder.
-Nothing else merges: never an initial against a full first name ("J. K. Rowling" / "Joanne Rowling"), never a name in
-another script without a rule (never a transliteration, ruling 39), never a surname alone, never two credits of a book.
-Among several spellings of one name the one the library already files under wins (rules' known authors), else the
-surname-first order of the name (local_identity.surname_first, ruling 3).
+     «Джоан Роулинг» are ruled "Rowling J. K" (same_as), followed to its end; a rule scoped to a folder counts for a book
+     in that folder (the book's own folder is passed in);
+  2. or both are written with exactly the same full words (in any order) and the same initials in the same order, case,
+     punctuation and ё/е aside: "J. K. Rowling" and "Rowling J. K." are one name, so are "Tove Jansson" and "Jansson
+     Tove". Since Senua's 0.30.0 review (m2) the initials' order counts: "K. J. Parker" and "Parker J. K." are two people
+     (every word, initials too, used to be compared sorted).
+Nothing else merges: never an initial against a full first name ("J. K. Rowling" / "Joanne Rowling"), never initials in
+another order, never a name in another script without a rule (never a transliteration, ruling 39), never a surname alone,
+never two credits of a book. A credit Sergei kept (a keep rule) stays exactly as it is spelled. Among several spellings of
+one name the one the library already files under wins (rules' known authors), else the surname-first order of the name
+(local_identity.surname_first, ruling 3).
 
 Item 6, the series name in the language the work was written in: a FantLab cycle of a work not written in Russian is
 named by its original name in Latin letters ("Гарри Поттер" -> "Harry Potter", "Муми-тролли" -> "Mumintrollen"). A
@@ -24,22 +28,31 @@ import json
 import re
 
 
-def _key(name):
-    import author_rules
-    return author_rules.key(name)
-
-
 def _people(name):
     return [part for part in re.split(r'\s*;\s*', str(name or '')) if part.strip()]
 
 
+def _order_key(name):
+    """The name's full words in any order and its initials in their own order, case, punctuation and ё/е aside: "J. K.
+    Rowling" and "Rowling J. K." -> (rowling; j k); "Tove Jansson" and "Jansson Tove" -> (jansson tove); "K. J. Parker" ->
+    (parker; k j), never "Parker J. K." (parker; j k)."""
+    import unicodedata
+    import local_identity
+    found = local_identity.words(unicodedata.normalize('NFC', local_identity.text(name)))
+    return ' '.join(sorted(word for word in found if len(word) > 1)) + ';' + ' '.join(word for word in found if len(word) == 1)
+
+
 def author(name, rules=None, folder=''):
-    """(the name the author's folder uses, why or ''). name: one credit ("A; B" credits are left as they are)."""
+    """(the name the author's folder uses, why or ''). name: one credit ("A; B" credits are left as they are). folder: the
+    book's own folder path, for a rule Sergei scoped to a folder."""
     import local_identity
     value = local_identity.text(name)
     if not value or len(_people(value)) != 1:
         return value, ''
     why = ''
+    rule = rules.rule(value, folder) if rules is not None else None
+    if rule and rule['kind'] != 'same_as':
+        return value, ('your rule keeps this spelling' if rule['kind'] == 'keep' else '')  # m2: kept (or no author) stays as it is
     ruled = rules.same_as(value, folder) if rules is not None else ''
     if ruled and ruled != value:
         value, why = local_identity.text(ruled), 'your rule files this name under "%s"' % ruled
@@ -69,14 +82,15 @@ def _surname_first(value):
 
 
 def _filed(value, rules):
-    """The library's own spelling of exactly this name (same words), surname first, with the most books; '' if none."""
+    """The library's own spelling of exactly this name (same words in the same order, surname first), with the most books;
+    '' if none."""
     import local_identity
     if rules is None:
         return ''
-    wanted = _key(value)
+    wanted = _order_key(value)
     found = []
     for spelling, count in getattr(rules, 'known_authors', {}).values():
-        if spelling and local_identity.script(spelling) == 'latin' and _key(spelling) == wanted:
+        if spelling and local_identity.script(spelling) == 'latin' and _order_key(spelling) == wanted:
             found.append((_surname_first(spelling) == spelling, count, spelling))
     if not found:
         return ''
@@ -88,7 +102,7 @@ def same_author(a, b, rules=None, folder=''):
     if not a or not b:
         return False
     first, second = author(a, rules, folder)[0], author(b, rules, folder)[0]
-    return _key(first) == _key(second)
+    return _order_key(first) == _order_key(second)
 
 
 def folder_key(name):

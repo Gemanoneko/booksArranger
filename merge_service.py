@@ -314,8 +314,9 @@ class MergeService:
         self.cleanup.on_completed=lambda job_id:self._prune_completed(job_id,source_completed=True)
         # Rulings 69 and 71h: folders Sergei chose hold books directly; they count as Sorted for those books.
         self.publications.chosen_roots=self._chosen_folders;self.cleanup.chosen_folders=self._chosen_folders
-        from storage_relocation_native import retained_runtime
-        if not retained_runtime(inventory.database):self._start_move_recovery()
+        # Senua's 0.30.0 review, M3: move recovery runs in retained-runtime mode too (a portable installation is always in
+        # it); a move of a retained job or through a retained path is left journaled (_start_move_recovery).
+        self._start_move_recovery()
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
@@ -6163,9 +6164,11 @@ class MergeService:
     def sorting_moves(self):
         """The planned list (sorting_moves.plan): every finished book in Sorted that would move, why, and what is left as it
         is; its 'digest' is what an approval names. Reads only: the catalog and whether the listed paths exist."""
-        import sorting_moves
+        import sorting_moves,storage_relocation_native
         output_root=getattr(self.inventory,'output_root',None)
-        with connect(self.inventory.database) as db:return sorting_moves.plan(db,output_root,self._sorting_rules())
+        # Senua's 0.30.0 review, M3: a retained job (retained-runtime mode) is left as published, as by every other pass.
+        retained=storage_relocation_native.retained_job_ids(self.inventory.database)
+        with connect(self.inventory.database) as db:return sorting_moves.plan(db,output_root,self._sorting_rules(),retained=retained)
 
     def sorting_moves_apply(self,digest,job_ids=None):
         """Sergei's approval of the listed moves: digest is the list he saw (refused when the list changed meanwhile);
@@ -6204,11 +6207,25 @@ class MergeService:
 
     def sorting_follow_up(self,job_id,approved,placed=None):
         """Series backfill wrote an approved book's series (item 2) under its new name in its own folder (placed): its move
-        to the path Sergei approved, when that is still where the app files it; else nothing moves and the answer says why."""
-        target=self.sorting_target(job_id,placed=placed)
-        if not target or os.path.normcase(target)!=os.path.normcase(str(approved)):
-            return {'state':'refused','reason':'The planned place changed since you approved it; the book stays where it is.'}
-        return self._sorting_move(job_id,target)
+        to the path Sergei approved, when that is still where the app files it; else nothing moves and the answer says why.
+        Senua's 0.30.0 review, M2: {'state': 'later', 'reason'} for a refusal that passes (Books Arranger closing, the action
+        queue refusing, a move of the book already running or waiting for a restart, a busy catalog): series backfill asks
+        again at its next pass. Only a lasting answer ('refused', or the move's own) is recorded for good."""
+        import book_move
+        if self.draining or self.__dict__.get('_closing'):return {'state':'later','reason':'Books Arranger is closing. Nothing was moved.'}
+        try:
+            target=self.sorting_target(job_id,placed=placed)
+            if not target or os.path.normcase(target)!=os.path.normcase(str(approved)):
+                return {'state':'refused','reason':'The planned place changed since you approved it; the book stays where it is.'}
+            return self._sorting_move(job_id,target)
+        except sqlite3.Error as error:
+            return {'state':'later','reason':str(error)[:300] or 'The catalog was busy'}
+        except ValueError as error:
+            text=str(error)
+            passing=(getattr(error,'code',None)=='unfinished' or text in (book_move.UNFINISHED,'Move was not accepted. Nothing was moved.',
+                                                                          'Books Arranger is closing. Nothing was moved.')
+                     or text.startswith('This audiobook is being moved now'))
+            return {'state':'later' if passing else 'refused','reason':text[:300]}
 
     def _sorting_move(self,job_id,target):
         """One approved sorting move: the usual verified move (book_move) to target, folder and name."""
@@ -6306,17 +6323,31 @@ class MergeService:
         self._destination_changed()
 
     def _start_move_recovery(self):
-        """In-engine reconciliation of moves a restart interrupted (no startup refusal); only when there are any."""
-        import book_move
+        """In-engine reconciliation of moves a restart interrupted (no startup refusal); only when there are any.
+
+        Senua's 0.30.0 review, M3: it never ran in retained-runtime mode, which a portable installation is always in, so a
+        move interrupted after its rename or publication and before its location commit stayed unfinished for good (two
+        copies or a temporary left in Sorted, the catalog naming the old place). A move only touches the book's own file,
+        the target folder and its temporary, all in the library, never the app's data folder: it is reconciled in that mode
+        as in any other. A move of a retained job, or one whose old path, target or temporary is a retained path of the data
+        folder move, is left journaled as before (retained jobs stay as published, item A)."""
+        import book_move,storage_relocation_native as relocation
         try:
             with connect(self.inventory.database) as db:open_moves=book_move.pending(db)
         except sqlite3.Error:return
         if not open_moves:return
+        database=self.inventory.database
+        def retained(move):
+            if not relocation.retained_runtime(database):return False
+            if relocation.retained_job(database,move['job_id']):return True
+            paths=[(move.get('from') or {}).get('final_path'),move.get('target_path'),move.get('temp_path')]
+            try:return any(relocation.retained_path(path,parent=True) for path in paths if path)
+            except Exception:return True  # cannot tell: left as it is
         def work():
             try:mover=self._mover()
             except Exception:return
             try:
-                for move in mover.recover():self._after_move(move)
+                for move in mover.recover(skip=retained):self._after_move(move)
             except Exception:pass  # each unreconciled move stays journaled; the next start tries again
             finally:self.__dict__.setdefault('_move_unfinished',{}).update(mover.unfinished)  # why, for its row (ruling 73k)
         self._move_recovery=threading.Thread(target=work,name='books-move-recovery',daemon=True)
