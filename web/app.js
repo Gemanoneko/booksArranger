@@ -1681,9 +1681,11 @@ function updateActivity(view,now){
 // not started read as one labelled item. Line 1 says what it is, line 2 what it waits for; Show in list where there is a book.
 const waitingItems=new Map();
 function waitingList(work){
-  const cleanups=work.waiting.filter(item=>item.kind==='cleanup');if(cleanups.length<=5)return work.waiting;
+  // QA D1 (0.30.0): a queued action nothing blocks (blocker null) is about to run: no Waiting item (its row comes when it runs).
+  const waiting=work.waiting.filter(item=>!(item.kind==='action' && !item.blocker));
+  const cleanups=waiting.filter(item=>item.kind==='cleanup');if(cleanups.length<=5)return waiting;
   const counted=work.counts.cleanups_waiting,n=Number.isInteger(counted) && counted>=cleanups.length?counted:cleanups.length,grouped={...cleanups[0],id:'cleanup:group',group:n};
-  const out=[];let placed=false;for(const item of work.waiting){if(item.kind!=='cleanup'){out.push(item);continue;}if(!placed){out.push(grouped);placed=true;}}
+  const out=[];let placed=false;for(const item of waiting){if(item.kind!=='cleanup'){out.push(item);continue;}if(!placed){out.push(grouped);placed=true;}}
   return out;
 }
 function waitingClock(at){const d=new Date(at<1e12?at*1000:at);return Number.isFinite(d.getTime())?`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`:'';}
@@ -5133,9 +5135,10 @@ function queueHint(row){
   const item=queuedFor(row);
   if(item){
     // 0.30.0 (Judy's spec 2.3): one form for every action, the same sentence as the Waiting list and the queue strip.
-    const n=queueAhead(item),ahead=n?`${n.toLocaleString()} ahead. `:'',said=blockerSentence(queueBlocker(item)).text;
-    if(item.action==='names')return `Save names queued. ${ahead}${said} These edits are waiting in memory, not saved yet.`;
-    return `${queueWord(item.action)} queued. ${ahead}${said}`;
+    // QA D1: an action nothing blocks (blocker null) is about to run; its line names no wait.
+    const n=queueAhead(item),ahead=n?`${n.toLocaleString()} ahead. `:'',said=item.blocker || n?blockerSentence(queueBlocker(item)).text:'';
+    if(item.action==='names')return ['Save names queued.',ahead.trim(),said,'These edits are waiting in memory, not saved yet.'].filter(Boolean).join(' ');
+    return [`${queueWord(item.action)} queued.`,ahead.trim(),said].filter(Boolean).join(' ');
   }
   const running=queueState.running;if(!queueRunning(row))return null;
   if(running.action==='delete' || running.action==='copy'){const n=Number(running.n) || 0;return n===0?'Removing this book…':n===1?'Deleting 1 file…':`Deleting ${n.toLocaleString()} files…`;}
@@ -5836,6 +5839,7 @@ function joinHint(row){
   if(joinLate.has(item.id))return joinLate.get(item.id);
   const n=Array.isArray(item.parts)?item.parts.length:Number(item.n) || 0;
   if(queueState.running?.id===item.id)return `Joining ${plural(n,'book','books')} into one book`;
+  if(!item.blocker)return '';  // QA D1: nothing blocks it; it is about to run, so no waiting line
   return `Join queued: «${item.title || ''}», ${plural(n,'book','books')}. ${blockerSentence(queueBlocker(item)).text}`;
 }
 // A15 (0.30.0): a joined book that is not approved and has no job offers the existing Keep as separate books, which undoes
@@ -5878,7 +5882,7 @@ function updateJoinRows(){
     if(entry.hint){if(entry.hint.textContent!==text)entry.hint.textContent=text;entry.hint.hidden=!text;entry.hint.classList?.toggle?.('retry-refused',!item && keepNotes.has(entry.row.id));}
     if(entry.keep)updateJoinedKeep(entry);
     if(!entry.cancel)continue;
-    const shown=!!item && queueState.running?.id!==item.id && !joinLate.has(item.id),lost=!shown && !entry.cancel.hidden && document.activeElement===entry.cancel;
+    const shown=!!item && !!item.blocker && queueState.running?.id!==item.id && !joinLate.has(item.id),lost=!shown && !entry.cancel.hidden && document.activeElement===entry.cancel;
     entry.cancel.hidden=!shown;
     if(shown){entry.cancel.setAttribute('aria-label',`Cancel the whole join: ${item.title || ''}`);if(joinCancels.has(item.id))entry.cancel.setAttribute('aria-disabled','true');else entry.cancel.removeAttribute('aria-disabled');}
     if(lost)(nextRowButton(entry.cancel.parentElement,entry.cancel) || $('filter')).focus?.({preventScroll:true});

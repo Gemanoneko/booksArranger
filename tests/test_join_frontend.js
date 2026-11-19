@@ -186,7 +186,22 @@ const joinButton=get('join-selected'),dialogText=()=>get('join-effects').childre
   // 14. The Book metadata line (item E) for a joined book.
   assert.equal(run('scopeBasisText({kind:"joined",basis:5,album:"Впусти меня",artist:"John Ajvide Lindqvist",track:null,track_total:null,repaired:false,folders:[]})'),'Joined by you from 5 books. Album «Впусти меня».');
   assert.equal(run('scopeBasisText({kind:"joined",basis:3,album:null,repaired:false,folders:[]})'),'Joined by you from 3 books.');
-  console.log('PASS Join into one book: button states, dialog (order, moves and focus, fields, Goes to, What happens, refusals, waiting), queued press with each part row\'s line and Cancel, outcome with Show it, jobs panel words; answer 9 row Cancel; A15 Keep as separate books on a joined book; the joined Book metadata line');
+  // 15. QA D1: a queued join nothing blocks (blocker null; it is about to run) shows no waiting line and no Cancel on its parts,
+  // and no Waiting item; a press behind it still says what it waits for.
+  run('view="candidates";filters.candidates="all";viewControls()');
+  const IDLE={id:'join-2',action:'join',book_id:'part-1',title:'Впусти меня',parts:['part-1','part-2'],n:2,position:1,blocker:null};
+  run('queueState={queued:'+JSON.stringify([IDLE])+',running:null}');inventoryRows=[partRow(1),partRow(2)];paint(inventoryRows);
+  assert.equal(joinHintOf(trOf('part-1')).hidden,true,'no waiting line');assert.equal(joinCancelOf(trOf('part-1')).hidden,true,'no Cancel for an instant');
+  run('queueState={queued:'+JSON.stringify([{...IDLE,blocker:{kind:'scan',cause:'scan'}}])+',running:null};controls()');
+  assert.equal(joinHintOf(trOf('part-1')).textContent,'Join queued: «Впусти меня», 2 books. It runs when the library scan finishes. Stop scanning to run it sooner.','positive control: a real blocker is said');
+  const waitingOf=item=>run('waitingList('+JSON.stringify({waiting:[item],counts:{}})+').length');
+  assert.equal(waitingOf({id:'action:join-2',kind:'action',label_key:'join',subject:'Впусти меня',book_id:'part-1',blocker:null,ahead:0}),0,'no Waiting item');
+  assert.equal(waitingOf({id:'action:join-2',kind:'action',label_key:'join',subject:'Впусти меня',book_id:'part-1',blocker:{kind:'scan',cause:'scan'},ahead:0}),1);
+  assert.equal(run('queueHint('+JSON.stringify(partRow(5))+')'),null);
+  run('queueState={queued:'+JSON.stringify([{id:'ap',action:'approve',book_id:'part-5',title:'Впусти меня 5',position:1,blocker:null}])+',running:null}');
+  assert.equal(run('queueHint('+JSON.stringify(partRow(5))+')'),'Approve queued.','an Approve nothing blocks names no wait');
+  run('queueState={queued:[],running:null}');
+  console.log('PASS Join into one book: button states, dialog (order, moves and focus, fields, Goes to, What happens, refusals, waiting), queued press with each part row\'s line and Cancel, outcome with Show it, jobs panel words; answer 9 row Cancel; A15 Keep as separate books on a joined book; the joined Book metadata line; D1 no waiting line without a blocker');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
 const Module=require('node:module');const m=new Module(path.join(__dirname,'test_join_frontend.js'),module);m.filename=path.join(__dirname,'test_join_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

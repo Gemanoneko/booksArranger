@@ -1541,7 +1541,8 @@ class Handler(BaseHTTPRequestHandler):
             from audio_jobs import RetryRefused
             self.shape(data,{'library','id','revision','job_id'})
             library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
-            try:result=self.server.merge.withdraw_readmission(library,id,revision,self.uuid_value(data['job_id']))
+            job_id=self.uuid_value(data['job_id'])  # QA D3: a malformed id is a bad request (400), never a refusal (409)
+            try:result=self.server.merge.withdraw_readmission(library,id,revision,job_id)
             except RetryRefused as error:
                 self.response(409,{'error':str(error),'code':error.cause or 'changed'});return
             except ValueError as error:
