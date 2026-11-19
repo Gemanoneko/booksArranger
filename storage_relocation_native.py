@@ -697,6 +697,27 @@ def disposed_history_location_match(current, historical):
         return False
 
 
+def data_location_match(left, right):
+    """Two recorded strings name the same place in the application data folder (0.30.0 sort-1).
+
+    Bridged only through the selected relocation's own records: the sealed
+    manifest's source and target roots and, after a portable move, the binding's
+    data folder, its origin and every earlier data folder it lists (aliases), so
+    a path recorded before any number of recorded moves meets its current place.
+    Location only: no read, write or disposal authority. Library roots and any
+    other path outside the relocated data folder match only themselves.
+    """
+    if left==right:return True
+    context=_context
+    if context is None or not isinstance(left,str) or not isinstance(right,str):return False
+    try:
+        if _key(context.logical_location(left))!=_key(context.logical_location(right)):return False
+        context.require_normal_operation()
+        return True
+    except ValueError:  # RelocationRefused: outside the relocated data folder, or no live verified catalog
+        return False
+
+
 def retained_observation_match(actual,expected,boundary,*,operation_path):
     """Typed location bridge for an ALREADY validated retained-proof record.
 

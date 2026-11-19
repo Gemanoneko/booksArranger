@@ -99,6 +99,7 @@ patterns.push('test_http_0290.py');  // 0.29.0 PA-1: every new field and hook th
 patterns.push('test_live_status.py','test_background_work.py');  // 0.30.0: the running part read at every poll; every background job as a row or a waiting item
 patterns.push('test_recovery_ancestry_moves.py');  // 0.30.0 item B: a cleanup recorded before both storage moves still finds its recovery folder (Brom)
 patterns.push('test_retained_runtime_passes.py');  // 0.30.0 item A: the background passes run in retained-runtime mode; retained jobs left alone
+patterns.push('test_relocated_job_paths.py');  // 0.30.0 sort-1: a job queued before the storage moves passes its pre-conversion check (263 books)
 patterns.push('test_quit_bound.py');  // 0.30.0 item F: Quit closes within seconds; it waits only for real work and says what (waiting_for)
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time
