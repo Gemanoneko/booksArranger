@@ -225,7 +225,7 @@ class AutomaticProcessing:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
         return {'state':r['state'],'duplicate_cleanup_policy':result.get('duplicate_cleanup_policy'),'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
                 'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
-                'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0)}
+                'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0),'series_waits':result.get('series_waits',0)}
     def _rules_generation(self):
         """The current author-rules generation ('' with none): a held book is researched again when it changes."""
         value=self._rules()
@@ -250,6 +250,10 @@ class AutomaticProcessing:
             # saved drafts, source revalidation and all metadata/media admission gates.
             return dict(previous,retry_at=None)
         if previous and previous['state']=='Held' and previous.get('research_version')!=RESEARCH_VERSION:return dict(previous,retry_at=None)
+        if previous and previous['state']=='Held' and (((previous.get('identity_hold') or {}).get('piece') or {}).get('cause'))=='long':
+            # 0.30.0 item 8 (Sergei 2026-11-18: remove the 30-hour limit): a set held only by that limit is researched again
+            # at the next visit and decided by its other clues (part_sets.decide); nothing else about it has to change.
+            return dict(previous,until_change=False,retry_at=None)
         if not previous or previous['state']!='Waiting for source' or not previous.get('wait'):return previous
         if previous.get('research_version')!=RESEARCH_VERSION:
             # New independent hosts get one opportunity; the old host ledger stays intact.
@@ -831,6 +835,8 @@ class AutomaticProcessing:
                   try:
                       research_failed=True
                       row['_research_attempt']=previous.get('research_attempt',0) if previous else 0
+                      # 0.30.0 item 3: how many times in a row this book has waited for its series (the wait is bounded).
+                      row['_series_waits']=previous.get('series_waits',0) if previous and previous.get('state')=='Waiting for source' else 0
                       import manual_metadata
                       with connect(self.inventory.database) as db:row['_manual_metadata_sources']=manual_metadata.records(db,row)
                       result=self.research.lookup(row,self._candidate_root(row),self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))

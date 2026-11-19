@@ -20,7 +20,7 @@ SAME_TITLE_VERSION = 'same-title-v4'  # v2: Senua's 0.22.0 review G1, G2; v3: N4
 SAME_ALBUM_VERSION = 'same-album-v4'  # v2: Senua's 0.22.0 review G3; v3: N6 (the works check for a plain album group too); v4: N11 (chapter-named title tags are no works)
 # Ruling 19a (Sergei 2026-10-24): explicitly marked .m4b parts with their own chapters are joined, chapters kept; the
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
-M4B_PARTS_VERSION = 'm4b-parts-v2'
+M4B_PARTS_VERSION = 'm4b-parts-v3'  # v3: 0.30.0 item 7, albums that differ only by a trailing part number are one set
 # 0.22.1, item 9: a clean file-name sequence orders a book (track_order); a single file has no order conflict.
 # Ruling 68 (0.24.0): one source folder is one book (folder_unit); mis-encoded tags are read repaired (tag_text).
 TAG_REPAIR_VERSION = 'tag-repair-v1'
@@ -386,6 +386,25 @@ def _folder_names_another_author(path,start,index):
         return not (same_person(who,start) or compare_names(who,start) or _shares_surname(who,start))
     return False
 
+_TRAILING_PART_NUMBER = re.compile(r'^(.*?[^\W\d_].*?)[\s_.,:;#№-]*\d{1,3}\s*$')
+
+
+def _without_part_number(album):
+    """0.30.0 item 7: the album without a trailing part number ("dale stewart 04 - darwin's blade 1" -> "dale stewart 04 -
+    darwin's blade"); an album that is only a number («1408») or ends in none stays as it is."""
+    match = _TRAILING_PART_NUMBER.match(album)
+    return match[1].strip() if match else album
+
+
+def _album_without_part_number(item):
+    """A copy of the member whose album tag has its trailing part number removed (only for the split rules' check)."""
+    tags = dict(item['metadata'].get('tags', {}))
+    for name in list(tags):
+        if name.casefold() == 'album':
+            tags[name] = _without_part_number(' '.join(str(tags[name]).split()))
+    return dict(item, metadata=dict(item['metadata'], tags=tags))
+
+
 PART_SET_MAX = 30
 # Split-rule refusals no chapter list can answer: the files stay books of their own.
 HARD_REFUSALS = ('parts are in different places', 'a part is unavailable or unreadable', 'mixed ', 'audio profile unknown',
@@ -411,13 +430,26 @@ def _part_sets(members,scopes,assigned,separate,taken):
         if not album:continue
         artist=unicodedata.normalize('NFC',tags.get('artist','')).casefold()
         clusters.setdefault((split_books.unit(path)[0],album,artist),[]).append(item)
+    # 0.30.0 item 7 (Sergei 2026-11-18): album tags that differ only by a trailing part number («Dale Stewart 04 - Darwin's
+    # Blade 1», «… 2», no track numbers) are one set too; its chapters decide what it is, as for any set. Albums that are
+    # all the same keep their own scope (no regroup of a set that was already one).
+    trailing={}
+    for unit,album,artist in clusters:
+        trailing.setdefault((unit,_without_part_number(album),artist),[]).append(album)
+    merged=set()
+    for (unit,base,artist),albums in trailing.items():
+        if len(albums)<2:continue
+        clusters[(unit,base,artist)]=[item for album in albums for item in clusters.pop((unit,album,artist))]
+        merged.add((unit,base,artist))
     found=[]
     for (unit,album,artist),items in sorted(clusters.items(),key=lambda kv:repr(kv[0])):
         if len(items)<2:continue
         if len(items)>PART_SET_MAX:continue
         stems=[unicodedata.normalize('NFC',Path(m['path']).stem).casefold() for m in items]
         if len(set(stems))!=len(stems):continue  # the same part twice (two copies under one name)
-        reasons=split_books.check(sorted(items,key=lambda m:m['path']))['reasons']
+        # Item 7: the split rules compare the album without the part number, which is the only way the albums differ.
+        checked=[_album_without_part_number(m) for m in items] if (unit,album,artist) in merged else items
+        reasons=split_books.check(sorted(checked,key=lambda m:m['path']))['reasons']
         if any(r.startswith(HARD_REFUSALS) for r in reasons):continue
         def number(value):
             match=re.match(r'^\s*(\d{1,4})',str(value or ''))

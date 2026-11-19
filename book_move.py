@@ -294,15 +294,19 @@ def current(db, job_id, kind):
     return {'move_id': record[0], 'generation': record[1]} if record else None
 
 
-def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None):
+def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None, name=None):
     """Queue one move of the book from its current location (start) into folder. None when it is already there (no-op).
     A queued move of the same book is superseded; a move already running is refused. running(move_id): whether that
-    journaled move is running now (None: assume it is); one that is not waits for a restart (ruling 73k: 'unfinished')."""
+    journaled move is running now (None: assume it is); one that is not waits for a restart (ruling 73k: 'unfinished').
+    name: the file name in folder (0.30.0, the sorting moves Sergei approves: the author or series name changes with the
+    folder); None keeps the book's own name. The same verified move either way (only the target path differs)."""
     setup(db)
     if kind not in KINDS:
         raise Refused('changed', 'This audiobook cannot be moved: it is a chapter update of another file.')
     start = location(start)
-    target = os.path.join(os.path.normpath(folder), ntpath.basename(start['final_path']))
+    if name is not None and (not name or ntpath.basename(name) != name or not name.lower().endswith('.m4b')):
+        raise Refused('changed', 'This audiobook cannot be moved under that name.')
+    target = os.path.join(os.path.normpath(folder), name or ntpath.basename(start['final_path']))
     if key(target) == key(start['final_path']):
         return None
     if len(target) > 240:

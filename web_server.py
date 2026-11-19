@@ -159,7 +159,11 @@ LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names', '/api/aut
 # Ruling 75a (2026-10-31): reads that arrive as POSTs (a details panel, a "Goes to" preview, opening a folder, the names editor,
 # the author rules, a delete preview that is not queued) change nothing, so their reply no longer throws away the shared
 # status computation (Handler.response, status_control): under load every panel read restarted it from the beginning.
-READ_ONLY_POSTS = frozenset(LOOKING | {'/api/candidate/routing-preview', '/api/candidate/approve-preview', '/api/candidate/delete-preview'})
+READ_ONLY_POSTS = frozenset(LOOKING | {'/api/candidate/routing-preview', '/api/candidate/approve-preview', '/api/candidate/delete-preview',
+                                       '/api/sorting-moves'})
+# 0.30.0 sorting moves (Sergei 2026-11-18, items 2, 5 and 6): the planned list (read) and its approval (moves only the books of
+# the exact list Sergei saw, named by its digest). Nothing moves a book in Sorted without that approval.
+SORTING_ROUTES = ('/api/sorting-moves', '/api/sorting-moves/apply')
 def approve_code(text):
     """Each Approve gate its own code (2026-10-26, «Спящие красавицы»: every other refusal read "Approve was not accepted"), so
     the row names the real reason and the next step. Unknown gates answer 'refused' and the row shows the engine's sentence."""
@@ -1474,6 +1478,20 @@ class Handler(BaseHTTPRequestHandler):
                 text=str(error)
                 self.response(409,{'error':text,'code':'changed' if 'Candidate changed' in text or 'Source files changed' in text else 'refused'});return
             self.response(200,result);return
+        if path=='/api/sorting-moves':
+            # 0.30.0: the books in Sorted the app now files elsewhere (items 2, 5, 6) and those left as they are. Reads only.
+            self.shape(data,set())
+            self.response(200,self.server.merge.sorting_moves());return
+        if path=='/api/sorting-moves/apply':
+            # 0.30.0: Sergei's explicit approval of the list he saw (its digest); job_ids narrows it to some of its books.
+            self.shape(data,{'digest'},{'job_ids'})
+            ids=data.get('job_ids')
+            if ids is not None and (not isinstance(ids,list) or not 1<=len(ids)<=2000 or any(not isinstance(i,str) or not 1<=len(i)<=100 for i in ids)):
+                raise ValueError('job_ids lists the books to move')
+            try:result=self.server.merge.sorting_moves_apply(data['digest'],ids)
+            except ValueError as error:
+                self.response(409,{'error':str(error),'code':'changed' if 'changed' in str(error) else 'refused'});return
+            self.response(200,result);return
         if path=='/api/author-rules':
             # 0.22.3 (Judy 4.1, Senua M5): the author rules research learned online that are in force, newest first. Reads only.
             self.shape(data,set())
@@ -1654,7 +1672,7 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
                          '/api/candidate/destination',
-                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rules','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,
+                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rules','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,*SORTING_ROUTES,
                          '/api/audiobook/resume-cancel','/api/audiobook/recovery/cancel',
                          '/api/manual-conversion/inspect','/api/manual-conversion/save','/api/manual-conversion/queue',
                          '/api/manual-conversion/discard','/api/manual-conversion/retry','/api/manual-conversion/reopen'}
