@@ -27,6 +27,15 @@ def _call(port, path, data, token):
         raise SystemExit('Books Arranger refused: ' + error.read().decode('utf-8', 'replace')[:500])
 
 
+def _health(port):
+    """The app answering on this port (its /api/health: name, version, process, port)."""
+    with urllib.request.urlopen('http://127.0.0.1:%d/api/health' % port, timeout=30) as answer:
+        return json.loads(answer.read().decode('utf-8'))
+
+
+DONE = ('move_queued', 'series_update_queued', 'unchanged')
+
+
 def _token(port):
     with urllib.request.urlopen('http://127.0.0.1:%d/' % port, timeout=30) as page:
         found = re.search(r'name="books-token" content="([^"]+)"', page.read().decode('utf-8'))
@@ -41,19 +50,34 @@ def main(argv=None):
     parser.add_argument('--apply', metavar='DIGEST')
     parser.add_argument('--job', action='append', dest='jobs')
     args = parser.parse_args(argv)
-    sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    # The default port is Sergei's own app (where the moves are applied): say which app this is before anything else.
+    health = _health(args.port)
+    print('Talking to %s %s at 127.0.0.1:%d (process %s).' % (health.get('application') or 'an app', health.get('version') or '(version unknown)',
+                                                           args.port, health.get('pid') or '?'))
     token = _token(args.port)
+    plan = _call(args.port, '/api/sorting-moves', {}, token)
+    print('Its list: %d book%s to move, %d left as they are. Digest: %s' % (len(plan['items']), '' if len(plan['items']) == 1 else 's',
+                                                                            len(plan['refused']), plan['digest']))
     if not args.apply:
         import sorting_moves
-        print(sorting_moves.markdown(_call(args.port, '/api/sorting-moves', {}, token)))
+        print(sorting_moves.markdown(plan))
         print('To move exactly these books: python scripts/sorting_moves.py --apply <the digest above>')
         return 0
+    if args.apply != plan['digest']:
+        print('The digest you gave is not this list\'s digest; the app will refuse it and move nothing.')
     body = {'digest': args.apply}
     if args.jobs:
         body['job_ids'] = args.jobs
     answer = _call(args.port, '/api/sorting-moves/apply', body, token)
     for result in answer['results']:
         print(result['job_id'], result['state'], result.get('reason') or result.get('to') or (result.get('move') or {}).get('target') or '')
+    # Futaba's 0.30.0 QA, C3: any book that was not moved or queued (refused, not in the list) is an error exit.
+    missed = [result for result in answer['results'] if result.get('state') not in DONE]
+    if missed:
+        print('%d of the books you named did not move; see the lines above.' % len(missed))
+        return 1
     return 0
 
 

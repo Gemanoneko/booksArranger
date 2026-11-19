@@ -6210,6 +6210,14 @@ class MergeService:
                     results.append(dict(self._sorting_move(item['job_id'],item['to']),job_id=item['job_id']))
             except Exception as error:  # one refusal never stops the others; each says why
                 results.append({'job_id':item['job_id'],'state':'refused','reason':(str(error) or type(error).__name__)[:300]})
+        # Futaba's 0.30.0 QA, C3: a book named in the approval that the list does not move answered nothing (200, no line).
+        # Each says why: the list's own refusal, else that it is not in the list.
+        listed={item['job_id'] for item in answer['items']}
+        refusals={item['job_id']:item['refused'] for item in answer['refused']}
+        for job_id in [] if job_ids is None else list(dict.fromkeys(job_ids)):
+            if job_id in listed:continue
+            results.append({'job_id':job_id,'state':'refused','reason':refusals[job_id]} if job_id in refusals else
+                           {'job_id':job_id,'state':'not_listed','reason':'Not in the list'})
         return {'digest':digest,'results':results}
 
     def sorting_target(self,job_id,series=None,placed=None):
