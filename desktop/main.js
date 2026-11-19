@@ -560,7 +560,9 @@ async function requestQuit({ confirmed }) {
   // all, or a refusal, the engine is stopped through its pipe, the same safe stop as a Windows sign-out (the book in
   // progress converts again next time), and the app exits. Quit never ends in a bare timeout.
   const sent = await sendQuit({ post: () => engineRequest('POST', '/api/desktop/quit', { desktop: true, timeout: 10000 }), sleep, gone: () => state.backendExited });
-  if (sent.outcome === 'accepted') return watchQuit();
+  // The book converting when Quit was accepted ("Quit after this book", or --quit, the same Quit without the question) is
+  // waited for as before; everything else Quit waits for is bounded (watchQuit).
+  if (sent.outcome === 'accepted') return watchQuit({ keepConversion: busy.converting === true });
   if (sent.outcome === 'gone') return engineGoneExit();
   remember('\nQuit: the engine ' + (sent.outcome === 'refused' ? 'refused it (' : 'did not answer (') + (sent.error ? sent.error.message : 'no reply') + '); stopping it safely through its pipe.\n');
   refreshTray('Books Arranger — stopping safely');
@@ -571,7 +573,7 @@ async function requestQuit({ confirmed }) {
 
 // HTTP failure never proves a safe checkpoint, but a closed server after an accepted Quit is the engine's
 // own last step: once connections are refused for a few seconds the engine is gone and the shell exits.
-const { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, createQuitProgress, quitNow } = require('./quit-watch');
+const { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, createQuitProgress, createQuitBound, QUIT_WAIT_BOUND_MS, quitNow } = require('./quit-watch');
 async function engineGoneExit() {
   // Tell the host the shell is done and wait until it has really exited (it exits only after its engine), then leave.
   // Futaba's 0.22.3 QA, m-2: this waited 5 s at most, so the shell could exit while its engine was still finishing its
@@ -580,11 +582,15 @@ async function engineGoneExit() {
   finishExit(state.backendExited && state.backend?.exitCode !== 0 ? 1 : 0);
 }
 // 0.30.0 item F: what an accepted Quit still waits for, from each status poll (createQuitProgress: phase, waiting_for,
-// waitedMs, blocked). Kept for the Quit-anyway offer (Judy's spec, pending) and written to the engine log when it changes.
+// waitedMs, blocked), written to the engine log when it changes.
 const quitWaitLine = (waiting) => waiting.map((item) => item.kind + (item.title ? ' “' + item.title + '”' : '')).join(', ');
-async function watchQuit() {
+// Follow-up (Sergei asleep, no new wording): an accepted Quit always ends. A failed close ('blocked', before: an error box
+// and a half-closed app) and work other than the chosen book still named after QUIT_WAIT_BOUND_MS both end in the safe
+// stop (quitAnyway, the existing "stopping safely" tray text); keepConversion: the book he chose to finish is waited for.
+async function watchQuit({ keepConversion = false } = {}) {
   const watch = createQuitWatch();
   const progress = createQuitProgress();
+  const bound = createQuitBound({ keepConversion });
   while (!state.backendExited && state.quit === 'requested') {
     await sleep(1000);
     try {
@@ -593,11 +599,11 @@ async function watchQuit() {
       const facts = state.quitFacts = progress.observe(status);
       if (facts.changed) remember('\nQuit: ' + (facts.waiting.length ? 'waiting for ' + quitWaitLine(facts.waiting) : 'nothing left to wait for') + '.\n');
       refreshTray('Books Arranger — ' + status.phase);
-      if (status.phase === 'blocked') {
-        state.quit = 'none';
-        refreshTray('Books Arranger — Quit blocked');
-        reportError('Books Arranger is still running', status.error || 'A worker has not reached its safe checkpoint. Try Quit again.');
-        return;
+      const stop = bound.observe(facts);
+      if (stop) {
+        remember('\nQuit: ' + (stop === 'blocked' ? 'the close failed (' + (facts.error || 'no reason given') + ')'
+          : 'still waiting after ' + Math.round(QUIT_WAIT_BOUND_MS / 1000) + ' s') + '; stopping safely.\n');
+        return quitAnyway();
       }
     } catch (error) {
       if (watch.observe(outcomeOf(error))) return engineGoneExit();
@@ -606,7 +612,7 @@ async function watchQuit() {
   }
 }
 // Quit anyway (0.30.0 item F): the way out of an accepted Quit that waits for real work (state.quitFacts) or ended
-// 'blocked'. When it is offered and how it is worded is Judy's spec (pending): nothing calls it yet. The engine stops at
+// 'blocked'; watchQuit calls it (no dialog: the tray says "stopping safely", the log says what was waited for). The engine stops at
 // once (stop-now, as at a Windows sign-out: the book in progress converts again next time), its host gets 30 s and is then
 // ended through its own handle (endOwnEngine, never by name or PID), and the shell exits.
 async function quitAnyway() {

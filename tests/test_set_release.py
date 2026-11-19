@@ -195,7 +195,7 @@ class SavedSeriesTransportTests(unittest.TestCase):
         from web_server import BrowserServer,Handler
         answer=MergeService.SeriesAsked(MergeService.SERIES_ASKED)
         merge=SimpleNamespace(approve_book=mock.Mock(side_effect=answer),reviews=SimpleNamespace(enrich=lambda r:r,_row=lambda *_:{'id':'one'}))
-        server=SimpleNamespace(merge=merge,actions=SimpleNamespace(blocker=lambda *_args,**_kw:False))
+        server=SimpleNamespace(merge=merge,actions=SimpleNamespace(blocker=lambda *_args,**_kw:False,item_blocker=lambda *_args,**_kw:False))  # 0.30.0: run_queued asks by item
         item={'action':'approve','book_id':'one','args':{'revision':1}}
         queued=BrowserServer.run_queued(server,item);self.assertEqual(queued,{'result':'saved','code':'series_needed','answer':answer.payload()})
         handler=Handler.__new__(Handler);handler.server=server;handler.candidate_identity=mock.Mock(return_value=('Audiobooks','one',1));handler.response=mock.Mock()

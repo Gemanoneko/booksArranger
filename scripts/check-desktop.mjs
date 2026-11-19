@@ -101,6 +101,7 @@ patterns.push('test_recovery_ancestry_moves.py');  // 0.30.0 item B: a cleanup r
 patterns.push('test_retained_runtime_passes.py');  // 0.30.0 item A: the background passes run in retained-runtime mode; retained jobs left alone
 patterns.push('test_relocated_job_paths.py');  // 0.30.0 sort-1: a job queued before the storage moves passes its pre-conversion check (263 books)
 patterns.push('test_quit_bound.py');  // 0.30.0 item F: Quit closes within seconds; it waits only for real work and says what (waiting_for)
+patterns.push('test_scope_view.py');  // 0.30.0 item E: the Book metadata line from scope_view (repaired text), never the grouping key
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
