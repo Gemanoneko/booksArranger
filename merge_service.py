@@ -1561,7 +1561,8 @@ class MergeService:
                         self._recovery_idle()
                         # Ruling 35: the queued Delete recovery copies presses, first in first out, one per pass.
                         with _MANUAL_LOCK:manual=next(iter(self._manual_queue()),None)
-                        selected=[manual[0]] if manual else [id for id in self.recovery.due() if self._cleanup_due(id)]
+                        # 0.30.0 item A: a retained job keeps its copies, as after its own cleanup (_purge_recovery_now).
+                        selected=[manual[0]] if manual else [id for id in self.recovery.due() if self._cleanup_due(id) and not self._retained_cleanup_job(id)]
                         for id in selected:
                             # One set at a time under the operation lock, so controls interleave between sets.
                             with self.operation_lock,_PURGE_LOCK:
@@ -1657,7 +1658,8 @@ class MergeService:
         posting=self.__dict__.get('_post_jobs',set())
         for row in self.jobs._rows("SELECT job_id FROM audio_jobs WHERE state='completed' ORDER BY updated,job_id"):
             job_id=row['job_id'];prior=stored.get(job_id)
-            if job_id in posting:continue
+            # 0.30.0 item A: a retained job's files are never cleaned up; its refusal would be recorded as a held cleanup.
+            if job_id in posting or self._retained_cleanup_job(job_id):continue
             # Generated published-attempt files are independent of original
             # retirement. A held source cleanup must not strand these receipts.
             working_key=('working',job_id)
@@ -3925,9 +3927,11 @@ class MergeService:
         """Ruling 71d, the existing-data pass (once per engine start, in the background): every unfinished job that converts
         only part of one source folder (pending or stopped, never started publishing: no output, no publication intent,
         not claimed) is set aside with REGROUP_REASON, and its folder regroups as one book. Completed books are never
-        touched. Returns the job ids set aside."""
+        touched, nor is a retained job (0.30.0 item A: it keeps its staging and its book as the storage move left them).
+        Returns the job ids set aside."""
         import book_restart
         from sqlite_retry import transaction
+        from storage_relocation_native import retained_job
         done=[]
         if self.__dict__.get('_closing'):return done
         with connect(self.inventory.database) as db:
@@ -3940,6 +3944,7 @@ class MergeService:
                 try:
                     manifest=json.loads(row['manifest']);journal=json.loads(row['journal'] or '{}')
                     if isinstance(journal,dict) and 'publication_intent' in journal:continue
+                    if retained_job(self.inventory.database,row['job_id']):continue
                     if book_restart.current_job(db,manifest['candidate_id'])!=row['job_id']:continue
                     if self._partial_folder_job(db,manifest):chosen.append((row,manifest))
                 except (ValueError,KeyError,TypeError,sqlite3.Error):continue

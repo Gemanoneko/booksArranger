@@ -33,8 +33,9 @@ REFUSED = 'Persisted recovery ancestry changed'
 COPY = b'recovery copy of an original'
 
 
-@unittest.skipUnless(os.name == 'nt', 'Windows native identities and junctions')
-class RecoveryAncestryAcrossMovesTests(unittest.TestCase):
+class MovesReplay:
+    """The two storage moves replayed on private folders (a mixin for a unittest.TestCase; 0.30.0 item A and sort-1 reuse
+    it): self.old_root is the original data folder's root, self.data the data folder after move_portably()."""
     def setUp(self):
         base = Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT', DEFAULT_SCRATCH));base.mkdir(parents=True, exist_ok=True)
         self.area = base / (PREFIX + uuid.uuid4().hex);self.area.mkdir()
@@ -155,6 +156,9 @@ class RecoveryAncestryAcrossMovesTests(unittest.TestCase):
         self.data = target
         return bound['manifest'], bound['sha256']
 
+
+@unittest.skipUnless(os.name == 'nt', 'Windows native identities and junctions')
+class RecoveryAncestryAcrossMovesTests(MovesReplay, unittest.TestCase):
     def test_recovery_recorded_before_two_moves_is_still_its_own(self):
         self.move_explicitly()
         self.admit(self.manifest, self.manifest_sha)

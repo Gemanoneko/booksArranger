@@ -355,10 +355,10 @@ class BrowserServer(ThreadingHTTPServer):
         return merge
 
     def _check_sources(self, merge, **options):
-        """The 0.29.0 check pass, never fatal: a failure leaves every book listed and every folder in place."""
-        from storage_relocation_native import retained_runtime
+        """The 0.29.0 check pass, never fatal: a failure leaves every book listed and every folder in place.
+        0.30.0 item A: it runs in retained-runtime mode too (see Retained-runtime passes, below)."""
         check = getattr(merge, 'check_sources', None)
-        if check is None or self.closing or retained_runtime(self.inventory.database):
+        if check is None or self.closing:
             return None
         try:
             return check(**options)
@@ -417,19 +417,26 @@ class BrowserServer(ThreadingHTTPServer):
         Senua S-m9: started at once it saw the worker alive and never ran). A scan started meanwhile ends with its own pass."""
         self._check_sources_later(after=threading.current_thread())
 
+    # Retained-runtime passes (0.30.0 item A). v0.28.2 turned every background pass off while the catalog runs in
+    # retained-runtime mode (historical staging, chapter-repair, cover and series-backfill files the storage move copied
+    # without resume or disposal authority), as a blanket guard beside its per-job ones; later passes copied the gate. A
+    # portable installation is always in that mode (its binding needs a source detach, and a detach needs the retained
+    # registration), so since Sergei's 14 Nov move none of these ran. Each runs again: the source check, housekeeping
+    # (recovery purge, working and finished-book cleanup, series backfill, optional fields), the published-book check
+    # with its regroup pass, the restart restore and the queued-actions restore. A retained job is left alone by each,
+    # as by its retry, cleanup and recovery purge since v0.28.2 (retained_job), and native_io refuses to write or delete
+    # a retained file whatever asks. Move recovery stays off in that mode (MergeService.__init__): not reviewed here.
     def _start_background(self):
-        from storage_relocation_native import retained_runtime
         # 0.29.0 (Judy section 0): a finished scan runs the check pass.
         self.inventory.after_scan = self._check_sources_after_scan
-        if retained_runtime(self.inventory.database):return
         if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
         # Published-book hashing reads every finished book from the library share; it must not delay health.
         if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()
 
     def _restore_queue(self):
-        """The queued actions saved before the last close come back (ActionQueue.restore); never fatal."""
-        from storage_relocation_native import retained_runtime
-        if self.closing or retained_runtime(self.inventory.database):
+        """The queued actions saved before the last close come back (ActionQueue.restore); never fatal. Each repeats its
+        own checks when it runs (a retained job's Retry is refused there) and starts no queue."""
+        if self.closing:
             return
         try:
             self.actions.restore()
@@ -437,8 +444,8 @@ class BrowserServer(ThreadingHTTPServer):
             print(f'Books Arranger could not take back the queued actions: {error}', file=sys.stderr, flush=True)
 
     def _restore_saved_work(self, merge):
-        from storage_relocation_native import retained_runtime
-        if self.closing or retained_runtime(self.inventory.database):
+        # The restart-intent rules decide what resumes; the conversion queue never takes a retained job.
+        if self.closing:
             return
         restore=getattr(merge,'restore_work_after_restart',None)
         if restore is not None:

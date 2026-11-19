@@ -544,6 +544,11 @@ def retained_job(database, job_id):
     return retained_runtime(database) and job_id in current().retained_jobs
 
 
+def retained_job_ids(database):
+    """Every retained job of this catalog (empty outside retained-runtime mode), for a query that must skip them all."""
+    return current().retained_jobs if retained_runtime(database) else frozenset()
+
+
 def retained_path(path, *, parent=False):
     context=current()
     if not context or not context.retained:return None

@@ -173,7 +173,9 @@ class SeriesBackfill:
 
     # ------------------------------------------------------------------ pass
     def candidates(self):
-        """Finished books (the newest job of each book) without a series and without a final record."""
+        """Finished books (the newest job of each book) without a series and without a final record. Never a retained job
+        (0.30.0 item A: the storage move kept its evidence without authority to change it; its book stays as published)."""
+        from storage_relocation_native import retained_job
         entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,record FROM series_backfill')}
         generation = self._local_generation()
         newest = {}
@@ -182,7 +184,7 @@ class SeriesBackfill:
         result = []
         for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY updated,job_id"):
             manifest = json.loads(row['manifest'])
-            if __import__('publication_reuse').task(manifest):continue
+            if __import__('publication_reuse').task(manifest) or retained_job(self.database, row['job_id']):continue
             review = manifest.get('metadata') or {}
             entry = entries.get(row['job_id'])
             record = json.loads(entry['record']) if entry else {}
