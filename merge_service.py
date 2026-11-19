@@ -5974,6 +5974,11 @@ class MergeService:
                 if facts:facts.pop('destination_override',None)
                 root=getattr(self.inventory,'output_root',None) or manifest.get('output_root',manifest['root'])
                 review=dict(manifest['metadata'],organization_policy='books-hierarchy-v2')
+                # 0.30.0 items 5 and 6: a finished book's computed folder is where the app files it now (one author folder,
+                # the original series name), so "Use computed folder" never moves a book back from an approved sorting move.
+                import sorting_moves
+                with connect(self.inventory.database) as db:
+                    review,facts,_,_=sorting_moves.canonical(db,dict(manifest,metadata=review,metadata_facts=facts),self._sorting_rules())
                 first=row['members'][0]['path'] if row.get('members') else ''
                 return propose(first,root,'audiobook',row.get('metadata') or {},review,automatic_facts=facts).get('path') or ''
             book,result=self._approval_result(row['id'],row['revision'])
@@ -5982,7 +5987,7 @@ class MergeService:
             if facts:facts.pop('destination_override',None)
             review=dict(result['review'],organization_policy='books-hierarchy-v2')
             return propose(book['members'][0]['path'],self.reviews._output_root(book,review),'audiobook',book['metadata'],review,automatic_facts=facts).get('path') or ''
-        except (ValueError,KeyError,TypeError,OSError,IndexError):return ''
+        except (ValueError,KeyError,TypeError,OSError,IndexError,sqlite3.Error):return ''
 
     def _override_stale(self,job):
         """AudioJobs' claim check (ruling 69): a pending job planned with another chosen folder than the book's now, or
@@ -6081,13 +6086,14 @@ class MergeService:
             if move is None:view['move']=shown[0].get('move')
         return {'outcome':outcome,**view}
 
-    def _queue_move(self,row,finished,start,folder,override_id):
-        """Plan the finished book's move (book_move.plan) and queue it; 'unchanged' when it is already in that folder."""
+    def _queue_move(self,row,finished,start,folder,override_id,name=None):
+        """Plan the finished book's move (book_move.plan) and queue it; 'unchanged' when it is already in that folder.
+        name: its file name there (0.30.0 sorting moves), else its own."""
         import book_move,destination_overrides
         publication,kind,job_id=finished
         root=self._move_root(folder)
         with connect(self.inventory.database) as db:
-            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id,running=self._move_running)
+            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id,running=self._move_running,name=name)
         if move is None:return self._destination_answer(row['id'],'unchanged')
         title=str(row.get('title_clue') or '')[:200]
         if self.move_requester is not None:
@@ -6098,6 +6104,78 @@ class MergeService:
             return self._destination_answer(row['id'],'move_queued',dict(book_move.view(move),queue=queued))
         done=self.run_move(move['move_id'])
         return self._destination_answer(row['id'],'move_queued',done)
+
+    # --- 0.30.0 sorting moves (Sergei 2026-11-18, items 2, 5 and 6): books in Sorted the app now files elsewhere. Planned
+    # and listed only; a book moves only after Sergei approves the exact list he saw (its digest). sorting_moves.py.
+    def _sorting_rules(self):
+        import author_rules
+        try:return author_rules.load(self.inventory.database)
+        except (sqlite3.Error,OSError,ValueError):return None
+
+    def sorting_moves(self):
+        """The planned list (sorting_moves.plan): every finished book in Sorted that would move, why, and what is left as it
+        is; its 'digest' is what an approval names. Reads only: the catalog and whether the listed paths exist."""
+        import sorting_moves
+        output_root=getattr(self.inventory,'output_root',None)
+        with connect(self.inventory.database) as db:return sorting_moves.plan(db,output_root,self._sorting_rules())
+
+    def sorting_moves_apply(self,digest,job_ids=None):
+        """Sergei's approval of the listed moves: digest is the list he saw (refused when the list changed meanwhile);
+        job_ids narrows it to some of its books. A book whose series must be written first goes to series backfill
+        (series_backfill.approve); any other is moved by the usual verified move (book_move), queued like a Choose
+        folder move. Returns {'digest', 'results': [{'job_id', 'state', ...}]}."""
+        import sorting_moves
+        if self.draining or self.__dict__.get('_closing'):raise ValueError('Books Arranger is closing. Nothing was moved.')
+        if not isinstance(digest,str) or len(digest)!=64:raise ValueError('Approve names the list you saw (its digest)')
+        answer=self.sorting_moves()
+        if answer['digest']!=digest:raise ValueError('The list changed since you looked at it. Look at it again; nothing was moved.')
+        wanted=None if job_ids is None else set(job_ids)
+        results=[]
+        for item in answer['items']:
+            if wanted is not None and item['job_id'] not in wanted:continue
+            try:
+                if 'series' in item['items']:
+                    self.series_backfill.approve(item['job_id'],item['series'],item['to'])
+                    results.append({'job_id':item['job_id'],'state':'series_update_queued','to':item['to']})
+                else:
+                    results.append(dict(self._sorting_move(item['job_id'],item['to']),job_id=item['job_id']))
+            except Exception as error:  # one refusal never stops the others; each says why
+                results.append({'job_id':item['job_id'],'state':'refused','reason':(str(error) or type(error).__name__)[:300]})
+        return {'digest':digest,'results':results}
+
+    def sorting_target(self,job_id,series=None,placed=None):
+        """The path the app files this finished book at now (items 5 and 6; with series, item 2), or '' (sorting_moves.target)."""
+        import sorting_moves
+        with connect(self.inventory.database) as db:
+            row=db.execute("SELECT job_id,manifest,output FROM audio_jobs WHERE job_id=? AND state='completed'",(job_id,)).fetchone()
+            if row is None:return ''
+            found=sorting_moves.target(db,{'job_id':row[0],'manifest':row[1],'output':row[2]},self._sorting_rules(),getattr(self.inventory,'output_root',None),
+                                       {'name':series['name'],'number':str(series['number']),'provider':series.get('provider',''),'source_url':series.get('source_url','')} if series else None,
+                                       placed=placed)
+        return (found or {}).get('to') or ''
+
+    def sorting_follow_up(self,job_id,approved,placed=None):
+        """Series backfill wrote an approved book's series (item 2) under its new name in its own folder (placed): its move
+        to the path Sergei approved, when that is still where the app files it; else nothing moves and the answer says why."""
+        target=self.sorting_target(job_id,placed=placed)
+        if not target or os.path.normcase(target)!=os.path.normcase(str(approved)):
+            return {'state':'refused','reason':'The planned place changed since you approved it; the book stays where it is.'}
+        return self._sorting_move(job_id,target)
+
+    def _sorting_move(self,job_id,target):
+        """One approved sorting move: the usual verified move (book_move) to target, folder and name."""
+        import book_move
+        with connect(self.inventory.database) as db:
+            found=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+        if found is None:raise ValueError('The audiobook is not in the catalog')
+        identity=json.loads(found[0])['candidate_id']
+        finished=self._finished(identity)
+        if not finished or finished[2]!=job_id or finished[1] not in book_move.KINDS:raise ValueError('This audiobook has a newer version; it was not moved')
+        row=self.reviews._row('Audiobooks',identity)
+        start=self._publication_location(job_id,finished[1])
+        answer=self._queue_move(row,finished,start,os.path.dirname(target),None,name=os.path.basename(target))
+        move=answer.get('move') or {}
+        return {'state':answer.get('outcome'),'move':move}
 
     def cancel_move(self,move_id):
         """The queued move's Cancel (ActionQueue): True when it had not started."""

@@ -10,7 +10,7 @@ split into files and only a few to be real volumes ("Торадора! Том 1-
   volumes   never joined: every file ends with its own author's afterword, every file starts its numbering again
             ("Глава 1" / "Пролог"), or every file names its own work; a volume of a series keeps ruling 15's naming;
   ask       "Part of a bigger book" with the proposed order and "Approve as one book", never joined on its own:
-            season/episode chapters (s01e10 -> s02e01, "Эпизод 10" -> "Эпизод 11"), a joined book over 30 hours, book or
+            season/episode chapters (s01e10 -> s02e01, "Эпизод 10" -> "Эпизод 11"), book or
             volume words in the names ("Книга первая", "Book 2", "Том 2": outside knowledge decides), several authors (a
             fairy-tale chest), files naming several works ("Альфа 1", "Альфа 2", "Бета"), and any set the chapters do not
             settle (story collections "Миры Джорджа Мартина 1/2");
@@ -21,7 +21,6 @@ import re
 import unicodedata
 
 VERSION = 'part-sets-v1'
-LONG_HOURS = 30
 _STEMS = ('перв', 'втор', 'трет', 'четверт', 'пят', 'шест', 'седьм', 'восьм', 'девят', 'десят', 'одиннадцат', 'двенадцат',
           'тринадцат', 'четырнадцат', 'пятнадцат', 'шестнадцат', 'семнадцат', 'восемнадцат', 'девятнадцат', 'двадцат')
 ORDINALS = {stem + ending: n for n, stem in enumerate(_STEMS, 1) for ending in ('ая', 'ый', 'ой', 'ий', 'ья', 'ей', 'ое', 'ье')}
@@ -195,8 +194,8 @@ def decide(parts):
         return result('volumes', 'each file starts again at chapter 1' if all(restarts) else 'each file names its own work')
     if caution:
         return result('ask', caution)
-    if sum(float(p.get('hours') or 0) for p in parts) > LONG_HOURS:
-        return result('ask', 'long')
+    # 0.30.0 item 8 (Sergei 2026-11-18: remove the 30-hour limit): the total length no longer holds a set; the clues above
+    # and below decide («Террор» 1-4, 32.2 h, chapter numbering continuing, is one book). No other limit replaces it.
     # N3: files naming two or more works (not one each: that is the volumes rule above) hold several works, so they are asked
     # ("Альфа 1", "Альфа 2", "Бета", "Гамма"). The row shows the "chapters don't settle it" sentence (todo_causes).
     if len({w for w in works if w}) > 1:
