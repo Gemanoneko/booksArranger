@@ -357,8 +357,9 @@ class ManualConversions:
         if isinstance(part, dict) and part.get('kind') in ('unrepairable', 'failed') and isinstance(part.get('file'), str):
             value['part_repair'] = {'kind': part['kind'], 'file': part['file']}
         output = json.loads(job['output']) if job['output'] else {}
+        # Sergei's ruling (2026-11-19): a container-only fix is no damage, never counted as a repaired damaged part.
         repaired = [item for item in ((output.get('validation') or {}).get('source_working_repairs') or [])
-                    if isinstance(item, dict) and item.get('kind') == 'm4b_part_repair']
+                    if isinstance(item, dict) and item.get('kind') == 'm4b_part_repair' and item.get('container_only') is not True]
         if repaired:
             value['repaired_parts'] = len(repaired)
         if 'part_repair' in value or repaired:
@@ -504,11 +505,13 @@ class ManualConversions:
                 duration = member['duration']
                 part = {'name': part_chapter_name(member), 'chapters': []}
                 if path.suffix.lower() in {'.m4a', '.m4b'} and duration is not None:
-                    # 0.30.0: a damaged .m4b part is planned on its repaired copy, as its conversion repairs it.
+                    # 0.30.0: a damaged .m4b part is planned from its own chapter track, never copied here (Senua M5).
                     plan = part_chapter_plan(path, self.service.reviews.cache, stop, duration, source=source)
                     part['chapters'] = plan['chapters']
                     if plan['terminal_end_correction']:
                         part['terminal_end_correction'] = plan['terminal_end_correction']
+                    if plan.get('repaired_terminal') is True:
+                        part['repaired_terminal'] = True  # Senua M5: its last end is proven on the conversion's repaired copy
                 parts.append(part)
             if any(part['chapters'] for part in parts):
                 manifest['part_chapters'] = parts
@@ -707,11 +710,10 @@ class ManualConversions:
 
 
 def retry_offered(journal):
-    """Retry on a stopped manual job: a classified transient failure, or (0.30.0, Judy 9) a repaired M4B part that failed its
-    check. A part no repair applies to stops the same way on the same bytes: Reopen draft replaces it or leaves it out. The
-    journal's own retryable flag (the hourly automatic retry) is not changed."""
+    """Retry on a stopped manual job: a classified transient failure only. Sergei's ruling (2026-11-19): a damaged part the
+    app can't repair (part_repair 'unrepairable' or 'failed') offers no Retry; the window tells him to get a new copy."""
     failure = journal.get('failure') or {}
-    return failure.get('retryable') is True or (failure.get('part_repair') or {}).get('kind') == 'failed'
+    return failure.get('retryable') is True and not isinstance(failure.get('part_repair'), dict)
 
 
 def cleanup_binding(db, manifest):

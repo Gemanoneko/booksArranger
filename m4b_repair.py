@@ -23,6 +23,19 @@ from manifest_compatibility import equivalent_manifest
 
 SCHEMA='m4b-damage-repair-v1'
 CHECK_TITLE='Repair check'
+# Sergei's ruling on damaged parts (2026-11-19): damage that leaves every audio frame in place and does not stop conversion is
+# no damage. These repair kinds change only container or chapter-reference bytes (m4b_preservation.plan proves the shape: no
+# sample uses the missing tail; the bytes after an understated mdat are exactly the final frames; only dangling chapter IDs
+# are dropped). Their callers still prove the audio intact by a full strict decode before they treat a file as undamaged.
+# The truncated-final-frames repair replaces missing audio with silence: the audio itself is damaged.
+CONTAINER_ONLY=frozenset({preservation.REPAIR_DANGLING_CHAPTER,preservation.REPAIR_TAIL_OVERRUN,preservation.REPAIR_MDAT_UNDERSTATED})
+
+def container_only(found):
+    """True when a diagnosis (or a list of repairs) is repairable with container-only kinds alone."""
+    repairs=found.get('repairs') if isinstance(found,dict) else found
+    if isinstance(found,dict) and found.get('state')!='repairable':return False
+    kinds={item.get('kind') for item in repairs or [] if isinstance(item,dict)}
+    return bool(kinds) and kinds<=CONTAINER_ONLY
 _MODULE_SHA256=hashlib.sha256(Path(preservation.__file__).read_bytes()).hexdigest()
 _CACHE={};_LOCK=threading.Lock();_CACHE_LIMIT=1024
 

@@ -43,20 +43,21 @@ const row=extra=>({id:'conversion:j1',kind:'conversion',label_key:'conversion',s
   // The manual window's stop lines and end line.
   const stopped={state:'failed',originals_untouched:true,reopen_allowed:true};
   context.d={...stopped,part_repair:{kind:'unrepairable',file:'Впусти меня 3.m4b'}};
-  assert.equal(run('partRepairLine(d)'),"Conversion stopped. Впусти меня 3.m4b is damaged and can't be repaired safely. Original kept. Press Reopen draft to replace that file or leave it out.");
+  // Sergei's ruling on damaged parts (2026-11-19): get a new copy; no Retry and no Reopen draft hint, whatever stopped the repair.
+  assert.equal(run('partRepairLine(d)'),"Conversion stopped. Впусти меня 3.m4b is damaged and can't be repaired safely. Original kept. Get a new copy of this book.");
   context.d={...stopped,originals_untouched:false,part_repair:{kind:'failed',file:'Впусти меня 3.m4b'}};
-  assert.equal(run('partRepairLine(d)'),'Conversion stopped. The repaired part Впусти меня 3.m4b failed its check. Press Retry to try again, or Reopen draft.');
+  assert.equal(run('partRepairLine(d)'),"Conversion stopped. Впусти меня 3.m4b is damaged and can't be repaired safely. Get a new copy of this book.");
   context.d={state:'converted',repaired_parts:1,originals_untouched:true};assert.equal(run('repairedPartsLine(d)'),' Repaired 1 damaged part. Original kept.');
   context.d={state:'cleanup',repaired_parts:2,originals_untouched:false};assert.equal(run('repairedPartsLine(d)'),' Repaired 2 damaged parts.');
   context.d={state:'running',repaired_parts:1};assert.equal(run('repairedPartsLine(d)'),'','only when the job ends');
   context.d={state:'failed',reason:'x'};assert.equal(run('partRepairLine(d)'),'');
 
   // The Needs attention row: the same sentence, " Original kept." only when the engine says so.
-  const media=code=>({media_failure:{schema:'books-media-failure-v1',code,filename:'Впусти меня 3.m4b',status:'Stopped — M4B source failed check',
-    hint:code==='m4b_part_unrepairable'?"Впусти меня 3.m4b is damaged and can't be repaired safely. Replace it with an intact copy.":'The repaired part Впусти меня 3.m4b failed its check.'},originals_untouched:true});
+  const media=code=>({media_failure:{schema:'books-media-failure-v1',code,filename:'Впусти меня 3.m4b',status:'Need to reacquire',
+    hint:'Впусти меня 3.m4b is damaged and cannot be repaired safely. Delete the book, then get a new copy.'},originals_untouched:true});
   context.a=media('m4b_part_unrepairable');
-  assert.deepEqual(JSON.parse(JSON.stringify(run('mediaFailureText(a)'))),{status:'Stopped — M4B source failed check',hint:"Впусти меня 3.m4b is damaged and can't be repaired safely. Replace it with an intact copy. Original kept.",warn:true});
-  context.a=media('m4b_part_repair_failed');assert.equal(run('mediaFailureText(a)').hint,'The repaired part Впусти меня 3.m4b failed its check. Original kept.');
+  assert.deepEqual(JSON.parse(JSON.stringify(run('mediaFailureText(a)'))),{status:'Need to reacquire',hint:'Впусти меня 3.m4b is damaged and cannot be repaired safely. Delete the book, then get a new copy. Original kept.',warn:true});
+  context.a=media('m4b_part_repair_failed');assert.equal(run('mediaFailureText(a)').status,'Need to reacquire');
 
   // The window before queueing: the track count line says the repair, only for a join that includes an .m4b.
   click('manual-conversion-tab');await flush();

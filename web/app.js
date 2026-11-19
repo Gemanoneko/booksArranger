@@ -1615,9 +1615,10 @@ function workDetail(row,finishing){
 function repairTip(row){return row?.kind==='conversion' && row.step==='repairing' && typeof row.step_text==='string' && row.step_text?'Repairing '+row.step_text:'';}
 function partRepairLine(draft){
   const part=draft?.state==='failed'?draft.part_repair:null,file=typeof part?.file==='string'?part.file:'';if(!file)return '';
+  // Sergei's ruling on damaged parts (2026-11-19): a part the app can't repair (or whose repair failed its check) blocks the
+  // conversion: the line says plainly to get a new copy. No Retry (the engine offers none) and no Reopen draft hint.
   const kept=draft.originals_untouched===true?' Original kept.':'';
-  return part.kind==='failed'?`Conversion stopped. The repaired part ${file} failed its check.${kept} Press Retry to try again, or Reopen draft.`
-    :`Conversion stopped. ${file} is damaged and can't be repaired safely.${kept} Press Reopen draft to replace that file or leave it out.`;
+  return `Conversion stopped. ${file} is damaged and can't be repaired safely.${kept} Get a new copy of this book.`;
 }
 function repairedPartsLine(draft){
   const n=Number.isInteger(draft?.repaired_parts) && draft.repaired_parts>0?draft.repaired_parts:0;
