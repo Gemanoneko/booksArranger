@@ -167,7 +167,26 @@ const joinButton=get('join-selected'),dialogText=()=>get('join-effects').childre
   withdrawAnswer=()=>ok({withdrawn:true,kind:'repair'});paint([accepted]);
   await buttonsOf(trOf('cand-r')).find(b=>b.textContent==='Cancel repair').handlers.click({stopPropagation(){}});await tick();
   assert.equal(posted('/api/audiobook/retry-cancel').length,2);
-  console.log('PASS Join into one book: button states, dialog (order, moves and focus, fields, Goes to, What happens, refusals, waiting), queued press with each part row\'s line and Cancel, outcome with Show it, jobs panel words; answer 9 row Cancel');
+  // 13. A15: a joined book not yet approved and with no job offers the existing Keep as separate books, which undoes the join.
+  run('view="candidates";filters.candidates="all";viewControls()');
+  const JOINED={joined:{version:'book-join-v1',join_id:'j1',files:5,books:5},title_clue:'Впусти меня'};
+  const keepOf=tr=>buttonsOf(tr).find(b=>b.textContent==='Keep as separate books' || b.textContent==='Keeping...');
+  inventoryRows=[partRow(7,JOINED),partRow(8,{...JOINED,metadata_approved:true}),partRow(6,{...JOINED,creation:{status:'Queued',can_create:false,reasons:[],job:{job_id:'job-6',state:'Queued'}}}),partRow(5)];paint(inventoryRows);
+  const keep=keepOf(trOf('part-7'));assert.ok(keep,'the joined book offers Keep as separate books');
+  assert.equal(keep.title,'Make each file shown its own book. Nothing is joined. Each book is checked again.');assert.equal(keep.getAttribute('aria-label'),'Keep as separate books: Впусти меня');
+  assert.equal(keepOf(trOf('part-8')),undefined,'approved: no undo');assert.equal(keepOf(trOf('part-6')),undefined,'with a job: no undo');
+  assert.equal(keepOf(trOf('part-5')),undefined,'positive control: a book nobody joined has no such button');
+  let keepAnswer=()=>refused(409,{error:'Keep as separate books was not accepted. Nothing was changed.',code:'refused'});const keepFetch=context.fetch;
+  context.fetch=async(route,options)=>route==='/api/candidate/keep-separate'?(calls.push({route,options}),keepAnswer(JSON.parse(options.body))):keepFetch(route,options);
+  await keep.handlers.click({stopPropagation(){}});await tick();
+  assert.deepEqual(posted('/api/candidate/keep-separate').at(-1),{library:'Audiobooks',id:'part-7',revision:3,queue:true,title:'Впусти меня'});
+  assert.equal(joinHintOf(trOf('part-7')).textContent,'Keep as separate books was not accepted. Nothing was changed.');assert.equal(joinHintOf(trOf('part-7')).hidden,false);
+  keepAnswer=()=>ok({kept:5});await keepOf(trOf('part-7')).handlers.click({stopPropagation(){}});await tick();
+  assert.equal(posted('/api/candidate/keep-separate').length,2);assert.equal(run('askDone.get("part-7")'),'separate');
+  // 14. The Book metadata line (item E) for a joined book.
+  assert.equal(run('scopeBasisText({kind:"joined",basis:5,album:"Впусти меня",artist:"John Ajvide Lindqvist",track:null,track_total:null,repaired:false,folders:[]})'),'Joined by you from 5 books. Album «Впусти меня».');
+  assert.equal(run('scopeBasisText({kind:"joined",basis:3,album:null,repaired:false,folders:[]})'),'Joined by you from 3 books.');
+  console.log('PASS Join into one book: button states, dialog (order, moves and focus, fields, Goes to, What happens, refusals, waiting), queued press with each part row\'s line and Cancel, outcome with Show it, jobs panel words; answer 9 row Cancel; A15 Keep as separate books on a joined book; the joined Book metadata line');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
 const Module=require('node:module');const m=new Module(path.join(__dirname,'test_join_frontend.js'),module);m.filename=path.join(__dirname,'test_join_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

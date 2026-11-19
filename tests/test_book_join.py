@@ -33,7 +33,7 @@ class GroupingTests(unittest.TestCase):
         volumes = frozenset(paths)
         self.assertEqual(len(groups.build(rows, volumes=volumes)), 3, 'positive control: separate volumes without the join')
         order = (paths[2], paths[0], paths[1])
-        built = groups.build(rows, volumes=volumes, joins={'j1': (order, ALBUM)})
+        built = groups.build(rows, volumes=volumes, joins={'j1': (order, ALBUM, 3)})
         self.assertEqual(len(built), 1, list(built))
         scope, group = next(iter(built.items()))
         self.assertEqual(scope, book_join.scope(order, 'j1'))
@@ -42,6 +42,10 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(group['joined']['join_id'], 'j1'); self.assertEqual(group['title_clue'], ALBUM)
         self.assertEqual(group['grouping'], book_join.GROUPING)
         self.assertFalse([c for c in group['conflicts'] if 'clues' in c or 'Series' in c], group['conflicts'])
+        # The details panel's Book metadata line (item E's scope_view): kind 'joined' with how many books he joined.
+        view = groups.scope_view(group)
+        self.assertEqual((view['kind'], view['basis'], view['album'], view['track']), ('joined', 3, ALBUM, None))
+        self.assertEqual(groups.scope_view(next(iter(groups.build(rows[:1]).values())))['kind'], 'single_file', 'positive control: another kind')
 
     def test_a_join_with_a_file_gone_lapses_and_a_named_anthology_keeps_its_stories(self):
         rows = self.files(); paths = [r['path'] for r in rows]
@@ -255,6 +259,50 @@ class EffectTests(JoinFixture):
                 self.service.jobs._claimed = None
         self.assertIsNone(ActionQueue(server, store=False).blocker('join', ids[0], parts=ids), 'it runs once the part is no longer converting')
         self.assertEqual(self.service.join_books(self.items(rows), ALBUM)['parts'], 3)
+
+
+class UndoTests(JoinFixture):
+    """A15 (0.30.0): Keep as separate books on a joined book not yet approved and with no job undoes the join."""
+    def test_keep_as_separate_books_undoes_the_join_and_the_parts_come_back_as_before(self):
+        _sources, rows = self.volumes((1, 2, 3), 3)
+        before = sorted(r['id'] for r in rows)
+        with connect(self.inv.database) as db:
+            volumes = sorted(tuple(r) for r in db.execute('SELECT path,basis FROM part_volumes'))
+        self.assertEqual(len(volumes), 3, 'positive control: the parts were separate volumes')
+        answer = self.service.join_books(self.items(rows), ALBUM, 'John Ajvide Lindqvist')
+        joined = self.rows()[0]
+        self.assertEqual(joined['id'], answer['book_id'])
+        self.assertEqual(self.service.keep_separate(joined['id'], joined['revision']), {'kept': 3})
+        self.assertEqual(sorted(r['id'] for r in self.rows()), before, 'the parts come back, the same books')
+        with connect(self.inv.database) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM book_joins').fetchone()[0], 0, 'the join record is gone')
+            self.assertEqual(sorted(tuple(r) for r in db.execute('SELECT path,basis FROM part_volumes')), volumes, 'their volume records are back')
+            self.assertEqual(db.execute('SELECT superseded FROM book_groups WHERE id=?', (joined['id'],)).fetchone()[0], 1)
+
+    def test_a_part_with_a_set_aside_job_comes_back_with_its_job_still_aside(self):
+        _sources, rows = self.volumes((1, 2), 2)
+        queued = self.service.approve_book(rows[0]['id'], rows[0]['revision'])['job_id']
+        current = {r['id']: r for r in self.rows()}
+        self.service.join_books(self.items([current[r['id']] for r in rows]), ALBUM)
+        joined = self.rows()[0]
+        self.service.keep_separate(joined['id'], joined['revision'])
+        self.assertEqual(sorted(r['id'] for r in self.rows()), sorted(r['id'] for r in rows))
+        with connect(self.inv.database) as db:
+            state = db.execute('SELECT state FROM audio_jobs WHERE job_id=?', (queued,)).fetchone()[0]
+            aside = db.execute('SELECT kind FROM audio_job_set_aside WHERE job_id=?', (queued,)).fetchone()[0]
+        self.assertEqual((state, aside), ('needs attention', 'join'), 'the set-aside job and the removed approval stay as they are')
+
+    def test_an_approved_joined_book_is_not_undone(self):
+        _sources, rows = self.volumes((1, 2), 2)
+        self.service.join_books(self.items(rows), ALBUM, 'John Ajvide Lindqvist')
+        joined = self.rows()[0]
+        self.service.approve_book(joined['id'], joined['revision'])
+        joined = self.rows()[0]
+        with self.assertRaisesRegex(ValueError, 'Keep as separate books was not accepted. Nothing was changed.'):
+            self.service.keep_separate(joined['id'], joined['revision'])
+        self.assertEqual([r['id'] for r in self.rows()], [joined['id']], 'still one book')
+        with connect(self.inv.database) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM book_joins').fetchone()[0], 2, 'its record kept')
 
 
 class WithdrawTests(JoinFixture):

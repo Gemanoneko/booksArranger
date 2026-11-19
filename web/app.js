@@ -52,7 +52,7 @@ function deleteNextPress(){const id=deleteNext;deleteNext=null;if(id && deleteBu
 let queueState={queued:[],running:null},queueStripOutcome=null;
 const queuePresses=new Map(),queueNotes=new Map(),queueSeen=new Set(),queueCancels=new Set(),queueLate=new Map();
 // 0.30.0 item D (Join into one book) and Sergei's answer 9 (Cancel an accepted Retry or Repair): see joinSelection below.
-const joinRows=new Map(),joinCancels=new Set(),joinLate=new Map(),withdrawing=new Set();let joinDialog=null,joinSeq=0,joinShow=null;
+const joinRows=new Map(),joinCancels=new Set(),joinLate=new Map(),withdrawing=new Set(),keepPending=new Set(),keepNotes=new Map();let joinDialog=null,joinSeq=0,joinShow=null;
 
 let routingPreviewTimer=null,routingPreviewSequence=0;
 function queueRoutingPreview(){
@@ -758,6 +758,8 @@ function scopeBasisText(view){
     case 'same_title':if(has(view.title)){parts.push(by('the title tag',view.title));tags=true;}break;
     case 'folder':parts.push(FOLDER_BASIS[view.basis] || FOLDER_BASIS.one);break;
     case 'anthology':parts.push('One anthology volume: its stories keep their source credits.');break;
+    // 0.30.0 item D: a book Sergei joined; basis is how many books he joined.
+    case 'joined':parts.push(count(view.basis)?`Joined by you from ${plural(view.basis,'book','books')}.`:'Joined by you.',album());tags=has(view.album);break;
     default:parts.push(album());tags=has(view.album);
   }
   if(tags && view.repaired===true)parts.push('The tag text was repaired from an old encoding.');
@@ -918,6 +920,7 @@ function renderRows(force=false) {
     }
     if(askOf(row))buildAskActions(row,buttons);
     if(row.kind==='candidate')buildJoinCancel(row,buttons);  // 0.30.0 item D: Cancel the whole join, on each part's row (Judy 8.6)
+    if(row.kind==='candidate')buildJoinedKeep(row,buttons);  // 0.30.0 (A15): Keep as separate books undoes a join not yet approved
     if(row.kind==='candidate' && row.manual_conversion!==true)buildNamesButton(row,buttons);  // after the row's own buttons, before View metadata (Judy 1.1)
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
     // One "Open source folder" on every book row (Judy 0.23.1 section 3; ruling 70: "Open book folder" once the originals are gone).
@@ -5828,10 +5831,38 @@ function joinFor(row){
   return queueState.queued.find(holds) || (holds(queueState.running)?queueState.running:null);
 }
 function joinHint(row){
-  const item=joinFor(row);if(!item)return '';if(joinLate.has(item.id))return joinLate.get(item.id);
+  const item=joinFor(row);if(!item)return joinedSeparable(row) && !askOf(row) && queuedFor(row,'separate')?queueHint(row) || '':keepNotes.get(row.id) || '';
+  if(joinLate.has(item.id))return joinLate.get(item.id);
   const n=Array.isArray(item.parts)?item.parts.length:Number(item.n) || 0;
   if(queueState.running?.id===item.id)return `Joining ${plural(n,'book','books')} into one book`;
   return `Join queued: «${item.title || ''}», ${plural(n,'book','books')}. ${blockerSentence(queueBlocker(item)).text}`;
+}
+// A15 (0.30.0): a joined book that is not approved and has no job offers the existing Keep as separate books, which undoes
+// the join (the engine's book_join.separate); its existing strings, its press and outcome as on a set row.
+function joinedSeparable(row){return row?.kind==='candidate' && !!row.joined && typeof row.joined==='object' && row.manual_conversion!==true && row.metadata_approved!==true && !row.creation?.job && !rowFinished(row);}
+function buildJoinedKeep(row,buttons){
+  if(!joinedSeparable(row))return;
+  const button=node('button',ASK_LABELS.separate,'quiet row-retry');button.type='button';button.title=ASK_TIPS.separate;button.setAttribute('aria-label',`${ASK_LABELS.separate}: ${askName(row)}`);
+  button.addEventListener('click',event=>{event?.stopPropagation?.();if(event?.repeat || button.getAttribute?.('aria-disabled')==='true')return;keepJoined(joinRows.get(row.id)?.row || row);});
+  button.addEventListener('keydown',event=>event?.stopPropagation?.());buttons.append(button);
+  joinRows.set(row.id,{...(joinRows.get(row.id) || {}),row,keep:button});
+}
+function updateJoinedKeep(entry){
+  const row=entry.row,button=entry.keep,pending=keepPending.has(row.id) || queueRunning(row,'separate'),held=!pending && (!!queuedFor(row) || !!joinFor(row) || askDone.has(row.id) || ended || recoveryDisconnected);
+  const [label,title]=pending?ASK_PENDING.separate:[ASK_LABELS.separate,queuedFor(row,'separate')?queueHint(row) || ASK_TIPS.separate:ASK_TIPS.separate];
+  if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
+  if(pending || held)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+}
+async function keepJoined(row){
+  if(!joinedSeparable(row) || keepPending.has(row.id))return;
+  keepPending.add(row.id);keepNotes.delete(row.id);controls();
+  let answer=null,failure=null;
+  try{answer=await request('/api/candidate/keep-separate',{library:'Audiobooks',id:row.id,revision:row.revision,queue:true,title:askName(row)},PRESS_TIMEOUT);}catch(error){failure=error;}
+  keepPending.delete(row.id);
+  if(answer?.queued===true)queueAccepted(row,'separate',answer);
+  else if(answer){askDone.set(row.id,'separate');selectedBooks.delete(row.id);askNote(`Kept as ${(Number(answer.kept) || 0).toLocaleString()} separate books. Each is checked again.`);}
+  else keepNotes.set(row.id,failure?.httpStatus?serverSentence(failure,ASK_REFUSED.separate):lostLine());
+  controls();if(!ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();
 }
 function buildJoinLine(row,td){const hint=node('p','','field-help attention-hint join-hint');hint.hidden=true;td.append(hint);joinRows.set(row.id,{...(joinRows.get(row.id) || {}),row,hint});}
 function buildJoinCancel(row,buttons){
@@ -5843,7 +5874,8 @@ function buildJoinCancel(row,buttons){
 function updateJoinRows(){
   for(const entry of joinRows.values()){
     const item=joinFor(entry.row),text=joinHint(entry.row);
-    if(entry.hint){if(entry.hint.textContent!==text)entry.hint.textContent=text;entry.hint.hidden=!text;}
+    if(entry.hint){if(entry.hint.textContent!==text)entry.hint.textContent=text;entry.hint.hidden=!text;entry.hint.classList?.toggle?.('retry-refused',!item && keepNotes.has(entry.row.id));}
+    if(entry.keep)updateJoinedKeep(entry);
     if(!entry.cancel)continue;
     const shown=!!item && queueState.running?.id!==item.id && !joinLate.has(item.id),lost=!shown && !entry.cancel.hidden && document.activeElement===entry.cancel;
     entry.cancel.hidden=!shown;

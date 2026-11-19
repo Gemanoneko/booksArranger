@@ -30,8 +30,12 @@ import uuid
 from pathlib import Path
 
 VERSION = 'book-join-v1'
+# parts: the files of the join (a record is whole only with all of them); books: how many books were joined; prior: the file's
+# separate-volume record the join replaced (JSON, '' for none), put back when Keep as separate books undoes the join (A15).
 TABLE = ('CREATE TABLE IF NOT EXISTS book_joins(root TEXT NOT NULL, path TEXT NOT NULL, join_id TEXT NOT NULL, position INTEGER NOT NULL, '
-         'parts INTEGER NOT NULL, size INTEGER NOT NULL, modified TEXT NOT NULL, title TEXT NOT NULL, created TEXT NOT NULL, PRIMARY KEY(root,path))')
+         'parts INTEGER NOT NULL, size INTEGER NOT NULL, modified TEXT NOT NULL, title TEXT NOT NULL, created TEXT NOT NULL, '
+         "books INTEGER NOT NULL DEFAULT 0, prior TEXT NOT NULL DEFAULT '', PRIMARY KEY(root,path))")
+COLUMNS = ('root', 'path', 'join_id', 'position', 'parts', 'size', 'modified', 'title', 'created', 'books', 'prior')
 SCOPE = '\x1fJoined by you\x1f'
 GROUPING = 'One book: joined by you.'
 JOIN_REASON = 'Set aside: joined into one book by you. Nothing ran; the joined book is checked from the start.'
@@ -62,6 +66,10 @@ def _table(db, name):
 def setup(db):
     """The record and its triggers: any change regroups the catalog (book_catalog_revision, groups.setup made it)."""
     db.execute(TABLE)
+    have = {row[1] for row in db.execute('PRAGMA table_info(book_joins)')}
+    for column, kind in (('books', 'INTEGER NOT NULL DEFAULT 0'), ('prior', "TEXT NOT NULL DEFAULT ''")):
+        if column not in have:
+            db.execute('ALTER TABLE book_joins ADD COLUMN %s %s' % (column, kind))  # a catalog that joined before the undo
     db.execute('CREATE INDEX IF NOT EXISTS book_joins_by_join ON book_joins(join_id)')
     if _table(db, 'book_catalog_revision'):
         for operation in ('INSERT', 'UPDATE', 'DELETE'):
@@ -75,27 +83,33 @@ def scope(paths, join_id):
 
 
 def valid(db, root):
-    """{join_id: (paths in play order, title)} of the joins on this root whose every file still matches its record (size,
-    time, present, readable). Read-only; {} before the first join."""
+    """{join_id: (paths in play order, title, books joined)} of the joins on this root whose every file still matches its
+    record (size, time, present, readable). Read-only; {} before the first join."""
     if not _table(db, 'book_joins'):
         return {}
+    books = 'j.books' if 'books' in {row[1] for row in db.execute('PRAGMA table_info(book_joins)')} else '0'
     found = {}
-    for row in db.execute("""SELECT j.join_id,j.path,j.parts,j.title FROM book_joins j JOIN files f ON f.root=j.root AND f.path=j.path
+    for row in db.execute("""SELECT j.join_id,j.path,j.parts,j.title,""" + books + """ FROM book_joins j JOIN files f ON f.root=j.root AND f.path=j.path
             WHERE j.root=? AND j.size=f.size AND j.modified=CAST(f.modified AS TEXT) AND f.error='' AND f.missing=0
             ORDER BY j.join_id,j.position""", (root,)):
-        entry = found.setdefault(row[0], {'paths': [], 'parts': row[2], 'title': row[3]})
+        entry = found.setdefault(row[0], {'paths': [], 'parts': row[2], 'title': row[3], 'books': row[4]})
         entry['paths'].append(row[1])
-    return {key: (tuple(value['paths']), value['title']) for key, value in found.items() if len(value['paths']) == value['parts'] and value['paths']}
+    return {key: (tuple(value['paths']), value['title'], value['books']) for key, value in found.items()
+            if len(value['paths']) == value['parts'] and value['paths']}
 
 
-def record(db, root, join_id, members, title):
-    """Write the record of one join (members: [{path, size, modified}] in play order). A file in an older join leaves it
-    (that join lapses: its record is no longer whole)."""
+def record(db, root, join_id, members, title, books=0, prior=None):
+    """Write the record of one join (members: [{path, size, modified}] in play order; books: how many books were joined;
+    prior: {path: the separate-volume record the join replaces}). A file in an older join leaves it (that join lapses: its
+    record is no longer whole)."""
     setup(db)
     now = _stamp()
+    prior = prior or {}
     for position, member in enumerate(members, 1):
-        db.execute('INSERT OR REPLACE INTO book_joins VALUES(?,?,?,?,?,?,?,?,?)',
-                   (root, member['path'], join_id, position, len(members), int(member['size']), str(member['modified']), title, now))
+        saved = prior.get(member['path'])
+        db.execute('INSERT OR REPLACE INTO book_joins(' + ','.join(COLUMNS) + ') VALUES(' + ','.join('?' * len(COLUMNS)) + ')',
+                   (root, member['path'], join_id, position, len(members), int(member['size']), str(member['modified']), title, now, int(books),
+                    json.dumps(saved, ensure_ascii=False) if saved else ''))
 
 
 # ---------------------------------------------------------------- what the dialog proposes (Judy 8.3, 8.4)
@@ -492,9 +506,14 @@ def join(service, items, title, author=None):
         book_restart.ensure(db)
         setup(db)
         # The parts' separate-volume facts (inferred, or kept by Keep as separate books) are replaced by his join.
+        prior = {}
         if _table(db, 'part_volumes'):
+            for path in paths:
+                saved = db.execute('SELECT size,modified,basis,checked FROM part_volumes WHERE root=? AND path=?', (root, path)).fetchone()
+                if saved:
+                    prior[path] = {'size': saved[0], 'modified': saved[1], 'basis': saved[2], 'checked': saved[3]}
             db.executemany('DELETE FROM part_volumes WHERE root=? AND path=?', [(root, path) for path in paths])
-        record(db, root, join_id, members, title)
+        record(db, root, join_id, members, title, len(ordered), prior)
         # The parts stop being books: their approvals and saved values go with them (as Keep as separate books and ruling
         # 71d's regroup drop a set's), so a part never comes back approved.
         marks = json.dumps(ids)
@@ -554,3 +573,55 @@ def join(service, items, title, author=None):
     if callable(invalidate):
         invalidate()
     return {'book_id': joined['id'], 'title': title, 'parts': len(ordered), 'request_kind': kind, **effects}
+
+
+# ---------------------------------------------------------------- the undo (A15)
+KEEP_REFUSED = 'Keep as separate books was not accepted. Nothing was changed.'
+
+
+def separate(service, row):
+    """A15 (0.30.0): Keep as separate books on a joined book that is not approved and has no job undoes the join: its record
+    goes, the parts' separate-volume records the join replaced come back, and the files group as they did before the join
+    (a part with a set-aside job keeps its stored group; its set-aside jobs and removed approvals stay as they are). One
+    transaction; nothing is touched on disk. ValueError ('Candidate changed...', or KEEP_REFUSED: approved, has a job, or
+    the regroup did not undo it). Returns {'kept': the books the files now belong to}."""
+    import groups
+    from scanner import connect
+    identity, revision = row['id'], row['revision']
+    join_id = (row.get('joined') or {}).get('join_id')
+    root = service.reviews._source_root(row)
+    paths = [m['path'] for m in row.get('members') or []]
+    if not join_id or not paths:
+        raise ValueError(KEEP_REFUSED)
+    with service.inventory.group_lock, connect(service.inventory.database) as db:
+        db.execute('BEGIN IMMEDIATE')
+        current = db.execute('SELECT revision,superseded FROM book_groups WHERE root=? AND id=?', (root, identity)).fetchone()
+        if current is None or current['superseded'] or current['revision'] != revision:
+            raise ValueError('Candidate changed; reload evidence before reviewing')
+        if approved(db, identity) or (_table(db, 'audio_jobs') and db.execute(
+                "SELECT 1 FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? LIMIT 1", (identity,)).fetchone()):
+            raise ValueError(KEEP_REFUSED)
+        setup(db)
+        saved = db.execute('SELECT path,prior FROM book_joins WHERE root=? AND join_id=?', (root, join_id)).fetchall()
+        if not saved:
+            raise ValueError(KEEP_REFUSED)
+        db.execute('DELETE FROM book_joins WHERE root=? AND join_id=?', (root, join_id))
+        restored = [(path, json.loads(prior)) for path, prior in saved if prior]
+        if restored:
+            groups.setup_part_volumes(db)
+            db.executemany('INSERT OR REPLACE INTO part_volumes VALUES(?,?,?,?,?,?)',
+                           [(root, path, int(v['size']), str(v['modified']), str(v['basis']), str(v['checked'])) for path, v in restored])
+        db.execute("UPDATE book_groups SET review='',approved=0 WHERE id=?", (identity,))
+        if _table(db, 'candidate_context'):
+            db.execute('DELETE FROM candidate_context WHERE id=?', (identity,))
+        groups.sync(db, root)
+        gone = db.execute('SELECT superseded FROM book_groups WHERE id=?', (identity,)).fetchone()
+        kept = {r[0] for path in paths for r in db.execute(
+            'SELECT c.group_id FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id WHERE c.root=? AND c.path=? AND g.superseded=0', (root, path))}
+        if not gone or not gone[0] or not kept or identity in kept:
+            raise ValueError(KEEP_REFUSED)
+    service.__dict__.pop('_needs_cache', None)
+    invalidate = getattr(service, 'invalidate_status', None)
+    if callable(invalidate):
+        invalidate()
+    return {'kept': len(kept)}

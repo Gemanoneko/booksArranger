@@ -3262,6 +3262,10 @@ class MergeService:
         every file is its own book after the regroup; otherwise everything is rolled back and it is refused."""
         import datetime,groups
         row=self.reviews._row('Audiobooks',id,revision)
+        if isinstance(row.get('joined'),dict):
+            # 0.30.0 (A15): on a book Sergei joined, not approved and with no job, Keep undoes the join (book_join.separate).
+            import book_join
+            return book_join.separate(self,row)
         members=row.get('members') or []
         entry=self.needs_you().get(id) or {}
         hold=(entry.get('hold') or {}).get('piece') or {}

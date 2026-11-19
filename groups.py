@@ -577,7 +577,7 @@ def _folder_units(members,scopes,assigned,reserved,kept,protected,roots):
         found[scope]=dict(decision,kind=kind_name,bound=bound)
     return found
 
-def _joined_group(items,companions,scope,paths,join_id,title):
+def _joined_group(items,companions,scope,paths,join_id,title,books=0):
     """0.30.0 item D: the files Sergei joined into one book (book_join), one candidate in his play order. The questions his
     join answered (different album or title clues, different credits, the parts' own series positions) are no conflicts;
     a file that cannot be read still is."""
@@ -590,7 +590,7 @@ def _joined_group(items,companions,scope,paths,join_id,title):
         m['order_evidence']='Order set by you when joining: %d of %d'%(rank[m['path']],len(paths))
     group['scope']=scope;group['grouping']=book_join.GROUPING
     if title:group['title_clue']=title
-    group['joined']={'version':book_join.VERSION,'join_id':join_id,'files':len(paths)}
+    group['joined']={'version':book_join.VERSION,'join_id':join_id,'files':len(paths),'books':int(books or 0)}
     group['part_set']={'version':M4B_PARTS_VERSION,'parts':len(paths),'order_basis':'joined by you'}
     group['conflicts']=[c for c in group['conflicts'] if c not in ('Different book album/title clues may indicate mixed works',
                         'Different author / reader clues; recording unverified','Series position conflicts')]
@@ -635,13 +635,13 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
     # stories; the joined book once protected keeps its own stored group through the protected path below).
     by_you={}
     import book_join
-    for join_id,(paths,title) in sorted((joins or {}).items()):
+    for join_id,(paths,title,*more) in sorted((joins or {}).items()):
         scope=book_join.scope(paths,join_id)
         if any(path not in members for path in paths):continue
         own=all(assigned.get(path)==scope for path in paths)  # the joined book itself is protected now (approved, queued)
         if not own and any(path in reserved for path in paths):continue
         for path in paths:scopes[path]=scope;reserved.add(path)
-        by_you[scope]=(paths,join_id,title)
+        by_you[scope]=(paths,join_id,title,*more[:1])
     split={}
     taken=set(scopes.values())
     for found in _split_plan(members,scopes,reserved,chaptered):
@@ -880,8 +880,8 @@ def _sync_inputs(connection,root):
     if joins:
         # 0.30.0 item D: a book Sergei joined into another no longer holds its files (its job, saved values or approval
         # would protect them); the joined book's own group, once protected, still does.
-        own={book_join.scope(paths,join_id) for join_id,(paths,_title) in joins.items()}
-        covered={path for paths,_title in joins.values() for path in paths}
+        own={book_join.scope(value[0],join_id) for join_id,value in joins.items()}
+        covered={path for value in joins.values() for path in value[0]}
         protected={scope:evidence for scope,evidence in protected.items()
                    if scope in own or not evidence.get('members') or not all(m['path'] in covered for m in evidence['members'])}
     ignored=_confirmed_internal_parts(connection,root,protected,frozen)
@@ -988,7 +988,7 @@ def _sync_write(connection,root,revision,groups,inputs):
 # is unchanged and never printed. Kinds: album, single_file, volume, split_book, filename_work, numbered_set, standalone
 # (Judy's table), same_title, folder, anthology (groupings her table does not name; the page words them from existing copy),
 # other (an older or manual key: only the album sentence).
-SCOPE_KINDS=('album','single_file','volume','split_book','filename_work','numbered_set','standalone','same_title','folder','anthology','other')
+SCOPE_KINDS=('album','single_file','volume','split_book','filename_work','numbered_set','standalone','same_title','folder','anthology','joined','other')
 # A volume's recorded reason (part_sets.decide, or Sergei's Keep as separate books) in the spec's plain words.
 VOLUME_BASES={'each file names its own work':'each file names its own work','each file starts again at chapter 1':'each file starts again at chapter 1',
               'each file ends with its own afterword':'each file ends with its own afterword','no chapters to compare':'there are no chapters to compare'}
@@ -1007,6 +1007,7 @@ def _scope_kind(scope):
     if tag in ('Source folder','Folder remainder'):return 'folder'
     if tag.startswith('Named anthology volume '):return 'anthology'
     if tag=='Standalone source':return 'standalone'
+    if tag=='Joined by you':return 'joined'  # 0.30.0 item D: Sergei's Join into one book (book_join)
     return 'other'
 
 def _shown(value):
@@ -1047,6 +1048,9 @@ def scope_view(evidence,volumes=None):
         decision=(evidence.get('folder_unit') or {}).get('kind')
         basis=decision if decision in ('one','ask','remainder') else None
     folders=list(dict.fromkeys(str(Path(m['path']).parent) for m in members if isinstance(m,dict) and m.get('path')))
+    if kind=='joined':
+        books=(evidence.get('joined') or {}).get('books')
+        basis=books if type(books) is int and books>1 else None  # how many books he joined ("Joined by you from 5 books.")
     return {'kind':kind,'album':album,'artist':artist,'track':track,'track_total':total,'basis':basis,
             'repaired':any(key in fixed and _shown(tags.get(key)) for key in shown if key),'folders':folders,'title':title,'author':author}
 
