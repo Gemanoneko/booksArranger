@@ -261,6 +261,56 @@ class EffectTests(JoinFixture):
         self.assertEqual(self.service.join_books(self.items(rows), ALBUM)['parts'], 3)
 
 
+class LockOrderTests(JoinFixture):
+    """Senua's 0.30.0 review, M6: the join takes the conversion queue's lock before the catalog writer, the app's order (the
+    converter, Edit names' Save and the regroup pass hold the queue lock across catalog writes). Before, the join held the
+    writer across its regroup and then waited up to 5 s for the queue lock: a converter holding that lock while it waited for
+    the writer stalled both, and the join gave up (Busy) and retried."""
+    def test_a_converter_writing_under_the_queue_lock_never_stalls_the_join(self):
+        _sources, rows = self.volumes((1, 2, 3), 3)
+        holding, wrote = threading.Event(), {}
+
+        def converter():
+            # The converter's order: the queue lock, then a catalog write (AudioJobs.enqueue; _names_save; regroup_partial_jobs).
+            with self.service.jobs._lock:
+                holding.set()
+                time.sleep(2)  # the join is under way meanwhile
+                started = time.monotonic()
+                with connect(self.inv.database) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    db.execute('CREATE TABLE IF NOT EXISTS lock_order_probe(x)')
+                    db.execute('INSERT INTO lock_order_probe VALUES(1)')
+                wrote['seconds'] = time.monotonic() - started
+        thread = threading.Thread(target=converter, daemon=True)
+        thread.start()
+        self.assertTrue(holding.wait(10))
+        try:
+            answer = self.service.join_books(self.items(rows), ALBUM)
+        finally:
+            thread.join(30)
+        self.assertEqual(answer['parts'], 3, 'joined at its first try, never Busy')
+        self.assertLess(wrote['seconds'], 1.5, "the converter's write never waited for the join's writer")
+        self.assertEqual(len(self.rows()), 1)
+        with connect(self.inv.database) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM lock_order_probe').fetchone()[0], 1)
+
+    def test_a_catalog_change_between_the_plan_and_the_write_is_regrouped_in_the_same_transaction(self):
+        _sources, rows = self.volumes((1, 2, 3), 3)
+        build = groups._sync_build
+        calls = []
+
+        def counted(db, root, inputs):
+            calls.append(inputs)
+            if len(calls) == 1:  # after the plan: another writer changes an input (a separate-volume fact elsewhere)
+                with connect(self.inv.database) as other:
+                    other.execute("INSERT OR REPLACE INTO part_volumes VALUES(?,?,?,?,?,?)", (str(self.audio), 'Z:\elsewhere.m4b', 1, '1', 'x', 'y'))
+            return build(db, root, inputs)
+        with mock.patch.object(groups, '_sync_build', side_effect=counted):
+            answer = self.service.join_books(self.items(rows), ALBUM)
+        self.assertGreaterEqual(len(calls), 2, 'the plan was stale, so the write regrouped again (one transaction)')
+        self.assertEqual([r['id'] for r in self.rows()], [answer['book_id']])
+
+
 class UndoTests(JoinFixture):
     """A15 (0.30.0): Keep as separate books on a joined book not yet approved and with no job undoes the join."""
     def test_keep_as_separate_books_undoes_the_join_and_the_parts_come_back_as_before(self):
