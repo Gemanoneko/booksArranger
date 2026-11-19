@@ -239,3 +239,15 @@ button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--d
 }
 /* 0.30.0 (Judy's spec 1.3, 1.6, 3.2, 3.3): every running row (scrolls past 8), the Waiting list, the counts' age cue, the unread line. */
 #jobs-rows{max-height:600px;overflow-y:auto}#jobs-rows:focus-visible{outline:3px solid var(--focus);outline-offset:2px}#jobs-fresh{margin-left:auto;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}#jobs-fresh.behind{color:var(--warning)}#jobs-unread{color:var(--warning);margin:4px 0 0}#jobs-wait{list-style:none;margin:4px 0 0;padding:0}.wait-label{font-weight:600}.wait-row .hold-text p{white-space:normal}
+/* 0.30.0 item D (Judy's spec 8.1, 8.2): Join into one book, its bulk-bar button and status, and the dialog (built like approve-dialog). */
+#join-selected,#join-show{min-width:96px;min-height:32px;white-space:normal}#join-selected[aria-disabled=true],#join-selected[aria-disabled=true]:hover{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}
+#join-status.retry-refused{color:var(--warning)}#join-status:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+#join-dialog{width:min(720px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow-y:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:16px}
+#join-dialog::backdrop{background:rgb(0 0 0 / .65)}#join-dialog p{overflow-wrap:anywhere}#join-dialog h3{font-size:15px;margin:12px 0 4px}
+#join-dialog .toolbar{justify-content:space-between;margin-top:12px}#join-dialog .toolbar button{min-height:32px;min-width:96px;white-space:normal}
+#join-confirm[aria-disabled=true],#join-confirm[aria-disabled=true]:hover{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}
+#join-dialog-list{max-height:min(360px,40vh);overflow:auto;border:1px solid var(--border);border-radius:5px;margin:0;padding:4px 8px 4px 32px}#join-dialog-list:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.join-part{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:4px 0}.join-part-title{flex:1 1 200px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.join-part-facts{color:var(--muted);font-variant-numeric:tabular-nums}.join-part-word{font-weight:600;color:var(--warning)}
+.join-part button{min-height:32px}.join-part button[aria-disabled=true]{background:var(--disabled);color:var(--disabled-text);cursor:default}
+#join-dialog-order.warn,.join-refusals p{color:var(--warning)}.join-fields{display:grid;grid-template-columns:max-content 1fr;gap:8px 12px;align-items:center;margin-top:12px}#join-effects{margin:4px 0;padding-left:20px}
+.join-hint{color:var(--muted)}

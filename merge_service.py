@@ -3291,6 +3291,44 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return {'kept':kept}
 
+    def join_preview(self,items,title=None,author=None,queued_presses=None):
+        """Join into one book, the dialog (0.30.0 item D; Judy's 0.30.0 spec 8.2-8.5): the parts in play order, the order
+        basis, the proposed title and author, Goes to, refusals and effect counts (book_join.preview). Read-only."""
+        import book_join
+        with self.reviews.catalog_snapshot():return book_join.preview(self,items,title,author,queued_presses)
+
+    def join_books(self,items,title,author=None):
+        """Join into one book, the press: one transaction or nothing (book_join.join). Raises book_join.Refused (nothing
+        joined) or book_join.Busy (a part converts now: the queued join waits)."""
+        import book_join
+        if self.draining or self.__dict__.get('_closing'):raise book_join.Busy('Books Arranger is closing. Nothing was joined.')
+        return book_join.join(self,items,title,author)
+
+    WITHDRAW_STARTED='started'
+
+    def withdraw_readmission(self,library,identity,revision,job_id):
+        """Sergei's answer 9 (0.30.0): Cancel on the row of a book whose Retry or Repair is accepted and has not started. Its
+        request leaves the queue-next order (m4b_readmission.withdraw) and the book is as before the press: its failed job
+        offers Retry or Repair again. Too late once its check began (the worker reads it now) or its new job exists:
+        RetryRefused with cause 'started', nothing changed. {'withdrawn': True, 'kind': 'retry' | 'repair'}."""
+        import m4b_readmission
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        self.reviews._row(library,identity,revision)  # 'Candidate changed...' for a row on screen that is out of date
+        rows=self.jobs._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,))
+        if not rows or json.loads(rows[0]['manifest']).get('candidate_id')!=identity:raise RetryRefused(RETRY_BOOK_CHANGED)
+        with self.jobs._lock:
+            checking=dict(self.jobs._priority_status)
+            with self.jobs._db() as db:
+                value=m4b_readmission.describe(db,job_id)
+                if value and (value.get('state')=='admitted' or checking.get('state')=='checking' and checking.get('job_id') in (value.get('parent_job_id'),job_id)):
+                    raise RetryRefused('Too late to cancel: the %s has already started.'%value.get('kind','retry'),self.WITHDRAW_STARTED)
+                if not value or not value.get('queued_next') or value.get('state')!='queued':raise RetryRefused(RETRY_BOOK_CHANGED)
+                m4b_readmission.withdraw(db,value['parent_job_id'],time.time())
+        self.__dict__.pop('_needs_cache',None)
+        self.invalidate_status()
+        return {'withdrawn':True,'kind':value.get('kind')}
+
     def delete_preview(self,id,revision,mode='delete',wait=False):
         """Delete book or Remove this copy, step 1 (rulings 23-26; Judy's specs): the files and folders it would remove,
         from the disk now, and any refusal, so a refusal shows before Sergei confirms. mode 'copy' also proves the copy

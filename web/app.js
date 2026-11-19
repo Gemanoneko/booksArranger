@@ -51,6 +51,8 @@ function deleteNextPress(){const id=deleteNext;deleteNext=null;if(id && deleteBu
 // hidden).
 let queueState={queued:[],running:null},queueStripOutcome=null;
 const queuePresses=new Map(),queueNotes=new Map(),queueSeen=new Set(),queueCancels=new Set(),queueLate=new Map();
+// 0.30.0 item D (Join into one book) and Sergei's answer 9 (Cancel an accepted Retry or Repair): see joinSelection below.
+const joinRows=new Map(),joinCancels=new Set(),joinLate=new Map(),withdrawing=new Set();let joinDialog=null,joinSeq=0,joinShow=null;
 
 let routingPreviewTimer=null,routingPreviewSequence=0;
 function queueRoutingPreview(){
@@ -540,7 +542,7 @@ function settleLoad(tookMs){
 }
 // Inert while loading (3.6): aria-disabled (still focusable), the sentence as tooltip; never the disabled attribute.
 const LOOKING_CONTROLS=['view','search','filter','clear-filters','previous','next'];
-const CHANGING_CONTROLS=['start','stop','resume','start-automatic','stop-automatic','cancel-automatic-start','pause-jobs','resume-jobs','select-page','queue-books','retry-selected','approve-selected','release-selected','retry-all','retry-all-go','retry-job'];
+const CHANGING_CONTROLS=['start','stop','resume','start-automatic','stop-automatic','cancel-automatic-start','pause-jobs','resume-jobs','select-page','queue-books','retry-selected','approve-selected','release-selected','join-selected','retry-all','retry-all-go','retry-job'];
 function gate(element,sentence){
   if(!element?.setAttribute)return;
   if(sentence){
@@ -636,7 +638,7 @@ function controls() {
     startWaitTip($('resume-jobs'),waiting);
   }
   renderJobControlState();
-  renderMetaSave();updateNamesRows();updateFolderRows();updateDestinations();renderLaterButtons();if(choiceSave)updateMetadataChoiceControls();if(trackSave)trackSaveLine();renderNamesFacts();
+  renderMetaSave();updateNamesRows();updateFolderRows();updateDestinations();renderLaterButtons();renderJoinSelected();updateJoinRows();if(choiceSave)updateMetadataChoiceControls();if(trackSave)trackSaveLine();renderNamesFacts();
   gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
   drainLater();
 }
@@ -804,14 +806,14 @@ function renderRows(force=false) {
     // refresh unless it holds focus.
     for(const entry of askRows.values()){const fresh=rows.find(row=>row.id===entry.row.id);if(fresh)entry.row=fresh;}
     // The folder list, the identity lines and the destination block take fresh data in place too (0.23.1).
-    for(const map of [folderRows,bookCells,destRows])for(const entry of map.values()){const fresh=rows.find(row=>row.id===entry.row?.id);if(fresh)entry.row=fresh;}
+    for(const map of [folderRows,bookCells,destRows,joinRows])for(const entry of map.values()){const fresh=rows.find(row=>row.id===entry.row?.id);if(fresh)entry.row=fresh;}
     updateFolderRows();updateDestinations();
     updateNamesRows();  // Edit names takes fresh data in place too (its draft stays)
     for(const tr of [...($('inventory').children || [])]){const id=tr.dataset?.path;if(askDone.has(id) && !rows.some(row=>row.path===id) && (!tr.contains?.(focused) || deletedBooks.has(id))){$('inventory').removeChild?.(tr);askRows.delete(id);askDone.delete(id);}}
     updateAskRows();
     const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
   const listFocus=!!document.activeElement && !!$('inventory').contains?.(document.activeElement);  // m-10: focus the rebuild drops
-  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();namesRows.clear();folderRows.clear();bookCells.clear();destRows.clear();
+  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();namesRows.clear();folderRows.clear();bookCells.clear();destRows.clear();joinRows.clear();
   for(const outcomes of [askDone,askResults,askChecked])for(const id of [...outcomes.keys()])if(!rows.some(row=>row.id===id))outcomes.delete(id);
   const attentionList=view==='candidates' && filters[view]==='output_attention';
   // In this filter the list window grows with the viewport: rows with fields are 150-230 px tall (section 9).
@@ -852,6 +854,7 @@ function renderRows(force=false) {
           if(path)td.append(node('p',path,'path'));
         }else buildDestination(row,td);
         }
+        buildJoinLine(row,td);  // 0.30.0 item D: a queued join names itself on every part's row (Judy 8.6)
         if(row.manual_conversion!==true)buildNamesBlock(row,td);  // Edit names (Judy 0.22.2 section 1): Place, Entered by you, the editor when open
       }
       tr.append(td); }
@@ -873,6 +876,7 @@ function renderRows(force=false) {
       clear.addEventListener('keydown',event=>event.stopPropagation());buttons.append(clear);
     }
     if(askOf(row))buildAskActions(row,buttons);
+    if(row.kind==='candidate')buildJoinCancel(row,buttons);  // 0.30.0 item D: Cancel the whole join, on each part's row (Judy 8.6)
     if(row.kind==='candidate' && row.manual_conversion!==true)buildNamesButton(row,buttons);  // after the row's own buttons, before View metadata (Judy 1.1)
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
     // One "Open source folder" on every book row (Judy 0.23.1 section 3; ruling 70: "Open book folder" once the originals are gone).
@@ -1105,7 +1109,7 @@ function listContext(){return JSON.stringify([$('library').value,view,filters[vi
 // While a different list is on its way, the old rows are not shown as the new filter's result.
 function showListLoading(){
   const label=filterOptions[view].find(item=>item[0]===filters[view])?.[1] || '';
-  $('inventory').replaceChildren();rowRetries.clear();askRows.clear();deleteButtons.clear();$('inventory').setAttribute?.('aria-busy','true');
+  $('inventory').replaceChildren();rowRetries.clear();askRows.clear();deleteButtons.clear();joinRows.clear();$('inventory').setAttribute?.('aria-busy','true');
   const text=`Loading ${label}${filters[view]==='output_attention' && attentionGroup!=='all'?' · '+attentionLabels[attentionGroup]:''}…`;
   $('empty').textContent=text;$('empty').hidden=false;$('page').textContent=text;$('previous').disabled=true;$('next').disabled=true;
   listLoadingText=text;  // ruling 75a, S6: renderListStale says why when it lasts
@@ -1523,7 +1527,7 @@ function workStep(row,finishing){
     case 'source_folders':return prefix('Checking leftovers');
     case 'move':{const folder=moveFolderOf(row);return prefix(folder?`Copying to ${folder}`:'Copying the audiobook to its new folder');}
     case 'move_recovery':return prefix('Finishing moves the last restart interrupted');
-    case 'action':return prefix(ACTION_STEPS[row.label_key] || 'Working');
+    case 'action':return prefix(row.label_key==='join'?`Joining ${plural(Number.isInteger(row.count)?row.count:0,'book','books')} into one book`:ACTION_STEPS[row.label_key] || 'Working');
     case 'bulk':case 'approve_selected':case 'release_selected':return prefix('One book at a time');
     case 'start_check':return row.state==='pausing'?'Pausing start checks…':'Checking each waiting book is ready to convert';
     case 'retry_check':return prefix('Checking this book can be converted again');
@@ -1559,7 +1563,7 @@ function workDetail(row,finishing){
   if(Number.isInteger(row.count) && row.count>0){
     if(row.kind==='queue')return plural(row.count,'book','books')+' waiting';
     if(row.kind==='repair_check')return plural(row.count,'book','books')+' left';
-    if(row.kind==='action')return plural(row.count,'file','files');
+    if(row.kind==='action')return row.label_key==='join'?'':plural(row.count,'file','files');  // a join's count is in its step (1.5a)
   }
   return '';
 }
@@ -2773,7 +2777,7 @@ $('retry-all-cancel').addEventListener('click',()=>closeRetryAll());
 $('retry-all-confirm').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault?.();closeRetryAll();}});
 $('retry-job').addEventListener('click',()=>{if($('retry-job').getAttribute?.('aria-disabled')==='true' || retryPending)return;retryJob();});
 // The details panel's Cancel retry / Cancel repair beside a queued face (Judy 1.3), the same press as the row's.
-$('retry-cancel').addEventListener('click',event=>{if(event?.repeat || $('retry-cancel').hidden || !selectedRow)return;const item=queuedFor(selectedRow);if(item && item.action!=='delete')cancelQueued(selectedRow,item.action);});
+$('retry-cancel').addEventListener('click',event=>{if(event?.repeat || $('retry-cancel').hidden || !selectedRow)return;const item=queuedFor(selectedRow);if(item && item.action!=='delete')cancelQueued(selectedRow,item.action);else if(!item && withdrawable(selectedRow))withdrawRequest(selectedRow);});
 $('recovery-cancel').addEventListener('click',()=>closeRecoveryDialog());
 $('recovery-confirm').addEventListener('click',deleteRecoveryCopies);
 $('recovery-dialog').addEventListener('cancel',event=>{event.preventDefault();closeRecoveryDialog();});
@@ -4820,7 +4824,7 @@ async function takeBackRule(rule){
 // its outcome lands in the row, the strip line and a polite announcement. Every check runs again when it runs.
 // 0.30.0 (Judy's spec 2.1): what a queued press waits for is said by one builder (blockerSentence), never a word table.
 // The word of each queued action (ruling 35), for its queued line, Cancel and outcome.
-const QUEUE_ACTION_WORDS={cleanup:'Retry cleanup',retry:'Retry',repair:'Repair',delete:'Delete',approve:'Approve',convert:"Convert what's there",separate:'Keep as separate books',
+const QUEUE_ACTION_WORDS={join:'Join into one book',cleanup:'Retry cleanup',retry:'Retry',repair:'Repair',delete:'Delete',approve:'Approve',convert:"Convert what's there",separate:'Keep as separate books',
   scan_again:'Scan again',dismiss:'Remove from list',move:'Move',destination:'Move',copy:'Remove this copy',names:'Save',names_forget:'Forget',scan_start:'Start scanning',scan_resume:'Resume scanning'};
 function queueWord(action){return QUEUE_ACTION_WORDS[action] || 'An action';}
 // The kind's words (1.2). An unknown kind reads as operation; the bulk approval runs in this page, so the page names it.
@@ -5001,6 +5005,7 @@ function queuePartial(outcome){
 const QUEUE_DELETE_UNKNOWN="The delete may not have finished. The app hasn't confirmed it. Check the list before trying again.";
 function applyQueueOutcome(outcome){
   // A row line's status is taken from the first list read after the outcome (the rows on screen predate the run).
+  if(outcome.action==='join'){joinOutcome(outcome);return;}  // 0.30.0 item D: the bulk bar's status line (Judy 8.6)
   const id=outcome.book_id,row=rows.find(item=>item.id===id),title=outcome.title || queueTitle(row),status=null,gen=listGeneration;
   queueLate.delete(outcome.id);
   if(outcome.action==='copy' && outcome.result==='done'){
@@ -5116,14 +5121,23 @@ async function cancelQueued(row,action){
 // The Cancel button of a queued action: a native button beside the face, never the same target (1.1).
 function queueCancelButton(row,action){
   const button=node('button','Cancel '+lowerFirst(queueWord(action)),'quiet row-cancel');button.type='button';button.hidden=true;
-  button.addEventListener('click',event=>{event?.stopPropagation?.();if(event?.repeat || button.hidden)return;const item=queuedFor(row);if(item){cancelQueued(row,item.action);return;}const key=retryKey(row);if(key && laterFor(key))cancelLater(key);});
+  button.addEventListener('click',event=>{event?.stopPropagation?.();if(event?.repeat || button.hidden)return;const item=queuedFor(row);if(item){cancelQueued(row,item.action);return;}const fresh=rows.find(entry=>entry.id===row.id) || row;if(withdrawable(fresh)){withdrawRequest(fresh);return;}const key=retryKey(row);if(key && laterFor(key))cancelLater(key);});
   button.addEventListener('keydown',event=>event?.stopPropagation?.());
   return button;
 }
 function updateQueueCancel(button,row,kinds){
   if(!button)return;const item=queuedFor(row),shown=!!item && kinds.includes(item.action) && !queueLate.has(item.id);
-  const lost=!shown && !button.hidden && document.activeElement===button;
-  button.hidden=!shown;
+  const request=!shown && kinds.includes('repair')?withdrawable(row):null;  // Sergei's answer 9: an accepted Retry or Repair, not started
+  const lost=!shown && !request && !button.hidden && document.activeElement===button;
+  button.hidden=!shown && !request;
+  if(request){
+    // The queued press's own Cancel, worded the same (0.30.0): Cancel repair, "Take this repair out of the queue. Nothing was started."
+    const word=request.kind==='retry'?'retry':'repair',label='Cancel '+word;
+    if(button.textContent!==label)button.textContent=label;
+    const tip=`Take this ${word} out of the queue. Nothing was started.`;if(button.title!==tip)button.title=tip;
+    button.setAttribute('aria-label',`${label}: ${queueTitle(row)}`);
+    if(withdrawing.has(row.id))button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+  }
   if(shown){
     const word=lowerFirst(queueWord(item.action)),label='Cancel '+word;
     if(button.textContent!==label)button.textContent=label;
@@ -5573,6 +5587,255 @@ $('approve-selected').addEventListener('click',()=>{if($('approve-selected').dis
 $('approve-cancel').addEventListener('click',()=>closeApproveDialog());
 $('approve-confirm').addEventListener('click',()=>runApproveSelected());
 $('approve-dialog').addEventListener('cancel',event=>{event.preventDefault?.();closeApproveDialog();});
+// ---------------------------------------------------------------- Join into one book (0.30.0 item D; Judy's 0.30.0 spec, section 8)
+// Sergei selects the rows of the wrongly split parts («Впусти меня») and records them as one book. The engine settles the
+// order, title, author and refusals (POST /api/candidate/join-preview); the join itself is always queued (action 'join'),
+// waits for a part that converts now, and does everything in one transaction or nothing. Answer 8: the joined book stays
+// a candidate for him to approve. Every sentence here is Judy's (section 8), except the ones her spec has none for.
+function joinSelection(){
+  // Selection across pages counts (8.1): every ticked book; the ones on this page in their list order first.
+  const shown=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id)).map(row=>row.id),ids=[...selectedBooks.keys()];
+  return [...shown,...ids.filter(id=>!shown.includes(id))].map(id=>{const row=rows.find(item=>item.kind==='candidate' && item.id===id) || null;return {id,revision:row?row.revision:selectedBooks.get(id),row};});
+}
+function renderJoinSelected(){
+  const button=$('join-selected');if(!button)return;
+  const items=view==='candidates'?joinSelection():[],n=items.length;
+  button.hidden=!n;if(!n)return;  // shows as soon as one row is selected, so he can find it (8.1)
+  const label=`Join into one book (${n.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
+  const finished=items.find(item=>rowFinished(item.row));
+  const tip=n<2?'Select at least 2 books to join them.':finished?`«${askName(finished.row)}» is already a finished audiobook. Join books that are not converted yet.`
+    :'Join the selected books into one audiobook. You choose the order, title and author first. Nothing is converted yet.';
+  if(button.title!==tip)button.title=tip;
+  const off=n<2 || !!finished || ended || recoveryDisconnected || !!joinDialog;
+  button.disabled=off;if(off)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+}
+const JOIN_REFUSALS={finished:t=>`«${t}» is already a finished audiobook. Join books that are not converted yet.`,changed:t=>`«${t}» changed. Select it again.`,
+  gone:t=>`«${t}» is no longer listed.`,queued:t=>`«${t}» already has a queued action. Cancel it first.`,manual:t=>`«${t}» is a Manual Conversion draft. It can't be joined.`,
+  root:t=>`«${t}» is in another library folder. Join books from one library folder.`};
+function joinRefusal(refusal){return (JOIN_REFUSALS[refusal?.cause] || (t=>`«${t}» can't be joined.`))(refusal?.title || 'Book');}
+function joinTime(seconds){return clockText(Number(seconds) || 0,true);}
+function joinWord(part){return part.has_repair_request?'Repair asked':part.has_failed_job?'Failed':part.has_queued_job?'Queued':part.has_approval?'Approved':'';}
+function joinNumbers(list){return list.length===1?`part ${list[0]} is`:`parts ${list.slice(0,-1).join(', ')} and ${list.at(-1)} are`;}
+// 8.3: the order basis, strongest first; a move makes it his.
+function joinOrderLine(dialog){
+  const order=dialog.preview?.order,n=dialog.parts.length;if(!order)return {text:'',warn:false};
+  if(dialog.moved)return {text:'Order set by you.',warn:false};
+  if(order.basis==='album_tracks'){
+    if(Number.isInteger(order.duplicate))return {text:`Two parts claim track ${order.duplicate}. Check the order.`,warn:true};
+    if(Array.isArray(order.missing) && order.missing.length)return {text:`Order from the album track numbers. The album has ${order.total} parts; ${joinNumbers(order.missing)} not selected.`,warn:false};
+    if(Number.isInteger(order.total))return {text:`Order from the album track numbers: ${order.first}/${order.total} to ${order.last}/${order.total}.`+(order.total===n?` All ${n} parts are here.`:''),warn:false};
+    return {text:'Order from the album track numbers.',warn:false};
+  }
+  if(order.basis==='file_names')return {text:'Order from the file names. Check it.',warn:false};
+  return {text:'No order evidence. The parts are in file-name order. Check it.',warn:false};
+}
+// 8.5: one line per effect whose count is above zero.
+function joinEffectLines(dialog){
+  const effects=dialog.preview?.effects || {},lines=[],count=key=>Number(effects[key]) || 0;
+  if(count('queued'))lines.push(count('queued')===1?'1 queued conversion is taken off the queue.':`${count('queued')} queued conversions are taken off the queue.`);
+  if(count('requests')){const kind=dialog.parts.find(part=>part.has_repair_request)?.request_kind==='retry'?'Retry':'Repair';
+    lines.push((count('requests')===1?`1 ${kind} request is cancelled.`:`${count('requests')} Retry or Repair requests are cancelled.`)+' The conversion repairs damaged parts itself.');}
+  if(count('failed'))lines.push(count('failed')===1?'1 failed attempt is set aside. Its entry leaves Needs attention.':`${count('failed')} failed attempts are set aside. Their entries leave Needs attention.`);
+  if(count('approvals'))lines.push('Approvals on these books are removed. Approve the joined book when it looks right.');
+  const dropped=dialog.preview?.series?.dropped;
+  if(dropped?.name){const numbers=(dropped.numbers || []).map(String).filter(Boolean),ints=numbers.map(Number);
+    const range=numbers.length>1 && ints.every(Number.isInteger)?`${Math.min(...ints)}-${Math.max(...ints)}`:numbers.join(', ');
+    lines.push(`The series «${dropped.name}» No. ${range} on these rows is dropped. It came from the part names.`);}
+  return lines;
+}
+// Why Join does nothing yet ('' when it works): the press is prevented, its reason the tooltip (8.2).
+function joinInert(dialog){
+  if(!dialog.preview)return dialog.failure || 'Checking these books…';
+  if(dialog.preview.refusals?.length)return joinRefusal(dialog.preview.refusals[0]);
+  if(dialog.parts.length<2)return 'Select at least 2 books to join them.';
+  if(!String($('join-title').value || '').trim())return 'Type a title first.';
+  return '';
+}
+function renderJoinParts(){
+  const dialog=joinDialog,list=$('join-dialog-list');if(!dialog)return;
+  list.replaceChildren(...dialog.parts.map((part,index)=>{
+    const li=node('li','','join-part'),title=node('span',part.title || 'Book','join-part-title');title.title=part.title || '';
+    const files=Number(part.files) || 0,facts=`${plural(files,'file','files')} · ${joinTime(part.seconds ?? (Number(part.hours) || 0)*3600)}`+(Number.isInteger(part.track) && Number.isInteger(part.track_total)?` · track ${part.track} of ${part.track_total}`:'');
+    li.append(title,node('span',facts,'join-part-facts'));
+    const word=joinWord(part);if(word)li.append(node('span',word,'join-part-word'));
+    for(const [key,label,delta,tip] of [['moveUp','Move up',-1,'Move this part earlier in the book.'],['moveDown','Move down',1,'Move this part later in the book.']]){
+      const button=node('button',label,'quiet');button.type='button';button.title=tip;button.setAttribute('aria-label',`${label}: ${part.title || 'Book'}`);
+      const edge=delta<0?index===0:index===dialog.parts.length-1;if(edge)button.setAttribute('aria-disabled','true');
+      button.addEventListener('click',()=>moveJoinPart(part.id,delta,key));li[key]=button;li.append(button);
+    }
+    return li;
+  }));
+}
+// After a Move, focus stays on the same button of the moved part (the Track order behaviour, 8.3).
+function moveJoinPart(id,delta,key){
+  const dialog=joinDialog;if(!dialog)return;const index=dialog.parts.findIndex(part=>part.id===id),to=index+delta;
+  if(index<0 || to<0 || to>=dialog.parts.length)return;
+  [dialog.parts[index],dialog.parts[to]]=[dialog.parts[to],dialog.parts[index]];dialog.moved=true;
+  renderJoinParts();renderJoinDialog();scheduleJoinGoes();
+  $('join-dialog-list').children[to]?.[key]?.focus?.();
+}
+function renderJoinDialog(){
+  const dialog=joinDialog;if(!dialog)return;const preview=dialog.preview,n=dialog.parts.length || dialog.items.length;
+  $('join-dialog-checking').hidden=!!preview && !dialog.failure;setText('join-dialog-checking',dialog.failure || 'Checking these books…');
+  const order=joinOrderLine(dialog);setText('join-dialog-order',order.text);$('join-dialog-order').classList?.toggle?.('warn',order.warn);
+  const refusals=preview?.refusals || [];$('join-dialog-refusals').replaceChildren(...refusals.map(item=>node('p',joinRefusal(item))));$('join-dialog-refusals').hidden=!refusals.length;
+  const author=String($('join-author').value || '').trim(),authors=preview?.authors || [];
+  const note=!preview || author?'':authors.length>1?`The parts name different authors: ${authors.join(', ')}. Type the author.`:'No author yet. The book needs one before it can be approved.';
+  setText('join-author-note',note);$('join-author-note').hidden=!note;
+  const goes=dialog.goes;setText('join-goes',goes?.path?shownPath(goes.path):'');$('join-goes').title=goes?.absolute || '';
+  $('join-effects').replaceChildren(...(preview?joinEffectLines(dialog):[]).map(line=>node('li',line)));
+  setText('join-dialog-repair','Damaged M4B parts are repaired automatically when the book is converted.');$('join-dialog-repair').hidden=!dialog.parts.some(part=>part.m4b);
+  setText('join-dialog-chapters','Each part keeps its title as a chapter name.');
+  // A part converting now: the join waits its turn (8.5, the 2.2 sentence) and the button says so.
+  const blocked=preview?.blocked,wait=blocked?blockerSentence(blocked).running+', so this join waits its turn.':'';
+  setText('join-dialog-wait',wait);$('join-dialog-wait').hidden=!wait;
+  const confirm=$('join-confirm'),inert=joinInert(dialog),label=blocked?'Queue the join':'Join into one book';
+  if(confirm.textContent!==label)confirm.textContent=label;
+  const tip=inert || `Join these ${plural(n,'book','books')} into one book. Nothing is converted yet.`;if(confirm.title!==tip)confirm.title=tip;
+  if(inert)confirm.setAttribute('aria-disabled','true');else confirm.removeAttribute('aria-disabled');
+}
+async function openJoinDialog(){
+  if(joinDialog || ended || recoveryDisconnected)return;
+  const items=joinSelection().map(({id,revision})=>({id,revision}));if(items.length<2)return;
+  const seq=++joinSeq;joinDialog={items,seq,preview:null,parts:[],moved:false,goes:null,failure:'',timer:null,goesSeq:0};
+  setText('join-dialog-title',`Join ${plural(items.length,'book','books')} into one book?`);
+  $('join-dialog-list').replaceChildren();$('join-title').value='';$('join-author').value='';
+  $('join-title').title='The title of the joined book.';$('join-author').title='The author of the joined book, as it is filed.';$('join-cancel').title='Close without joining. Nothing changes.';
+  renderJoinDialog();$('join-dialog').showModal?.();$('join-cancel').focus?.();controls();  // it opens at once (8.2)
+  let answer=null,failure=null;
+  try{answer=await request('/api/candidate/join-preview',{library:'Audiobooks',items},APPROVE_TIMEOUT);}catch(error){failure=error;}
+  const dialog=joinDialog;if(!dialog || dialog.seq!==seq)return;
+  if(answer && Array.isArray(answer.parts)){
+    dialog.preview=answer;dialog.parts=answer.parts.slice();dialog.goes=answer.goes_to || null;
+    $('join-title').value=typeof answer.title==='string'?answer.title:'';$('join-author').value=typeof answer.author==='string'?answer.author:'';
+    renderJoinParts();
+  }else dialog.failure=failure?.httpStatus?serverSentence(failure,'These books could not be checked. Nothing was changed.'):lostLine();
+  renderJoinDialog();
+}
+// Goes to follows the two fields (8.4), from the same preview as the Edit names editor; asked once typing pauses.
+function scheduleJoinGoes(){
+  const dialog=joinDialog;if(!dialog?.preview)return;if(dialog.timer)clearTimeout(dialog.timer);
+  dialog.timer=setTimeout(async()=>{
+    dialog.timer=null;const seq=++dialog.goesSeq,title=String($('join-title').value || '').trim();
+    if(!title){dialog.goes=null;renderJoinDialog();return;}
+    try{const answer=await request('/api/candidate/join-preview',{library:'Audiobooks',items:dialog.parts.map(part=>({id:part.id,revision:part.revision})),title,author:String($('join-author').value || '').trim()});
+      if(joinDialog===dialog && dialog.goesSeq===seq){dialog.goes=answer.goes_to || null;renderJoinDialog();}}
+    catch(error){}  // the line keeps the last answer; Join re-checks every part anyway
+  },300);
+}
+function closeJoinDialog(){
+  const dialog=joinDialog;if(!dialog)return;if(dialog.timer)clearTimeout(dialog.timer);
+  joinDialog=null;$('join-dialog').close?.();controls();
+  $('select-page').focus?.({preventScroll:true});  // the Join button may be gone by then (8.2)
+}
+function setJoinStatus(text,warn,show){
+  const status=$('join-status');status.textContent=text;status.classList?.toggle?.('retry-refused',!!warn);
+  joinShow=show && show.id && show.title?show:null;const button=$('join-show');button.hidden=!joinShow;
+  if(joinShow){button.setAttribute('aria-label','Show it: '+joinShow.title);button.title='List this book: sets Status to All and searches for its title.';}
+}
+function joinDoneText(answer){
+  const count=key=>Number(answer?.[key]) || 0,bits=[];
+  if(count('queued'))bits.push(count('queued')===1?'1 queued conversion taken off the queue.':`${count('queued')} queued conversions taken off the queue.`);
+  if(count('requests'))bits.push(count('requests')===1?`1 ${answer.request_kind==='retry'?'Retry':'Repair'} request cancelled.`:`${count('requests')} Retry or Repair requests cancelled.`);
+  if(count('failed'))bits.push(count('failed')===1?'1 failed attempt set aside.':`${count('failed')} failed attempts set aside.`);
+  return `Joined ${plural(count('parts'),'book','books')} into «${answer?.title || ''}».`+(bits.length?' '+bits.join(' '):' Approve it when it looks right.');
+}
+function joinRefusedText(outcome){
+  const said=typeof outcome?.error==='string'?outcome.error.trim():'';
+  if(said.startsWith('Join cancelled:'))return said;
+  if(outcome?.code==='changed' && outcome.part)return `Join cancelled: «${outcome.part}» changed. Nothing was joined.`;
+  return said?`Join cancelled: ${lowerFirst(said.replace(/\.?$/,'.'))} Nothing was joined.`:'Join cancelled: it was not accepted. Nothing was joined.';
+}
+// A queued join ended (the engine's outcome): the bulk bar's status line says what happened, with Show it (8.6).
+function joinOutcome(outcome){
+  if(outcome.result==='done' && outcome.answer && typeof outcome.answer==='object'){
+    const text=joinDoneText(outcome.answer);setJoinStatus(text,false,{id:outcome.answer.book_id,title:outcome.answer.title || outcome.title});queueAnnounce(text);
+  }else{const text=joinRefusedText(outcome);setJoinStatus(text,true,null);queueAnnounce(text);}
+  queueAck(outcome.id);lastKey=null;
+}
+async function confirmJoin(event){
+  const dialog=joinDialog,button=$('join-confirm');if(event?.repeat || !dialog || button.getAttribute?.('aria-disabled')==='true' || joinInert(dialog))return;
+  const items=dialog.parts.map(part=>({id:part.id,revision:part.revision})),title=String($('join-title').value || '').trim(),author=String($('join-author').value || '').trim();
+  // 8.6: the dialog closes, the selection clears, focus goes to Select this page.
+  closeJoinDialog();selectedBooks.clear();renderRows(true);batchCounts();$('select-page').focus?.({preventScroll:true});setJoinStatus('',false,null);
+  let answer=null;
+  try{answer=await request('/api/candidate/join',{library:'Audiobooks',items,title,author,queue:true},APPROVE_TIMEOUT);}
+  catch(error){setJoinStatus(error.httpStatus?joinRefusedText({code:error.body?.code,part:error.body?.part,error:error.body?.error}):lostLine(),true,null);controls();return;}
+  if(answer?.outcome){if(!queueSeen.has(answer.id)){queueSeen.add(answer.id);applyQueueOutcome(answer.outcome);}}
+  else if(answer?.queued===true && !queueState.queued.some(item=>item.id===answer.id) && queueState.running?.id!==answer.id){
+    const item={id:answer.id,action:'join',book_id:items[0].id,title,parts:items.map(entry=>entry.id),n:items.length,position:Number(answer.position) || queueState.queued.length+1,blocker:answer.blocker};
+    if(answer.running)queueState={...queueState,running:item};else queueState={...queueState,queued:[...queueState.queued,item]};
+    queueAnnounce(`${queueWord('join')} queued: ${title}.`);
+  }
+  controls();lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}
+}
+// 8.6: a queued join names itself on each part's row, with Cancel (the whole join).
+function joinFor(row){
+  if(!row)return null;const holds=item=>item?.action==='join' && (Array.isArray(item.parts)?item.parts.includes(row.id):item.book_id===row.id);
+  return queueState.queued.find(holds) || (holds(queueState.running)?queueState.running:null);
+}
+function joinHint(row){
+  const item=joinFor(row);if(!item)return '';if(joinLate.has(item.id))return joinLate.get(item.id);
+  const n=Array.isArray(item.parts)?item.parts.length:Number(item.n) || 0;
+  if(queueState.running?.id===item.id)return `Joining ${plural(n,'book','books')} into one book`;
+  return `Join queued: «${item.title || ''}», ${plural(n,'book','books')}. ${blockerSentence(queueBlocker(item)).text}`;
+}
+function buildJoinLine(row,td){const hint=node('p','','field-help attention-hint join-hint');hint.hidden=true;td.append(hint);joinRows.set(row.id,{...(joinRows.get(row.id) || {}),row,hint});}
+function buildJoinCancel(row,buttons){
+  const button=node('button','Cancel','quiet row-cancel');button.type='button';button.hidden=true;button.title='Cancel the whole join. Nothing is changed.';
+  button.addEventListener('click',event=>{event?.stopPropagation?.();if(event?.repeat || button.hidden || button.getAttribute?.('aria-disabled')==='true')return;cancelJoin(joinRows.get(row.id)?.row || row);});
+  button.addEventListener('keydown',event=>event?.stopPropagation?.());buttons.append(button);
+  joinRows.set(row.id,{...(joinRows.get(row.id) || {}),row,cancel:button});
+}
+function updateJoinRows(){
+  for(const entry of joinRows.values()){
+    const item=joinFor(entry.row),text=joinHint(entry.row);
+    if(entry.hint){if(entry.hint.textContent!==text)entry.hint.textContent=text;entry.hint.hidden=!text;}
+    if(!entry.cancel)continue;
+    const shown=!!item && queueState.running?.id!==item.id && !joinLate.has(item.id),lost=!shown && !entry.cancel.hidden && document.activeElement===entry.cancel;
+    entry.cancel.hidden=!shown;
+    if(shown){entry.cancel.setAttribute('aria-label',`Cancel the whole join: ${item.title || ''}`);if(joinCancels.has(item.id))entry.cancel.setAttribute('aria-disabled','true');else entry.cancel.removeAttribute('aria-disabled');}
+    if(lost)(nextRowButton(entry.cancel.parentElement,entry.cancel) || $('filter')).focus?.({preventScroll:true});
+  }
+}
+async function cancelJoin(row){
+  const item=joinFor(row);if(!item || joinCancels.has(item.id) || queueState.running?.id===item.id)return;
+  joinCancels.add(item.id);controls();let answer=null,failure=null;
+  try{answer=await request('/api/queue/cancel',{id:item.id},APPROVE_TIMEOUT);}catch(error){failure=error;}
+  joinCancels.delete(item.id);
+  if(answer?.cancelled===true){
+    queueState={...queueState,queued:queueState.queued.filter(entry=>entry.id!==item.id).map(entry=>({...entry,position:Number(entry.position)>Number(item.position)?Number(entry.position)-1:entry.position}))};
+    queueAnnounce(`${queueWord('join')} cancelled: ${item.title || queueTitle(row)}.`);$('filter').focus?.({preventScroll:true});
+  }else if(failure?.httpStatus===409 && failure.body?.code==='started')joinLate.set(item.id,'Too late to cancel: the join has already started.');
+  controls();if(!ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();
+}
+// Sergei's answer 9 (0.30.0): Cancel on a row whose Retry or Repair is accepted and has not started (still waiting for its
+// check). The engine withdraws it; the row is as before the press. Worded as a queued press's Cancel.
+function withdrawable(row){const value=readmissionOf(row);return value?.queued_next===true && value.state==='queued' && !value.remembered && typeof row?.creation?.job?.job_id==='string'?value:null;}
+async function withdrawRequest(row){
+  const value=withdrawable(row),key=retryKey(row);if(!value || withdrawing.has(row.id))return;
+  if(selectedPath!==row.path)select(row,true);  // as a row's Retry press: its line lives with the selected book
+  const word=value.kind==='retry'?'retry':'repair',buttons=rowButtons(row.path),inRow=!!buttons?.contains?.(document.activeElement) || document.activeElement===$('retry-cancel');
+  withdrawing.add(row.id);controls();let answer=null,failure=null;
+  try{answer=await request('/api/audiobook/retry-cancel',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:row.creation.job.job_id},APPROVE_TIMEOUT);}catch(error){failure=error;}
+  withdrawing.delete(row.id);
+  if(answer?.withdrawn===true){if(key)pressed.delete(key);queueAnnounce(`${queueWord(word)} cancelled: ${queueTitle(row)}.`);}
+  else if(failure?.httpStatus===409 && failure.body?.code==='started')retryResult={key,text:`Too late to cancel: the ${word} has already started.`,warn:true};
+  else if(failure)retryResult={key,text:failure.httpStatus?serverSentence(failure,'Cancel was not accepted. Nothing was changed.'):lostLine(),warn:true};
+  controls();
+  if(!ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
+  controls();
+  if(answer?.withdrawn===true && inRow){const target=rowRetries.get(row.path)?.button || (selectedRow?.id===row.id?$('retry-job'):null);(target && !target.hidden && !target.disabled?target:$('filter')).focus?.({preventScroll:true});}
+}
+$('join-selected')?.addEventListener('click',()=>{const button=$('join-selected');if(button.disabled || button.getAttribute?.('aria-disabled')==='true')return;openJoinDialog();});
+$('join-cancel')?.addEventListener('click',()=>closeJoinDialog());
+$('join-confirm')?.addEventListener('click',event=>confirmJoin(event));
+$('join-dialog')?.addEventListener('cancel',event=>{event.preventDefault?.();closeJoinDialog();});  // Escape cancels
+for(const id of ['join-title','join-author']){
+  $(id)?.addEventListener('input',()=>{renderJoinDialog();scheduleJoinGoes();});
+  $(id)?.addEventListener('keydown',event=>{if(event.key==='Enter')event.preventDefault?.();});  // Enter in a field does not submit; only the button does
+}
+$('join-show')?.addEventListener('click',()=>{if(joinShow)showInList(joinShow);});
 // "Needs attention · N" beside "Read errors · N" (section 8): N is the All total; one click opens the list on All.
 function renderAttentionShortcut(){
   const button=$('attention-shortcut');if(!button)return;const total=attentionTotal(state?.audiobook_jobs);

@@ -99,6 +99,7 @@ patterns.push('test_http_0290.py');  // 0.29.0 PA-1: every new field and hook th
 patterns.push('test_live_status.py','test_background_work.py');  // 0.30.0: the running part read at every poll; every background job as a row or a waiting item
 patterns.push('test_recovery_ancestry_moves.py');  // 0.30.0 item B: a cleanup recorded before both storage moves still finds its recovery folder (Brom)
 patterns.push('test_quit_bound.py');  // 0.30.0 item F: Quit closes within seconds; it waits only for real work and says what (waiting_for)
+patterns.push('test_book_join.py');  // 0.30.0 item D: Join into one book (the record, every 8.5 effect in one transaction, the wait behind a converting part) and answer 9's Cancel
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])

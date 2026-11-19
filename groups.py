@@ -545,7 +545,28 @@ def _folder_units(members,scopes,assigned,reserved,kept,protected,roots):
         found[scope]=dict(decision,kind=kind_name,bound=bound)
     return found
 
-def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=frozenset(),blocked_members=()):
+def _joined_group(items,companions,scope,paths,join_id,title):
+    """0.30.0 item D: the files Sergei joined into one book (book_join), one candidate in his play order. The questions his
+    join answered (different album or title clues, different credits, the parts' own series positions) are no conflicts;
+    a file that cannot be read still is."""
+    import book_join
+    group=next(iter(_legacy_build(items+companions,single=scope).values()))
+    rank={path:n for n,path in enumerate(paths,1)}
+    group['members'].sort(key=lambda m:rank[m['path']])
+    for m in group['members']:
+        m['disc']=None;m['track']=m['order']=rank[m['path']];m['order_conflict']=False
+        m['order_evidence']='Order set by you when joining: %d of %d'%(rank[m['path']],len(paths))
+    group['scope']=scope;group['grouping']=book_join.GROUPING
+    if title:group['title_clue']=title
+    group['joined']={'version':book_join.VERSION,'join_id':join_id,'files':len(paths)}
+    group['part_set']={'version':M4B_PARTS_VERSION,'parts':len(paths),'order_basis':'joined by you'}
+    group['conflicts']=[c for c in group['conflicts'] if c not in ('Different book album/title clues may indicate mixed works',
+                        'Different author / reader clues; recording unverified','Series position conflicts')]
+    group['local_clues']=[{'path':m['path'],'clues':clues(m)} for m in group['members']]
+    return group
+
+def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=frozenset(),blocked_members=(),joins=None):
+    """joins: book_join.valid() of the root, {join id: (paths in play order, title)}: Sergei's joins win over every planner."""
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     members={row['path']:member(row) for row in audio}
@@ -578,6 +599,17 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
     chaptered=frozenset(path for path in volumes if Path(path).suffix.lower()=='.m4b')
     for path in chaptered:
         if path in scopes and path not in assigned:scopes[path]=str(Path(path))+'\x1fVolume of a series'
+    # 0.30.0 item D: Sergei's joins (book_join). Every file of a join is here and free (a named anthology volume keeps its
+    # stories; the joined book once protected keeps its own stored group through the protected path below).
+    by_you={}
+    import book_join
+    for join_id,(paths,title) in sorted((joins or {}).items()):
+        scope=book_join.scope(paths,join_id)
+        if any(path not in members for path in paths):continue
+        own=all(assigned.get(path)==scope for path in paths)  # the joined book itself is protected now (approved, queued)
+        if not own and any(path in reserved for path in paths):continue
+        for path in paths:scopes[path]=scope;reserved.add(path)
+        by_you[scope]=(paths,join_id,title)
     split={}
     taken=set(scopes.values())
     for found in _split_plan(members,scopes,reserved,chaptered):
@@ -610,6 +642,10 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
         for path,item in members.items():
             neighbours.setdefault((split_books.unit(path)[::2],split_books.book_key(item)),[]).append(item)
     for scope,items in buckets.items():
+        if scope in by_you:
+            found=_joined_group(items,companions,scope,*by_you[scope]);old=protected.get(scope)
+            output[scope]=old if old is not None and found['members']==old['members'] and found['companions']==old['companions'] else found
+            continue
         if scope in anthology:
             output[scope]=_anthology_group(items,companions,scope,anthology[scope]);continue
         if scope in protected and protected[scope].get('anthology_volume'):
@@ -807,9 +843,18 @@ def _sync_inputs(connection,root):
                 overlapping.add(r['scope'])
             elif evidence and (r['approved'] or r['review'] or r['id'] in jobs):
                 protected[r['scope']]=evidence
+    import book_join
+    joins=book_join.valid(connection,root)
+    if joins:
+        # 0.30.0 item D: a book Sergei joined into another no longer holds its files (its job, saved values or approval
+        # would protect them); the joined book's own group, once protected, still does.
+        own={book_join.scope(paths,join_id) for join_id,(paths,_title) in joins.items()}
+        covered={path for paths,_title in joins.values() for path in paths}
+        protected={scope:evidence for scope,evidence in protected.items()
+                   if scope in own or not evidence.get('members') or not all(m['path'] in covered for m in evidence['members'])}
     ignored=_confirmed_internal_parts(connection,root,protected,frozen)
     return {'retired':retired,'archived':archived,'frozen':frozen,'protected':protected,'manual':manual,'manual_blocked':manual_blocked,'overlapping':overlapping,
-            'parts':(chaptered_parts(connection,root),volume_parts(connection,root)-ignored,kept_parts(connection,root))}
+            'parts':(chaptered_parts(connection,root),volume_parts(connection,root)-ignored,kept_parts(connection,root)),'joins':joins}
 
 
 def _sync_build(connection,root,inputs):
@@ -819,7 +864,7 @@ def _sync_build(connection,root,inputs):
     manual_blocked=inputs.get('manual_blocked',())
     frozen_paths={member['path'] for item in frozen.values() for member in item['members']}
     rows=[row for row in rows if row['path'] not in frozen_paths and path_key(row['path']) not in manual_blocked]
-    groups=build(rows,inputs['protected'],*inputs['parts'],blocked_members=[m for item in frozen.values() for m in item['members']])
+    groups=build(rows,inputs['protected'],*inputs['parts'],blocked_members=[m for item in frozen.values() for m in item['members']],joins=inputs.get('joins'))
     for scope in inputs.get('overlapping',set()) & groups.keys():
         evidence=groups.pop(scope)
         residual=scope+'\x1fmanual-remaining'

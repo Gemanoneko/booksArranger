@@ -972,6 +972,9 @@ class PublicResearch:
         import groups,part_sets,split_books
         members=row.get('members') or []
         if len(members)<2 or not (row.get('part_set') or row.get('split_book')) or any(Path(m['path']).suffix.lower()!='.m4b' for m in members):return None
+        # 0.30.0 item D: Sergei joined these parts into one book (book_join): his answer, never asked again or split by the
+        # chapters (the «Впусти меня» parts each name their own work).
+        if row.get('joined'):return {'decision':'join','basis':'joined by you','version':part_sets.VERSION,'parts':len(members)}
         # 0.22.1, item 9 (Sergei 2026-10-25, VanderMeer): the parts in one book folder of Sergei's structure
         # ("Annihilation\478. Книга 2. Консолидация") whose album tags all name that book are that one book, whatever the parts'
         # own titles say. Its sibling folders are the other books of the series, never parts of this one.

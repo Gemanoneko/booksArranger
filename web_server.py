@@ -159,7 +159,8 @@ LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names', '/api/aut
 # Ruling 75a (2026-10-31): reads that arrive as POSTs (a details panel, a "Goes to" preview, opening a folder, the names editor,
 # the author rules, a delete preview that is not queued) change nothing, so their reply no longer throws away the shared
 # status computation (Handler.response, status_control): under load every panel read restarted it from the beginning.
-READ_ONLY_POSTS = frozenset(LOOKING | {'/api/candidate/routing-preview', '/api/candidate/approve-preview', '/api/candidate/delete-preview'})
+READ_ONLY_POSTS = frozenset(LOOKING | {'/api/candidate/routing-preview', '/api/candidate/approve-preview', '/api/candidate/delete-preview',
+                                       '/api/candidate/join-preview'})
 def approve_code(text):
     """Each Approve gate its own code (2026-10-26, «Спящие красавицы»: every other refusal read "Approve was not accepted"), so
     the row names the real reason and the next step. Unknown gates answer 'refused' and the row shows the engine's sentence."""
@@ -612,6 +613,22 @@ class BrowserServer(ThreadingHTTPServer):
                 return {'result': 'done', 'answer': {'job_id': result['job_id'], **({'list_row': result['list_row']} if result.get('list_row') else {})}}
             if action == 'separate':
                 return {'result': 'done', 'answer': merge.keep_separate(book, args['revision'])}
+            if action == 'join':
+                # 0.30.0 item D: every part checked again now; a part converting makes it wait (None), never refused or aborted.
+                import book_join
+                import sqlite3
+                try:
+                    answer = merge.join_books(args['items'], args['title'], args.get('author'))
+                except book_join.Busy:
+                    return None
+                except sqlite3.OperationalError as error:
+                    if 'locked' in str(error).casefold() or 'busy' in str(error).casefold():
+                        return None  # a busy catalog is a wait, never a refusal
+                    raise
+                except book_join.Refused as refusal:
+                    return {'result': 'refused', 'code': refusal.cause, 'error': str(refusal)[:500], 'part': refusal.title}
+                answer['requests'] += self.actions.drop_presses([entry['id'] for entry in args['items']])
+                return {'result': 'done', 'answer': answer}
             if action == 'scan_again':
                 return {'result': 'done', 'answer': merge.scan_again(book, args['revision'])}
             if action == 'dismiss':
@@ -780,7 +797,8 @@ QUEUED_ROUTES = frozenset({'/api/audiobook/cleanup/retry','/api/audiobook/retry'
 QUEUE_PRESSES = {'/api/candidate/approve': 'approve', '/api/candidate/keep-separate': 'separate', '/api/candidate/scan-again': 'scan_again',
                  '/api/candidate/dismiss': 'dismiss', '/api/candidate/names-save': 'names', '/api/candidate/names-forget': 'names_forget',
                  '/api/candidate/destination': 'destination',
-                 '/api/scan/start': 'scan_start', '/api/scan/resume': 'scan_resume'}
+                 '/api/scan/start': 'scan_start', '/api/scan/resume': 'scan_resume',
+                 '/api/candidate/join': 'join'}  # 0.30.0 item D: Join into one book, always queued (book_join)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1029,6 +1047,19 @@ class Handler(BaseHTTPRequestHandler):
         if type(value) is not bool:raise ValueError('queue must be an explicit boolean')
         return value
 
+    def join_items(self,data):
+        """0.30.0 item D: the books of a join, [{id, revision}] in the dialog's play order: 2 to 200, each once."""
+        import book_join
+        items=data.get('items')
+        if not isinstance(items,list) or not 2<=len(items)<=book_join.LIMIT:raise ValueError('Join takes 2 to %d books'%book_join.LIMIT)
+        found=[]
+        for item in items:
+            if not isinstance(item,dict) or set(item)!={'id','revision'}:raise ValueError('Join takes each book as its id and revision')
+            _library,id,revision=self.candidate_identity({'library':data['library'],'id':item['id'],'revision':item['revision']})
+            found.append({'id':id,'revision':revision})
+        if len({item['id'] for item in found})!=len(found):raise ValueError('Each book can be joined once')
+        return found
+
     @staticmethod
     def queue_title(data):
         """The title the page shows for the book, kept with a queued action for its outcome line (display only)."""
@@ -1060,6 +1091,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(values,list) or len(values)>10000 or any(not isinstance(p,str) or not 1<=len(p)<=1000 for p in values):raise ValueError('Delete takes the listed file and folder paths')
             return self.server.actions.enqueue('delete' if mode=='delete' else 'copy',id,self.queue_title(data),{'revision':revision,'paths':paths,'folders':folders},always=always)
         action=QUEUE_PRESSES[path]
+        if path=='/api/candidate/join':
+            self.shape(data,{'library','items','title','queue'},{'author'})
+            items=self.join_items(data)
+            title=self.text_value(data['title'],1000);author=self.text_value(data.get('author'),1000,nullable=True)
+            return self.server.actions.enqueue('join',items[0]['id'],' '.join(title.split()),{'items':items,'title':title,'author':author},always=always)
         if path in ('/api/scan/start','/api/scan/resume'):
             self.shape(data,{'library','queue'},{'title'})
             library=self.library(data['library'])
@@ -1465,6 +1501,42 @@ class Handler(BaseHTTPRequestHandler):
             except (destination_overrides.Refused,book_move.Refused) as refusal:
                 self.response(409,{'error':str(refusal),'cause':refusal.cause,'code':refusal.cause});return
             self.response(200,result);return
+        if path=='/api/candidate/join-preview':
+            # Join into one book (0.30.0 item D; Judy's spec 8.2-8.5): the dialog's facts. Read-only. With title (and author)
+            # only the Goes to line. 'blocked': what the queued join would wait for, with its cause (a part converting).
+            self.shape(data,{'library','items'},{'title','author'})
+            items=self.join_items(data)
+            title=self.text_value(data.get('title'),1000,nullable=True);author=self.text_value(data.get('author'),1000,nullable=True)
+            actions=self.server.actions
+            result=self.server.merge.join_preview(items,title,author,actions.book_actions() if hasattr(actions,'book_actions') else None)
+            if title is None:
+                ids=[item['id'] for item in items]
+                kind=actions.waiting('join',ids[0],parts=ids)
+                result['blocked']=self.server.explain_blocker(kind,{'action':'join','book_id':ids[0],'parts':ids}) if kind else None
+            self.response(200,result);return
+        if path=='/api/candidate/join':
+            # Without queue: true (the page always queues it): run now, in this request. Refusals are typed (409, code).
+            import book_join
+            self.shape(data,{'library','items','title'},{'author'})
+            items=self.join_items(data)
+            try:result=self.server.merge.join_books(items,self.text_value(data['title'],1000),self.text_value(data.get('author'),1000,nullable=True))
+            except book_join.Busy as error:
+                self.response(409,{'error':str(error),'code':'busy'});return
+            except book_join.Refused as refusal:
+                self.response(409,{'error':str(refusal),'code':refusal.cause,'part':refusal.title});return
+            result['requests']+=self.server.actions.drop_presses([item['id'] for item in items])
+            self.response(200,result);return
+        if path=='/api/audiobook/retry-cancel':
+            # Sergei's answer 9 (0.30.0): Cancel an accepted Retry or Repair that has not started (m4b_readmission.withdraw).
+            from audio_jobs import RetryRefused
+            self.shape(data,{'library','id','revision','job_id'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            try:result=self.server.merge.withdraw_readmission(library,id,revision,self.uuid_value(data['job_id']))
+            except RetryRefused as error:
+                self.response(409,{'error':str(error),'code':error.cause or 'changed'});return
+            except ValueError as error:
+                self.response(409,{'error':str(error),'code':'changed' if 'changed' in str(error) else 'refused'});return
+            self.response(200,result);return
         if path=='/api/candidate/keep-separate':
             # "Keep as separate books" (Judy 2026-10-25): records the set's files as separate books; touches no file.
             self.shape(data,{'library','id','revision'})
@@ -1653,7 +1725,7 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
-                         '/api/candidate/destination',
+                         '/api/candidate/destination','/api/candidate/join-preview','/api/candidate/join','/api/audiobook/retry-cancel',
                          '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rules','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,
                          '/api/audiobook/resume-cancel','/api/audiobook/recovery/cancel',
                          '/api/manual-conversion/inspect','/api/manual-conversion/save','/api/manual-conversion/queue',
@@ -1711,7 +1783,7 @@ class Handler(BaseHTTPRequestHandler):
                         data={key:value for key,value in data.items() if key not in ('queue','label') and not (key=='title' and path!='/api/candidate/approve')}
                     # Ruling 35: historical cleanup, restore and recovery deletion wait for a scan in the engine; the page holds
                     # these presses until a scan ends and presses again on code 'scanning' (a scan that began meanwhile).
-                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/candidate/approve','/api/candidate/scan-again','/api/candidate/keep-separate'} and self.server.scan_active():
+                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/candidate/approve','/api/candidate/scan-again','/api/candidate/keep-separate','/api/candidate/join'} and self.server.scan_active():
                         self.response(409,{'error':'A library scan is running. This runs when it ends.','code':'scanning'});return
                     if path in {'/api/candidate/delete-preview','/api/candidate/delete'} and self.server.scan_active() and not queued:
                         # Senua's 0.22.0 final review, N13: Delete waits for a library scan like Keep, Approve and Convert.

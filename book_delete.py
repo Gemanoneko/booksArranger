@@ -859,7 +859,7 @@ _BY_JOB = (('audio_jobs', 'job_id'), ('audio_destination_holds', 'job_id'), ('au
            ('inplace_edits', 'job_id'), ('kept_files', 'job_id'), ('recovery_retention', 'job_id'), ('series_backfill', 'job_id'),
            ('source_folder_cleanup_jobs', 'job_id'), ('source_folder_cleanup_directories', 'job_id'), ('working_attempts', 'job_id'),
            ('working_diagnostics', 'job_id'), ('working_files', 'job_id'))
-_BY_PATH = ('files', 'part_volumes', 'part_chapters', 'source_retirements', 'scan_outcomes')
+_BY_PATH = ('files', 'part_volumes', 'part_chapters', 'source_retirements', 'scan_outcomes', 'book_joins')
 
 
 def forget(service, identity, members, jobs, others=()):

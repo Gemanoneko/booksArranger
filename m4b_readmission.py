@@ -40,7 +40,7 @@ def request(db,parent_job_id,kind,now,origin=None):
     if kind not in KINDS:raise ValueError('Unknown re-admission kind')
     ensure(db);db.execute('BEGIN IMMEDIATE')
     row=db.execute('SELECT state FROM m4b_readmissions WHERE parent_job_id=?',(parent_job_id,)).fetchone()
-    if not row or row[0]=='refused':
+    if not row or row[0] in ('refused','withdrawn'):  # 0.30.0: a withdrawn request may be pressed again
         seq=db.execute('SELECT COALESCE(MAX(seq),0)+1 FROM m4b_readmissions').fetchone()[0]
         db.execute('INSERT OR REPLACE INTO m4b_readmissions VALUES(?,?,?,?,?,?,?,?)',(parent_job_id,kind,seq,'queued',None,json.dumps({'origin':origin}) if origin else '',_stamp(now),_stamp(now)))
     return describe(db,parent_job_id)
@@ -55,7 +55,7 @@ def describe(db,job_id):
             detail=json.loads(saved[0] or '{}') if saved else {}
             return {'accepted':True,'queued_next':True,'position':position,'kind':kind,'state':state,'parent_job_id':parent,'child_job_id':child,'waiting_reason':detail.get('waiting_reason',''),**({'origin':detail['origin']} if state=='queued' and detail.get('origin') else {})}
     row=db.execute('SELECT parent_job_id,kind,state,child_job_id,detail,updated FROM m4b_readmissions WHERE parent_job_id=? OR child_job_id=?',(job_id,job_id)).fetchone()
-    if not row:return None
+    if not row or row[2]=='withdrawn':return None  # 0.30.0: a withdrawn request reads as never pressed
     parent,kind,state,child,detail,updated=tuple(row)
     value={'queued_next':False,'kind':kind,'state':state,'parent_job_id':parent,'child_job_id':child}
     if state=='refused':
@@ -101,12 +101,43 @@ def next_job(db_factory,admit,now,report=None):
             return None
         with db_factory() as db:
             if result.get('requeued') and result.get('job_id'):
-                db.execute("UPDATE m4b_readmissions SET state='admitted',child_job_id=?,detail=?,updated=? WHERE parent_job_id=? AND state='queued'",
-                    (result['job_id'],json.dumps({'reason':result.get('reason','')}),_stamp(now),parent))
+                admitted=db.execute("UPDATE m4b_readmissions SET state='admitted',child_job_id=?,detail=?,updated=? WHERE parent_job_id=? AND state='queued'",
+                    (result['job_id'],json.dumps({'reason':result.get('reason','')}),_stamp(now),parent)).rowcount
+                if not admitted:_withdrawn_meanwhile(db,parent,result['job_id'],now)
             else:
                 refusal=retry_refusal.record(result.get('reason'),result.get('cause'),_stamp(now))
                 db.execute("UPDATE m4b_readmissions SET state='refused',detail=?,updated=? WHERE parent_job_id=? AND state='queued'",
                     (json.dumps(refusal,ensure_ascii=False),_stamp(now),parent))
+
+WITHDRAWN_REASON='Set aside: its Retry or Repair was cancelled before it started. Nothing ran.'
+
+
+def withdraw(db,parent_job_id,now,any_state=False):
+    """0.30.0 (Judy's 0.30.0 spec 8.5; Sergei's answer 9): take back an accepted request that has not started. A request
+    still waiting for its check ('queued') becomes 'withdrawn': it leaves the order, describe() reads it as never pressed and
+    a new press may request it again. any_state (Join into one book only): an admitted request whose child has not started
+    is withdrawn too; the caller sets the child aside with the book's other jobs. Inside the caller's transaction. Returns
+    the state it had ('queued' or 'admitted'), or None when there was nothing to withdraw."""
+    if not _exists(db):return None
+    row=db.execute('SELECT state FROM m4b_readmissions WHERE parent_job_id=?',(parent_job_id,)).fetchone()
+    if not row or row[0] not in (('queued','admitted') if any_state else ('queued',)):return None
+    db.execute("UPDATE m4b_readmissions SET state='withdrawn',detail=?,updated=? WHERE parent_job_id=? AND state=?",
+               (json.dumps({'withdrawn':True}),_stamp(now),parent_job_id,row[0]))
+    return row[0]
+
+
+def _withdrawn_meanwhile(db,parent,child,now):
+    """The request was withdrawn while its check admitted a child (the check had already begun): the child never runs. It is
+    set aside with WITHDRAWN_REASON, its row kept; this runs on the worker's own thread, before it could claim the child."""
+    row=db.execute('SELECT state FROM m4b_readmissions WHERE parent_job_id=?',(parent,)).fetchone()
+    if not row or row[0]!='withdrawn':return
+    import book_restart
+    book_restart.ensure(db)
+    job=db.execute("SELECT json_extract(manifest,'$.candidate_id'),json_extract(manifest,'$.candidate_revision') FROM audio_jobs WHERE job_id=?",(child,)).fetchone()
+    if not job:return
+    db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'",(WITHDRAWN_REASON,_stamp(now),child))
+    db.execute('INSERT OR IGNORE INTO audio_job_set_aside VALUES(?,?,?,?,?)',(child,job[0] or '',int(job[1] or 0),'withdrawn',_stamp(now)))
+
 
 def convert_legacy(db):
     """Startup, once per catalog: v0.18.0 plain-text refusals become typed records (retry_refusal.legacy), then refusals

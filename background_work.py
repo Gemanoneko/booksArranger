@@ -397,6 +397,14 @@ def explain(kind, item, jobs, queue_running=None):
     elif kind == 'operation':
         if isinstance(queue_running, dict):
             value.update(cause='action', title=queue_running.get('title') or None, book_id=queue_running.get('book_id'))
+    elif kind == 'book' and isinstance(item, dict) and item.get('action') == 'join':
+        # 0.30.0 item D (Judy 8.5: 2.2, book/conversion): a queued join waits for the part that converts now; the sentence
+        # names its row ("It runs when Converting: Впусти меня 2 finishes.").
+        args = item.get('args') if isinstance(item.get('args'), dict) else {}
+        parts = item.get('parts') or [entry.get('id') for entry in args.get('items') or [] if isinstance(entry, dict)]
+        current = jobs.get('current_book_id')
+        if current and current in parts and jobs.get('current_job_id'):
+            value.update(cause='conversion', title=jobs.get('current_title') or None, book_id=current)
     elif kind == 'retry_run':
         run = jobs.get('retry_all') if isinstance(jobs.get('retry_all'), dict) else {}
         if type(run.get('total')) is int and type(run.get('done')) is int:

@@ -37,16 +37,28 @@ ACTIONS = ('retry', 'repair', 'delete',
            # Ruling 37 (the rest of ruling 35): historical cleanup and restore, route-only, wait for a scan and for audiobook work.
            'cleanup', 'restore',
            # Rulings 69 and 71h (Sergei 2026-10-29): Choose folder / Use computed folder, and the move of a finished book.
-           'destination', 'move')
+           'destination', 'move',
+           # 0.30.0 item D: Join into one book (book_join), queued under its first part, holding every part's row.
+           'join')
 KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book', 'loading', 'jobs', 'automatic')
 # The presses a library scan holds back (their checks read the catalog the scan regroups), as their routes refused them.
-SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'scan_again', 'copy')
+SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'scan_again', 'copy', 'join')
 # Always queued, even with nothing in the way: their checks (every file probed and hashed) take the time a page must not
-# wait for; the row shows it running and its outcome (ruling 35).
-ALWAYS = ('approve', 'convert', 'move')
+# wait for; the row shows it running and its outcome (ruling 35). A join regroups the catalog.
+ALWAYS = ('approve', 'convert', 'move', 'join')
 # Run by the server (run_queued): the same call the press makes, every check again at run time.
 SERVER_RUN = ('approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume', 'cleanup', 'restore',
-              'destination', 'move')
+              'destination', 'move', 'join')
+# Queued presses a join takes over: a part's Retry or Repair is cancelled by the join (Judy 8.5), never refused.
+JOIN_CANCELS = ('retry', 'repair')
+
+
+def parts_of(item):
+    """The books a queued action holds: a join every part (its args' items), any other action its own book."""
+    if item.get('action') == 'join':
+        args = item.get('args') if isinstance(item.get('args'), dict) else {}
+        return [entry.get('id') for entry in args.get('items') or [] if isinstance(entry, dict)] or [item.get('book_id')]
+    return [item.get('book_id')]
 KEEP = 24 * 3600     # an outcome nobody acknowledged is forgotten after a day
 POLL = 0.5           # how often a blocked head is looked at again
 APPROVAL_RECEIPT_LIMIT = 4096
@@ -160,11 +172,12 @@ class ActionQueue:
         self.restored = False
 
     # ------------------------------------------------------------------ what an action waits for
-    def blocker(self, action, book_id, held=0, job_id=None):
+    def blocker(self, action, book_id, held=0, job_id=None, parts=None):
         """The kind that keeps this action from running now, or None. Reads only: the loading flag, a thread probe, the scan
         flag, the Retry all run and, for Delete, the book's own jobs and research row. held: the control admissions the
         caller holds itself (the worker holds one while it runs an action: run_queued passes 1). job_id: the audiobook job
-        the action is for (its args' job_id); a cleanup action's own source cleanup never blocks it."""
+        the action is for (its args' job_id); a cleanup action's own source cleanup never blocks it. parts: a join's books
+        (0.30.0 item D): it waits ('book') while one of them converts or its retry check runs, never aborting it."""
         server = self.server
         loading = getattr(server, 'loading', None)
         if loading is not None and not loading.finished or getattr(server, 'merge', None) is None:
@@ -193,6 +206,9 @@ class ActionQueue:
             return None
         if action in SCAN_WAITS and server.scan_active():
             return 'scan'
+        if action == 'join':
+            import book_join
+            return 'book' if book_join.busy(merge, parts or [book_id]) else None
         if action in ('cleanup', 'restore'):
             # Historical cleanup removes originals and restore puts them back: never beside a scan or audiobook work (their
             # engine checks); cleanup also waits for queued books and for other source cleanups (it is finite and alone).
@@ -244,10 +260,10 @@ class ActionQueue:
             return 'operation'
         return None
 
-    def waiting(self, action, book_id):
+    def waiting(self, action, book_id, parts=None):
         """The kind a press made now would wait for, or None when it would run at once (the Delete preview's
-        'blocked', Judy 1.5)."""
-        kind = self.blocker(action, book_id)
+        'blocked', Judy 1.5; the join dialog's, 0.30.0)."""
+        kind = self.blocker(action, book_id, parts=parts)
         with self.lock:
             if kind is None and (self.items or self.running is not None):
                 kind = self._head_kind()
@@ -266,7 +282,8 @@ class ActionQueue:
         (one queued action per row, Judy 1.1)."""
         if action not in ACTIONS:
             raise ValueError('Only Retry, Repair and Delete book are queued')
-        kind = self.blocker(action, book_id, job_id=args.get('job_id') if isinstance(args, dict) else None)
+        pressed = {'action': action, 'book_id': book_id, 'args': args}
+        kind = self.blocker(action, book_id, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(pressed))
         with self.lock:
             if self.closed or self.server.closing:
                 raise ValueError('Server is shutting down')
@@ -282,12 +299,20 @@ class ActionQueue:
                     if answer.get('unknown'):raise ValueError('That approval already reached the queue. Check the book before trying again.')
                     return answer
                 self._receipt_room()
-            same = next((item for item in self.items if item['book_id'] == book_id), None)
+            same = next((item for item in self.items if item['book_id'] == book_id and (action != 'join' or item['action'] == 'join')), None)
             if action in ('approve','convert') and self.running is not None and self.running['book_id']==book_id:
                 same=self.running
+            # 0.30.0 item D: a join holds every part's row; a part's queued Retry or Repair is the join's to cancel.
+            books = set(parts_of(pressed))
+            held = [item for item in self.items + ([self.running] if self.running is not None else [])
+                    if item is not same and books & set(parts_of(item)) and not (action == 'join' and item['action'] in JOIN_CANCELS)]
+            if held and not (same is not None and same['action'] == action):
+                raise ValueError('This book already has a queued action. Cancel it first.')  # one per row (Judy 1.1)
             if same is not None and same['action'] == action:
                 if action in ('approve','convert') and same['args'] != args:
                     raise ValueError('An approval with different choices is already queued or running for this book.')
+                if action == 'join' and same['args'] != args:
+                    raise ValueError('This book already has a queued action. Cancel it first.')
                 if receipt is not None:self.approval_receipts[key]=(book_id,action,expires,same['id'])
                 return self._answer(same)
             if same is not None:
@@ -383,12 +408,34 @@ class ActionQueue:
 
     def book_action(self, book_id):
         """The action queued or running for this book ('retry', 'repair', 'delete'), else None (Edit names is inert while
-        one waits: one queued action per row, Judy 0.22.2 1.4)."""
+        one waits: one queued action per row, Judy 0.22.2 1.4). A join holds every part's row."""
         with self.lock:
             for item in ([self.running] if self.running is not None else []) + self.items:
-                if item.get('book_id') == book_id:
+                if book_id in parts_of(item):
                     return item['action']
         return None
+
+    def book_actions(self):
+        """{book id: action} of every queued or running action (a join under each of its parts), for the join dialog."""
+        with self.lock:
+            found = {}
+            for item in ([self.running] if self.running is not None else []) + self.items:
+                for book in parts_of(item):
+                    found.setdefault(book, item['action'])
+        return found
+
+    def drop_presses(self, book_ids, actions=JOIN_CANCELS):
+        """0.30.0 item D: a join that ran takes its parts' queued Retry and Repair presses out of the queue (Judy 8.5: they
+        are cancelled, counted in the join's outcome). Returns how many."""
+        wanted = set(book_ids)
+        with self.lock:
+            dropped = [item for item in self.items if item['action'] in actions and item['book_id'] in wanted]
+            if not dropped:
+                return 0
+            self.items = [item for item in self.items if item not in dropped]
+            self.changed.notify_all()
+        self._persist()
+        return len(dropped)
 
     def queued_jobs(self):
         """Job ids of the queued Retry and Repair presses: Retry all leaves them out (Judy 1.3, 1.8)."""
@@ -414,6 +461,9 @@ class ActionQueue:
         value = {key: item[key] for key in ('id', 'action', 'book_id', 'title')}
         if item['action'] in ('delete', 'copy'):
             value['n'] = len(item['args'].get('paths') or [])
+        if item['action'] == 'join':
+            value['parts'] = parts_of(item)  # 0.30.0 item D: every part's row shows the queued join
+            value['n'] = len(value['parts'])
         if item.get('restored'):
             value['restored'] = True  # 0.30.0: queued before the last restart
         return value
@@ -581,7 +631,7 @@ class ActionQueue:
     def item_blocker(self, item, held=0):
         """blocker() for a queued action, with the job its args name."""
         args = item.get('args')
-        return self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None)
+        return self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item))
 
     def blocker_after(self, item):
         try:
