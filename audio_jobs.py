@@ -21,7 +21,8 @@ import destination_admission
 STAGES = {"checking sources", "creating", "checking", "copying", "publishing", "checking extra source", "verified existing audiobook"}
 # Measured progress a running attempt may report, per journal stage: step -> unit. Not journaled.
 MEASURED = {"checking sources": {"preparing": "files", "source copies": "bytes", "checking audio": "seconds",
-                                 "matching format": "seconds", "normalizing": "seconds", "joined audio": "seconds"},
+                                 "matching format": "seconds", "normalizing": "seconds", "joined audio": "seconds",
+                                 "repairing": "parts"},  # 0.30.0: damaged M4B parts repaired before the join
             "creating": {"encoding": "seconds"}, "copying": {"publishing": "bytes"}}
 
 
@@ -54,6 +55,8 @@ def _failure_details(error, stage, now=None):
         details['winerror'] = error.winerror  # typed, so a drive or share that went away is told apart (UNREACHABLE)
     if isinstance(getattr(error,'chapter_diagnostic',None),dict):details['chapter_diagnostic']=copy.deepcopy(error.chapter_diagnostic)
     if isinstance(getattr(error,'source_diagnostic',None),dict):details['source_diagnostic']=copy.deepcopy(error.source_diagnostic)
+    if isinstance(getattr(error, 'part_repair', None), dict):
+        details['part_repair'] = copy.deepcopy(error.part_repair)  # 0.30.0: a damaged M4B part that stopped its joined book
     if getattr(error, 'tag_repair_checked', False) is True:
         details['tag_repair_checked'] = True  # an MP3 decode failure from a version with the trailing-tag repair
     return details
@@ -97,6 +100,16 @@ def media_failure(row,journal,manifest,group,remedy=None,repair=None):
     if not isinstance(failure,dict):return None
     if failure.get('stage')!='checking sources':return None
     code=None;path=None
+    part=failure.get('part_repair')
+    if isinstance(part,dict) and part.get('kind') in ('unrepairable','failed') and isinstance(part.get('source_index'),int) \
+            and 0<=part['source_index']<len(sources) and isinstance(sources[part['source_index']],dict) and sources[part['source_index']].get('path')==part.get('source_path'):
+        # 0.30.0 (Judy 9): a damaged M4B part of a joined book; the row says the window's sentence.
+        path=part['source_path'];filename=Path(path).name
+        code='m4b_part_unrepairable' if part['kind']=='unrepairable' else 'm4b_part_repair_failed'
+        hint=(filename+" is damaged and can't be repaired safely. Replace it with an intact copy." if code=='m4b_part_unrepairable' else
+              'The repaired part '+filename+' failed its check.')
+        return {'schema':'books-media-failure-v1','code':code,'source_path':path,'filename':filename,'status':'Stopped — M4B source failed check','hint':hint,
+                'source_index':part['source_index'],'source_count':len(sources),'next_step':'intact_source'}
     if remedy and remedy.get('kind')=='replace_source':
         path=remedy['path'];code='invalid_m4b_source' if Path(path).suffix.lower() in {'.m4b','.m4a'} else 'source_decode_failed'
     elif len(sources)==1 and Path(sources[0].get('path','')).suffix.lower()=='.m4b' and failure.get('exception_class')=='ValidationError':
@@ -398,10 +411,17 @@ def repair_record(job):
         import m4b_repair
         manifest = job.get('manifest')
         binding = manifest.get('m4b_repair') if isinstance(manifest, dict) else None
-        if not isinstance(binding, dict) or binding.get('schema') != m4b_repair.SCHEMA:
-            return None
         output = job.get('output') if isinstance(job.get('output'), dict) else {}
         validation = output.get('validation') if isinstance(output.get('validation'), dict) else {}
+        # 0.30.0: damaged M4B parts repaired before their join (audio_pipeline part repair), applied in the verified output.
+        parts = [item for item in validation.get('source_working_repairs') or [] if isinstance(item, dict) and item.get('kind') == 'm4b_part_repair']
+        if parts and not isinstance(binding, dict):
+            patched = [{key: item[key] for key in ('kind', 'padding', 'removed', 'frames', 'replaced_ticks', 'timescale') if key in item}
+                       for part in parts for item in part.get('repairs') or [] if isinstance(item, dict)]
+            return {'applied': True, 'patched': patched, 'detail': ' '.join(part['file'] + ': ' + str(part.get('note') or '') for part in parts),
+                    'parts': len(parts)}
+        if not isinstance(binding, dict) or binding.get('schema') != m4b_repair.SCHEMA:
+            return None
         applied = validation.get('damage_repair') if isinstance(validation.get('damage_repair'), dict) else None
         source = applied or binding
         patched = [{key: item[key] for key in ('kind', 'padding', 'removed', 'frames', 'replaced_ticks', 'timescale') if key in item} for item in source.get('repairs') or [] if isinstance(item, dict)]
@@ -1555,7 +1575,9 @@ class AudioJobs:
                     raise ValueError('Invalid progress item')
                 if 'fraction' in measured and not (type(measured['fraction']) in (int,float) and math.isfinite(measured['fraction']) and 0<=measured['fraction']<=1):
                     raise ValueError('Invalid progress fraction')
-                measured={key:measured[key] for key in ('phase','completed','total','unit','item','items','fraction') if key in measured}
+                if 'file' in measured and not (isinstance(measured['file'],str) and 0<len(measured['file'])<=260):
+                    raise ValueError('Invalid progress file')
+                measured={key:measured[key] for key in ('phase','completed','total','unit','item','items','fraction','file') if key in measured}
                 measured['unit']=units[measured['phase']]
                 # Never wait for the queue lock: it can be held across catalog I/O (busy timeout), and an
                 # FFmpeg drain thread blocked here fails the attempt. A dropped progress tick is harmless.

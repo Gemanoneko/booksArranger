@@ -148,8 +148,10 @@ class Reader:
                 unit = progress.get('unit') or ('seconds' if phase == 'encoding' else None)
                 started = progress.get('started') if type(progress.get('started')) is int else None
                 fraction = progress.get('fraction') if type(progress.get('fraction')) in (int, float) and 0 <= progress['fraction'] <= 1 else None
+                # 0.30.0 (Judy 9): a damaged part's repair names its file (the step's tooltip).
+                text = progress.get('file') if phase == 'repairing' and isinstance(progress.get('file'), str) else None
                 self.rows.append(_row(id='conversion:' + job, kind='conversion', subject=title, book_id=book, job_id=job, step=phase,
-                                      state=state, fraction=fraction, started=started, task_kind=task,
+                                      step_text=text, state=state, fraction=fraction, started=started, task_kind=task,
                                       **_amount(progress.get('completed'), progress.get('total'), unit)))
         running = next((row['job_id'] for row in self.rows if row['kind'] == 'cleanup'), None)
         pending = [c for c in jobs.get('cleanups_pending') or [] if isinstance(c, dict) and c.get('job_id') != running]

@@ -348,9 +348,23 @@ class ManualConversions:
                 reason = 'Waiting for the library scan to finish'
         journal = json.loads(job['journal'])
         reopen_allowed = state == 'failed' and self._failed_unowned(db, job)
-        retry_allowed = reopen_allowed and journal.get('failure', {}).get('retryable') is True
-        return value | {'state': state, 'reason': reason, 'stage': job['stage'], 'retry_allowed': retry_allowed,
-                        'reopen_allowed': reopen_allowed}
+        retry_allowed = reopen_allowed and retry_offered(journal)
+        value = value | {'state': state, 'reason': reason, 'stage': job['stage'], 'retry_allowed': retry_allowed,
+                         'reopen_allowed': reopen_allowed}
+        # 0.30.0 (Judy 9): a damaged M4B part. The window says which part stopped the book, how many parts were repaired, and
+        # whether the originals are still untouched (no output and no source cleanup of this job).
+        part = (journal.get('failure') or {}).get('part_repair') if state == 'failed' else None
+        if isinstance(part, dict) and part.get('kind') in ('unrepairable', 'failed') and isinstance(part.get('file'), str):
+            value['part_repair'] = {'kind': part['kind'], 'file': part['file']}
+        output = json.loads(job['output']) if job['output'] else {}
+        repaired = [item for item in ((output.get('validation') or {}).get('source_working_repairs') or [])
+                    if isinstance(item, dict) and item.get('kind') == 'm4b_part_repair']
+        if repaired:
+            value['repaired_parts'] = len(repaired)
+        if 'part_repair' in value or repaired:
+            cleaned = db.execute('SELECT 1 FROM source_cleanup WHERE job_id=?', (row['job_id'],)).fetchone() is not None
+            value['originals_untouched'] = not cleaned and (state != 'failed' or not job['output'])
+        return value
 
     def list(self):
         with connect(self.inventory.database) as db:
@@ -455,7 +469,7 @@ class ManualConversions:
 
     def _plan(self, identity, data, root, destination, files):
         import groups
-        from audio_pipeline import part_chapter_name, source_chapters, verified_source_chapters
+        from audio_pipeline import part_chapter_name, part_chapter_plan, source_chapters
         review = data['metadata'] | {'canonical_author': data['metadata']['author'],
                                     'original_language': 'Unknown', 'multi_author': False, 'topic': ''}
         if not review['title']:
@@ -490,7 +504,8 @@ class ManualConversions:
                 duration = member['duration']
                 part = {'name': part_chapter_name(member), 'chapters': []}
                 if path.suffix.lower() in {'.m4a', '.m4b'} and duration is not None:
-                    plan = verified_source_chapters(path, self.service.reviews.cache, stop, duration, source=source)
+                    # 0.30.0: a damaged .m4b part is planned on its repaired copy, as its conversion repairs it.
+                    plan = part_chapter_plan(path, self.service.reviews.cache, stop, duration, source=source)
                     part['chapters'] = plan['chapters']
                     if plan['terminal_end_correction']:
                         part['terminal_end_correction'] = plan['terminal_end_correction']
@@ -650,7 +665,7 @@ class ManualConversions:
             exact_binding(db, manifest)
             if job['state'] == 'needs attention':
                 journal = json.loads(job['journal'])
-                if not self._failed_unowned(db, job) or journal.get('failure', {}).get('retryable') is not True:
+                if not self._failed_unowned(db, job) or not retry_offered(journal):
                     raise ValueError('This conversion cannot be retried yet')
                 self._destination(manifest['destination'], manifest['root'])
                 db.execute("UPDATE audio_jobs SET state='pending',stage='queued',reason='',updated=? WHERE job_id=?", (utc(), job['job_id']))
@@ -689,6 +704,14 @@ class ManualConversions:
             db.execute('''DELETE FROM manual_conversion_sources WHERE draft_id IN
                           (SELECT d.id FROM manual_conversions d JOIN source_cleanup c ON c.job_id=d.job_id
                            WHERE d.job_id=? AND c.state='completed')''', (job_id,))
+
+
+def retry_offered(journal):
+    """Retry on a stopped manual job: a classified transient failure, or (0.30.0, Judy 9) a repaired M4B part that failed its
+    check. A part no repair applies to stops the same way on the same bytes: Reopen draft replaces it or leaves it out. The
+    journal's own retryable flag (the hourly automatic retry) is not changed."""
+    failure = journal.get('failure') or {}
+    return failure.get('retryable') is True or (failure.get('part_repair') or {}).get('kind') == 'failed'
 
 
 def cleanup_binding(db, manifest):

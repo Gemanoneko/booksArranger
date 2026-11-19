@@ -1528,8 +1528,8 @@ function shownRows(work,now=Date.now()){
   for(const item of [...work.waiting,...queueState.queued]){const row=blockerRow(item?.blocker,all);if(row)homes.add(row.id);}
   return all.filter(row=>homes.has(row.id) || !Number.isFinite(row.started) || now-row.started>=1000);
 }
-const conversionStepIndex={'checking sources':1,preparing:1,'source copies':1,'checking audio':2,'matching format':2,normalizing:2,'joined audio':2,creating:3,encoding:3,checking:4,copying:4,publishing:4};
-const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
+const conversionStepIndex={'checking sources':1,repairing:1,preparing:1,'source copies':1,'checking audio':2,'matching format':2,normalizing:2,'joined audio':2,creating:3,encoding:3,checking:4,copying:4,publishing:4};
+const conversionSteps={'checking sources':'Checking source files',repairing:'Repairing a damaged part',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
 const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
 // 1.5a: a running queued action's step; 1.5b: a saved decision's labels (row, Waiting item).
 const ACTION_STEPS={cleanup:'Rechecking the audiobook and recovery copies',retry:'Checking this book can be converted again',repair:'Checking the audiobook file for repair',delete:'Deleting files',copy:'Deleting files',
@@ -1591,7 +1591,7 @@ function measured(row){return Number.isFinite(row.total) && row.total>0 && Numbe
 function workDetail(row,finishing){
   if(measured(row) && !finishing){
     const done=row.done,total=row.total,whole=value=>Math.floor(value).toLocaleString();
-    if(row.unit==='files' || row.unit==='books'){const noun=row.unit==='files'?'file':'book';return `${whole(done)} of ${whole(total)} ${noun}${total===1?'':'s'}`;}
+    if(row.unit==='files' || row.unit==='books' || row.unit==='parts'){const noun=row.unit==='files'?'file':row.unit==='parts'?'part':'book';return `${whole(done)} of ${whole(total)} ${noun}${total===1?'':'s'}`;}
     if(row.unit==='bytes')return byteText(done,total);
     if(row.unit==='seconds'){const hours=total>=3600;return `${clockText(done,hours)} of ${clockText(total,hours)} audio`;}
     return Math.floor(done/total*100)+'%';
@@ -1603,6 +1603,18 @@ function workDetail(row,finishing){
     if(row.kind==='action')return plural(row.count,'file','files');
   }
   return '';
+}
+// 0.30.0 (Judy 9): a damaged part's repair names its file in the step's tooltip; the manual window's stop and end lines.
+function repairTip(row){return row?.kind==='conversion' && row.step==='repairing' && typeof row.step_text==='string' && row.step_text?'Repairing '+row.step_text:'';}
+function partRepairLine(draft){
+  const part=draft?.state==='failed'?draft.part_repair:null,file=typeof part?.file==='string'?part.file:'';if(!file)return '';
+  const kept=draft.originals_untouched===true?' Original kept.':'';
+  return part.kind==='failed'?`Conversion stopped. The repaired part ${file} failed its check.${kept} Press Retry to try again, or Reopen draft.`
+    :`Conversion stopped. ${file} is damaged and can't be repaired safely.${kept} Press Reopen draft to replace that file or leave it out.`;
+}
+function repairedPartsLine(draft){
+  const n=Number.isInteger(draft?.repaired_parts) && draft.repaired_parts>0?draft.repaired_parts:0;
+  return n && ['cleanup','converted'].includes(draft.state)?` Repaired ${plural(n,'damaged part','damaged parts')}.${draft.originals_untouched===true?' Original kept.':''}`:'';
 }
 function activityRow(id){
   const item=node('li','','activity-row'),first=node('div','','activity-line activity-first'),head=node('span','','activity-head'),label=node('span','','activity-label'),subject=node('span','','activity-subject'),detail=node('span','','activity-detail'),bar=node('progress'),last=node('div','','activity-line'),step=node('span','','activity-step'),time=node('span','','activity-time');
@@ -1636,7 +1648,7 @@ function updateActivity(view,now){
   const stepShown=frozen?'No progress for 5 min':step;view.item.classList.toggle('stalled',frozen);
   writeText(view.detail,detail);writeText(view.step,stepShown);
   // The chapter check's file name is its tooltip (1.5); every other step line carries its own text.
-  view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:stepShown;
+  view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:repairTip(row) || stepShown;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',false);
   const fraction=typeof row.fraction==='number' && row.fraction>=0 && row.fraction<=1?row.fraction:row.done/row.total;
   if(determinate){const value=Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}
@@ -3017,7 +3029,7 @@ function refusalCurrent(row){const refusal=refusalOf(row);return refusal && refu
 function attentionOf(row){const job=row?.creation?.job,a=job?.attention;return a && typeof a.group==='string' && (job.state==='Output needs attention' || keptGroup(a))?a:null;}
 function mediaFailureText(attention){
   const value=attention?.media_failure;
-  if(value?.schema!=='books-media-failure-v1' || !['m4b_feature_unsupported','invalid_m4b_source','source_decode_failed'].includes(value.code) || typeof value.filename!=='string' || !value.filename || typeof value.status!=='string' || typeof value.hint!=='string')return null;
+  if(value?.schema!=='books-media-failure-v1' || !['m4b_feature_unsupported','invalid_m4b_source','source_decode_failed','m4b_part_unrepairable','m4b_part_repair_failed'].includes(value.code) || typeof value.filename!=='string' || !value.filename || typeof value.status!=='string' || typeof value.hint!=='string')return null;
   return {status:value.status,hint:value.hint+(attention.originals_untouched===true?' Original kept.':''),warn:true};
 }
 function attentionText(row){
@@ -5831,7 +5843,9 @@ function setupManualConversion(){
     reuse.hidden=!editor.sourceStale || !data.source;
     reuse.disabled=!usable || frozen || pendingControls;
     $('manual-tracks').hidden=!data.tracks.length || (editing && !loadedSelection);
-    line('manual-track-count',`${count} included ${count===1?'file':'files'}. One M4B plays them in the order shown.`);
+    // 0.30.0 (Judy 9, A17): damage is found while the book converts, so the window only says it will be repaired.
+    const repairs=count>1 && included(data).some(track=>/\.m4b$/i.test(String(track.path || '')))?' Damaged M4B parts are repaired automatically when this book is converted.':'';
+    line('manual-track-count',`${count} included ${count===1?'file':'files'}. One M4B plays them in the order shown.${repairs}`);
     const key=JSON.stringify([data.id,frozen,data.tracks]);
     if(key!==tracksKey){
       tracksKey=key;
@@ -5871,7 +5885,7 @@ function setupManualConversion(){
     const reserved=accepted?.state==='draft'?included(accepted).length:0;
     $('manual-saved-reservation').hidden=!reserved;
     line('manual-saved-reservation',reserved?`${reserved} saved ${reserved===1?'file is':'files are'} reserved for manual conversion.`:'');
-    const note=accepted && !editing?[stateLabel(accepted),accepted.reason].filter(Boolean).join(' · '):'';
+    const note=accepted && !editing?partRepairLine(accepted) || [stateLabel(accepted),accepted.reason].filter(Boolean).join(' · ')+repairedPartsLine(accepted):'';
     line('manual-editor-status', [editor.note,editing && changed?'Unsaved changes.':'',note].filter(Boolean).join(' '));
     const jobs=state?.audiobook_jobs;
     // 0.30.0: its row in work (conversion or cleanup of this job), read at this poll.
@@ -5881,9 +5895,9 @@ function setupManualConversion(){
     if(activity){
       const finishing=measured(activity) && activity.done>=activity.total && ['running','pausing'].includes(activity.state);
       const step=workStep(activity,finishing),detail=workDetail(activity,finishing),bar=$('manual-job-bar');
-      line('manual-job-stage',step);line('manual-job-measure',detail);
+      line('manual-job-stage',step);line('manual-job-measure',detail);$('manual-job-stage').title=repairTip(activity) || '';
       bar.setAttribute('aria-valuetext',[step,detail].filter(Boolean).join(', '));
-      if(detail && activity.done>=0)bar.value=Math.min(99,Math.floor(activity.done/activity.total*100));
+      if(detail && activity.done>=0)bar.value=Math.min(99,Math.floor((typeof activity.fraction==='number' && activity.fraction>=0 && activity.fraction<=1?activity.fraction:activity.done/activity.total)*100));
       else bar.removeAttribute('value');
     }
     $('manual-job-actions').hidden=editing;
