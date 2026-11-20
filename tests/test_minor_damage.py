@@ -6,6 +6,7 @@ end, at most MINOR_LOST_SECONDS (1.0 s) of audio are missing in all, and no digi
 follows the first damaged frame. One rule for every path: a single file edited in place or copied (a manual conversion takes the
 copy flow), and the parts of a Join. Below the threshold the book publishes with a minor-damage note; above it, or when the file
 does not play through, the book stops with its decode failure ("Need to reacquire"). Real FFmpeg-made private media."""
+import json
 import os
 from pathlib import Path
 import random
@@ -115,6 +116,57 @@ class MinorDamageTests(unittest.TestCase):
         [note] = validation['minor_audio_damage']
         self.assertEqual((note['file'], note['source_index']), (source.name, 0)); self.assertLessEqual(note['lost_seconds'], 1)
         self.assertNotIn('damage_repair', validation)
+
+    def test_single_alac_repairs_only_playable_damage_and_publishes_lossless_audio(self):
+        source = self.root / 'library' / 'Book.m4b'
+        source.parent.mkdir()
+        metadata = self.root / 'chapters.txt'
+        metadata.write_text(';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=10000\ntitle=One\n'
+                            '[CHAPTER]\nTIMEBASE=1/1000\nSTART=10000\nEND=20000\ntitle=Two\n', encoding='utf-8')
+        subprocess.run([FFMPEG, '-hide_banner', '-v', 'error', '-nostdin', '-n', '-f', 'lavfi', '-i',
+                        'aevalsrc=exprs=0.16*sin(3900*t):s=44100:d=20', '-f', 'ffmetadata', '-i', str(metadata),
+                        '-map', '0:a', '-map_chapters', '1', '-ac', '2', '-c:a', 'alac', '-movflags', '+disable_chpl',
+                        str(source)], check=True, timeout=60, creationflags=HIDE)
+        intact = source.read_bytes()
+        manifest = self.manifest([source])
+        _, clean = pipeline.create_private(manifest, self.root / 'stage-clean', self.stop)
+        self.assertEqual(clean['encoding']['mode'], 'copy')
+        self.assertIn('audio_packet_sha256', clean)
+        self.assertNotIn('minor_audio_damage', clean)
+
+        packets = json.loads(subprocess.check_output([shutil.which('ffprobe'), '-v', 'error', '-select_streams', 'a:0',
+                             '-show_packets', '-show_entries', 'packet=pos,size,pts_time', '-of', 'json', str(source)],
+                             timeout=30, creationflags=HIDE))['packets']
+        damaged = [p for p in packets if float(p['pts_time']) >= 4]
+        def corrupt(count):
+            data = bytearray(intact)
+            for packet in damaged[:count]:
+                at = int(packet['pos'])
+                self.assertGreaterEqual(int(packet['size']), 23)
+                data[at:at + 23] = random.Random(42).randbytes(23)
+            source.write_bytes(data)
+            return bytes(data)
+
+        # Several bad packets still pass the one-second rule, while separating the movie and playable clocks by over .25 s.
+        before = corrupt(6)
+        manifest = self.manifest([source])
+        output, proof = pipeline.create_private(manifest, self.root / 'stage-minor', self.stop)
+        journal = {}
+        published = Path(pipeline.publish(output, manifest, proof, self.stop, journal.__setitem__, lambda: True))
+        [note] = journal['completed']['validation']['minor_audio_damage']
+        self.assertEqual((note['file'], note['source_index']), (source.name, 0))
+        self.assertGreater(note['lost_seconds'], .25)
+        self.assertLess(note['lost_seconds'], 1)
+        self.assertEqual(proof['encoding']['mode'], 'alac_reencode')
+        self.assertEqual(proof['chapters'], manifest['source_chapters'])
+        encoding = proof['encoding']
+        self.assertEqual(pipeline.audio_info(pipeline.probe(published, self.root, self.stop))[1], ('alac', '44100', 2))
+        self.assertEqual(pipeline.native_pcm_evidence(source, self.root, self.stop, 20, encoding, strict=False),
+                         pipeline.native_pcm_evidence(published, self.root, self.stop, 20, encoding))
+        self.assertEqual(source.read_bytes(), before)
+        corrupt(16)
+        with self.assertRaises(pipeline.SourceDecodeError):
+            pipeline.create_private(self.manifest([source]), self.root / 'stage-refused', self.stop)
 
     def test_a_single_file_over_the_threshold_stops_for_reacquire(self):
         source = book(self.root / 'library' / 'Книга.m4b'); damage(source, 16 * 1024)

@@ -133,5 +133,14 @@ assert.equal(run('workStep({kind:"action",label_key:"approve",step:"covers",stat
 assert.equal(run('workStep({kind:"action",label_key:"approve",step:"checking",state:"running"},false)'),'Step 3 of 4 - Checking each file');
 assert.equal(run('workStep({kind:"action",label_key:"approve",step:"confirming",state:"running"},false)'),'Step 4 of 4 - Checking each file again');
 assert.equal(run('workStep({kind:"action",label_key:"approve",state:"running"},false)'),'Saving the approval','no pass reported: as before');
-assert.equal(run('workDetail({kind:"action",label_key:"approve",step:"confirming",done:300,total:300,unit:"files",state:"running"},false)'),'300 of 300 files');
+const approving={id:'action:q6',kind:'action',label_key:'approve',subject:'The Orchard Ledger',step:'confirming',total:6,unit:'files',state:'running',started:ago(5000)};
+for(const [done,percent] of [[5,83],[6,100]]){
+  const [row]=show({rows:[{...approving,done}]});
+  assert.equal(row.children[0].children[1].textContent,done+' of 6 files');
+  assert.equal(row.children[1].value,percent);
+  assert.equal(row.children[1].getAttribute('aria-valuetext'),'Step 4 of 4 - Checking each file again, '+done+' of 6 files');
+}
+const [finalizing]=show({rows:[{...conversion,done:conversion.total}]});
+assert.equal(finalizing.children[1].hasAttribute('value'),false);
+assert.match(finalizing.children[1].getAttribute('aria-valuetext'),/Finalizing conversion/);
 console.log('PASS 0.30.0 work panel: one sentence in three places, every row, split counts, freshness, unread, backlog, short jobs, automatic wait');
