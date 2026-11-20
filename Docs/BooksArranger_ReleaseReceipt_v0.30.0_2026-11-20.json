@@ -1,0 +1,86 @@
+{
+  "version": "0.30.0",
+  "release_url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.30.0",
+  "release_id": 452510508,
+  "published_at": "2026-11-20T09:47:12Z",
+  "source_commit": "2c7129f84b394e0f086f94222935e812ce3d6412",
+  "tag": "v0.30.0",
+  "tag_target_commit": "c7a75fa689545174b97a7386ec2e2ffb2e18d71e",
+  "product_digest": "c2e2a1691fd969cc3e1905da678523b1f7af91944a6e3362f156b481f7fab44d",
+  "build_id": "a4d64d9a-217e-4348-9d27-6280e75fd2fd",
+  "artifact_manifest_sha256": "1deac1f34ab8cfca0f3f46baa1a6fde2356ff6c025233ccab0177ec6e3430055",
+  "release_route": "Canonical existing-candidate publisher (npm run release).",
+  "assets": [
+    {
+      "name": "Books-Arranger-Setup-0.30.0.exe",
+      "size": 209987083,
+      "sha256": "d280da9ad5ed7e8f753a641d50203de45609151bdbea6a0e6ac92aa746c0bd18",
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.30.0/Books-Arranger-Setup-0.30.0.exe"
+    },
+    {
+      "name": "Books-Arranger-Setup-0.30.0.exe.blockmap",
+      "size": 220358,
+      "sha256": "a70057fe331fda629817e7fb104020b64789b8378907845e9a0aa628b70de00a",
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.30.0/Books-Arranger-Setup-0.30.0.exe.blockmap"
+    },
+    {
+      "name": "latest.yml",
+      "size": 360,
+      "sha256": "f89552e8dcfcb9d3c69cbc4d21485007308f8fa7b61f59edde5174e49b504de9",
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.30.0/latest.yml"
+    }
+  ],
+  "verification": {
+    "public_release": true,
+    "remote_sha256_and_sizes_match_local": true,
+    "packaged_version": "0.30.0",
+    "installer_payload_files": 415,
+    "installer_payload_equivalent": true,
+    "desktop_asar_source_members_verified": 13
+  },
+  "acceptance": {
+    "qa": {
+      "report": "Docs/BooksArranger_QA_v0.30.0_2026-11-20.md",
+      "verdict": "GO",
+      "sha256": "92e819b7779bf9b52422a896e36b8b73bf9856ab48ae5d59415ce49ee75757eb"
+    },
+    "review": {
+      "report": "Docs/BooksArranger_CodeReview_v0.30.0_2026-11-20.md",
+      "verdict": "RELEASE CLEAR",
+      "sha256": "d3964367dfa96a700fef41d34ec8ffbe9adcbe92fb315c897427c9238b2c04e1"
+    }
+  },
+  "gates": {
+    "entry": {
+      "status": "PASS",
+      "python": 2894,
+      "node": 279,
+      "frontend": 56,
+      "syntax": 11,
+      "log_sha256": "20b8c70ebd84fa53ed44bba2b35123d92ad582007038ccef2377cc4b24b5b256"
+    },
+    "required_local_updater": {
+      "status": "PASS",
+      "reran_at_publication": true,
+      "case": "M-1: an installer that cannot start keeps the app open: the old engine starts again and the Install line says so"
+    },
+    "optional_native_tray": "Not run. The packaged app and installer were not launched.",
+    "publisher": {
+      "status": "PASS",
+      "native_closure": true,
+      "active_descendants_after": 0,
+      "log_sha256": "6c5e169df64a91c7739c5f0600bf9723b55a17d90dfb5ad0c9b295d20dfef78c",
+      "native_receipt_sha256": "f45739f6d7681a7fa56a39d04896a0a0154bf6f04617421e897f2b8bbb64e834"
+    }
+  },
+  "release_pruning": {
+    "kept": [
+      "v0.30.0",
+      "v0.29.0",
+      "v0.28.13",
+      "v0.28.12"
+    ],
+    "removed_release_and_remote_tag": "v0.28.6",
+    "local_tags_match_origin": true
+  }
+}
