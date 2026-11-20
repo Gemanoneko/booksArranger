@@ -1,0 +1,82 @@
+{
+  "version": "0.30.1",
+  "release_url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.30.1",
+  "release_id": 452734196,
+  "published_at": "2026-11-20T13:35:17Z",
+  "source_commit": "f658d2ecbbd0c938b911715b3becac7300474ac9",
+  "tag": "v0.30.1",
+  "tag_target_commit": "50c4d4bbfd65733c215089c130d1c6ba0b8699a4",
+  "product_digest": "23c25240636f1c8774c4d1dd9dcc4dae04df3346dba3799295428d980bddb447",
+  "build_id": "5986017e-17a2-487a-a4d0-f087e4f70de6",
+  "artifact_manifest_sha256": "54468fbe13d1a9d160f1d3f98bfee22d749b9c2e8c4c77ff3298118634c7ae73",
+  "release_route": "npm run release",
+  "assets": [
+    {
+      "name": "Books-Arranger-Setup-0.30.1.exe",
+      "size": 209985256,
+      "sha256": "bf386538e357e140e750ff2650fa47dcbec6cac13c93918b8f12fe7b523c7172",
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.30.1/Books-Arranger-Setup-0.30.1.exe"
+    },
+    {
+      "name": "Books-Arranger-Setup-0.30.1.exe.blockmap",
+      "size": 219828,
+      "sha256": "5ad105b8fb22a6138269ce626dc77752992a6450d2952ae3fcd52236d32414ab",
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.30.1/Books-Arranger-Setup-0.30.1.exe.blockmap"
+    },
+    {
+      "name": "latest.yml",
+      "size": 360,
+      "sha256": "a8d0cab2b36ec467cddfa596f33376908b32fb6c7b6ef141e340bd32730fc265",
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.30.1/latest.yml"
+    }
+  ],
+  "verification": {
+    "public_release": true,
+    "remote_sha256_and_sizes_match_local": true,
+    "packaged_version": "0.30.1",
+    "installer_payload_files": 415,
+    "installer_payload_equivalent": true
+  },
+  "acceptance": {
+    "qa": {
+      "report": "Docs/BooksArranger_QA_v0.30.1_2026-11-20.md",
+      "verdict": "GO",
+      "sha256": "d7f790022594cb9a0e1deb7794236148a9043375ec8b4e39c33c2f38318e7d03"
+    },
+    "review": {
+      "report": "Docs/BooksArranger_CodeReview_v0.30.1_2026-11-20.md",
+      "verdict": "RELEASE CLEAR",
+      "sha256": "124992dfb52cf6577c5db951cf6a8670c8856a54e4f305f2d00eac8301719698"
+    }
+  },
+  "gates": {
+    "entry": {
+      "status": "PASS",
+      "log_sha256": "d0c4ec088900c8f13ac643ac684233a04a3205f27828bbfac230e9b45e6938e4",
+      "native_job_closed": true,
+      "active_descendants_after": 0
+    },
+    "required_local_updater": {
+      "status": "PASS",
+      "reran_at_publication": true
+    },
+    "optional_native_tray": "Skipped",
+    "publisher": {
+      "status": "PASS",
+      "native_closure": true,
+      "active_descendants_after": 0,
+      "log_sha256": "19f1bd4bd7a5020b616b1f4b868085d78456271e98ece833c651db6cde8e3ec9",
+      "native_receipt_sha256": "7dbcf028dd0ff600d056c2d23aa0faadd58aff7424c167bc9bfdaab75016a830"
+    }
+  },
+  "release_pruning": {
+    "kept": [
+      "v0.30.1",
+      "v0.30.0",
+      "v0.29.0",
+      "v0.28.13"
+    ],
+    "removed_release_and_remote_tag": "v0.28.12",
+    "local_tags_match_origin": true
+  }
+}
