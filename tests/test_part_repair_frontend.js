@@ -68,6 +68,37 @@ const row=extra=>({id:'conversion:j1',kind:'conversion',label_key:'conversion',s
   const boxes=get('manual-track-list').children.map(item=>item.children[1].children[2].children[0]);
   boxes[1].checked=false;boxes[1].handlers.change();
   assert.equal(get('manual-track-count').textContent,'1 included file. One M4B plays them in the order shown.','one file is not joined: nothing to repair');
+
+  // Futaba 0.30.0 slice D, follow-up 1 (Sergei's ruling: "just tell me to reacquire"): a draft stopped by a part the app
+  // can't repair shows the stop line alone. No Retry and no Reopen draft, though the engine would still accept a reopen.
+  const stoppedDraft={id:'d0a1b2c3-0000-4000-8000-000000000001',revision:2,state:'failed',job_id:'job-stopped',candidate_id:'d0a1b2c3-0000-4000-8000-000000000001',
+    source:{kind:'folder',path:folder},tracks:picked.map(p=>({path:p,included:true})),metadata:{title:'Впусти меня (остановлено)',author:'Линдквист'},destination:'D:\\Готово\\Впусти меня.m4b',
+    reason:'Source 2 of 2 failed full audio decoding',stage:'checking sources',part_repair:{kind:'unrepairable',file:'Впусти меня 3.m4b'},originals_untouched:true,
+    retry_allowed:false,reopen_allowed:true};
+  server.set(stoppedDraft.id,stoppedDraft);
+  click('manual-conversion-tab');await flush();
+  const stoppedButton=get('manual-books').children.map(row=>row.children[0]).find(button=>button.textContent===stoppedDraft.metadata.title);
+  assert(stoppedButton,'the stopped draft is listed');stoppedButton.handlers.click();
+  assert.match(get('manual-editor-status').textContent,/Get a new copy of this book\.$/);
+  assert.equal(get('manual-job-retry').hidden,true,'no Retry');
+  assert.equal(get('manual-job-reopen').hidden,true,'no Reopen draft: the stop line stands alone');
+  // Futaba 0.30.0 slice D, follow-up 3: a single M4B cut inside its last frame failed its full decode (so the engine keeps a
+  // replace-source fact), yet its damage is repairable: the row is "Damaged — can repair", never "the MP3 ... can't be repaired".
+  const remedied=(group,path,extra={})=>({id:'r1',kind:'candidate',creation:{job:{state:'Output needs attention',job_id:'job-r1',attention:{group,originals_untouched:true,
+    remedy:{kind:'replace_source',cause:'source_decode_failed',path,source_index:0,source_count:1},...extra}}}});
+  context.fixture=remedied('repair','Z:\\Audiobooks\\Впусти меня.m4b',{damage:[{kind:'truncated_final_frames',frames:1,replaced_ticks:1024,timescale:44100,description:'d'}],repair:{allowed:true,reason:''}});
+  const cutText=run('attentionText(fixture)');
+  assert.equal(cutText.status,'Damaged — can repair');assert.doesNotMatch(JSON.stringify(cutText),/MP3|can't be repaired/);
+  // The replace-source line names the file's own type (positive control for the word: always "The MP3" before).
+  context.fixture=remedied('other','Z:\\Audiobooks\\Книга.mp3');
+  assert.equal(run('attentionText(fixture)').hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
+  context.fixture=remedied('other','Z:\\Audiobooks\\Книга.flac');
+  assert.equal(run('attentionText(fixture)').hint,"The FLAC file failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
+  // Any other stopped draft keeps its Reopen draft.
+  server.set(stoppedDraft.id,{...stoppedDraft,part_repair:undefined,reason:'An output already exists'});
+  click('manual-conversion-tab');await flush();
+  get('manual-books').children.map(row=>row.children[0]).find(button=>button.textContent===stoppedDraft.metadata.title).handlers.click();
+  assert.equal(get('manual-job-reopen').hidden,false);
   console.log('PASS 0.30.0 damaged M4B parts on the page: the repair step, the stop and end lines, the row sentence');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

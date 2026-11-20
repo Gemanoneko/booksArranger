@@ -3058,7 +3058,12 @@ function attentionText(row){
   }
   const changed=readmissionOf(row)?.queued_next===true?null:sourceChangedText(a);if(changed)return changed;  // ruling 75b, before the "replace it" line
   const media=mediaFailureText(a);if(media)return media;
-  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",warn:true};
+  // Futaba 0.30.0 slice D: a file whose damage the app can repair (group repair: a single M4B cut inside its last frame) keeps
+  // its "Damaged — can repair" row; the replace-source line names the file's own type (it said "The MP3" for every file).
+  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed' && a.group!=='repair'){
+    const type=String(a.remedy.path || '').split('.').pop().toUpperCase(),word={MP3:'The MP3',M4B:'The M4B',M4A:'The M4A'}[type] || (/^[A-Z0-9]{2,5}$/.test(type)?`The ${type} file`:'The audio file');
+    return {status:'Source audio needs replacement',hint:`${word} failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.`,warn:true};
+  }
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):readmission.origin==='automatic'?AUTO_QUEUED_HINT:'The book is checked again before it runs.'};
@@ -6210,7 +6215,8 @@ function setupManualConversion(){
     }
     $('manual-job-retry').hidden=accepted?.retry_allowed!==true;
     $('manual-job-retry').disabled=!usable || uncertain && editor.unknown.action!=='retry';
-    $('manual-job-reopen').hidden=accepted?.reopen_allowed!==true;
+    // Sergei's ruling (2026-11-19, "just tell me to reacquire"): a part the app can't repair leaves the stop line alone.
+    $('manual-job-reopen').hidden=accepted?.reopen_allowed!==true || !!partRepairLine(accepted);
     $('manual-job-reopen').disabled=!usable || uncertain && editor.unknown.action!=='reopen';
     const jobView=$('manual-job-view');
     jobView.hidden=!accepted?.candidate_id || !['failed','cleanup','converted'].includes(accepted.state);
