@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import sys
 import json
+import queue
 from pathlib import Path
 import tempfile
 import threading
@@ -390,8 +391,21 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.inventory.status('Audiobooks')['state'],'stopped')
         self.assertEqual(self.call('/api/scan/start',{'library':'Audiobooks'})[0],400)
         self.read_delay=0
-        self.assertEqual(self.call('/api/scan/resume',{'library':'Audiobooks'})[0],200)
-        self.wait_scan()
+        # Finishing a resumed scan starts a separate source check. Keep its real catalog
+        # work in this fixture and wait for it before tearDown removes the SQLite file.
+        source_check_thread = queue.Queue()
+        check_sources = self.server._check_sources
+
+        def track_source_check(*args, **kwargs):
+            source_check_thread.put(threading.current_thread())
+            return check_sources(*args, **kwargs)
+
+        with patch.object(self.server, '_check_sources', side_effect=track_source_check):
+            self.assertEqual(self.call('/api/scan/resume',{'library':'Audiobooks'})[0],200)
+            self.wait_scan()
+            checker = source_check_thread.get(timeout=5)
+            checker.join(timeout=5)
+            self.assertFalse(checker.is_alive(), 'The post-scan source check still owns the fixture catalog')
         self.assertGreater(self.inventory.status('Audiobooks')['count'],before)
         self.assertEqual(self.inventory.status('Audiobooks')['count'],20)
 
