@@ -40,9 +40,9 @@ function leaf(exe){return {subkeys:0,values:{ExecutablePath:{type:1,hex:Buffer.f
 function registryFixture(){const b=candidate(),a=authority(b),p=plan(b,a),exe=p.fixture_root+'/app/Books Arranger.exe',before={rootSchema:{},order:'',leaves:{}},order=Buffer.alloc(8);order.writeBigUInt64LE(42n);const current={rootSchema:{},order:order.toString('hex'),leaves:{'42':leaf(exe)}},calls=[];let state=structuredClone(current),held=null;
  const adapter={snapshot:async()=>{calls.push('snapshot');return structuredClone(state);},openExact:async id=>{calls.push('open:'+id);assert.equal(id,'42');return held={id};},readHandle:async h=>{calls.push('read');assert.equal(h,held);return structuredClone(state.leaves[h.id]);},deleteHandle:async h=>{calls.push('delete');assert.equal(h,held);delete state.leaves[h.id];},close:async h=>{calls.push('close');assert.equal(h,held);},writeOrder:()=>{throw Error('FORBIDDEN native write');}};
  return {p,a,before,current,exe,adapter,calls,get state(){return state;},set state(v){state=v;},run:()=>cleanupOwnLeaf({plan:p,authority:a,owned:normal(),before,adapter,deadline:Date.now()+5000})};}
-test('all eighteen original identities occur exactly once across mandatory phases',()=>{const p=phaseAccounting();assert.equal(ORIGINAL_NODE_ENTRIES.length,18);assert.equal(p.canonical.node_entries.length,18);assert.equal(p.native.entry,PA1_ENTRY);assert.equal(p.native.required,true);assert.ok(!p.canonical.node_entries.includes(PA1_ENTRY));assert.equal(p.total_node_entries,19);});
+test('all eighteen original identities remain accounted for, including the optional real tray',()=>{const p=phaseAccounting();assert.equal(ORIGINAL_NODE_ENTRIES.length,18);assert.equal(p.canonical.node_entries.length,18);assert.equal(p.native.entry,PA1_ENTRY);assert.equal(p.native.required,false);assert.ok(!p.canonical.node_entries.includes(PA1_ENTRY));assert.equal(p.total_node_entries,19);});
 test('missing, duplicated, renamed or pure-labelled native entries refuse',()=>{for(const rows of [CANONICAL_NODE_ENTRIES.slice(1),[...CANONICAL_NODE_ENTRIES,PA1_ENTRY],[...CANONICAL_NODE_ENTRIES.slice(0,-1),CANONICAL_NODE_ENTRIES[0]]])assert.throws(()=>phaseAccounting(rows));assert.throws(()=>phaseAccounting(CANONICAL_NODE_ENTRIES,[]));});
-test('native evidence is mandatory for 0.24.2 and every later release',()=>{for(const v of ['0.24.2','0.24.3','0.25.0','1.0.0'])assert.equal(requiresNativeQa(v),true);assert.equal(requiresNativeQa('0.24.1'),false);assert.throws(()=>requiresNativeQa('00.24.2'));});
+test('native evidence is optional from 0.30.0 and remains readable for newer versions',()=>{assert.equal(requiresNativeQa('0.29.0'),true);for(const v of ['0.30.0','1.0.0']){assert.equal(requiresNativeQa(v),false);validateAuthority(authority({...candidate(),version:v}),{...candidate(),version:v});}assert.throws(()=>requiresNativeQa('00.24.2'));});
 test('authority absent, stale or allowing shared-list writes refuses',()=>{const b=candidate();assert.throws(()=>validateAuthority(null,b));for(const alter of [a=>a.binding.build_id='a3a1de11-1811-4ef5-bf5c-586a70b7db9e',a=>a.decision_ref='PENDING-authority',a=>a.effects.ui_order_list_write=true,a=>a.effects.leave_numeric_history_reference=false,a=>a.approved_by='agent']){const a=authority(b);a.binding=structuredClone(b);alter(a);assert.throws(()=>validateAuthority(a,b));}});
 test('each candidate binding field is checked',()=>{const expected=candidate();for(const k of Object.keys(expected)){const a=authority();a.binding[k]=k==='version'?'0.24.3':k==='build_id'?'f3a1de11-1811-4ef5-bf5c-586a70b7db9e':'f'.repeat(k==='source_head'?40:64);assert.throws(()=>validateAuthority(a,expected),k);}});
 test('fixed plan rejects wrong selector, deadline, external fixture or authority bytes',()=>{for(const alter of [p=>p.case={...NATIVE_CASE,title:'replacement'},p=>p.deadlineMs=600001,p=>p.fixture_root='Z:/library',p=>p.authority.sha256='0'.repeat(64),p=>p.environment.NODE_OPTIONS='--require bad']){const a=authority(),p=plan(candidate(),a);alter(p);assert.throws(()=>validatePlan(p,a));}});
@@ -56,6 +56,22 @@ test('a private I: plan retains exact containment and rejects path aliases',()=>
   assert.throws(()=>privatePath(value),/Private absolute drive path|Noncanonical/);
  }
  p.environment.TEMP='I:/elsewhere';assert.throws(()=>validatePlan(p,a),/escapes private fixture/);
+});
+test('PA-1 requires the shell hive and QA outputs inside the same approved projects root',async()=>{
+ const {trayHivePaths}=await import('./real-shell-update-support.mjs');
+ const volume='\\Device\\HarddiskVolume9';
+ for(const root of ['I:/AI Projects','C:/Antigravity Projects']){
+  const p={source_root:root+'/source',fixture_root:root+'/fixture',evidence_root:root+'/evidence'};
+  const suffix=root.slice(2).replaceAll('/','\\')+'\\private-profile\\NTUSER.DAT';
+  const classes=suffix.replace('NTUSER.DAT','AppData\\Local\\Microsoft\\Windows\\UsrClass.dat');
+  const hives={'ntuser.dat':volume+suffix,'usrclass.dat':volume+classes};
+  assert.deepEqual(trayHivePaths(p,volume,hives,root),[root.slice(0,2)+suffix,root.slice(0,2)+classes]);
+  for(const path of ['\\Device\\HarddiskVolume10'+suffix,volume+'\\Users\\somebody\\NTUSER.DAT',volume+suffix.replace('Projects','ProjectsOld')]){
+   assert.throws(()=>trayHivePaths(p,volume,{...hives,'ntuser.dat':path},root),/shell hive ntuser.dat inside/);
+   assert.throws(()=>trayHivePaths(p,volume,{...hives,'usrclass.dat':path.replace('NTUSER.DAT','UsrClass.dat')},root),/shell hive usrclass.dat inside/);
+  }
+  assert.throws(()=>trayHivePaths({...p,fixture_root:'D:/other'},volume,hives,root),/outputs require/);
+ }
 });
 test('PA-1 physical path check rejects mapped drives and any reparse ancestor before fixture work',()=>{
  const visited=[];

@@ -15,6 +15,9 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const Module = require('node:module');
 const MAIN = require.resolve('../desktop/main.js');
+const VERSION=require('../package.json').version;
+const [major,minor,patch]=VERSION.split('.').map(Number);
+const NEXT_VERSION=[major,minor,patch+1].join('.');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(check, ms = 6000, what = 'condition') {
  const end = Date.now() + ms;
@@ -54,7 +57,7 @@ async function boot({ setup = false, flags = ['--show-inactive'], lock = true, u
   constructor() { super(); this.tips = []; this.destroyed = false; log.trays.push(this); }
   setToolTip(text) { this.tips.push(text); } setContextMenu(menu) { this.menu = menu; } destroy() { this.destroyed = true; } isDestroyed() { return this.destroyed; }
  }
- const app = { isPackaged: true, paths: {}, getVersion: () => '0.22.1', setPath(name, value) { this.paths[name] = value; }, getPath(name) { return this.paths[name] || profile; },
+ const app = { isPackaged: true, paths: {}, getVersion: () => VERSION, setPath(name, value) { this.paths[name] = value; }, getPath(name) { return this.paths[name] || profile; },
   requestSingleInstanceLock: () => lock, on: (name, fn) => { appEvents[name] = fn; }, whenReady: () => Promise.resolve(), exit: (code) => log.exits.push(code),
   // Electron's app.quit(): before-quit first; the quit goes ahead unless a handler prevented it.
   quit() { const event = { prevented: false, preventDefault() { this.prevented = true; } }; log.quits = (log.quits || 0) + 1; if (appEvents['before-quit']) appEvents['before-quit'](event); if (!event.prevented) log.exits.push(0); } };
@@ -78,12 +81,12 @@ async function boot({ setup = false, flags = ['--show-inactive'], lock = true, u
   finish(code, signal = null) { if (this.exitCode !== null || this.signalCode !== null) return; this.exitCode = code; this.signalCode = signal; this.emit('exit', code, signal); }
   prove(pid) { this.stdout.emit('data', Buffer.from('BOOKS_ENGINE_OWNER ' + JSON.stringify({ type: 'books-native-owner-v1', host_pid: this.pid, pid, creation_filetime: '1', image: this.command }) + '\n')); }
  }
- const childProcess = { ...require('node:child_process'), spawn: (command, args) => { const child = new Child(command, args); log.spawns.push(child); return child; } };
+ const childProcess = { spawn: (command, args) => { const child = new Child(command, args); log.spawns.push(child); return child; } };
  const load = Module._load;
  Module._load = function (request, parent, isMain) {
   if (request === 'electron') return electron;
   if (request === 'electron-updater') return { autoUpdater: updater };
-  if (request === 'node:child_process' && parent && parent.filename === MAIN) return childProcess;
+  if ((request === 'node:child_process'||request === 'child_process') && parent && parent.filename.startsWith(path.dirname(MAIN)+path.sep)) return childProcess;
   return load.call(this, request, parent, isMain);
  };
  const argv = process.argv, resourcesPath = process.resourcesPath;
@@ -96,7 +99,7 @@ async function boot({ setup = false, flags = ['--show-inactive'], lock = true, u
   parts: { library: true, status: true, books: false, attention: false, jobs: false }, took_ms: null }, requests: [] };
  const server = http.createServer((req, res) => {
   engine.requests.push(req.url);
-  const body = req.url === '/api/health' ? { application: 'Books Arranger', version: '0.22.1', pid: engine.pid, instance: 'a'.repeat(32), port }
+  const body = req.url === '/api/health' ? { application: 'Books Arranger', version: VERSION, pid: engine.pid, instance: 'a'.repeat(32), port }
    : req.url === '/api/desktop/status' ? { phase: engine.phase || 'running', error: engine.error || '', busy: engine.busy || null, idle: false, loading: engine.loading, update: engine.update || null,
      ...(engine.waiting_for ? { waiting_for: engine.waiting_for } : {}) }
    : req.url === '/api/desktop/update' ? (engine.phase = 'pausing', engine.update = { phase: 'pausing', waiting: [], critical: [], elapsed: 0, safe_seconds: 90, stopped: [] }, { phase: 'pausing', update: engine.update })
@@ -229,7 +232,7 @@ test('first run: "Use this folder" closes the setup window and the main window o
 function electronUpdaterLike({ spawnError = 'UNKNOWN' } = {}) {
  return (electronApp) => {
   const updater = Object.assign(new EventEmitter(), { setFeedURL() {}, checkForUpdates: async () => ({}), downloadUpdate: async () => {}, quitAndInstallCalled: false, spawned: [],
-   downloadedUpdateHelper: { file: 'C:/owned/Books-Arranger-Setup-0.22.2.exe', downloadedFileInfo: { sha512: 'c'.repeat(88), isAdminRightsRequired: false } },
+   downloadedUpdateHelper: { file: path.join(os.tmpdir(),'Books-Arranger-Setup-'+NEXT_VERSION+'.exe'), downloadedFileInfo: { sha512: 'c'.repeat(88), isAdminRightsRequired: false } },
    app: { quit: () => electronApp.quit() } });
   updater.spawnLog = function (cmd) {
    this.spawned.push(cmd);
@@ -251,7 +254,7 @@ async function loaded(t, child) {
  throw new Error('timed out waiting for the load');
 }
 async function failedInstall(t) {
- t.log.updater.emit('update-downloaded', { version: '0.22.2' });
+ t.log.updater.emit('update-downloaded', { version: NEXT_VERSION });
  const restart = t.invoke('books:update-install');
  await until(() => t.engine.requests.includes('/api/desktop/update'), 6000, 'the update request');
  t.engine.phase = 'updating'; hosts(t)[0].finish(0);  // the engine ends for the update

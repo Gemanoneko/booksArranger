@@ -1,6 +1,7 @@
 // Fixed PA-1 support. Imports are inert; native adapters are loaded only by the
 // separately admitted, explicitly authorized worker/controller.
 import fs from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {isDeepStrictEqual} from 'node:util';
@@ -41,10 +42,50 @@ export function assertLocalPaths(api,paths){
  }
 }
 
+// Explorer records tray registration under its real logon SID, regardless of TEMP or USERPROFILE.
+export function trayHivePaths(plan,device,hives,root=existsSync('I:/AI Projects')?'I:/AI Projects':'C:/Antigravity Projects'){
+ need([plan.source_root,plan.evidence_root,plan.fixture_root].every(p=>within(p,root)),'Native QA outputs require the approved project root');
+ need(/^\\Device\\HarddiskVolume\d+$/i.test(device),'Direct project volume required');
+ const prefix=device+root.slice(2).replaceAll('/','\\')+'\\';
+ return ['ntuser.dat','usrclass.dat'].map(name=>{
+  const hive=hives[name];
+  need(typeof hive==='string'&&hive.toLowerCase().startsWith(prefix.toLowerCase())&&path.win32.basename(hive).toLowerCase()===name,'Native tray QA requires the Windows shell hive '+name+' inside '+root);
+  return privatePath(root.slice(0,2)+hive.slice(device.length));
+ });
+}
+function shellUserHives(k,K){
+ const A=k.load('C:/Windows/System32/advapi32.dll'),U=k.load('C:/Windows/System32/user32.dll');
+ const open=K.func('void * __stdcall OpenProcess(uint32_t,bool,uint32_t)'),close=K.func('bool __stdcall CloseHandle(void *)');
+ const openToken=A.func('bool __stdcall OpenProcessToken(void *,uint32_t,_Out_ void **)');
+ const tokenInfo=A.func('bool __stdcall GetTokenInformation(void *,uint32_t,void *,uint32_t,_Out_ uint32_t *)');
+ function userSid(process){
+  const handle=[null];need(openToken(process,8,handle),'Cannot inspect Windows session token');
+  try{
+   const data=Buffer.alloc(1024),used=[0];need(tokenInfo(handle[0],1,data,data.length,used)&&used[0]<=data.length,'Cannot read Windows session SID');
+   const offset=Number(data.readBigUInt64LE()-k.address(data));
+   need(offset>=0&&offset+8<=used[0]&&data[offset]===1,'Malformed Windows session SID');
+   const count=data[offset+1];need(count>0&&offset+8+count*4<=used[0],'Truncated Windows session SID');
+   return 'S-1-'+data.readUIntBE(offset+2,6)+'-'+Array.from({length:count},(_,i)=>data.readUInt32LE(offset+8+i*4)).join('-');
+  }finally{close(handle[0]);}
+ }
+ const window=U.func('void * __stdcall GetShellWindow()')(),pid=[0];
+ need(window&&U.func('uint32_t __stdcall GetWindowThreadProcessId(void *,_Out_ uint32_t *)')(window,pid)&&pid[0],'No interactive Windows shell session');
+ const shell=open(0x1000,false,pid[0]);need(shell,'Cannot inspect Windows shell owner');
+ let sid;try{sid=userSid(shell);}finally{close(shell);}
+ need(sid===userSid(K.func('void * __stdcall GetCurrentProcess()')()),'Native tray QA requires the same Windows shell user as the test');
+ const regGet=A.func('int32_t __stdcall RegGetValueW(intptr_t,str16,str16,uint32_t,void *,void *,_Inout_ uint32_t *)');
+ function readHive(key){
+  const destination=Buffer.alloc(65536),size=[destination.length];
+  need(regGet(-2147483646n,'SYSTEM\\CurrentControlSet\\Control\\hivelist','\\REGISTRY\\USER\\'+key,2,null,destination,size)===0&&size[0]>2&&size[0]<=destination.length,'Windows shell hive backing could not be verified');
+  return destination.subarray(0,size[0]).toString('utf16le').replace(/\0+$/,'');
+ }
+ return {'ntuser.dat':readHive(sid),'usrclass.dat':readHive(sid+'_Classes')};
+}
+
 // Invoke only after the existing source, DLL and Koffi input pins pass.
 export async function verifyLocalPaths(plan,manifest,existing=[]){
  need(process.platform==='win32'&&process.arch==='x64','Native PA-1 requires reviewed Windows x64 ABI');
- const require=createRequire(import.meta.url),K=require(plan.koffi_root).load('C:/Windows/System32/kernel32.dll');
+ const require=createRequire(import.meta.url),k=require(plan.koffi_root),K=k.load('C:/Windows/System32/kernel32.dll');
  const driveType=K.func('uint32_t __stdcall GetDriveTypeW(str16)');
  const queryDos=K.func('uint32_t __stdcall QueryDosDeviceW(str16,void *,uint32_t)');
  const attributes=K.func('uint32_t __stdcall GetFileAttributesW(str16)');
@@ -53,10 +94,11 @@ export async function verifyLocalPaths(plan,manifest,existing=[]){
   need(count>0&&count<=buffer.length/2,'PA-1 drive mapping unavailable: '+drive);
   return buffer.subarray(0,count*2).toString('utf16le').split('\0',1)[0];
  }
+ const hives=trayHivePaths(plan,dosTarget(path.win32.parse(plan.source_root).root.slice(0,2)),shellUserHives(k,K));
  const roots=[plan.evidence_root,plan.source_root,plan.koffi_root,plan.payload.root,path.win32.dirname(plan.fixture_root),...existing];
  const payload=Object.keys(manifest.payload.files).map(name=>path.win32.join(plan.payload.root,name));
  assertLocalPaths({driveType,dosTarget,attributes:p=>attributes(path.win32.toNamespacedPath(p))},
-  [...roots,plan.authority.path,plan.payload.manifest.path,...plan.inputs.map(ref=>ref.path),...plan.trees.map(tree=>tree.root),...payload]);
+  [...hives,...roots,plan.authority.path,plan.payload.manifest.path,...plan.inputs.map(ref=>ref.path),...plan.trees.map(tree=>tree.root),...payload]);
  for(const root of roots)need(norm(await fs.realpath(root))===norm(root),'PA-1 path resolves through an alias: '+root);
 }
 export function validatePlan(plan,authority){

@@ -136,7 +136,8 @@ test('a good run pins the wrapper in the harness and the assembler in the graph 
   assert.ok(wrapper.includes('export SystemRoot='+"'"+f.systemRoot+"'"));assert.ok(wrapper.includes('export WINDIR='+"'"+f.systemRoot+"'"));
   assert.equal(graph.schema,'books-entry-graph-v4');assert.equal(graph.phases.prior_node_entries,18);assert.equal(graph.phases.total_node_entries,19);
   assert.equal(graph.phases.canonical.node_entries.length,18);assert.equal(graph.phases.canonical.node_entries.includes('tests/real-shell-update.test.mjs'),false);
-  assert.equal(graph.phases.native.required,true);assert.match(graph.phases.native.status,/PENDING/);
+  assert.equal(graph.phases.native.required,false);assert.match(graph.phases.native.status,/OPTIONAL/);
+  assert.equal(graph.phases.local_update.command,'node scripts/check-update-local.mjs');
   assert.equal(graph.phases.contract.sha256,sha(await fs.readFile(new URL('../scripts/qa-phase-contract.mjs',import.meta.url))));
 });
 

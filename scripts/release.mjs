@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { releaseFlow } from './release-flow.mjs';
+import { checkLocalUpdate, verifyLocalShell } from './check-update-local.mjs';
 import { leasedExecutable } from './release-contract.mjs';
 import cleanup from './cleanup-releases.js';
 import { runNativeOwned, validateChildLease } from './guarded-io.mjs';
@@ -93,6 +94,13 @@ async function ownedRelease() {
     });
   };
   const io={run,
+    checkLocalUpdate:async manifest=>{
+      // Bind the project-local case to the code actually in the accepted installer.
+      const archive=safePath('dist/'+manifest.unpacked+'/resources/app.asar'),asar=require('@electron/asar');
+      verifyLocalShell(relative=>asar.extractFile(archive,relative));
+      checkLocalUpdate(ownership.deadline);
+      console.log('[release] Project-local update recovery and tray intent passed for '+manifest.version+' build '+manifest.build_id+'.');
+    },
     read:async relative=>fs.readFileSync(safePath(relative),'utf8'),
     exists:async relative=>fs.existsSync(safePath(relative)),
     hash:async relative=>inspectFile(safePath(relative)),

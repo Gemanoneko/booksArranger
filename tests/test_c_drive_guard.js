@@ -135,8 +135,13 @@ const root=fs.mkdtempSync(path.join(scratch,'c-drive-guard-'));
   // checks only read, and a checkout that itself lives on C: (the laptop's approved root), are not.
   const refusal=guard.cDriveEnvRefusal({BOOKS_RELOCATION_FIXTURE_SOURCE:'C:\\BA-fixture',BOOKS_QA_RUNTIME_ROOT:'C:\\runtime',BOOKS_QA_FIXTURE_ROOT:'I:\\f',TEMP:'C:\\Temp'},'I:\\AI Projects\\checkout');
   assert.ok(refusal&&refusal.includes('BOOKS_RELOCATION_FIXTURE_SOURCE=C:\\BA-fixture')&&!refusal.includes('BOOKS_QA_RUNTIME_ROOT')&&!refusal.includes('TEMP='),refusal);
-  assert.equal(guard.cDriveEnvRefusal({BOOKS_QA_FIXTURE_ROOT:'c:/x'},'C:\\Antigravity Projects\\checkout'),null);
-  assert.equal(guard.cDriveEnvRefusal({BOOKS_QA_FIXTURE_ROOT:'I:\\x',BOOKS_MP3_REAL_FIXTURE:'C:\\a.mp3'},'I:\\checkout'),null);
+  for(const [approved,outside] of [['I:/AI Projects','I:/x'],['C:/Antigravity Projects','C:/x']]){
+   const checkout=approved+'/checkout';
+   for(const escaped of [outside,approved+'-old/x',approved+'/../escape','../escape','C:relative','//server/share/output']){
+    assert.match(guard.cDriveEnvRefusal({BOOKS_QA_FIXTURE_ROOT:escaped},checkout,approved),/BOOKS_QA_FIXTURE_ROOT/);
+   }
+   assert.equal(guard.cDriveEnvRefusal({BOOKS_QA_FIXTURE_ROOT:checkout+'/scratch',BOOKS_MP3_REAL_FIXTURE:'C:/input.mp3'},checkout,approved),null);
+  }
   // The real check script, copied into a private root on I:, refuses with that message, exit 1, and makes nothing.
   const gate=path.join(root,'gate');fs.mkdirSync(path.join(gate,'scripts'),{recursive:true});
   for(const name of ['check-desktop.mjs','python-check-batches.mjs','gate-source-guard.mjs','gate-scratch.mjs','qa-phase-contract.mjs','c-drive-guard.mjs'])fs.copyFileSync(path.join(repo,'scripts',name),path.join(gate,'scripts',name));
@@ -144,7 +149,7 @@ const root=fs.mkdtempSync(path.join(scratch,'c-drive-guard-'));
    const never='C:\\BA-guard-never-made-'+process.pid;
    const run=require('node:child_process').spawnSync(process.execPath,[path.join(gate,'scripts','check-desktop.mjs')],{cwd:gate,encoding:'utf8',windowsHide:true,timeout:60000,env:{...process.env,BOOKS_OPERATOR_C_ROOT:never}});
    assert.equal(run.status,1,run.stderr);
-   assert.match(run.stderr,/^Refusing to run the checks: BOOKS_OPERATOR_C_ROOT=C:\\BA-guard-never-made-\d+ is on C:/m);
+   assert.match(run.stderr,/^Refusing to run the checks: .*BOOKS_OPERATOR_C_ROOT=C:\\BA-guard-never-made-\d+ .*inside I:\/AI Projects/m);
    assert.ok(!fs.existsSync(never),'nothing made on C:');
    assert.deepEqual(fs.readdirSync(gate),['scripts'],'refused before any scratch was made');
   }
