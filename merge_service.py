@@ -6224,7 +6224,7 @@ class MergeService:
         for item in answer['items']:
             if wanted is not None and item['job_id'] not in wanted:continue
             try:
-                if 'series' in item['items']:
+                if 'series' in item['items'] and not item.get('placed'):  # placed: its series is written already, the move only
                     self.series_backfill.approve(item['job_id'],item['series'],item['to'])
                     results.append({'job_id':item['job_id'],'state':'series_update_queued','to':item['to']})
                 else:

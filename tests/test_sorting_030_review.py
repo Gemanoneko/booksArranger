@@ -137,6 +137,47 @@ class QAFindingTests(SortedCatalog):
                           ('job-unknown', 'not_listed', 'Not in the list')])
 
 
+class StuckSeriesMoveTests(SortedCatalog):
+    """Futaba's 0.30.0 slice C delta: the series was written into an approved book in its own folder, then its move into
+    the series folder failed for a lasting reason (a stranger file already there). The plan neither listed nor refused it:
+    the book was stuck with no line anywhere. Now it is listed again, or refused with the reason."""
+
+    def placed(self, follow_up, stranger=False):
+        job = self.book('Rowling J. K\\Harry Potter - 7 - Deathly Hallows - Rowling J. K.m4b', 'Rowling J. K', 'Deathly Hallows',
+                        series='Harry Potter', number='7', source={'provider': 'fantlab', 'url': 'https://fantlab.ru/work3650'})
+        placed = self.sorted / 'Rowling J. K' / 'Harry Potter - 7 - Deathly Hallows - Rowling J. K.m4b'
+        target = self.sorted / 'Rowling J. K' / 'Harry Potter' / 'Harry Potter - 7 - Deathly Hallows - Rowling J. K.m4b'
+        if stranger:
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b'a stranger file')
+        record = {'series': 'Harry Potter', 'number': '7', 'provider': 'fantlab', 'move_approved': True, 'approved_target': str(target),
+                  'old_path': str(self.sorted / 'Rowling J. K' / 'Deathly Hallows - Rowling J. K.m4b'), 'new_path': str(placed), 'follow_up': follow_up}
+        with contextlib.closing(sqlite3.connect(self.database)) as db:
+            db.execute("INSERT INTO series_backfill VALUES(?,'done','',?,'now')", (job, json.dumps(record, ensure_ascii=False)))
+            db.commit()
+        return job, placed, target
+
+    def test_a_stranger_file_at_the_target_is_listed_as_left_with_its_reason(self):
+        job, placed, _ = self.placed({'state': 'refused', 'reason': 'A file of that name is already in the folder'}, stranger=True)
+        found = self.plan()
+        self.assertEqual(found['items'], [])
+        self.assertEqual([(i['job_id'], i['from'], i['refused']) for i in found['refused']],
+                         [(job, str(placed), 'A file with the new name is already there')], 'was: no line at all')
+
+    def test_a_series_move_that_failed_is_listed_again_and_approval_moves_it(self):
+        from merge_service import MergeService
+        job, placed, target = self.placed({'state': 'refused', 'reason': 'The planned place changed since you approved it; the book stays where it is.'})
+        found = self.plan()
+        self.assertEqual([(i['job_id'], i['from'], i['to'], i['items']) for i in found['items']], [(job, str(placed), str(target), ['series'])])
+        approved, moved = [], []
+        merge = MergeService.__new__(MergeService)
+        merge.inventory = SimpleNamespace(database=self.database, output_root=str(self.sorted), worker=None)
+        merge.series_backfill = SimpleNamespace(approve=lambda *a: approved.append(a))
+        merge._sorting_move = lambda job_id, to: moved.append((job_id, to)) or {'state': 'move_queued'}
+        merge.sorting_moves_apply(found['digest'])
+        self.assertEqual((approved, moved), ([], [(job, str(target))]), 'its series is already written: the move only')
+
+
 class ScriptTests(unittest.TestCase):
     """scripts/sorting_moves.py: it names the app and port it talks to, and the list's digest and count, before it
     approves anything; any book not moved makes it exit with an error (C3)."""

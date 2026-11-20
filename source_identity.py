@@ -212,7 +212,9 @@ def source_gate(row,work):
     # (groups.ALBUM_PART_BASIS): one recording in that order. Its albums compare without the part number; its order is the
     # one grouping proved (the members' positions), with no track tags. Other evidence (the artists, a gap) still holds it.
     import groups
-    album_parts=standing and len(members)>1 and (row.get('part_set') or {}).get('order_basis')==groups.ALBUM_PART_BASIS
+    part_set=row.get('part_set') or {}
+    album_parts=standing and len(members)>1 and (part_set.get('album_parts') is True or part_set.get('order_basis')==groups.ALBUM_PART_BASIS)
+    album_order=album_parts and part_set.get('order_basis')==groups.ALBUM_PART_BASIS  # the order is the album part numbers'
     if len(members)>1:
         tags=[tag_text.tags(m['metadata']) for m in members]
         albums={norm(groups._without_part_number(' '.join(str(t.get('album') or '').split()).casefold()) if album_parts else t.get('album')) for t in tags}
@@ -228,7 +230,7 @@ def source_gate(row,work):
         for m in members:
             match=re.match(r'^(\d{1,4})[ _.-]+',m['filename'])
             filename_positions.append(int(match[1]) if match else None)
-        use_filenames=bool(standing and (folder_context or len(albums)==1 and next(iter(albums),'')) and all(p is not None for p in filename_positions)) or album_parts
+        use_filenames=bool(standing and (folder_context or len(albums)==1 and next(iter(albums),'')) and all(p is not None for p in filename_positions)) or album_order
         named_order=bool(sequence and standing and (folder_context or len(albums)==1 and next(iter(albums),'')))
         if split:
             # Proven above (embedded track numbers, part numbers in the names or disc folders).

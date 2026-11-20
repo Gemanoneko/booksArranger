@@ -2753,9 +2753,10 @@ function renderAttentionGroups(){
     const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked.`+(state?.automatic_processing?.can_start===true?` ${automaticStartWord()} automatic processing to check ${n===1?'it':'them'}.`:'');
     if(sweep.textContent!==text)sweep.textContent=text;sweep.hidden=!text;}
   const queueLine=$('queue-line');
-  if(queueLine){const n=queueState.queued.length,first=queueState.queued[0],said=n?blockerSentence(queueBlocker(first)).text:'';
-    // 0.30.0 (Judy's spec 2.3): the queue strip says the same sentence as the book row and the Waiting list.
-    const text=!n?'':n===1?`1 action waiting. ${said}`:`${n.toLocaleString()} actions waiting, one at a time. First: ${queueWord(first.action)}: ${first.title || 'a book'}. ${said}`;
+  if(queueLine){const n=queueState.queued.length,first=queueState.queued[0],said=n && first.blocker?blockerSentence(queueBlocker(first)).text:'';
+    // 0.30.0 (Judy's spec 2.3): the queue strip says the same sentence as the book row and the Waiting list. Futaba's QA,
+    // slice D item 2: an action nothing blocks (blocker null, about to run) names no wait (it read "It runs when the app is free.").
+    const text=!n?'':[n===1?'1 action waiting.':`${n.toLocaleString()} actions waiting, one at a time. First: ${queueWord(first.action)}: ${first.title || 'a book'}.`,said].filter(Boolean).join(' ');
     if(queueLine.textContent!==text)queueLine.textContent=text;queueLine.hidden=!text;}
   const run=bulkRun(),running=run?.state==='running';
   if(retryAllRun && !retryAllRun.ended && run?.id===retryAllRun.id && !running)finishRetryAll(run);
