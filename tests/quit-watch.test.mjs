@@ -170,11 +170,20 @@ test('the engine host is not ended while its engine still names an open file cha
  assert.ok(h.clock.t<36000,'positive control: without a hold, ended at the bound');
  const fs=await import('node:fs');const main=fs.readFileSync(new URL('../desktop/main.js',import.meta.url),'utf8');
  const anyway=main.slice(main.indexOf('async function quitAnyway()'),main.indexOf('// Quit while loading closes at once'));
- assert.match(anyway,/endLoadingEngine\(30000, \{ holdKill: fileChangeOpen \}\)/,'Quit anyway holds the kill for a file change');
- const refused=main.slice(main.indexOf('async function requestQuit('),main.indexOf('async function fileChangeOpen()'));
- assert.match(refused,/endLoadingEngine\(30000, \{ holdKill: fileChangeOpen \}\)/,'so does the stop of an engine that refused Quit');
- const open=main.slice(main.indexOf('async function fileChangeOpen()'),main.indexOf('// HTTP failure never proves'));
- assert.match(open,/'\/api\/desktop\/status'/);assert.match(open,/catch \{ return false; \}/);
+ assert.match(anyway,/endLoadingEngine\(30000, \{ holdKill: stillEnding \}\)/,'Quit anyway holds the kill for a file change');
+ const refused=main.slice(main.indexOf('async function requestQuit('),main.indexOf('async function stillEnding()'));
+ assert.match(refused,/endLoadingEngine\(30000, \{ holdKill: stillEnding \}\)/,'so does the stop of an engine that refused Quit');
+ const open=main.slice(main.indexOf('async function stillEnding()'),main.indexOf('// HTTP failure never proves'));
+ assert.match(open,/'\/api\/desktop\/status'/);assert.match(open,/endingByItself\(quitWaiting\(status\)\)/);assert.match(open,/catch \{ return false; \}/);
+});
+// Futaba's 0.30.0 slice A delta: after a safe stop the engine ends a press itself and then closes on its own; the host is
+// not ended while the engine still names one (or a file change), never past the ceiling. Anything else ends at the bound.
+const {endingByItself,ENDS_BY_ITSELF}=createRequire(import.meta.url)('../desktop/quit-watch.js');
+test('what the engine ends by itself before it closes: a file change, an approval, a press; nothing else',()=>{
+ assert.deepEqual([...ENDS_BY_ITSELF].sort(),['approval','critical','press']);
+ assert.deepEqual(endingByItself([{kind:'cleanup',title:''},{kind:'decisions',title:''},{kind:'press',title:''},{kind:'approval',title:''},{kind:'critical',title:'a delete'},{kind:'scan',title:''}]),
+  [{kind:'press',title:''},{kind:'approval',title:''},{kind:'critical',title:'a delete'}]);
+ for(const none of [null,undefined,'press',[null],[{kind:'cleanup'}],[{kind:'conversion',title:'Дюна'}]])assert.deepEqual(endingByItself(none),[],JSON.stringify(none));
 });
 test('the shell stops safely through Quit anyway on a failed close and past the bound, and keeps the chosen book',()=>{
  return import('node:fs').then(fs=>{

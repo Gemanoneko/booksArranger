@@ -428,3 +428,27 @@ test('Quit does not stop the engine while it names an open file change; it stops
   assert.equal(child.stdin.ended, true);
  } finally { await t.close(); }
 });
+// Futaba's 0.30.0 slice A delta (Sergei: "I can't exit"): a close blocked by a press still running. The shell's safe stop
+// (stop-now) makes the engine end the press and close by itself once it has ended (desktop_backend _close_until_done); the
+// shell waits for that instead of ending the engine's host 30 s after its pipe closed. Before: ended at 30 s.
+test('a Quit blocked by a press still running ends when the engine closes by itself after the press; its host is not ended', async () => {
+ const t = await boot();
+ try {
+  const child = await loadedEngine(t);
+  child.deaf = true;  // the engine does not end at its pipe: it closes when its press has ended
+  t.engine.quitPhase = 'blocked'; t.engine.error = 'A press is still running; ownership retained'; t.engine.waiting_for = [{ kind: 'press', title: '' }];
+  const quitting = t.invoke('books:quit');  // it answers when the Quit has ended
+  await until(() => t.engine.requests.includes('/api/desktop/stop-now'), 8000, 'the safe stop');
+  await sleep(40000);  // past the 30 s the host gets after its pipe closes
+  assert.equal(child.killed, undefined, 'the host is not ended while the engine still names its press');
+  assert.deepEqual(t.log.exits, []);
+  assert.equal(child.stdin.ended, true, 'the pipe closed (the engine\'s own safe stop)');
+  t.engine.waiting_for = []; t.engine.phase = 'exiting';
+  child.finish(0);  // the press ended: the engine closed by itself
+  await until(() => t.log.exits.length, 8000, 'the exit');
+  await quitting;
+  assert.deepEqual(t.log.exits, [0]);
+  assert.equal(child.killed, undefined);
+  assert.ok(t.log.trays[0].tips.includes('Books Arranger — stopping safely'));
+ } finally { await t.close(); }
+});

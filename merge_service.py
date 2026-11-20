@@ -4460,7 +4460,7 @@ class MergeService:
         result['reasons']=[]
         # Senua's 0.22.0 review, m4: closing or draining the app stops a press still checking the files (hashes, probes).
         stop=threading.Event();presses=self.__dict__.setdefault('_approve_stops',set());presses.add(stop)
-        if self.draining or self.__dict__.get('_closing'):stop.set()
+        if self.draining or self.__dict__.get('_closing') or self.__dict__.get('_presses_stopped'):stop.set()
         try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
         except Exception as error:
             # Senua's 0.22.3 review, M4: once the job is queued the Approve is accepted. Pause still settling (Start refused),
@@ -5697,6 +5697,19 @@ class MergeService:
     def _publication_verified(self,record):
         try:self._remember_identity(record,file_identity(ordinary(record['final_path'])))
         except OSError:pass
+
+    def stop_presses(self):
+        """A safe stop (desktop stop-now, a sign-out, the shell's pipe closing: Futaba's 0.30.0 slice A delta) tells every press
+        that can stop to stop now, before the shutdown waits for presses: an approval still checking its files (the book is
+        not approved, as at Quit and close), Retry all at its next book; an approval that reaches its checks after this stops
+        at once. Delayed starts are invalidated, as at drain and close. Never waits. Unlike drain(), the queue's own pause is
+        left to close (automatic processing records why it paused)."""
+        with _BULK_LOCK:
+            self._presses_stopped=True
+            self._start_generation=self.__dict__.get('_start_generation',0)+1
+            pending=self.__dict__.get('_retry_all_stop')
+            if pending:pending.set()
+            for press in list(self.__dict__.get('_approve_stops',())):press.set()
 
     def stop_background(self):
         """Quit (0.30.0 item F): the background work close() stops is told to stop now, never waited for here, so it ends

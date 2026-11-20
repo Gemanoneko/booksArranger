@@ -283,7 +283,56 @@ class DesktopControl:
                 self.phase = 'blocked'
                 self.error = str(error)[:512] or type(error).__name__
             return  # Keep server, native catalog lease and ownership record alive.
-        self._shutdown()
+        self._close_until_done('quit')
+
+    RETRY_AFTER = 2.0  # seconds after a failed close before it is tried again by itself; doubled after each failed try,
+    RETRY_MAX = 60.0   # up to this (a close that keeps failing for another reason is not tried in a tight loop)
+
+    def _close_until_done(self, trigger):
+        """The close, tried again by itself until it succeeds (0.30.0, Futaba's slice A delta, Sergei's "I can't exit").
+
+        A close fails ('blocked': finish_shutdown's bound) while a press is still running, and the engine then stayed
+        blocked, closing and half closed, until someone pressed Quit again: 420 s and more after a safe stop during a 160 s
+        Approve, with no shell left to do it after a sign-out or a closed pipe. Now, once the presses and file changes that
+        held it have ended (merge_admissions, critical_sections), the close runs again; each try waits for them with its own
+        bounds. Quit again, a safe stop or an update meanwhile take over (they set shutting or change the phase)."""
+        import critical_sections
+        tries = 0
+        while not self._shutdown(trigger):
+            failed, pause = time.monotonic(), min(self.RETRY_MAX, self.RETRY_AFTER * 2 ** tries)
+            tries += 1
+            while True:
+                time.sleep(self.QUIT_POLL)
+                with self.lock:
+                    if self.phase != 'blocked' or self.shutting:
+                        return False  # taken over
+                    ready = (not getattr(self.server, 'merge_admissions', 0) and not critical_sections.open_sections()
+                             and time.monotonic() - failed >= pause)
+                    if ready:
+                        self.phase = 'parking' if trigger == 'quit' else 'stopping'
+                        self.shutting = True
+                        break
+        return True
+
+    def _stop_for_safe_stop(self):
+        """A safe stop's own stops, before its close (never waits; a part that fails is skipped: close stops it again). Futaba's
+        0.30.0 slice A delta: a safe stop during a 160 s Approve went 'blocked' at 30 s because nothing told the approval to
+        stop until merge.close(), which comes only after the presses ended; and the background sweeps it never stopped kept
+        'cleanup' and 'decisions' in waiting_for for good. Now, as Quit does: presses that can stop are told to
+        (MergeService.stop_presses: an approval still checking its files, Retry all) and the background work close would
+        stop is told now (MergeService.stop_background)."""
+        merge = getattr(self.server, 'merge', None)
+        for name in ('stop_presses', 'stop_background'):
+            step = getattr(merge, name, None)
+            if callable(step):
+                try:
+                    step()
+                except Exception as error:
+                    print('Books Arranger could not stop work early for a safe stop: ' + (str(error) or type(error).__name__), file=sys.stderr, flush=True)
+
+    def _safe_stop(self, trigger):
+        self._stop_for_safe_stop()
+        self._close_until_done(trigger)
 
     def _shutdown(self, trigger='quit'):
         database=getattr(self.server.inventory,'database',None)
@@ -651,7 +700,7 @@ class DesktopControl:
                 self.requested_at = time.time()
         self.server.inventory.stop()
         self._set_closing()
-        threading.Thread(target=self._shutdown, args=(trigger,), name='books-desktop-stop', daemon=True).start()
+        threading.Thread(target=self._safe_stop, args=(trigger,), name='books-desktop-stop', daemon=True).start()
         return {'phase': 'stopping'}
 
 
