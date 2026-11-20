@@ -20,7 +20,7 @@ SAME_TITLE_VERSION = 'same-title-v4'  # v2: Senua's 0.22.0 review G1, G2; v3: N4
 SAME_ALBUM_VERSION = 'same-album-v4'  # v2: Senua's 0.22.0 review G3; v3: N6 (the works check for a plain album group too); v4: N11 (chapter-named title tags are no works)
 # Ruling 19a (Sergei 2026-10-24): explicitly marked .m4b parts with their own chapters are joined, chapters kept; the
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
-M4B_PARTS_VERSION = 'm4b-parts-v4'  # v3: 0.30.0 item 7, albums that differ only by a trailing part number are one set; v4: QA D2 (repaired tag text) and C2 (the album part numbers order such a set)
+M4B_PARTS_VERSION = 'm4b-parts-v5'  # v3: 0.30.0 item 7, albums that differ only by a trailing part number are one set; v4: QA D2 (repaired tag text) and C2 (the album part numbers order such a set); v5: C2 delta (such a set is no mixed works)
 # 0.22.1, item 9: a clean file-name sequence orders a book (track_order); a single file has no order conflict.
 # Ruling 68 (0.24.0): one source folder is one book (folder_unit); mis-encoded tags are read repaired (tag_text).
 TAG_REPAIR_VERSION = 'tag-repair-v1'
@@ -489,7 +489,8 @@ def _part_sets(members,scopes,assigned,separate,taken):
         order=sorted(range(len(items)),key=lambda i:positions[i])
         scope=unit+'\x1fPart set '+album+'\x1f'+artist
         if scope in taken:continue
-        found.append({'scope':scope,'members':[items[i] for i in order],'positions':[positions[i] for i in order],'basis':basis,'book_name':''})
+        found.append({'scope':scope,'members':[items[i] for i in order],'positions':[positions[i] for i in order],'basis':basis,'book_name':'',
+                      'album_parts':(unit,album,artist) in merged})
     return found
 
 def _same_album_parts(members,scopes,assigned,chaptered,taken):
@@ -717,6 +718,15 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
         if scope in part_sets and {r['path'] for r in items}=={m['path'] for m in part_sets[scope]['members']}:
             group=_split_group(items,companions,scope,part_sets[scope]);parts=group.pop('split_book')
             group['part_set']={'version':M4B_PARTS_VERSION,'parts':parts['parts'],'order_basis':parts['order_basis']}
+            if part_sets[scope].get('album_parts'):
+                # Futaba's 0.30.0 QA, C2 (delta on 03041ee): a set joined because its album tags differ only by their part
+                # numbers (item 7) is one work: its albums are no "mixed works" conflict (which held «Darwin's Blade» from
+                # every automatic approval), and its title clue is the album without the number, not the folder's name.
+                group['part_set']['album_parts']=True
+                base=_without_part_number(' '.join(str(group['title_evidence'][0]).split())) if group['title_evidence'] else ''
+                if base and len({_without_part_number(' '.join(str(t).split()).casefold()) for t in group['title_evidence']})==1:
+                    group['conflicts']=[c for c in group['conflicts'] if c!='Different book album/title clues may indicate mixed works']
+                    group['title_clue']=base;group['metadata']['title']=base
             group['grouping']=PART_SET_GROUPING
             output[scope]=group
             continue
@@ -765,6 +775,17 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
                 group['conflicts'].append('Part of this folder is already its own book: '+'; '.join('«'+b+'»' for b in decision['bound'][:3])+'. These files were not joined to it.')
             output[scope]=group
             continue
+        if scope in protected and protected[scope].get('part_set') and not protected[scope].get('joined'):
+            # Futaba's 0.30.0 QA, C2 (delta): an approved or queued part set (protected: the part-set rule no longer plans its
+            # files) was rebuilt below by the per-file rule, which orders its parts differently (no track tags: "order
+            # unclear"), so it read "Recording grouping needs stronger evidence", its revision moved and its queued job stopped
+            # at "Source changed - review required" (the automatic run never converted «Darwin's Blade»). It keeps its
+            # stored group while its files are the same ones, unchanged (only the order the set rule gave them differs).
+            old=protected[scope]
+            facts=lambda m:{k:v for k,v in m.items() if k not in ('order','disc','track','order_evidence','order_conflict')}
+            same={r['path']:facts(member(r)) for r in items}=={m['path']:facts(m) for m in old['members']}
+            if same and next(iter(_legacy_build(items+companions,single=scope).values()))['companions']==old.get('companions'):
+                output[scope]=old;continue
         legacy=_legacy_build(items+companions)
         if scope in protected:
             old=protected[scope]

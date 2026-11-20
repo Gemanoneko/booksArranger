@@ -157,12 +157,73 @@ class QuitWithinSecondsTests(ApproveFixture):
         value = control.status()
         self.assertEqual((value['phase'], value['waiting_for']), ('blocked', [{'kind': 'press', 'title': ''}]), 'the shell is told what still runs')
         self.assertIn('A press is still running', value['error'])
+        # Futaba's 0.30.0 slice A delta: once the press has ended, the close runs again by itself (before: only a second
+        # Quit closed it, and with no shell left nothing did).
         release.set(); presser.join(10)
         started = time.monotonic()
-        self.assertEqual(control.quit()['phase'], 'finishing')
-        self.wait_for(lambda: control.phase in ('blocked', 'exiting'))
+        self.wait_for(lambda: control.phase == 'exiting', seconds=15)
+        self.assertLess(time.monotonic() - started, self.BOUND + DesktopControl.RETRY_AFTER)
+
+    def press_holding(self, server, stop=None):
+        """A press admitted as Handler.do_POST admits one, running until released, or until its stop is set (an approval
+        still checking its files stops at its next checkpoint). Returns the release event and the thread."""
+        entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+
+        def press():
+            with server.control_condition:
+                server.merge_admissions += 1
+            entered.set()
+            try:
+                while not release.is_set() and not (stop is not None and stop.is_set()):
+                    release.wait(.05)
+            finally:
+                with server.control_condition:
+                    server.merge_admissions -= 1
+                    server.control_condition.notify_all()
+        presser = threading.Thread(target=press, name='fixture-press', daemon=True); presser.start()
+        self.assertTrue(entered.wait(5))
+        return release, presser
+
+    def test_a_safe_stop_during_an_approval_tells_it_to_stop_and_exits_within_seconds(self):
+        # Futaba's 0.30.0 slice A delta: a safe stop (sign-out, the shell's pipe closing, stop-now) during a 160 s Approve went
+        # 'blocked' at 30 s: nothing told the approval to stop until close, which comes after the presses end.
+        tone(self.audio / 'Unsorted' / 'Ясно' / 'Ясно.mp3', self.cover, album='Ясно', artist='Иван Петров')
+        self.start()
+        server = self.serve()
+        control = DesktopControl(server); server.desktop = control
+        approval = threading.Event()
+        self.service.__dict__.setdefault('_approve_stops', set()).add(approval)  # as approve_book registers its checks
+        self.press_holding(server, stop=approval)
+        with patch.object(web_server.BrowserServer, 'ADMISSIONS_CLOSE', 1.0):
+            started = time.monotonic()
+            self.assertEqual(control.stop_now('shell_pipe_closed')['phase'], 'stopping')
+            self.wait_for(lambda: control.phase in ('blocked', 'exiting'), seconds=15)
         self.assertEqual(control.phase, 'exiting', control.error)
         self.assertLess(time.monotonic() - started, self.BOUND)
+        self.assertTrue(approval.is_set(), 'the approval was told to stop')
+        self.assertTrue(self.service._presses_stopped, 'an approval reaching its checks later stops at once')
+
+    def test_a_safe_stop_during_a_press_that_cannot_stop_closes_by_itself_once_it_has_ended(self):
+        # The same, with a press that cannot be told to stop: the close fails at its bound ('blocked', naming only the press:
+        # the background sweeps were never stopped, so 'cleanup' and 'decisions' stayed named for good), then runs again by
+        # itself once the press has ended. Before: blocked for good (420+ s in Futaba's run) with no shell to Quit again.
+        tone(self.audio / 'Unsorted' / 'Ясно' / 'Ясно.mp3', self.cover, album='Ясно', artist='Иван Петров')
+        self.start()
+        server = self.serve()
+        control = DesktopControl(server); server.desktop = control
+        release, presser = self.press_holding(server)
+        with patch.object(web_server.BrowserServer, 'ADMISSIONS_CLOSE', 1.0):
+            self.assertEqual(control.stop_now('shell_pipe_closed')['phase'], 'stopping')
+            self.wait_for(lambda: control.phase == 'blocked', seconds=15)
+            self.wait_for(lambda: control.status()['waiting_for'] == [{'kind': 'press', 'title': ''}], seconds=10)
+            time.sleep(3)
+            self.assertEqual(control.phase, 'blocked', 'still blocked while the press runs: it is not cut short')
+            self.assertTrue(server.health()['closing'])
+            release.set(); presser.join(10)
+            started = time.monotonic()
+            self.wait_for(lambda: control.phase == 'exiting', seconds=15)
+        self.assertLess(time.monotonic() - started, self.BOUND + DesktopControl.RETRY_AFTER, 'closed by itself after the press')
 
 
 def stand_in(converting=False):

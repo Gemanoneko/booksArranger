@@ -57,9 +57,30 @@ class SweepTests(unittest.TestCase):
         s.recovery._set.assert_called_once_with('job-a', 'needs_attention', AUDIOBOOK_UNVERIFIED + 'Completed output bytes changed; copies retained')
 
 
+def started(s, saved_pause=False):
+    """A Start admitted in this launch (_authorize_automatic_cleanup records its generation, 0 for the first) and the
+    catalog's saved jobs Pause (this stub has no catalog)."""
+    s._automatic_cleanup_generation = 0; s._jobs_pause_saved = lambda: saved_pause
+    return s
+
+
 class HeldCleanupTests(unittest.TestCase):
+    def test_marker_held_cleanups_wait_for_a_start_and_any_saved_pause(self):
+        # 0.30.0 R2-1: before, a fresh engine's own start generation 0 matched the sweep's default 0, so these held
+        # cleanups ran at launch with nothing pressed, a saved Pause included (as the ancestry hold did, Futaba R2-1).
+        rows = [{'id': 'c1', 'job_id': 'j1', 'reason': 'Download marker native identity differs'}]
+        for name, s in (('fresh launch, nothing pressed', service()), ('saved Pause or safety hold', started(service(), saved_pause=True))):
+            with self.subTest(name):
+                s.jobs._thread = None; s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set(); s._settle_folder_jobs = Mock()
+                s._jobs_pause_saved = getattr(s, '_jobs_pause_saved', lambda: False)
+                s.cleanup._rows = lambda *args: rows
+                s._finish_held_cleanups(); s.cleanup.resume.assert_not_called(); s._settle_folder_jobs.assert_called_once()
+        s = started(service()); s.jobs._thread = None; s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set()
+        s.cleanup._rows = lambda *args: rows
+        s._finish_held_cleanups(); s.cleanup.resume.assert_called_once()  # positive control: an admitted Start does
+
     def test_marker_held_cleanups_finish_on_their_own_once(self):
-        s = service(); s.jobs._thread = None; s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set()
+        s = started(service()); s.jobs._thread = None; s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set()
         s.cleanup._rows = lambda *args: [{'id': 'c1', 'job_id': 'j1', 'reason': 'Download marker native identity differs'},
                                          {'id': 'c2', 'job_id': 'j2', 'reason': 'Unknown download marker contents preserved'},
                                          {'id': 'c3', 'job_id': 'j3', 'reason': 'Download marker native identity differs'}]
@@ -73,14 +94,14 @@ class HeldCleanupTests(unittest.TestCase):
     def test_a_kept_book_is_never_resumed_and_an_unreadable_record_resumes_nothing(self):
         rows = [{'id': 'c1', 'job_id': 'j1', 'reason': 'Download marker native identity differs'},
                 {'id': 'c2', 'job_id': 'j2', 'reason': 'Download marker native identity differs'}]
-        s = service(); s.jobs._thread = None; s._purge_tried = set(); s.cleanup._rows = lambda *args: rows
+        s = started(service()); s.jobs._thread = None; s._purge_tried = set(); s.cleanup._rows = lambda *args: rows
         s._kept_by_choice = lambda job_ids: {'j2'}
         s._finish_held_cleanups(); s.cleanup.resume.assert_called_once()
         self.assertEqual(s.cleanup.resume.call_args.args, (['c1'],))
         self.assertFalse(s.cleanup.resume.call_args.kwargs['follow_audio'])
         self.assertEqual(s.cleanup.resume.call_args.kwargs['admission_token'], 0)
         self.assertTrue(s.cleanup.resume.call_args.kwargs['admission_check']())
-        s = service(); s.jobs._thread = None; s._purge_tried = set(); s.cleanup._rows = lambda *args: rows
+        s = started(service()); s.jobs._thread = None; s._purge_tried = set(); s.cleanup._rows = lambda *args: rows
         s._kept_by_choice = Mock(side_effect=sqlite3.OperationalError('database is locked'))
         s._finish_held_cleanups(); s.cleanup.resume.assert_not_called()
 
@@ -94,7 +115,7 @@ class HeldCleanupTests(unittest.TestCase):
         self.assertEqual([call.args[0]['id'] for call in s.retirement.purge_recoveries.call_args_list], ['r1'])
 
     def test_they_wait_while_a_book_converts(self):
-        s = service(); s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set()
+        s = started(service()); s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set()
         s.cleanup._rows = lambda *args: [{'id': 'c1', 'job_id': 'j1', 'reason': 'Download marker native identity differs'}]
         s._finish_held_cleanups(); s.cleanup.resume.assert_not_called()
 

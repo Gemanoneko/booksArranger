@@ -42,6 +42,7 @@ const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py'
 const measuredSeconds={'test_inplace_m4b.py':389,'test_inplace_m4b.py:EligiblePathTests,FallbackTests,RecoveryWiringTests':189,
   'test_inplace_m4b.py:-EligiblePathTests,FallbackTests,RecoveryWiringTests':201,'test_book_delete.py':285,'test_lock_timing.py':187,'test_approve_as_is.py':173,
   'test_set_release.py':200,  // 0.22.3: six real automatic runs with conversions, 150 s alone (2026-10-28), scaled for the workers at once
+  'test_launch_held_cleanup.py':130,  // 0.30.0 R2-1: three real conversions and engine relaunches, 130 s alone (2026-11-20)
   'test_part_sets.py':163,'test_automatic_media.py':118,'test_series_backfill.py':110,'test_iron_skazka.py':107,'test_destination_admission.py':85,
   'test_split_books.py':78,'test_migration_planning.py':70,'test_automatic_media_policy.py':67,'test_m4b_join.py':62,'test_retry_intent.py':62,
   'test_todo_holds.py':58,'test_attention_list.py':56,'test_working_lifecycle.py':54,'test_standing_admission.py':54,'test_entered_names.py':48,
@@ -79,6 +80,7 @@ const GATE_PLACEMENT={
   'test_failed_m4b_retry.py':2,'test_progress_rows.py':2,'test_library_settings.py':2,'test_status_under_load.py':2,'test_backup_rule.py':2,'test_collection_identity.py':2,'test_set_release.py':2,
   'test_publication_consumers.py':3,'test_migration_operation.py':3,'test_derived_migration.py':3,'test_local_identity.py':3,'test_inplace_m4b.py:-EligiblePathTests,FallbackTests,RecoveryWiringTests':3,'test_source_cleanup.py':3,'test_list_speed.py':3,'test_folder_unit_grouping.py':3,
   'test_working_precision.py':4,'test_storage_cleanup.py':4,'test_automatic_media_policy.py':4,'test_standing_admission.py':4,'test_published_snapshot_lifecycle.py':4,'test_progress.py':4,'test_multisource.py':4,'test_review_backend.py':4,'test_source_proofs.py':4,'test_no_evidence.py':4,
+  'test_launch_held_cleanup.py':5,  // 0.30.0 R2-1 (130 s): the lightest worker here (185 s projected without it)
   'test_working_lifecycle.py':5,'test_attention_failure_policy.py':5,'test_destination_admission.py':5,'test_groups_filters.py':5,'test_anthology_volumes.py':5,'test_public_work_identity.py':5,'test_folder_structure.py':5,'test_catalog_busy.py':5,'test_destination_override.py':5,
   'test_working_cleanup.py':6,'test_local_identity_fixes.py':6,'test_catalog_paging.py':6,'test_safety_boundaries.py':6,'test_approve_as_is.py':6,'test_join_parts.py':6,'test_ruling35.py':6,
   'test_automatic_processing.py':7,'test_mp3_tag_repair.py':7,'test_relocated_replacement.py':7,'test_series_research.py':7,'test_inplace_m4b.py:EligiblePathTests,FallbackTests,RecoveryWiringTests':7,'test_source_folders.py':7,'test_author_rules.py':7,'test_action_queue.py':7,

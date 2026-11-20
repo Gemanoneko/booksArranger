@@ -201,7 +201,17 @@ const joinButton=get('join-selected'),dialogText=()=>get('join-effects').childre
   run('queueState={queued:'+JSON.stringify([{id:'ap',action:'approve',book_id:'part-5',title:'Впусти меня 5',position:1,blocker:null}])+',running:null}');
   assert.equal(run('queueHint('+JSON.stringify(partRow(5))+')'),'Approve queued.','an Approve nothing blocks names no wait');
   run('queueState={queued:[],running:null}');
-  console.log('PASS Join into one book: button states, dialog (order, moves and focus, fields, Goes to, What happens, refusals, waiting), queued press with each part row\'s line and Cancel, outcome with Show it, jobs panel words; answer 9 row Cancel; A15 Keep as separate books on a joined book; the joined Book metadata line; D1 no waiting line without a blocker');
+  // 16. Futaba's QA, slice D item 2: the queue strip names no wait for an action nothing blocks (it read "It runs when the app
+  // is free."); with a blocker it still says what the action waits for.
+  run("view='candidates';filters[view]='output_attention'");
+  run('queueState={queued:'+JSON.stringify([{id:'ap',action:'approve',book_id:'part-5',title:'Впусти меня 5',position:1,blocker:null}])+',running:null};renderAttentionGroups()');
+  assert.equal(get('queue-line').textContent,'1 action waiting.');assert.equal(get('queue-line').hidden,false);
+  run('queueState={queued:'+JSON.stringify([{id:'ap',action:'approve',book_id:'part-5',title:'Впусти меня 5',position:1,blocker:null},{id:'jn',action:'join',book_id:'part-1',title:'Впусти меня',position:2,blocker:{kind:'operation',cause:'operation'}}])+',running:null};renderAttentionGroups()');
+  assert.equal(get('queue-line').textContent,'2 actions waiting, one at a time. First: Approve: Впусти меня 5.');
+  run('queueState={queued:'+JSON.stringify([{id:'ap',action:'approve',book_id:'part-5',title:'Впусти меня 5',position:1,blocker:{kind:'scan',cause:'scan'}}])+',running:null};renderAttentionGroups()');
+  assert.equal(get('queue-line').textContent,'1 action waiting. It runs when the library scan finishes. Stop scanning to run it sooner.','positive control: a real blocker is said');
+  run("queueState={queued:[],running:null};view='candidates';filters[view]='all'");
+  console.log('PASS Join into one book: button states, dialog (order, moves and focus, fields, Goes to, What happens, refusals, waiting), queued press with each part row\'s line and Cancel, outcome with Show it, jobs panel words; answer 9 row Cancel; A15 Keep as separate books on a joined book; the joined Book metadata line; D1 no waiting line without a blocker; the queue strip without a blocker');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
 const Module=require('node:module');const m=new Module(path.join(__dirname,'test_join_frontend.js'),module);m.filename=path.join(__dirname,'test_join_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);
