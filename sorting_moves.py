@@ -173,6 +173,22 @@ def _held_series(db):
     return found
 
 
+def _placed_series(db):
+    """{job_id: the path series backfill wrote it at}: an approved book whose series is written in its own folder under its
+    new name (item 2) and that still waits for, or lost, its move into the series folder."""
+    if not _table(db, 'series_backfill'):
+        return {}
+    found = {}
+    for job_id, record in db.execute("SELECT job_id,record FROM series_backfill WHERE state='done'"):
+        try:
+            record = json.loads(record)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict) and record.get('move_approved') and record.get('new_path'):
+            found[job_id] = record['new_path']
+    return found
+
+
 RETAINED = 'Kept as published while the data folder move is unfinished; left as it is'
 SAME_TARGET = 'Another listed book would get the same name; left as it is'
 
@@ -194,6 +210,10 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
         replaced = {r[0] for r in db.execute('SELECT parent_job_id FROM audiobook_replacements')} | {r[0] for r in db.execute('SELECT replacement_job_id FROM audiobook_replacements')}
     kept = {r[0] for r in db.execute('SELECT job_id FROM kept_files')} if _table(db, 'kept_files') else set()
     series = _held_series(db)
+    # Futaba's 0.30.0 slice C delta: an approved book whose series was written in its own folder and whose move into the
+    # series folder then failed for good (a stranger file at the target) read as "where the app files it" and got no line:
+    # stuck in silence. It is planned from where series backfill put it: listed again, or refused with the reason.
+    placed = _placed_series(db)
     rows = db.execute("SELECT job_id,manifest,output FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY job_id").fetchall()
     for row in rows:
         row = {'job_id': row[0], 'manifest': row[1], 'output': row[2]}
@@ -215,12 +235,14 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
             continue
         try:
             # A moved book: the receipt keeps the published place, the move chain the new one (book_move).
-            found = target(db, row, rules, output_root, series.get(row['job_id']), effective=_moved(db, row['job_id']))
+            found = target(db, row, rules, output_root, series.get(row['job_id']), placed=placed.get(row['job_id']), effective=_moved(db, row['job_id']))
         except Exception as error:  # one malformed record never hides the others
             refused.append({'job_id': row['job_id'], 'from': current, 'refused': 'Could not be planned: ' + (str(error) or type(error).__name__)[:200], 'items': []})
             continue
         if not found:
             continue
+        if row['job_id'] in placed and 'to' in found:
+            found['placed'] = True  # its series is in the file already: an approval only moves it (sorting_moves_apply)
         if 'refused' not in found:
             why = (RETAINED if row['job_id'] in retained else
                    'Part of a replacement or a newer version; left as it is' if row['job_id'] in replaced else
