@@ -398,6 +398,11 @@ def explain(kind, item, jobs, queue_running=None):
             value['cause'] = 'checking'
         else:
             value['cause'] = 'unknown'
+    elif kind == 'paused':
+        # 0.30.0 R2-1 (ruling, item 6): a press restored from before a restart waits for Start under a saved Pause; the page
+        # words it as the paused conversion queue ("… Press Resume audiobook jobs.").
+        conversions = jobs.get('queued_conversions') if type(jobs.get('queued_conversions')) is int else 0
+        value.update(cause='queue_paused', count=conversions)
     elif kind == 'operation':
         if isinstance(queue_running, dict):
             value.update(cause='action', title=queue_running.get('title') or None, book_id=queue_running.get('book_id'))

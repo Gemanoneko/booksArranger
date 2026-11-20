@@ -102,6 +102,11 @@ class WorkTests(unittest.TestCase):
         self.assertEqual(explain('retry_run', {}, jobs_state(retry_all={'state': 'running', 'done': 12, 'total': 80}))['count'], 68)
         for kind in ('scan', 'automatic', 'book', 'loading'):
             self.assertEqual(explain(kind, {}, jobs_state())['cause'], kind)
+        # 0.30.0 R2-1 (ruling, item 6): a press restored from before a restart that waits for Start under a saved Pause is worded
+        # as the paused conversion queue, with the books waiting (none here: the jobs line itself reads Completed).
+        self.assertEqual(explain('paused', {'book_id': 'x'}, jobs_state(state='Completed')),
+                         {'kind': 'paused', 'cause': 'queue_paused', 'title': None, 'book_id': None, 'count': 0})
+        self.assertEqual(explain('paused', {'book_id': 'x'}, jobs_state(state='Paused', queued_conversions=2))['count'], 2)
 
     def test_paused_work_has_rows_and_unstarted_work_waits(self):
         # Judy section 4: three paused cleanups and one queued conversion are 1 book waiting and 3 paused rows, never "4 books".

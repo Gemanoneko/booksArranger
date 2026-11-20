@@ -307,6 +307,10 @@ class MergeService:
         self.recovery=RecoveryRetention(self.storage_cleanup,guard=self._retention_guard)
         self.cleanup.recovery_status=self.recovery_status
         self._retention_stop=threading.Event();self._retention_wake=threading.Event();self._retention_thread=None;self._manual_recovery=None
+        # 0.30.0 R2-1 (ruling, item 7): a Pause saved before this launch holds the finished-book checks as an in-session Pause
+        # does (_maintenance_paused), until a Start ends it. Only them: the published check and the recovery-copy purges run
+        # as before (routine verified work; neither makes the jobs line read Running).
+        self._maintenance_saved_pause=self._jobs_pause_saved()
         # 0.22.2 (Futaba's 0.22.1 QA, m-3): Restart to update holds the background recovery pass at its next safe point;
         # Cancel, the bound or a failed close let it go on (desktop_backend). It used to run set after set while the update
         # waited for it (_post_current), up to the engine's 150 s bound at 8,000 books.
@@ -1096,7 +1100,7 @@ class MergeService:
         with _BULK_LOCK:
             if not self._start_allowed(generation):raise StartRefused('stale','Start was superseded by Pause or closing.')
             if cleanups:self._automatic_cleanup_generation=generation
-            self._maintenance_paused=False
+            self._maintenance_paused=False;self._maintenance_saved_pause=False
             # Senua R-m6: the admitted start clears "Paused by you." at once, also while cleanup owns the handoff and the
             # queue's stop flag is still set; the saved run intent, not this display record, says what a restart resumes.
             with connect(self.inventory.database) as db:__import__('pause_state').clear(db,'jobs')
@@ -1386,7 +1390,7 @@ class MergeService:
         self._background_guard()
         if not self.operation_lock.acquire(blocking=False):raise InterruptedError('Foreground work is active')
         try:
-            if self.__dict__.get('_maintenance_paused') or self._worker_active():raise InterruptedError('Finished-book checks paused')
+            if self._maintenance_held() or self._worker_active():raise InterruptedError('Finished-book checks paused')
             self._no_scan();self._background_guard()
             self._maintenance_owner=threading.current_thread()
             with connect(self.inventory.database) as db:
@@ -1399,10 +1403,15 @@ class MergeService:
             self._maintenance=None;self._maintenance_owner=None
             self.operation_lock.release()
 
+    def _maintenance_held(self):
+        """Finished-book checks wait: an in-session Pause (_maintenance_paused) or a Pause saved before this launch that no
+        Start has ended (_maintenance_saved_pause, 0.30.0 R2-1)."""
+        return bool(self.__dict__.get('_maintenance_paused') or self.__dict__.get('_maintenance_saved_pause'))
+
     def _storage_guard(self):
         self._no_scan();self._background_guard()
         maintenance=threading.current_thread() is self.__dict__.get('_maintenance_owner')
-        if maintenance and self.__dict__.get('_maintenance_paused'):
+        if maintenance and self._maintenance_held():
             if self.__dict__.get('_maintenance'):self._maintenance.update(state='stopping',cancel_requested=True)
             raise InterruptedError('Finished-book checks stopped; remaining files retained')
         if not maintenance and self.jobs._stop.is_set():
@@ -1534,7 +1543,7 @@ class MergeService:
         maintenance=isinstance(key,tuple) and key[0] in ('folder','temporary')
         stopped=self.__dict__.get('_closing') or self.draining or self._retention_stop.is_set() or self.__dict__.get('_update_hold') is not None and self._update_hold.is_set()
         scheduled=bool(deadline is not None and thread and thread.is_alive() and not stopped
-                       and not (maintenance and self.__dict__.get('_maintenance_paused'))
+                       and not (maintenance and self._maintenance_held())
                        and key not in self.__dict__.get('_purge_tried',set()))
         return {'retryable':scheduled,'retry_at':time.time()+max(0,deadline-time.monotonic()) if scheduled else None}
 
@@ -1642,11 +1651,16 @@ class MergeService:
     NO_ADMITTED_START=-1
 
     def _jobs_pause_saved(self):
-        """A jobs Pause saved in the catalog that no Start has ended yet: Sergei's, or a safety hold (AudioJobs._hold_queue,
-        which does not end the current Start). An unreadable catalog counts as paused."""
+        """A jobs Pause saved in the catalog and in force until a Start ends it: Sergei's, a safety hold (AudioJobs._hold_queue,
+        which does not end the current Start) or one an older version saved; the restart restore's own test
+        (restore_work_after_restart). The record a Quit or an update leaves over a running queue is not one: the restore
+        resumes that work. An unreadable catalog counts as paused. Read by the held-cleanup sweep, the finished-book checks
+        at launch and the restored queued presses (action_queue.WAITS_FOR_START)."""
+        import pause_state
         try:
-            with connect(self.inventory.database) as db:return __import__('pause_state').read(db,'jobs') is not None
+            with connect(self.inventory.database) as db:saved=pause_state.read(db,'jobs')
         except sqlite3.Error:return True
+        return bool(saved) and (saved.get('origin') in ('user','interrupted') or not pause_state.own(saved))
 
     def _finish_held_cleanups(self,generation=None):
         """Only a Start admitted in this launch authorizes this automatic held-cleanup sweep: never at launch, never while

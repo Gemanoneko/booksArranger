@@ -23,10 +23,13 @@ import subprocess
 import sys
 import time
 import unittest
+import uuid
 
 import test_merge_service as fixtures
+from action_queue import QueueStore
 from scanner import Inventory
 from merge_service import MergeService
+from source_cleanup import LEGACY_IDENTITY_HOLD
 
 REPO = Path(__file__).resolve().parents[1]
 REFUSED = 'Persisted recovery ancestry changed'
@@ -51,8 +54,9 @@ class LaunchHeldCleanupTests(unittest.TestCase):
         self.engine = None
 
     # ------------------------------------------------------------------ the 0.29.0 book, built for real
-    def held_book(self, paused):
-        """The converted book with its cleanup held as 0.29.0 left Brom's; `paused`: Sergei paused before quitting."""
+    def held_book(self, paused, reason=REFUSED, queued=False):
+        """The converted book with its cleanup held as 0.29.0 left Brom's; `paused`: Sergei paused before quitting. reason: the
+        hold's (an identity hold offers Retry cleanup); queued: his Retry cleanup press was queued and saved at Quit."""
         self.sorted = self.base / 'Sorted';self.sorted.mkdir()
         roots = dict(self.inv.roots);database = self.inv.database;self.service.close()
         self.inv = Inventory(database, roots, audiobook_sources=[roots['Audiobooks']], output_root=str(self.sorted))
@@ -74,12 +78,19 @@ class LaunchHeldCleanupTests(unittest.TestCase):
         # The row exactly as 0.29.0's hold() left Brom's after the refusal: needs attention, that reason, no hold cause.
         with contextlib.closing(sqlite3.connect(self.inv.database, timeout=10)) as db, db:
             db.execute("UPDATE source_cleanup SET state='needs_attention',reason=?,updated=? WHERE id=?",
-                       (REFUSED, '2026-11-18T10:09:00.000000+00:00', self.id))
+                       (reason, '2026-11-18T10:09:00.000000+00:00', self.id))
         self.originals = [str(path) for path in self.sources]
         self.copies = sorted(str(path) for path in (self.base / 'source-recovery' / self.id).iterdir())
         self.assertEqual(len(self.copies), len(self.originals), 'positive control: every recovery copy is made')
+        if queued:
+            self.assertTrue((self.service.cleanup.identity_retry(self.id) or {}).get('allowed'), 'positive control: the hold offers Retry cleanup')
+            revision = self.service.reviews._row('Audiobooks', row['id'])['revision']
         if paused:self.service.pause()  # Sergei's Pause, saved; then Quit
         self.service.close()
+        if queued:  # his queued Retry cleanup, saved at Quit as the action queue saves it (ActionQueue._persist)
+            press = {'id': str(uuid.uuid4()), 'action': 'cleanup', 'book_id': row['id'], 'title': 'Book', 'queued_at': time.time(),
+                     'args': {'identity_retry': True, 'revision': revision, 'job_id': job, 'cleanup_id': self.id}}
+            QueueStore(self.inv.database).save([press], closing=True)
         self.before = self.snapshot()
         self.roots_file = self.base / 'roots.json';self.roots_file.write_text(json.dumps(roots), encoding='utf-8')
 
@@ -185,6 +196,42 @@ class LaunchHeldCleanupTests(unittest.TestCase):
         self.held_book(paused=False)
         self.relaunch()
         self.watch_launch(paused=False)
+
+    # ------------------------------------------------------------------ the coordinator's ruling on the other launch paths
+    def queue(self):
+        status, state = self.call('/api/state?library=Audiobooks', method='GET')
+        self.assertEqual(status, 200, state)
+        return state.get('queued_actions') or [], state.get('queue_outcomes') or []
+
+    def test_a_restored_retry_cleanup_waits_for_start_under_a_saved_pause_then_runs(self):
+        # Item 6: a press restored from before a restart that changes files waits for Start while a saved Pause is in force,
+        # worded as the paused conversion queue, and runs after his Resume with its checks again.
+        self.held_book(paused=True, reason=LEGACY_IDENTITY_HOLD, queued=True)
+        self.relaunch()
+        self.watch_launch(paused=True)  # 91ffe1e: the restored Retry cleanup ran here, removing the originals
+        waiting, _ = self.queue()
+        self.assertEqual([(item['action'], item.get('restored'), (item.get('blocker') or {}).get('cause')) for item in waiting],
+                         [('cleanup', True, 'queue_paused')])
+        status, answer = self.call('/api/audiobook/resume', {})
+        self.assertEqual(status, 200, answer)
+        deadline = time.monotonic() + 120
+        while self.snapshot()['row'][0] != 'completed':
+            self.assertLess(time.monotonic(), deadline, 'the restored press never ran after Resume: ' + repr(self.queue()))
+            time.sleep(.25)
+        self.assertFalse(any(os.path.exists(path) for path in self.originals), 'the Retry cleanup removed the originals')
+        waiting, outcomes = self.queue()
+        self.assertEqual(waiting, []);self.assertEqual([(item['action'], item['result']) for item in outcomes], [('cleanup', 'done')])
+
+    def test_a_saved_pause_holds_the_finished_book_checks_at_launch_until_start(self):
+        # Item 7: as an in-session Pause holds them. The published check and the recovery-copy purges run as before.
+        self.service.pause()  # Sergei's Pause, saved; then Quit
+        self.service.close()
+        self.service = MergeService(self.inv, self.base / 'cache')  # the next launch's engine, over the same catalog
+        with self.assertRaisesRegex(InterruptedError, 'Finished-book checks paused'):
+            with self.service._maintenance_book('a-finished-book'):pass
+        self.assertFalse(self.service.jobs.background_stop.is_set(), 'the published check is left as it was')
+        self.service.resume();self.wait()  # his Start
+        with self.service._maintenance_book('a-finished-book'):pass  # positive control: after Start they run
 
 
 def setUpModule():

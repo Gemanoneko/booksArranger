@@ -586,6 +586,33 @@ class PersistentQueueTests(unittest.TestCase):
             pause_state.record_shutdown(db, 'quit')
             db.execute('UPDATE desktop_shutdown SET at=?', (when.isoformat(),))
 
+    def test_under_a_saved_pause_a_restored_press_that_changes_files_waits_for_start_and_the_others_run(self):
+        # 0.30.0 R2-1 (the coordinator's ruling, item 6): nothing flips a saved Paused state to Running at launch. The relaunch
+        # itself is in test_launch_held_cleanup; this pins the queue's rule.
+        server, queue = self.server()
+        server.scanning = True
+        self.press(queue, 0)  # Retry: queues audiobook work
+        queue.enqueue('dismiss', self.book[1], 'Book 1', {'revision': 3})  # Remove from list: writes the catalog only
+        self.shutdown(action_queue._now() - __import__('datetime').timedelta(seconds=5))
+        queue.close()
+        later, again = self.server(started=False)
+        paused = {'on': True};ran = []
+        later.merge._jobs_pause_saved = lambda: paused['on']  # Sergei's Pause, saved before the restart
+        later.merge.restored_press = lambda: mock.MagicMock(__enter__=lambda *_: None, __exit__=lambda *_: False)
+        later.run_queued = lambda item: (ran.append(item['action']), {'result': 'done'})[1]
+        later.merge.answers = {'retry': {'position': 1}}
+        self.assertEqual(again.restore(), 2)
+        self.assertTrue(until(lambda: ran == ['dismiss']), 'a restored press that only writes the catalog runs')
+        self.assertTrue(until(lambda: [item['blocker'] for item in again.view()['queued_actions']] == [{'kind': 'paused'}]))
+        time.sleep(.2)
+        self.assertEqual(later.merge.calls, [], 'the restored Retry waits for Start under the saved Pause')
+        # A press made in this session behaves as today: nothing else waits ahead of it, so it runs in its own request.
+        self.assertIsNone(self.press(again, 2), 'a parked restored press holds no new press back')
+        self.assertIsNone(again.waiting('retry', self.book[3]))
+        paused['on'] = False  # his Resume or Start ends the saved Pause
+        self.assertTrue(until(lambda: [args[1] for _name, args in later.merge.calls] == [self.book[0]]), 'then it runs, its checks again')
+        self.assertTrue(until(lambda: self.saved() == []))
+
     def test_waiting_actions_are_saved_and_come_back_in_order_after_a_restart(self):
         server, queue = self.server()
         server.scanning = True

@@ -12,7 +12,8 @@ acknowledges it or 24 h pass, so a reload still shows it.
 Blocker kinds (Judy 1.2; the page words them): 'scan' a library scan runs; 'retry_run' Retry all or Retry selected
 runs (Retry and Repair only); 'book' the book itself is converting, queued for conversion or being researched (Delete
 only); 'operation' another operation holds the app's operation lock (Delete only: Retry and Repair take no lock), or
-another queued action runs. A fresh press while others wait goes to the back even when nothing blocks it.
+another queued action runs; 'paused' a press restored from before a restart that changes files waits for Start under a
+saved Pause (WAITS_FOR_START). A fresh press while others wait goes to the back even when nothing blocks it.
 
 0.30.0 (Sergei, Q4: remember): the waiting actions are kept in the catalog (QueueStore) and come back at the next start
 (restore), across Quit, Restart to update and a crash. Quit and an update stop the queue (nothing runs while the app
@@ -42,7 +43,14 @@ ACTIONS = ('retry', 'repair', 'delete',
            'destination', 'move',
            # 0.30.0 item D: Join into one book (book_join), queued under its first part, holding every part's row.
            'join')
-KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book', 'loading', 'jobs', 'automatic')
+KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book', 'loading', 'jobs', 'automatic', 'paused')
+# 0.30.0 R2-1 (the coordinator's ruling, item 6): nothing flips a saved Paused state to Running at launch. A press restored
+# from before a restart that changes files or queues audiobook work waits ('paused': the page's "the conversion queue is
+# paused … Press Resume audiobook jobs.") while a jobs Pause saved before it is in force (Sergei's or a safety hold:
+# MergeService._jobs_pause_saved), and runs after his Resume or Start, every check again as always. A restored press that
+# only writes the catalog (Keep as separate books, Scan again, Remove from list, names, a destination, a join, a scan)
+# runs as before, and a press made in this session keeps today's behaviour.
+WAITS_FOR_START = ('retry', 'repair', 'delete', 'copy', 'approve', 'convert', 'cleanup', 'restore', 'move')
 # The presses a library scan holds back (their checks read the catalog the scan regroups), as their routes refused them.
 SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'scan_again', 'copy', 'join')
 # Always queued, even with nothing in the way: their checks (every file probed and hashed) take the time a page must not
@@ -288,7 +296,14 @@ class ActionQueue:
     def _head_kind(self):
         if self.running is not None:
             return 'operation'
-        return (self.items[0]['blocker'] or 'operation') if self.items else 'operation'  # behind a head that waits for nothing: the head
+        waiting = self._unparked()
+        if self.items and not waiting:
+            return None  # only restored presses parked for Start (R2-1): a press made now runs as with an empty queue
+        return (waiting[0]['blocker'] or 'operation') if waiting else 'operation'  # behind a head that waits for nothing: the head
+
+    def _unparked(self):
+        """The waiting actions not parked for Start (blocker 'paused': a restored press under a saved Pause, R2-1)."""
+        return [item for item in self.items if item.get('blocker') != 'paused']
 
     # ------------------------------------------------------------------ presses
     def enqueue(self, action, book_id, title, args, always=False, receipt=None):
@@ -333,8 +348,8 @@ class ActionQueue:
                 return self._answer(same)
             if same is not None:
                 raise ValueError('This book already has a queued action. Cancel it first.')  # one per row (Judy 1.1)
-            if kind is None and not self.items and self.running is None and not (always or action in ALWAYS):
-                return None
+            if kind is None and not self._unparked() and self.running is None and not (always or action in ALWAYS):
+                return None  # nothing ahead but restored presses parked for Start (R2-1): it runs now, as with an empty queue
             if len(self.items) >= LIMIT:
                 raise QueueFull('Too many queued actions. Wait for some to run.')
             item = {'id': str(uuid.uuid4()), 'action': action, 'book_id': book_id, 'title': title, 'args': copy.deepcopy(args),
@@ -615,18 +630,35 @@ class ActionQueue:
                 self._persist()  # a save the catalog refused is tried again
             if head is None:
                 continue
+            # 0.30.0 R2-1 (ruling, item 6): restored presses held for Start (WAITS_FOR_START, a saved Pause in force) are parked:
+            # they keep their place and their 'paused' blocker while the first other action runs, so a press made in this
+            # session behaves as it does today. One catalog read per pass, only while a restored press of that kind waits.
+            with self.lock:
+                restored = any(item.get('restored') and item['action'] in WAITS_FOR_START for item in self.items)
+            paused = restored and self._paused_for_start()
+            with self.lock:
+                parked = {item['id'] for item in self.items if paused and item.get('restored') and item['action'] in WAITS_FOR_START}
+                head = next((item for item in self.items if item['id'] not in parked), None)
+                if head is None:
+                    for item in self.items:
+                        item['blocker'] = 'paused'
+                    self.changed.wait(self.poll)
+                    continue
             kind = self.item_blocker(head)
             with self.lock:
                 if self.closed:
                     return
-                if not self.items or self.items[0] is not head:
+                if head not in self.items:
                     continue  # cancelled meanwhile
                 if kind is not None:
                     for item in self.items:
-                        item['blocker'] = kind
+                        item['blocker'] = 'paused' if item['id'] in parked else kind
                     self.changed.wait(self.poll)
                     continue
-                self.items.pop(0)
+                for item in self.items:
+                    if item['id'] in parked:
+                        item['blocker'] = 'paused'
+                self.items.remove(head)
                 self.running = head
             self._persist()  # it runs now: an action is never run twice after a crash
             if not self._admit():
@@ -660,9 +692,21 @@ class ActionQueue:
                     pass
 
     def item_blocker(self, item, held=0):
-        """blocker() for a queued action, with the job its args name."""
+        """blocker() for a queued action, with the job its args name; a restored press that changes files or queues
+        audiobook work also waits for Start while a saved jobs Pause is in force ('paused', WAITS_FOR_START)."""
         args = item.get('args')
-        return self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item))
+        kind = self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item))
+        if kind != 'loading' and item.get('restored') and item['action'] in WAITS_FOR_START and self._paused_for_start():
+            return 'paused'
+        return kind
+
+    def _paused_for_start(self):
+        merge = getattr(self.server, 'merge', None)
+        saved = getattr(merge, '_jobs_pause_saved', None)
+        try:
+            return bool(saved()) if callable(saved) else False
+        except Exception:
+            return True  # unknown: a restored press waits rather than run beside a Pause it can't see
 
     def blocker_after(self, item):
         """The blocker of an action that came back to wait, read while it still holds its own admission (held=1, M1)."""
