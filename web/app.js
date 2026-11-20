@@ -1655,7 +1655,8 @@ function renderActivities(shown,jobs,unread=[],asOf=''){
 }
 function updateActivity(view,now){
   const row=view.row,running=row.state==='running' || row.state==='pausing',isMeasured=measured(row);
-  const finishing=isMeasured && running && row.done>=row.total,determinate=isMeasured && !finishing;
+  const approveFiles=row.kind==='action' && row.label_key==='approve' && row.unit==='files';
+  const finishing=isMeasured && running && row.done>=row.total && !approveFiles,determinate=isMeasured && !finishing;
   const label=workLabel(row),subject=rowSubject(row),step=workStep(row,finishing),detail=workDetail(row,finishing);
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
   const progressKey=[row.done,row.fraction,row.step,row.subject].join('\u001f');if(view.progressKey!==progressKey){view.progressKey=progressKey;view.progressAt=now;}
@@ -1666,7 +1667,7 @@ function updateActivity(view,now){
   view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:repairTip(row) || stepShown;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',false);
   const fraction=typeof row.fraction==='number' && row.fraction>=0 && row.fraction<=1?row.fraction:row.done/row.total;
-  if(determinate){const value=Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}
+  if(determinate){const value=approveFiles && row.done===row.total?100:Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}
   else if(view.bar.hasAttribute?.('value')!==false)view.bar.removeAttribute('value');
   view.bar.setAttribute('aria-label',label+(subject?': '+subject:''));view.bar.setAttribute('aria-valuetext',[step,detail].filter(Boolean).join(', '));
   // Elapsed counts from the job's start (the engine's, or the first poll that saw it); it freezes while paused.
