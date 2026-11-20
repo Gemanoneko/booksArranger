@@ -433,7 +433,9 @@ def output_space_required(source_bytes, durations, encoding, count):
     duration=sum(durations);rate=encoding['sample_rate']
     if not math.isfinite(duration) or type(count) is not int or count!=len(durations) or type(rate) is not int or not 8000<=rate<=192000:
         raise ValidationError('Working-space estimate has invalid complete-source bounds')
-    payload=source_bytes if encoding.get('mode')=='copy' else math.ceil(duration*(encoding['bitrate']/8+rate/1024*128))
+    if encoding.get('mode')=='alac_reencode':
+        payload=math.ceil(duration*(rate*encoding['channels']*4+rate/1024*128))
+    else:payload=source_bytes if encoding.get('mode')=='copy' else math.ceil(duration*(encoding['bitrate']/8+rate/1024*128))
     return max(source_bytes,payload)+count*4096+16*1024*1024
 
 
@@ -721,6 +723,16 @@ def _source_duration(manifest,item,path,stage,stop,duration,*,source_index=None)
         raise failed from error
 
 
+def _automatic_encoding(manifest,profiles):
+    sources=manifest['sources']
+    single=len(sources)==1 and Path(sources[0]['path']).suffix.lower()=='.m4b'
+    encoding=choose_automatic_encoding(profiles,single_m4b=single)
+    if single and encoding.get('codec')=='alac' and (sources[0]['path'],sources[0]['sha256']) in (_minor() or {}):
+        # Copying would carry the broken packet into the output. Keep the original ALAC rate and channels.
+        return encoding|{'mode':'alac_reencode','selection':'lossless_playable_alac'}
+    return encoding
+
+
 def check_working_space(manifest, stage, stop, report=None):
     if shutil.disk_usage(stage).free<sum(item['size'] for item in manifest['sources'])+64*1024*1024:
         raise OSError(errno.ENOSPC,'Insufficient staging space before source admission; originals retained')
@@ -740,7 +752,7 @@ def check_working_space(manifest, stage, stop, report=None):
             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
             durations.append(_source_duration(manifest,item,path,stage,stop,duration,source_index=index))
     if manifest.get('profile')==AUTOMATIC_PROFILE:
-        encoding=choose_automatic_encoding(profiles,single_m4b=len(profiles)==1 and Path(manifest['sources'][0]['path']).suffix.lower()=='.m4b')
+        encoding=_automatic_encoding(manifest,profiles)
     elif manifest.get('profile')==PROFILE:encoding=choose_encoding(profiles)
     elif manifest.get('profile')==LEGACY_PROFILE:encoding={'bitrate':160000,'channels':2,'sample_rate':44100}
     else:raise ValidationError('Unsupported frozen encoding profile')
@@ -891,7 +903,7 @@ def _create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_ob
                         encoding=choose_encoding(profiles)
                     elif manifest.get('profile')==AUTOMATIC_PROFILE:
                         if manifest.get('encoding_policy')!=freeze_automatic_policy(manifest['sources']):raise ValidationError('Frozen automatic encoding policy changed')
-                        encoding=choose_automatic_encoding(profiles,single_m4b=len(copies)==1 and Path(copies[0]).suffix.lower()=='.m4b')
+                        encoding=_automatic_encoding(manifest,profiles)
                     elif manifest.get('profile')==LEGACY_PROFILE:
                         encoding={'bitrate':160000,'channels':2,'sample_rate':44100,'selection':'legacy fixed profile'}
                     else:raise ValidationError('Unsupported frozen encoding profile')
@@ -1331,15 +1343,20 @@ def preservation_tags(manifest,tags=None):
 
 def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies,feed,executable,review,tags):
     output=stage/'checked.m4b'
+    reencode_alac=encoding.get('mode')=='alac_reencode'
+    single_m4b=reencode_alac or encoding.get('mode')=='copy'
     if feed is not None:source_input=['-protocol_whitelist','pipe','-format_whitelist','f64le','-f','f64le','-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-i','pipe:0']
     else:source_input=['-protocol_whitelist','file','-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf',
-      *(['-f','mov','-i',str(stage/original_copies[0])] if encoding.get('mode')=='copy' else ['-f','concat','-safe','1','-i',str(stage/'inputs.txt')])]
+      *(['-f','mov','-i',str(stage/original_copies[0])] if single_m4b else ['-f','concat','-safe','1','-i',str(stage/'inputs.txt')])]
     # A source accepted as playing through with a short glitch is read by the ordinary decoder; the new output is checked strictly.
     strict=['-xerror'] if feed is not None or all(_strict(stage/name) for name in original_copies) else []
     args=[executable,'-hide_banner','-v','error',*strict,'-nostdin','-n','-threads','2','-filter_threads','1',*source_input,'-f','image2','-i',str(cover)]
     chapters=[];terminal_corrections=[]
-    preserved=source_chapters(stage/original_copies[0],stage,stop,sum(durations)) if encoding.get('mode')=='copy' else []
-    if encoding.get('mode')=='copy' and manifest.get('source_chapters')!=preserved:
+    if reencode_alac:
+        # ALAC packet timestamps and chapters stay on the container clock, even across an undecodable packet.
+        encoding=encoding|{'source_presentation_seconds':_container_seconds(stage/original_copies[0],stage,stop)}
+    preserved=source_chapters(stage/original_copies[0],stage,stop,encoding.get('source_presentation_seconds',sum(durations))) if single_m4b else []
+    if single_m4b and manifest.get('source_chapters')!=preserved:
         raise ValidationError('Existing M4B chapters differ from the frozen complete source plan')
     if preserved:
         chapter_file=stage/'chapters.txt';text=';FFMETADATA1\n';chapters=preserved
@@ -1379,7 +1396,7 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
             text+=f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={chapter['start']}\nEND={chapter['end']}\ntitle={ffmetadata_escape(chapter['title'])}\n"
         write_generated(chapter_file,text)
         args+=['-f','ffmetadata','-i',str(chapter_file),'-map_chapters','2']
-    elif manifest.get('chapters') and encoding.get('mode')!='copy':
+    elif manifest.get('chapters') and not single_m4b:
         if len(manifest['chapters'])!=len(copies):raise ValidationError('Chapter plan must match the reviewed source boundaries')
         chapter_file=stage/'chapters.txt';text=';FFMETADATA1\n';position=0
         for name,duration in zip(manifest['chapters'],durations):
@@ -1389,7 +1406,10 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
         write_generated(chapter_file,text)
         args+=['-f','ffmetadata','-i',str(chapter_file),'-map_chapters','2']
     else:args+=['-map_chapters','-1']
-    args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1',*(['-c:a','copy'] if encoding.get('mode')=='copy' else ['-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2']),'-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
+    if reencode_alac:audio_args=['-c:a','alac','-threads:a','2']
+    elif single_m4b:audio_args=['-c:a','copy']
+    else:audio_args=['-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2']
+    args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1',*audio_args,'-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
     for name,value in tags.items():args+=['-metadata',name+'='+value]
     args+=(['-nostats'] if feed is not None else ['-progress','pipe:1','-stats_period','1','-nostats'])+['-f','mp4',str(output)]
     progress('Creating audio',{'duration':sum(durations),'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'encoding':encoding})
@@ -1410,19 +1430,20 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
         progress('Checking output',{})
         validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
         if terminal_corrections:validation['terminal_end_corrections']=terminal_corrections
-        if encoding.get('mode')=='copy':
+        if single_m4b and not reencode_alac:
             source_hash=audio_packet_hash(stage/original_copies[0],stage,stop,sum(durations))
             output_hash=audio_packet_hash(output,stage,stop,sum(durations))
             if source_hash!=output_hash:raise ValidationError('Remux changed the complete compressed audio payload')
             source_evidence=copied_audio_evidence(stage/original_copies[0],stage,stop,sum(durations))
             output_evidence=copied_audio_evidence(output,stage,stop,sum(durations))
             if source_evidence!=output_evidence:raise ValidationError('Remux changed the decoder configuration or relative audio packet timing')
-            source_pcm=native_pcm_evidence(stage/original_copies[0],stage,stop,sum(durations),encoding)
-            output_pcm=native_pcm_evidence(output,stage,stop,sum(durations),encoding)
-            if source_pcm!=output_pcm:raise ValidationError('Remux changed full native decoded audio samples or decoder trim effects')
-            validation['native_pcm_evidence']=output_pcm
             validation['copied_audio_evidence']=output_evidence
             validation['audio_packet_sha256']=output_hash
+        if single_m4b:
+            source_pcm=native_pcm_evidence(stage/original_copies[0],stage,stop,sum(durations),encoding,strict=not reencode_alac)
+            output_pcm=native_pcm_evidence(output,stage,stop,sum(durations),encoding)
+            if source_pcm!=output_pcm:raise ValidationError('Output changed full native decoded audio samples or decoder trim effects')
+            validation['native_pcm_evidence']=output_pcm
             validation['preserved_source_chapters']=chapters
         if chapter_format:
             validation['chapter_format']=chapter_format
@@ -1534,11 +1555,15 @@ def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
     duration,profile=audio_info(raw)
     encoding=encoding or {'bitrate':160000,'channels':2,'sample_rate':44100,'selection':'legacy fixed profile'}
     if profile!=(encoding.get('codec','aac'),str(encoding['sample_rate']),encoding['channels']):raise ValidationError('Output audio profile is incorrect')
-    if encoding.get('mode')=='copy' and encoding.get('channel_layout'):
+    if encoding.get('mode') in ('copy','alac_reencode') and encoding.get('channel_layout'):
         actual_audio=next(stream for stream in raw['streams'] if stream.get('codec_type')=='audio')
         if actual_audio.get('channel_layout')!=encoding['channel_layout']:raise ValidationError('Copied M4B channel layout changed')
     expected=sum(durations);tolerance=max(.25,len(durations)*.1)
-    if abs(duration-expected)>tolerance:raise ValidationError(f'Output duration differs from reviewed sources: expected{expected:.3f}s, actual{duration:.3f}s, tolerance{tolerance:.3f}s')
+    # A repaired ALAC can end before the last broken packet, or retain its timestamp gap in the movie timeline.
+    # Its complete playable sample count is checked separately below and its native PCM is verified losslessly.
+    presentation=encoding['source_presentation_seconds'] if encoding.get('mode')=='alac_reencode' else expected
+    if not min(expected,presentation)-tolerance<=duration<=max(expected,presentation)+tolerance:
+        raise ValidationError(f'Output duration differs from reviewed sources: expected{expected:.3f}s, actual{duration:.3f}s, tolerance{tolerance:.3f}s')
     pictures=[s for s in raw.get('streams',[]) if s.get('codec_type')=='video' and s.get('disposition',{}).get('attached_pic')==1]
     if len(pictures)!=1:raise ValidationError('Output must contain exactly one attached cover')
     if any(s.get('codec_type')=='video' and s not in pictures for s in raw.get('streams',[])):raise ValidationError('Unexpected video stream in audiobook output')
