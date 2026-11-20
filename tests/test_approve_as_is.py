@@ -415,4 +415,55 @@ class Ruling76aTests(ApproveFixture):
         self.assertEqual(saved['outcome'],'replanned','the pending automatic job is set aside and the book checked again with his names')
 
 
+class PressPassTests(ApproveFixture):
+    def test_an_approve_counts_each_pass_over_the_files_to_the_last_file_0_30_0(self):
+        # Futaba's 0.30.0 QA A delta, 2: an Approve of 300 tiny files counted only its last pass (the manifest's source check,
+        # reported before each file), so the row showed a count for the last part of the press and stopped at 299 of 300.
+        # The press reads each file (probe), each file's cover, then checks each file's bytes twice; each pass now counts its
+        # files, after each one, to the last.
+        from unittest import mock
+        import press_progress
+        for n in (1,2,3):tone(self.audio/'Unsorted'/'Dune Probe'/('%02d.mp3'%n),self.cover,album='Dune Probe',artist='Frank Herbert',title='Chapter %d'%n,track='%d/3'%n)
+        row=self.start()[0];calls=[]
+        with mock.patch.object(press_progress,'report',side_effect=lambda done,total,unit='files',step=None:calls.append((step,done,total,unit))):
+            self.service.approve_book(row['id'],row['revision'],title='Dune Probe',author='Frank Herbert')
+        self.assertEqual(list(dict.fromkeys(call[0] for call in calls)),['reading','covers','checking','confirming'],calls)
+        for step in ('reading','covers','checking','confirming'):
+            self.assertEqual([call[1:] for call in calls if call[0]==step],[(n,3,'files') for n in range(4)],step)
+        self.assertEqual(calls[-1],('confirming',3,3,'files'),'the last count the row shows is 3 of 3')
+
+
+class ResearchFramesTests(ApproveFixture):
+    def test_the_research_row_names_its_book_with_a_step_from_its_first_frame_to_its_last_0_30_0(self):
+        # Futaba's 0.30.0 QA A delta, 4: frames of a real run showed "Working" as the step the moment each book was taken
+        # (its source and stage were empty until its research began), and a last "3 of 3" frame with no book (the run
+        # forgot its book before its row left research).
+        from unittest import mock
+        for title,author in (('Alpha Book','Ann Writer'),('Beta Book','Bob Writer')):
+            tone(self.audio/'Unsorted'/title/(title+'.mp3'),self.cover,album=title,title=title,artist=author)
+        self.start();auto=self.service.automatic;seen=[];left=threading.Event()
+        update,status=auto._update,self.service.candidate_status
+        def recorded(id,**values):
+            if values.get('phase')=='conversion':seen.append(('leaves research',dict(auto.current or {})));left.set()
+            if values.get('phase')=='research':seen.append(('enters research',dict(auto.current or {})))
+            return update(id,**values)
+        def taken(identity):
+            if threading.current_thread() is auto.thread:seen.append(('taken',dict(auto.current or {})))
+            return status(identity)
+        with mock.patch.object(auto,'_update',side_effect=recorded),mock.patch.object(self.service,'candidate_status',side_effect=taken):
+            auto.start()
+            self.assertTrue(left.wait(60),'the run left research')
+            auto.stop();auto.thread.join(60)
+        firsts={}  # the first check after each book is taken (it is checked again later in its research)
+        for kind,current in seen:
+            if kind=='taken':firsts.setdefault(current.get('title'),current)
+        taken_frames=list(firsts.values())
+        self.assertEqual(list(firsts),['Alpha Book','Beta Book'],seen)
+        for current in taken_frames:self.assertTrue(current.get('stage'),'a step from the first frame: '+repr(current))
+        last=[current for kind,current in seen if kind=='leaves research']
+        self.assertEqual(last[0].get('title'),'Beta Book','the last frame still names its book')
+        first=[current for kind,current in seen if kind=='enters research']
+        self.assertEqual((first[0].get('title'),first[0].get('stage')),('Alpha Book','Researching work identity'),'the first frame names the first book')
+
+
 if __name__=='__main__':unittest.main()

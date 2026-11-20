@@ -1541,6 +1541,7 @@ const cleanupSteps={originals:'Removing original files','recovery copies':'Check
 // 1.5a: a running queued action's step; 1.5b: a saved decision's labels (row, Waiting item).
 const ACTION_STEPS={cleanup:'Rechecking the audiobook and recovery copies',retry:'Checking this book can be converted again',repair:'Checking the audiobook file for repair',delete:'Deleting files',copy:'Deleting files',
   approve:'Saving the approval',convert:'Queuing the files that remain',separate:'Splitting the folder into separate books',scan_again:"Reading this book's files again",dismiss:'Removing this book from the list',names:'Saving the names',names_forget:'Forgetting the saved names'};
+const APPROVE_PASSES={reading:[1,'Reading each file'],covers:[2,"Reading each file's cover"],checking:[3,'Checking each file'],confirming:[4,'Checking each file again']};
 const DECISION_LABELS={decision_names:['Saving names','Save names'],decision_approve:['Saving approval','Approve'],decision_review:['Saving review','Save review'],decision_tracks:['Saving track review','Save track review'],
   decision_metadata_choices:['Saving choices','Save choices'],decision_file_review:['Saving file review','Save file review']};
 function decisionLabel(key,waiting){return (DECISION_LABELS[key] || ['Saving your answers','Save your answers'])[waiting?1:0];}
@@ -1571,7 +1572,13 @@ function workStep(row,finishing){
     case 'source_folders':return prefix('Checking leftovers');
     case 'move':{const folder=moveFolderOf(row);return prefix(folder?`Copying to ${folder}`:'Copying the audiobook to its new folder');}
     case 'move_recovery':return prefix('Finishing moves the last restart interrupted');
-    case 'action':return prefix(row.label_key==='join'?`Joining ${plural(Number.isInteger(row.count)?row.count:0,'book','books')} into one book`:ACTION_STEPS[row.label_key] || 'Working');
+    case 'action':{
+      // Futaba's 0.30.0 QA A delta, 2: an Approve counts each pass over its files; the pass is named as a step, in the
+      // conversion steps' form, so a count that starts again reads as the next step.
+      const pass=row.label_key==='approve'?APPROVE_PASSES[row.step]:null;
+      if(pass)return prefix(`Step ${pass[0]} of 4 - ${pass[1]}`);
+      return prefix(row.label_key==='join'?`Joining ${plural(Number.isInteger(row.count)?row.count:0,'book','books')} into one book`:ACTION_STEPS[row.label_key] || 'Working');
+    }
     case 'bulk':case 'approve_selected':case 'release_selected':return prefix('One book at a time');
     case 'start_check':return row.state==='pausing'?'Pausing start checks…':'Checking each waiting book is ready to convert';
     case 'retry_check':return prefix('Checking this book can be converted again');

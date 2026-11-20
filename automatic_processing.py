@@ -300,6 +300,10 @@ class AutomaticProcessing:
             return 'unknown','Start availability is unknown. Waiting for the local server.'
         return None,''
     def status(self,*,jobs=None,scanning=None,server_closing=False):
+        # Futaba's 0.30.0 QA A delta, 4: the book is read before the run's phase. The worker leaves research first and
+        # forgets its book after, so a status that still reads research always has its book (a read in the other order
+        # straddled the two and showed a last "3 of 3" frame with no book).
+        current=dict(self.current) if self.current else None
         run=self._run_row();counts={'researching':0,'waiting':0,'held':0}
         with connect(self.database) as db:
             for r in db.execute('SELECT a.state,count(*) n FROM automatic_candidates a JOIN book_groups g ON g.id=a.id AND g.revision=a.revision AND g.fingerprint=a.fingerprint WHERE g.superseded=0 GROUP BY a.state'):
@@ -326,7 +330,7 @@ class AutomaticProcessing:
         return {'pause':pause,'start_block':{'kind':kind,'clears':kind in CLEARS} if kind and kind!='running' else None,
                 'start_pending':{'kind':pending['kind']} if pending else None,'state':state,'phase':'waiting' if armed else run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':self.volatile_failure['reason'] if self.volatile_failure else run['reason'] if run else '',
                 'restart_paused':bool(run and run['restart_paused']),'failure':diagnostic,'failure_durable':bool(diagnostic and not self.volatile_failure),'retry_help':RETRY_HELP if research_retry(run) and not self.volatile_failure else '',
-                'can_start':not bool(block),'start_block_reason':block,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None,
+                'can_start':not bool(block),'start_block_reason':block,'can_stop':active and state!='Stopping','research':counts,'current':current,
                 'automatic_retry_enabled':armed,'next_retry_at':self.next_retry_at if armed else None,'research_pass':self._research_pass(run,self.live_checkpoint)}
     @staticmethod
     def _research_pass(run,live=None):
@@ -586,6 +590,11 @@ class AutomaticProcessing:
             if thread.is_alive():raise TimeoutError('Automatic processing still closing at safe checkpoint')
     def _progress(self,title,source,stage):
         self.current={'title':title,'source':source,'stage':stage}
+    def _name_first(self,candidates):
+        """Futaba's 0.30.0 QA A delta, 4: the research row names the book it takes first from its first frame (it read
+        "0 of 3 books, Working" with no book until that book was taken). Set before the run's phase becomes research."""
+        first=next((r for r in candidates if not r.get('manual_conversion')),None)
+        if first is not None:self.current={'title':first.get('title_clue') or '','source':None,'stage':'Researching work identity'}
     def _jobs_now(self):
         """The audiobook jobs' state(): state, queued, cleanup_active, read now. 0.30.0: from the merge's live read. The wait
         loops below asked for the full status computation twice every 0.2 s while waiting for the queue (each one seconds
@@ -748,11 +757,11 @@ class AutomaticProcessing:
                     # in the catalog are researched now; the scan waits until conversion is idle (scan_after, below).
                     candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
                     checkpoint={'pending':[r['id'] for r in candidates if not r.get('manual_conversion')],'done':[],'scan_after':True};self.live_checkpoint=checkpoint
-                    self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
+                    self._name_first(candidates);self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
                 else:
                     self._discover();candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
                     checkpoint={'pending':[r['id'] for r in candidates if not r.get('manual_conversion')],'done':[]};self.live_checkpoint=checkpoint
-                    self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
+                    self._name_first(candidates);self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
                 if self._queue_to_resume():self._resume_queue()
@@ -790,7 +799,8 @@ class AutomaticProcessing:
                       checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
                   # 0.30.0 (Futaba's QA A): the book is named from the moment it is taken, not only once its research starts
                   # (the first row read "Researching books · 1 of 27 books · Working" with no book).
-                  self.current={'title':row.get('title_clue') or '','source':None,'stage':None}
+                  # Its QA A delta, 4: with its step too; the row read "Working" until the book's research began.
+                  self.current={'title':row.get('title_clue') or '','source':None,'stage':'Researching work identity'}
                   if row.get('manual_conversion'):
                       checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
                   job=self.merge.candidate_status(identity)
@@ -920,7 +930,9 @@ class AutomaticProcessing:
                   checkpoint['pending'].pop(0)
                   if identity not in checkpoint['done']:checkpoint['done'].append(identity)
                   self._update(id,checkpoint=json.dumps(checkpoint))
-              row=None;identity=None;phase='conversion';self.current=None;self._update(id,phase='conversion')
+              # Futaba's 0.30.0 QA A delta, 4: the run leaves research first, then forgets its last book; the other order
+              # showed a last research frame ("3 of 3") with no book.
+              row=None;identity=None;phase='conversion';self._update(id,phase='conversion');self.current=None
               while not self._idle_jobs():
                   if self.stop_event.wait(.2):raise InterruptedError()
                   if self._jobs_now()['state']=='Paused':raise InterruptedError()

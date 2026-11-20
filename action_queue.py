@@ -690,7 +690,9 @@ class ActionQueue:
         {'done', 'total', 'unit'}, or nothing."""
         import press_progress
         found = press_progress.read(self.__dict__.get('_runner_ident'))
-        return {'done': found[0], 'total': found[1], 'unit': found[2]} if found else {}
+        if not found:
+            return {}
+        return {'done': found[0], 'total': found[1], 'unit': found[2]} | ({'step': found[3]} if found[3] else {})
 
     def _run(self, item):
         """The outcome for the page, or None when a blocker refused it (it is queued again at the front)."""

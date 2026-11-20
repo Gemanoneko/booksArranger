@@ -222,6 +222,16 @@ class PressCountTests(unittest.TestCase):
         work = view(server, jobs_state(), {'state': 'Idle'}, {'queued_actions': [], 'queue_running': running}, False, None, None, None, 1000)
         row = next(row for row in work['rows'] if row['id'] == 'action:q1')
         self.assertEqual((row['done'], row['total'], row['unit']), (3, 300, 'files'))
+        # Futaba's 0.30.0 QA A delta, 2: the press names the pass it counts (an Approve reads, then checks, its files more than
+        # once), and the row carries it as its step.
+        press_progress.report(7, 300, 'files', 'covers')
+        try:
+            self.assertEqual(queue._progress(), {'done': 7, 'total': 300, 'unit': 'files', 'step': 'covers'})
+        finally:
+            press_progress.clear()
+        work = view(server, jobs_state(), {'state': 'Idle'}, {'queued_actions': [], 'queue_running': dict(running, done=7, step='covers')}, False, None, None, None, 1000)
+        row = next(row for row in work['rows'] if row['id'] == 'action:q1')
+        self.assertEqual((row['done'], row['total'], row['step']), (7, 300, 'covers'))
 
 
 class SnapshotFreshnessTests(unittest.TestCase):
@@ -251,6 +261,25 @@ class SnapshotFreshnessTests(unittest.TestCase):
         info = s.snapshot_info()
         self.assertGreaterEqual(info['snapshot_age_ms'], 44000, 'behind: the cue shows')
         self.assertTrue(info['refreshing'])
+
+    def test_the_finished_book_check_moving_on_is_no_backlog(self):
+        # Futaba's 0.30.0 QA A delta, 3: on a live-sized catalog the cue warned for 5-8 s about once a minute during the
+        # background finished-book check. Its progress is part of the quiet token (the status refreshes per checked book),
+        # so every checked book made the answer being served "older than the catalog" though no commit had happened.
+        s = self.service()
+        s.token = (7, 0, '{"done": 10}')  # (catalog data_version, controls, the check's progress): _quiet_token's shape
+        s._status_shared = SimpleNamespace(get=lambda compute, max_age: ((7, 0, '{"done": 3}'), {'n': 1}, time.monotonic() - 45), _flight=object())
+        s.status_snapshot(max_age=0.0)
+        self.assertLess(s.snapshot_info()['snapshot_age_ms'], 1000, 'only the check moved on: the counts are current')
+        # A real backlog still shows: a catalog commit since the computation began (or a control) makes its age count.
+        for token in ((8, 0, '{"done": 10}'), (7, 1, '{"done": 10}')):
+            s.token = token
+            s.status_snapshot(max_age=0.0)
+            self.assertGreaterEqual(s.snapshot_info()['snapshot_age_ms'], 44000, token)
+        # Busy (a job runs: no quiet token at all) is not quiet either.
+        s.token = None
+        s.status_snapshot(max_age=0.0)
+        self.assertGreaterEqual(s.snapshot_info()['snapshot_age_ms'], 44000)
 
 
 if __name__ == '__main__':

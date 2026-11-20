@@ -664,10 +664,18 @@ class MergeService:
         started,value,began=shared.get(lambda:(lambda began:(self._quiet_token(),self.state(),began))(time.monotonic()),max_age)
         # Confirmed current when the computation's quiet token is still this poll's (no commit, nothing running between);
         # otherwise the counts are as old as their computation (a slow or busy refresh shows its real age).
-        self._served_at=time.monotonic() if token is not None and started==token else began
+        self._served_at=time.monotonic() if token is not None and started==token or self._only_check_moved(token,started) else began
         if token is not None and started==token:
             with _QUIET_LOCK:self._quiet_state=(token,time.monotonic(),copy.deepcopy(value),began)
         return value
+
+    @staticmethod
+    def _only_check_moved(token,started):
+        """Futaba's 0.30.0 QA A delta, 3: the two quiet tokens (_quiet_token: catalog data_version, controls, the
+        finished-book check's progress) differ only in the check's progress. The check is part of the token so the status
+        refreshes once per checked book; that routine recompute is no backlog, so its counts read as current. A catalog
+        commit, a control or busy work (no token) still makes them as old as their computation."""
+        return isinstance(token,tuple) and isinstance(started,tuple) and len(token)==len(started)==3 and token[:2]==started[:2]
 
     def snapshot_info(self):
         """0.30.0 (Judy's spec, section 3): {'snapshot_age_ms': how long ago the last answer status_snapshot served began
@@ -4647,7 +4655,10 @@ class MergeService:
                 with generated_artifacts(self.reviews.cache) as artifacts:
                     try:
                         profiles=[];own_chapters={}
-                        for path in paths:
+                        # Futaba's 0.30.0 QA A delta, 2: each pass over the files counts them on the running press's row.
+                        import press_progress
+                        press_progress.report(0,len(paths),'files','reading')
+                        for counted,path in enumerate(paths,1):
                             raw_profile=probe(path,self.reviews.cache,stop)
                             member=next(m for m in current['members'] if m['path']==path)
                             observed={k.casefold():v for k,v in raw_profile.get('format',{}).get('tags',{}).items()}
@@ -4657,6 +4668,7 @@ class MergeService:
                             if len(streams)!=1:raise ValueError('Audio format needs an encoding decision')
                             stream=streams[0];profiles.append((stream.get('codec_name'),stream.get('sample_rate'),stream.get('channels'),stream.get('bit_rate'),stream.get('channel_layout')))
                             if Path(path).suffix.lower() in ('.m4b','.m4a'):own_chapters[path]=len(raw_profile.get('chapters') or [])
+                            press_progress.report(counted,len(paths),'files','reading')
                         # Sergei 2026-10-13: M4B parts with their own chapters are never joined. Only the .m4b
                         # members of a split book are re-filed (the fact regroups the catalog: each part becomes
                         # its own candidate); any other joined set is held as it is, every member kept together

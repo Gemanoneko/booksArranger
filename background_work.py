@@ -243,8 +243,9 @@ class Reader:
                                       **_amount(percent, 100, 'percent')))
             else:
                 # 0.30.0 (Futaba's QA A): a press that reports its count (press_progress) has an amount, e.g. an Approve's files.
+                # Futaba's QA A delta, 2: the pass it counts (step), when the press goes over its files more than once.
                 self.rows.append(_row(id='action:' + running['id'], kind='action', label_key=running.get('action'), subject=running.get('title') or '',
-                                      book_id=running.get('book_id'), count=running.get('n'),
+                                      book_id=running.get('book_id'), count=running.get('n'), step=running.get('step') if isinstance(running.get('step'), str) else None,
                                       **_amount(running.get('done'), running.get('total'), running.get('unit') or 'files')))
         for item in self.queue.get('queued_actions') or []:
             if isinstance(item, dict):

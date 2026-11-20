@@ -775,7 +775,10 @@ class CandidateReviewService:
             ffmpeg=shutil.which('ffmpeg')
             if ffmpeg:
                 with connect(self.inventory.database) as db:
-                    for m in (row['members'] if all_embedded else row['members'][:30]):
+                    # Futaba's 0.30.0 QA A delta, 2: an Approve reads every file's cover (all_embedded); its row counts them.
+                    import press_progress
+                    for counted,m in enumerate(row['members'] if all_embedded else row['members'][:30]):
+                        if all_embedded:press_progress.report(counted,len(row['members']),'files','covers')
                         if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
                         raw=db.execute('SELECT metadata FROM files WHERE root=? AND path=?',(self._source_root(row,library),m['path'])).fetchone()
                         streams=json.loads(raw[0]).get('probe',{}).get('streams',[]) if raw else []
@@ -789,6 +792,7 @@ class CandidateReviewService:
                         except InterruptedError:raise
                         except (OSError,ValueError,TimeoutError,subprocess.TimeoutExpired):pass
                         if not all_embedded:break
+                    if all_embedded and row['members']:press_progress.report(len(row['members']),len(row['members']),'files','covers')
             changed=choices!=ctx.get('cover_choices',[])
             if changed:ctx['cover_choices']=choices
             if ctx.get('cover_id') and not any(c['id']==ctx['cover_id'] for c in choices):ctx.update(metadata_approved=False,source_hashes={})
@@ -899,6 +903,10 @@ class CandidateReviewService:
             if chapters and not chapters_available([m for m in row['members'] if member_key(m['path']) in included]):raise ValueError('Chapter boundaries unavailable: source durations need checking')
             hashes={}
             if source_coverage_confirmed and order_confirmed:
+                # Futaba's 0.30.0 QA A delta, 2: each file's full hash is counted on the running press's row.
+                import press_progress
+                checking=[m for m in row['members'] if member_key(m['path']) in included]
+                if checking:press_progress.report(0,len(checking),'files','checking')
                 for m in row['members']:
                     key=member_key(m['path'])
                     if key not in included:continue
@@ -907,6 +915,7 @@ class CandidateReviewService:
                     hash=source_hash(m['path'],before,stop) if stop is not None else source_hash(m['path'],before);after=fresh_stat(m['path'])
                     if identity(before)!=identity(after):raise ValueError('Source changed — review required')
                     hashes[key]={'sha256':hash,'size':before.st_size,'modified':str(before.st_mtime_ns),'dev':before.st_dev,'ino':before.st_ino}
+                    press_progress.report(len(hashes),len(checking),'files','checking')
             ctx.update(track_order=order,included=included,source_coverage_confirmed=source_coverage_confirmed,order_confirmed=order_confirmed,chapters=chapters,track_actor=actor,track_utc=utc(),track_evidence=evidence_note,source_hashes=hashes)
             return self._write(row,ctx,effect=effect)
 
@@ -943,12 +952,13 @@ class CandidateReviewService:
                 reasons=[reason for reason in reasons if reason!=collision]
             if reasons:raise ValueError('; '.join(reasons))
             members={m['member_key']:m for m in row['members']};sources=[]
-            # 0.30.0 (Futaba's QA A): the running press shows how many source files are checked (press_progress).
+            # 0.30.0 (Futaba's QA A): the running press shows how many source files are checked (press_progress). Its QA A
+            # delta, 2: counted after each file, so the last count is N of N (it stopped at 299 of 300), as the last pass.
             import press_progress
             checking=[key for key in row['track_order'] if key in row['included']]
+            if checking:press_progress.report(0,len(checking),'files','confirming')
             for key in row['track_order']:
                 if key not in row['included']:continue
-                press_progress.report(len(sources),len(checking))
                 m=members[key];stored=ctx['source_hashes'][key];proof=held.get(os.path.normcase(os.path.abspath(m['path'])))
                 if proof is not None:
                     if proof['sha256']!=stored['sha256']:raise ValueError('Source changed — review required')
@@ -960,6 +970,7 @@ class CandidateReviewService:
                         if (source_hash(m['path'],stat,stop) if stop is not None else source_hash(m['path'],stat))!=stored['sha256']:raise ValueError('Source changed — review required')
                         source_proofs.remember(m['path'],stored['sha256'],stat)
                 sources.append({'path':m['path'],'size':stored['size'],'modified':stored['modified'],'sha256':stored['sha256'],'fingerprint':{'size':stored['size'],'modified':stored['modified']},'metadata':m['metadata']})
+                press_progress.report(len(sources),len(checking),'files','confirming')
             cover=row['selected_cover'];cover=cover|{'path':str(self.cover_file(cover['id']))}
             comments=future_audio_tags(row['metadata'],row['review'])['COMMENTS']
             manual_m4b=bool(len(sources)==1 and Path(sources[0]['path']).suffix.lower()=='.m4b' and manual_metadata.approved(row,ctx))
