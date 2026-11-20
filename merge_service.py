@@ -1555,7 +1555,7 @@ class MergeService:
         def work():
             while not self._retention_stop.is_set():
                 # Snapshot the existing admitted intent before any slow work/admission wait.
-                cleanup_generation=self.__dict__.get('_automatic_cleanup_generation',0)
+                cleanup_generation=self.__dict__.get('_automatic_cleanup_generation',self.NO_ADMITTED_START)
                 published_revisits=[]
                 # This distinct unpublished-working operation holds only its
                 # relevant job/native leases. No central operation/admission lock
@@ -1637,12 +1637,25 @@ class MergeService:
     # after the storage moves) is checked again by this sweep too, once per Start; CleanupJobs._work decides.
     RECHECKED_HOLDS=HELD_FOR_METADATA+(ANCESTRY_HOLD,)
 
+    # 0.30.0 R2-1: no Start admitted in this launch. Start generations begin at 0, so 0 cannot mean "none": as the default
+    # it let a fresh engine's own generation 0 authorize this sweep at launch, with nothing pressed and a saved Pause.
+    NO_ADMITTED_START=-1
+
+    def _jobs_pause_saved(self):
+        """A jobs Pause saved in the catalog that no Start has ended yet: Sergei's, or a safety hold (AudioJobs._hold_queue,
+        which does not end the current Start). An unreadable catalog counts as paused."""
+        try:
+            with connect(self.inventory.database) as db:return __import__('pause_state').read(db,'jobs') is not None
+        except sqlite3.Error:return True
+
     def _finish_held_cleanups(self,generation=None):
-        """Only an existing admitted Start intent can authorize this automatic held-cleanup sweep."""
-        if generation is None:generation=self.__dict__.get('_automatic_cleanup_generation',0)
-        allow=lambda:self._start_allowed(generation) and generation==self.__dict__.get('_automatic_cleanup_generation',0)
+        """Only a Start admitted in this launch authorizes this automatic held-cleanup sweep: never at launch, never while
+        a saved or in-session Pause is in force (0.30.0 R2-1). The restart restore no press made never authorizes it
+        (_authorize_automatic_cleanup with cleanups=False)."""
+        if generation is None:generation=self.__dict__.get('_automatic_cleanup_generation',self.NO_ADMITTED_START)
+        allow=lambda:self._start_allowed(generation) and generation==self.__dict__.get('_automatic_cleanup_generation',self.NO_ADMITTED_START)
         if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
-        if not allow():
+        if not allow() or self._jobs_pause_saved():
             self._settle_folder_jobs();return
         rows=[row for row in self.cleanup._rows("SELECT id,job_id,reason FROM source_cleanup WHERE state='needs_attention'") if row['reason'] in self.RECHECKED_HOLDS and row['id'] not in self._purge_tried]
         try:kept=self._kept_by_choice([row['job_id'] for row in rows]) if rows else set()

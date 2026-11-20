@@ -23,6 +23,7 @@ import uuid
 
 from merge_service import MergeService
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile
+import pause_state
 from scanner import connect
 from scratch_area import DEFAULT_SCRATCH, remove_own_area
 from source_cleanup import CleanupJobs
@@ -269,11 +270,13 @@ class HeldBeforeTheFixTests(MovesReplay, unittest.TestCase):
 
     def sweep(self, worker, started=True):
         """The held-cleanup sweep the retention pass runs once the queue is idle (MergeService._finish_held_cleanups);
-        only an admitted Start (`started`) authorizes it."""
+        only a Start admitted in this launch (`started`: the generation _authorize_automatic_cleanup records) authorizes it."""
         service = MergeService.__new__(MergeService)
         service.jobs = SimpleNamespace(_thread=None);service.cleanup = worker;service._purge_tried = set()
         service._kept_by_choice = lambda job_ids: set();service._settle_folder_jobs = lambda: None
-        service._start_allowed = lambda generation: started
+        service.inventory = SimpleNamespace(database=str(self.data / 'inventory.sqlite3'));service.draining = False
+        service._start_generation = 0
+        if started:service._automatic_cleanup_generation = 0
         service._finish_held_cleanups()
         if worker.thread is not None:
             worker.thread.join(120);self.assertFalse(worker.thread.is_alive())
@@ -299,6 +302,12 @@ class HeldBeforeTheFixTests(MovesReplay, unittest.TestCase):
         self.assertEqual(tuple(self.row(id)), ('needs_attention', REFUSED));self.assertIsNone(worker.thread)
         self.sweep(worker, started=False)  # no Start pressed: the held cleanup is left alone
         self.assertIsNone(worker.thread);self.assertEqual(tuple(self.row(id)), ('needs_attention', REFUSED))
+        # 0.30.0 R2-1: a Pause saved in the catalog holds it after a Start too: a safety hold records one without ending
+        # the Start (AudioJobs._hold_queue), read here from the real catalog.
+        with self.catalog(self.data) as db, db:pause_state.record(db, 'jobs', 'interrupted', 'Audiobook jobs stopped at a safety hold')
+        self.sweep(worker)
+        self.assertIsNone(worker.thread);self.assertEqual(tuple(self.row(id)), ('needs_attention', REFUSED))
+        with self.catalog(self.data) as db, db:pause_state.clear(db, 'jobs')
         # Negative controls: what the relocation records do not prove stays held, with the same reason, nothing removed.
         root = next(i for i, row in enumerate(honest['recovery_identity']) if _key(row[0]) == _key(str(self.old_root)))
         forged = json.loads(json.dumps(honest));forged['recovery_identity'][root][1:] = self.elsewhere[-2][1:]
