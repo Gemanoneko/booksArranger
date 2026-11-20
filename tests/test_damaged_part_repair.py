@@ -84,12 +84,15 @@ def truncate(path, count=2):
     data = path.read_bytes(); path.write_bytes(data[:-count])
 
 
-def corrupt(path):
-    """Garbage over audio frames in the middle of the media data: no container repair applies."""
+def corrupt(path, share=None):
+    """Garbage over audio frames in the middle of the media data: no container repair applies. Default: 1 KB from the middle.
+    share: that part of the audio data, from a quarter in. Sergei's ruling (2026-11-20): a short glitch (about 1 KB here)
+    still plays through and publishes with a note; most of a two-second part does not play through."""
     data = bytearray(path.read_bytes())
     mdat = next(b for b in m4b_preservation.boxes(bytes(data)) if b.kind == b'mdat')
-    middle = mdat.start + mdat.header + (mdat.size - mdat.header) // 2
-    data[middle:middle + 1024] = b'\xff' * 1024
+    payload = mdat.size - mdat.header
+    middle, size = (mdat.start + mdat.header + payload // 2, 1024) if share is None else (mdat.start + mdat.header + payload // 4, int(payload * share))
+    data[middle:middle + size] = b'\xff' * size
     path.write_bytes(bytes(data))
 
 
@@ -179,7 +182,7 @@ class DamagedPartTests(unittest.TestCase):
         folder = self.source / 'Линдквист' / 'Впусти меня'; folder.mkdir(parents=True)
         first = make_part(folder / 'Впусти меня 1.m4b', self.work, frequency=440)
         second = make_part(folder / 'Впусти меня 3.m4b', self.work, frequency=660)
-        corrupt(second)
+        corrupt(second, share=.7)  # over the short-glitch rule (Sergei 2026-11-20): about 1.4 s of its 2 s do not play
         self.assertEqual(m4b_repair.diagnose_path(second)['state'], 'intact', 'the container is whole: no repair applies')
         before = {path.name: facts(path) for path in (first, second)}
         queued = self.queue_folder(manual, folder)

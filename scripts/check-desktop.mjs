@@ -112,6 +112,7 @@ patterns.push('test_sorting_030_review.py');  // Senua's 0.30.0 review M2, M3, m
 patterns.push('test_scope_view.py');  // 0.30.0 item E: the Book metadata line from scope_view (repaired text), never the grouping key
 patterns.push('test_damaged_part_repair.py');  // 0.30.0 item C: a damaged M4B part is repaired on a working copy before its join (manual and automatic)
 patterns.push('test_damage_ruling.py');  // Sergei's ruling 2026-11-19: container-only damage with proven intact audio converts normally; unrepairable damage says re-acquire
+patterns.push('test_minor_damage.py');  // Sergei's ruling 2026-11-20: audio that plays through with only a short glitch publishes with a minor-damage note
 patterns.push('test_book_join.py');
 patterns.push('test_join_qa_030.py');  // 0.30.0 QA D1, D2, D3, C2: no blocker when nothing blocks, repaired tags in part sets, Cancel retry's 400, Darwin's Blade  // 0.30.0 item D: Join into one book (the record, every 8.5 effect in one transaction, the wait behind a converting part) and answer 9's Cancel
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup

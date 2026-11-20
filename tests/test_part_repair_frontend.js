@@ -94,6 +94,19 @@ const row=extra=>({id:'conversion:j1',kind:'conversion',label_key:'conversion',s
   assert.equal(run('attentionText(fixture)').hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
   context.fixture=remedied('other','Z:\\Audiobooks\\Книга.flac');
   assert.equal(run('attentionText(fixture)').hint,"The FLAC file failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
+  // Follow-up 4 (Sergei's ruling 2026-11-20): a file that plays through with only a short glitch is published as a good file
+  // and its details say so, plainly; never a warning status.
+  context.items=[{file:'Книга.m4b',source_index:0,glitch_at_seconds:7199.997,lost_seconds:0.145,longest_silence_seconds:0,error_lines:16}];
+  assert.equal(run('minorDamageText(items)'),'Minor audio damage: Книга.m4b has a short glitch at 1:59:59 (0.1 s skipped). It plays through.');
+  context.items=[{file:'2.m4b',glitch_at_seconds:65.2,lost_seconds:0.6},{file:'bad'}];
+  assert.equal(run('minorDamageText(items)'),'Minor audio damage: 2.m4b has a short glitch at 1:05 (0.6 s skipped). It plays through.');
+  assert.equal(run('minorDamageText(undefined)'),'');
+  context.done={id:'m1',kind:'candidate',revision:1,status:'Audiobook created',review:{},review_context:{},members:[],
+    creation:{status:'Audiobook created',job:{state:'Audiobook created',job_id:'job-m1',minor_damage:context.items.slice(0,1)}}};
+  run('renderAutomaticResult(done)');
+  assert.equal(get('automatic-minor-damage').textContent,'Minor audio damage: 2.m4b has a short glitch at 1:05 (0.6 s skipped). It plays through.');
+  assert.equal(get('automatic-minor-damage').hidden,false);
+  assert.match(fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),/<p id="automatic-minor-damage" class="field-help" hidden><\/p>/);
   // Any other stopped draft keeps its Reopen draft.
   server.set(stoppedDraft.id,{...stoppedDraft,part_repair:undefined,reason:'An output already exists'});
   click('manual-conversion-tab');await flush();

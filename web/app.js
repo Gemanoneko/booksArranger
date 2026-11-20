@@ -3318,10 +3318,15 @@ function originalTitleFact(row){
   return '';
 }
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
+function minorDamageText(items){
+  return (Array.isArray(items)?items:[]).filter(item=>typeof item?.file==='string' && item.file && Number.isFinite(item.glitch_at_seconds)).map(item=>{
+    const lost=Number.isFinite(item.lost_seconds) && item.lost_seconds>0?` (${Math.max(.1,Math.round(item.lost_seconds*10)/10).toLocaleString()} s skipped)`:'';
+    return `Minor audio damage: ${item.file} has a short glitch at ${clockText(item.glitch_at_seconds,item.glitch_at_seconds>=3600)}${lost}. It plays through.`;}).join(' ');
+}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
   renderProducerRetained(row);
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move,row.admission_error,row.chapter_corrections,row.chapter_check,row.creation?.job?.folder_cleanup]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.minor_damage,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move,row.admission_error,row.chapter_corrections,row.chapter_check,row.creation?.job?.folder_cleanup]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
@@ -3332,6 +3337,8 @@ function renderAutomaticResult(row){
   $('automatic-result-hint').classList?.toggle?.('retry-refused',!!attention?.warn);
   // After Repair: a permanent line and one bullet per patch; the technical note is the last line.
   const repaired=row.creation?.job?.repaired,patched=Array.isArray(repaired?.patched)?repaired.patched:[];
+  // Sergei's ruling (2026-11-20): a file that plays through with only a short glitch was published as a good file; a plain note.
+  const minor=minorDamageText(row.creation?.job?.minor_damage);setText('automatic-minor-damage',minor);$('automatic-minor-damage').hidden=!minor;
   setText('automatic-repaired-title',patched.length?(repaired.applied===true?'Repaired':'Repair queued'):'');$('automatic-repaired-list').replaceChildren(...patched.map(item=>node('li',patchCopy(item))));$('automatic-repaired').hidden=!patched.length;
   // A stopped job with no typed cause reads "Stopped — see details": its own text is here, in Technical details.
   const untyped=row.creation?.job?.state==='Output needs attention' && typeof row.creation.job.reason==='string' && row.creation.job.reason;

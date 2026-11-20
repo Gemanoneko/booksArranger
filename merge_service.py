@@ -1971,6 +1971,8 @@ class MergeService:
         if job['state']=='completed':
             validation=(job.get('output') or {}).get('validation') or {}
             if validation.get('passed') is True:value['chapter_corrections']=copy.deepcopy(validation.get('terminal_end_corrections') or [])
+            # Sergei's ruling (2026-11-20): published as a good file; the book's details say it has minor audio damage.
+            if validation.get('passed') is True and validation.get('minor_audio_damage'):value['minor_damage']=copy.deepcopy(validation['minor_audio_damage'])
             folder=self.storage_cleanup.folder_status(job['job_id'])
             if folder:
                 value['folder_cleanup']=folder|self._retry_view(('folder',job['job_id']))
