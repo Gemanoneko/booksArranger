@@ -110,7 +110,9 @@ class LaunchHeldCleanupTests(unittest.TestCase):
     def relaunch(self):
         self.port = free_port();self.assertNotEqual(self.port, 5210, 'never Sergei\'s app port')
         log = open(self.base / 'engine.log', 'wb');self.addCleanup(log.close)
-        command = [sys.executable, '-B', str(REPO / 'web_server.py'), '--database', str(self.inv.database),
+        # Embedded Python omits the script directory. Admit only this fixture's backend, as the packaged host does.
+        bootstrap = 'import sys; sys.path.insert(0, sys.argv.pop(1)); import web_server; web_server.main()'
+        command = [sys.executable, '-I', '-B', '-c', bootstrap, str(REPO), '--database', str(self.inv.database),
                    '--roots-json', str(self.roots_file), '--audiobook-source', self.inv.roots['Audiobooks'],
                    '--audiobook-output-root', str(self.sorted), '--port', str(self.port)]
         environment = {key: value for key, value in os.environ.items() if key not in ('PYTHONPATH', 'PYTHONHOME')}
