@@ -102,6 +102,12 @@ const QUIT_WAIT_BOUND_MS = 15000;
 // changes with the same bound (critical_sections.FILE_CHANGE_BOUND), so an accepted Quit still always ends.
 const FILE_CHANGE_BOUND_MS = 300000;
 const fileChangeNamed = (waiting) => Array.isArray(waiting) && waiting.some((item) => item && item.kind === 'critical');
+// Futaba's 0.30.0 slice A delta (Sergei: "I can't exit"): after its safe stop the engine ends a press itself (an approval
+// is told to stop; another press is waited for) and then closes on its own once it has ended (desktop_backend
+// _close_until_done). So the host is not ended while the engine still names a press or a file change: what is named here,
+// never past FILE_CHANGE_BOUND_MS (endOwnEngine's holdKill). Anything else still ends at the bound.
+const ENDS_BY_ITSELF = Object.freeze(['critical', 'approval', 'press']);
+const endingByItself = (waiting) => (Array.isArray(waiting) ? waiting.filter((item) => item && ENDS_BY_ITSELF.includes(item.kind)) : []);
 function createQuitBound({ keepConversion = false, boundMs = QUIT_WAIT_BOUND_MS, fileChangeMs = FILE_CHANGE_BOUND_MS, now = () => Date.now() } = {}) {
  let since = null;
  let holding = null;
@@ -130,4 +136,4 @@ async function quitNow({ post, endEngine }) {
  return { answer, engine: await endEngine() };
 }
 module.exports = { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, quitWaiting, createQuitProgress, createQuitBound, QUIT_WAIT_BOUND_MS,
- FILE_CHANGE_BOUND_MS, fileChangeNamed, quitNow };
+ FILE_CHANGE_BOUND_MS, fileChangeNamed, ENDS_BY_ITSELF, endingByItself, quitNow };

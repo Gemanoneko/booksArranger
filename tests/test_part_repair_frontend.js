@@ -68,6 +68,50 @@ const row=extra=>({id:'conversion:j1',kind:'conversion',label_key:'conversion',s
   const boxes=get('manual-track-list').children.map(item=>item.children[1].children[2].children[0]);
   boxes[1].checked=false;boxes[1].handlers.change();
   assert.equal(get('manual-track-count').textContent,'1 included file. One M4B plays them in the order shown.','one file is not joined: nothing to repair');
+
+  // Futaba 0.30.0 slice D, follow-up 1 (Sergei's ruling: "just tell me to reacquire"): a draft stopped by a part the app
+  // can't repair shows the stop line alone. No Retry and no Reopen draft, though the engine would still accept a reopen.
+  const stoppedDraft={id:'d0a1b2c3-0000-4000-8000-000000000001',revision:2,state:'failed',job_id:'job-stopped',candidate_id:'d0a1b2c3-0000-4000-8000-000000000001',
+    source:{kind:'folder',path:folder},tracks:picked.map(p=>({path:p,included:true})),metadata:{title:'Впусти меня (остановлено)',author:'Линдквист'},destination:'D:\\Готово\\Впусти меня.m4b',
+    reason:'Source 2 of 2 failed full audio decoding',stage:'checking sources',part_repair:{kind:'unrepairable',file:'Впусти меня 3.m4b'},originals_untouched:true,
+    retry_allowed:false,reopen_allowed:true};
+  server.set(stoppedDraft.id,stoppedDraft);
+  click('manual-conversion-tab');await flush();
+  const stoppedButton=get('manual-books').children.map(row=>row.children[0]).find(button=>button.textContent===stoppedDraft.metadata.title);
+  assert(stoppedButton,'the stopped draft is listed');stoppedButton.handlers.click();
+  assert.match(get('manual-editor-status').textContent,/Get a new copy of this book\.$/);
+  assert.equal(get('manual-job-retry').hidden,true,'no Retry');
+  assert.equal(get('manual-job-reopen').hidden,true,'no Reopen draft: the stop line stands alone');
+  // Futaba 0.30.0 slice D, follow-up 3: a single M4B cut inside its last frame failed its full decode (so the engine keeps a
+  // replace-source fact), yet its damage is repairable: the row is "Damaged — can repair", never "the MP3 ... can't be repaired".
+  const remedied=(group,path,extra={})=>({id:'r1',kind:'candidate',creation:{job:{state:'Output needs attention',job_id:'job-r1',attention:{group,originals_untouched:true,
+    remedy:{kind:'replace_source',cause:'source_decode_failed',path,source_index:0,source_count:1},...extra}}}});
+  context.fixture=remedied('repair','Z:\\Audiobooks\\Впусти меня.m4b',{damage:[{kind:'truncated_final_frames',frames:1,replaced_ticks:1024,timescale:44100,description:'d'}],repair:{allowed:true,reason:''}});
+  const cutText=run('attentionText(fixture)');
+  assert.equal(cutText.status,'Damaged — can repair');assert.doesNotMatch(JSON.stringify(cutText),/MP3|can't be repaired/);
+  // The replace-source line names the file's own type (positive control for the word: always "The MP3" before).
+  context.fixture=remedied('other','Z:\\Audiobooks\\Книга.mp3');
+  assert.equal(run('attentionText(fixture)').hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
+  context.fixture=remedied('other','Z:\\Audiobooks\\Книга.flac');
+  assert.equal(run('attentionText(fixture)').hint,"The FLAC file failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.");
+  // Follow-up 4 (Sergei's ruling 2026-11-20): a file that plays through with only a short glitch is published as a good file
+  // and its details say so, plainly; never a warning status.
+  context.items=[{file:'Книга.m4b',source_index:0,glitch_at_seconds:7199.997,lost_seconds:0.145,longest_silence_seconds:0,error_lines:16}];
+  assert.equal(run('minorDamageText(items)'),'Minor audio damage: Книга.m4b has a short glitch at 1:59:59 (0.1 s skipped). It plays through.');
+  context.items=[{file:'2.m4b',glitch_at_seconds:65.2,lost_seconds:0.6},{file:'bad'}];
+  assert.equal(run('minorDamageText(items)'),'Minor audio damage: 2.m4b has a short glitch at 1:05 (0.6 s skipped). It plays through.');
+  assert.equal(run('minorDamageText(undefined)'),'');
+  context.done={id:'m1',kind:'candidate',revision:1,status:'Audiobook created',review:{},review_context:{},members:[],
+    creation:{status:'Audiobook created',job:{state:'Audiobook created',job_id:'job-m1',minor_damage:context.items.slice(0,1)}}};
+  run('renderAutomaticResult(done)');
+  assert.equal(get('automatic-minor-damage').textContent,'Minor audio damage: 2.m4b has a short glitch at 1:05 (0.6 s skipped). It plays through.');
+  assert.equal(get('automatic-minor-damage').hidden,false);
+  assert.match(fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),/<p id="automatic-minor-damage" class="field-help" hidden><\/p>/);
+  // Any other stopped draft keeps its Reopen draft.
+  server.set(stoppedDraft.id,{...stoppedDraft,part_repair:undefined,reason:'An output already exists'});
+  click('manual-conversion-tab');await flush();
+  get('manual-books').children.map(row=>row.children[0]).find(button=>button.textContent===stoppedDraft.metadata.title).handlers.click();
+  assert.equal(get('manual-job-reopen').hidden,false);
   console.log('PASS 0.30.0 damaged M4B parts on the page: the repair step, the stop and end lines, the row sentence');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

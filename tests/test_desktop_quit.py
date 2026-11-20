@@ -131,15 +131,20 @@ class ControlTests(unittest.TestCase):
         server.finish_shutdown.assert_called_once_with()
         self.assertEqual(control.status()['phase'], 'exiting')
 
-    def test_shutdown_failure_retains_serving_and_can_retry_after_safe_checkpoint(self):
-        server, _ = fake_server(finish=Mock(side_effect=TimeoutError('worker still at checkpoint')))
+    def test_shutdown_failure_retains_serving_and_the_close_is_tried_again_by_itself(self):
+        # Futaba's 0.30.0 slice A delta: a failed close is tried again by itself once nothing holds it (before: only a
+        # second Quit did, and with no shell left nothing ever did).
+        server, _ = fake_server(finish=Mock(side_effect=[TimeoutError('worker still at checkpoint'), None]))
         control = DesktopControl(server)
-        control.quit(); control.thread.join(5)
-        server.shutdown.assert_not_called()
-        self.assertEqual(control.status()['phase'], 'blocked')
-        self.assertIn('worker still at checkpoint',control.status()['error'])
-        server.finish_shutdown.side_effect=None
-        control.quit(); control.thread.join(5)
+        with patch.object(DesktopControl, 'RETRY_AFTER', .5):
+            control.quit()
+            limit = time.monotonic() + 5
+            while control.status()['phase'] != 'blocked' and time.monotonic() < limit:
+                time.sleep(.01)
+            self.assertEqual(control.status()['phase'], 'blocked')
+            self.assertIn('worker still at checkpoint',control.status()['error'])
+            server.shutdown.assert_not_called()
+            control.thread.join(5)
         self.assertEqual(control.status()['phase'],'exiting')
         self.assertEqual(server.finish_shutdown.call_count,2)
 

@@ -11,11 +11,13 @@ _LOCK = threading.Lock()
 _DONE = {}
 
 
-def report(done, total, unit='files'):
-    """The calling thread's press has done `done` of `total` (whole numbers, 0 <= done <= total)."""
+def report(done, total, unit='files', step=None):
+    """The calling thread's press has done `done` of `total` (whole numbers, 0 <= done <= total). step names the pass when a
+    press goes over its files more than once (an Approve: reading, covers, checking, confirming; Futaba's QA A delta, 2),
+    so a count that starts again reads as the next step."""
     if type(done) is int and type(total) is int and 0 <= done <= total and total > 0:
         with _LOCK:
-            _DONE[threading.get_ident()] = (done, total, unit)
+            _DONE[threading.get_ident()] = (done, total, unit, step)
 
 
 def clear(ident=None):
@@ -25,6 +27,6 @@ def clear(ident=None):
 
 
 def read(ident):
-    """(done, total, unit) the thread last reported, or None."""
+    """(done, total, unit, step) the thread last reported, or None."""
     with _LOCK:
         return _DONE.get(ident)

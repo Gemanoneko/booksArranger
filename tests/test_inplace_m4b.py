@@ -137,7 +137,8 @@ class EligiblePathTests(Fixture):
         edited, validation = self.run_in_place(manifest)
         self.assertIsInstance(edited, inplace_m4b.Edited)
         self.assertEqual(validation['encoding']['selection'], inplace_m4b.SELECTION)
-        self.assertEqual(validation['publication_mode'], 'in_place'); self.assertFalse(validation['in_place']['decoded'])
+        # Sergei's ruling on damaged audio (2026-11-20): one strict full decode now runs before the first write.
+        self.assertEqual(validation['publication_mode'], 'in_place'); self.assertTrue(validation['in_place']['decoded'])
         stages = []
         record = published(self.fake(), manifest, edited, validation, lambda stage, details: stages.append((stage, details)))
         final = Path(record['final_path'])
@@ -1010,7 +1011,7 @@ COVERED = {
     'check_working_space: Insufficient staging space': NO_STAGE,
     'check_working_space: Insufficient working space': NO_STAGE,
     'output_space_required: ': NO_STAGE,
-    'decoded_duration: ': NO_DECODE,
+    # 'decoded_duration: ' is no longer skipped: the edit runs the same strict full decode (Sergei's ruling, 2026-11-20).
     '_encode_inputs: Staging space changed': 'in place: _edit: Insufficient library space',
     '_encode_inputs: Installed ffmpeg is required': 'the edit runs FFmpeg itself (probe, chapters, packet evidence) and falls back without it',
     '_preserve_single_m4b: Existing M4B chapters differ': 'in place: _edit: Existing M4B chapters differ',

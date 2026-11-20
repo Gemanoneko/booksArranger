@@ -126,4 +126,12 @@ assert.equal(run('savedFieldsLine({},{})+leftAttentionLine(before,after)'),'Save
 context.after.review.author='Паланик Чак';assert.equal(run('leftAttentionLine(before,after)'),'','an author entered: nothing to add');
 context.after={...context.before};assert.equal(run('leftAttentionLine(before,after)'),'','still asking: it stays');
 context.before={id:'a2',kind:'candidate',ask:{kind:'title_author',why:'title_missing'}};context.after={id:'a2',kind:'candidate',review:{}};assert.equal(run('leftAttentionLine(before,after)'),'','positive control: only an Author unclear book');
+// Futaba's 0.30.0 QA A delta, 2: an Approve counts each pass over its files, named in the conversion steps' "Step N of 4"
+// form so a count that starts again reads as the next step; with no pass reported the row reads as before.
+assert.equal(run('workStep({kind:"action",label_key:"approve",step:"reading",state:"running"},false)'),'Step 1 of 4 - Reading each file');
+assert.equal(run('workStep({kind:"action",label_key:"approve",step:"covers",state:"running"},false)'),"Step 2 of 4 - Reading each file's cover");
+assert.equal(run('workStep({kind:"action",label_key:"approve",step:"checking",state:"running"},false)'),'Step 3 of 4 - Checking each file');
+assert.equal(run('workStep({kind:"action",label_key:"approve",step:"confirming",state:"running"},false)'),'Step 4 of 4 - Checking each file again');
+assert.equal(run('workStep({kind:"action",label_key:"approve",state:"running"},false)'),'Saving the approval','no pass reported: as before');
+assert.equal(run('workDetail({kind:"action",label_key:"approve",step:"confirming",done:300,total:300,unit:"files",state:"running"},false)'),'300 of 300 files');
 console.log('PASS 0.30.0 work panel: one sentence in three places, every row, split counts, freshness, unread, backlog, short jobs, automatic wait');

@@ -14,9 +14,13 @@ the reviewed original, then length, the 4 type bytes, the download marker it rem
 attributes, then a full-hash proof) before anything else. A crash leaves an inplace_edits row that
 recovery undoes, or proves moved, at startup and before any new attempt on that source.
 
-No decode is performed (Sergei, 2026-10-22). Audio integrity rests on the byte proof: with the 4
-type bytes reverted, the file's original extent hashes to the reviewed SHA-256, and the appended
-bytes equal the plan.
+Audio integrity rests on the byte proof: with the 4 type bytes reverted, the file's original extent
+hashes to the reviewed SHA-256, and the appended bytes equal the plan. No decode was performed
+(Sergei, 2026-10-22) until his ruling on damaged audio (2026-11-20): a file whose audio is damaged
+mid-file was published as good. One strict full decode now runs before the first write (about 2 s
+per hour of audio, measured); damage within audio_pipeline.play_through's short-glitch rule is
+published with its minor-damage note, and anything else takes the copy flow, which stops the book
+with its decode failure ("Need to reacquire").
 """
 import base64
 import contextlib
@@ -398,6 +402,13 @@ def _edit(manifest, stage, stop, progress, session):
             original, expected = _hashes(writer, plan, stop)
             if original != item['sha256']:
                 raise Ineligible('Source changed — review required')
+            minor = None  # Sergei's ruling on damaged audio (2026-11-20): see the module docstring
+            try:
+                ap.decoded_duration(source, stage, stop, duration)
+            except ap.ValidationError as failure:
+                minor = ap.play_through(source, stage, stop, duration, failure)
+                if minor is None:
+                    raise Ineligible('The audio does not play through') from failure
         intent = {'schema': SCHEMA, 'job_id': manifest['job_id'], 'attempt_id': manifest['attempt_id'], 'path': str(source),
                   'root': str(root), 'destination': str(destination), 'identity': facts['identity'], 'size': facts['size'],
                   'modified': facts['modified'], 'attributes': facts['attributes'], 'sha256': original,
@@ -458,8 +469,11 @@ def _edit(manifest, stage, stop, progress, session):
                       'copied_audio_evidence': evidence, 'metadata_preservation': receipt, 'tags': actual_tags,
                       'in_place': {'schema': SCHEMA, 'original_sha256': original, 'original_size': intent['size'],
                                    'type_offset': intent['type_offset'], 'appended_sha256': intent['appended_sha256'],
-                                   'all_retained_bytes_verified': True, 'decoded': False, 'zone_marker_removed': marker is not None},
+                                   'all_retained_bytes_verified': True, 'decoded': True, 'zone_marker_removed': marker is not None},
                       'checks': 'Output checks passed', 'device': 'Apple Books sync not checked'}
+        if minor is not None:  # the job record's note; never a hold
+            validation['minor_audio_damage'] = [{'file': source.name, 'source_index': 0, **{key: minor[key] for key in
+                                                ('lost_seconds', 'glitch_at_seconds', 'longest_silence_seconds', 'error_lines')}}]
         held['final'] = None  # owned by the Edited from here
         return Edited(source, stack, boundary, final, validation, intent, session)
     except Exception as failure:

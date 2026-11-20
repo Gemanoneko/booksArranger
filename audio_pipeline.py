@@ -1,5 +1,5 @@
 """Owned immutable-source M4B staging and strict validation; no source rewrites."""
-import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib,struct,errno,sys
+import hashlib,json,math,os,re,shutil,subprocess,time,uuid,threading,contextlib,struct,errno,sys
 from pathlib import Path
 from fractions import Fraction
 from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob,VerifiedFile
@@ -366,9 +366,63 @@ def decoded_duration(path,stage,stop,estimated):
     if state['error'] or process.returncode or state['bytes']%4:
         error=ValidationError('Full audio decode failed: '+error_raw.decode('utf-8','replace')[-1000:])
         if process.returncode and not state['error'] and state['bytes']%4==0:error.media_decode_failed=True
+        error.decoded_seconds=state['bytes']/4/44100  # where the strict decode stopped: the first damaged frame (play_through)
         raise error
     if not state['bytes']:raise ValidationError('Audio decoder produced no samples')
     return state['bytes']/4/44100
+
+# Sergei's ruling on damaged audio (2026-11-20, Futaba slice D follow-up 4): "If a file plays through with only a short glitch,
+# the app should publish it as a good file. You can add that it has minor damage." One rule for every path (a single file
+# edited in place or copied, a manual conversion, a Join part), applied only after the strict full decode failed on the
+# audio itself. Measured (10-minute 64 kbps stereo AAC, random bytes over the middle of the audio data): 1 KB drops 7 AAC
+# frames (0.16 s skipped, about 0.1 s garbled: a click); 16 KB, 2.07 s skipped (words lost); 256 KB, 32.6 s skipped and
+# then digital silence to the end (the decoder never recovers). A short glitch: FFmpeg's ordinary decode plays the file to
+# its end, at most MINOR_LOST_SECONDS of audio are missing in all (expected stream length against the ordinary decode), and
+# no stretch of digital silence longer than MINOR_SILENCE_SECONDS follows the first damaged frame (a silent dead decoder,
+# which the error count alone does not show). Anything else does not play through: "Need to reacquire".
+MINOR_LOST_SECONDS=1.0
+MINOR_SILENCE_SECONDS=5.0
+_SILENT_RUN=re.compile(rb'\x00{4410,}')  # 25 ms or more of s16 stereo digital silence
+
+class _PlayThrough:
+    """The ordinary decode's s16 stereo 44.1 kHz output: its length, and the longest digital silence from `start` bytes on."""
+    def __init__(self,start):self.start=max(0,int(start));self.bytes=0;self.run=0;self.longest=0
+    def feed(self,raw):
+        offset=self.bytes;self.bytes+=len(raw)
+        if self.bytes<=self.start:return
+        block=raw[max(0,self.start-offset):]
+        if not block.strip(b'\0'):self.run+=len(block);self.longest=max(self.longest,self.run);return
+        head=len(block)-len(block.lstrip(b'\0'));self.longest=max(self.longest,self.run+head)
+        for found in _SILENT_RUN.finditer(block,head,len(block)-(len(block)-len(block.rstrip(b'\0')))):self.longest=max(self.longest,found.end()-found.start())
+        self.run=len(block)-len(block.rstrip(b'\0'))
+
+def play_through(path,stage,stop,expected,failure):
+    """The minor-damage measure of a source whose strict decode failed (failure: decoded_duration's media decode error), or None
+    when it does not play through with only a short glitch. Returns {'decoded_seconds','lost_seconds','glitch_at_seconds',
+    'longest_silence_seconds','error_lines'}. One more full ordinary decode, only for a damaged file."""
+    if not getattr(failure,'media_decode_failed',False):return None
+    at=float(getattr(failure,'decoded_seconds',0) or 0);tracker=_PlayThrough(round(at*44100)*4);completed=[]
+    try:
+        run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-nostdin','-threads','2','-filter_threads','1','-protocol_whitelist','file',
+                   '-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0','-ar','44100','-ac','2','-c:a','pcm_s16le','-f','s16le','pipe:1'],
+                  stage,stop,max(300,expected*2),telemetry=tracker,diagnostic=lambda token,out,err:completed.append(err))
+    except ValidationError:return None  # the ordinary decode itself fails: it does not play through
+    decoded=tracker.bytes/4/44100;lost=max(0.0,float(expected)-decoded);silence=tracker.longest/4/44100
+    if not decoded or lost>MINOR_LOST_SECONDS or silence>MINOR_SILENCE_SECONDS:return None
+    lines=sum(1 for line in (completed[0] if completed else b'').decode('utf-8','replace').splitlines() if line.strip())
+    return {'decoded_seconds':decoded,'lost_seconds':round(lost,3),'glitch_at_seconds':round(at,3),'longest_silence_seconds':round(silence,3),'error_lines':lines}
+
+def _minor():
+    current=getattr(_ARTIFACTS,'current',None)
+    return current[5].setdefault('minor',{}) if current and len(current)>5 else None
+
+def _container_seconds(path,stage,stop):
+    return audio_info(probe(path,stage,stop))[0]
+
+def _strict(path):
+    """-xerror for every decode, except of a source this attempt accepted as playing through with only a short glitch."""
+    found=_minor()
+    return [] if found is not None and Path(path).name in found.get('lenient',()) else ['-xerror']
 
 def ffmetadata_escape(value):
     return str(value).replace('\\','\\\\').replace('=','\\=').replace(';','\\;').replace('#','\\#').replace('\r','').replace('\n','\\\n')
@@ -627,6 +681,11 @@ def _same_except_last_end(checked,planned):
 
 def _source_duration(manifest,item,path,stage,stop,duration,*,source_index=None):
     if m4b_repair.silence_approved(manifest):return duration
+    minor=_minor();accepted=minor.get((item.get('path'),item.get('sha256'))) if minor is not None else None
+    if accepted is not None:
+        # Accepted once this attempt (the strict decode of the original failed; it plays through): its copy decodes leniently.
+        minor.setdefault('lenient',set()).add(Path(path).name)
+        return accepted['decoded_seconds']
     if type(source_index) is int and _joined_part(manifest,item.get('path','')):
         repaired=_repaired_part(manifest,item,path,stage,stop,duration,source_index)
         if repaired is not None:return repaired['duration']
@@ -649,6 +708,12 @@ def _source_duration(manifest,item,path,stage,stop,duration,*,source_index=None)
             not isinstance(sources,list) or type(source_index) is not int or not 0<=source_index<len(sources) or
             not isinstance(sources[source_index],dict) or not isinstance(item.get('path'),str) or
             sources[source_index].get('path')!=item['path'] or sources[source_index].get('sha256')!=item.get('sha256')):raise
+        found=play_through(path,stage,stop,duration,error) if minor is not None else None
+        if found is not None:
+            # Sergei's ruling (2026-11-20): it plays through with only a short glitch: a good file, with a minor-damage note.
+            minor[(item['path'],item['sha256'])]=found|{'file':Path(item['path']).name,'source_index':source_index}
+            minor.setdefault('lenient',set()).add(Path(path).name)
+            return found['decoded_seconds']
         failed=SourceDecodeError(item['path'],source_index,len(sources),error)
         if _joined_part(manifest,item['path']):
             # 0.30.0: a joined .m4b part that fails its full decode with no repair for it (Judy 9: "can't be repaired safely").
@@ -873,7 +938,7 @@ def normalized_pcm_evidence(path,stage,stop,duration,encoding,kind=None,aggregat
         telemetry=Fanout()
     if on_seconds is not None:telemetry=PcmSeconds(telemetry,encoding['sample_rate'],encoding['channels'],{None:8,'s16':2,'s24':3,'s32':4,'f32':4}[kind],on_seconds)
     codec,format=('pcm_f64le','f64le') if kind is None else {'s16':('pcm_s16le','s16le'),'s24':('pcm_s24le','s24le'),'s32':('pcm_s32le','s32le'),'f32':('pcm_f32le','f32le')}[kind]
-    run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
+    run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error',*_strict(path),'-nostdin','-threads','2','-filter_threads','1',
       '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0',
       '-af',normalization_filter(encoding),'-c:a',codec,'-f',format,'pipe:1'],stage,stop,max(300,duration*2),telemetry=telemetry)
     return proof.result()
@@ -908,7 +973,7 @@ def stream_normalized(write,stage,copies,durations,encoding,stop,references,join
     step=StepProgress(report,'encoding',total,'seconds');step.update(0,force=True)
     for name,duration,reference in zip(copies,durations,references):
         proof=NativePcmHash(encoding['channels'])
-        with owned_stream([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
+        with owned_stream([shutil.which('ffmpeg'),'-hide_banner','-v','error',*_strict(stage/name),'-nostdin','-threads','2','-filter_threads','1',
               '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(name).suffix.lower()],'-i',str(stage/name),'-map','0:a:0',
               '-af',normalization_filter(encoding),'-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,stop,max(300,duration*2),read=True) as decoder:
             while block:=decoder.stdout.read1(1024*1024):
@@ -1165,13 +1230,14 @@ class NativePcmHash:
         return {'sha256':self.hash.hexdigest(),'sample_count':self.bytes//self.frame_bytes,'bytes':self.bytes,'sample_format':'pcm_f64le'}
 
 
-def native_pcm_evidence(path,stage,stop,duration,encoding,on_seconds=None):
+def native_pcm_evidence(path,stage,stop,duration,encoding,on_seconds=None,strict=True):
+    """strict=False: the ordinary decode, for a file accepted as playing through with only a short glitch (play_through)."""
     proof=NativePcmHash(encoding['channels'])
     # on_seconds only for normalized working files, whose native rate and channels are the encoding's.
     telemetry=proof if on_seconds is None else PcmSeconds(proof,encoding['sample_rate'],encoding['channels'],8,on_seconds)
     # No resampling or channel selection: hash the decoder's complete native-rate,
     # all-channel output, including the effect of codec priming/discard/edit trims.
-    run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
+    run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error',*(['-xerror'] if strict else []),'-nostdin','-threads','2','-filter_threads','1',
       '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0',
       '-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,stop,max(300,duration*2),telemetry=telemetry)
     return proof.result()|{'sample_rate':encoding['sample_rate'],'channels':encoding['channels'],'channel_layout':encoding.get('channel_layout')}
@@ -1204,6 +1270,9 @@ def _encode_repaired_inputs(manifest,stage,copies,durations,cover,stop,progress,
     if joined is not None:
         validation['normalized_joined_pcm']=joined;validation['normalized_pcm_codec']='pcm_f64le'
     if repairs:validation['source_working_repairs']=repairs
+    minor=[{key:value[key] for key in ('file','source_index','lost_seconds','glitch_at_seconds','longest_silence_seconds','error_lines')}
+           for key_,value in sorted(((k,v) for k,v in (_minor() or {}).items() if k!='lenient'),key=lambda pair:pair[1]['source_index'])]
+    if minor:validation['minor_audio_damage']=minor  # the job record's note (Sergei's ruling 2026-11-20); never a hold
     return output,validation
 
 
@@ -1265,7 +1334,9 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
     if feed is not None:source_input=['-protocol_whitelist','pipe','-format_whitelist','f64le','-f','f64le','-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-i','pipe:0']
     else:source_input=['-protocol_whitelist','file','-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf',
       *(['-f','mov','-i',str(stage/original_copies[0])] if encoding.get('mode')=='copy' else ['-f','concat','-safe','1','-i',str(stage/'inputs.txt')])]
-    args=[executable,'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1',*source_input,'-f','image2','-i',str(cover)]
+    # A source accepted as playing through with a short glitch is read by the ordinary decoder; the new output is checked strictly.
+    strict=['-xerror'] if feed is not None or all(_strict(stage/name) for name in original_copies) else []
+    args=[executable,'-hide_banner','-v','error',*strict,'-nostdin','-n','-threads','2','-filter_threads','1',*source_input,'-f','image2','-i',str(cover)]
     chapters=[];terminal_corrections=[]
     preserved=source_chapters(stage/original_copies[0],stage,stop,sum(durations)) if encoding.get('mode')=='copy' else []
     if encoding.get('mode')=='copy' and manifest.get('source_chapters')!=preserved:
@@ -1290,7 +1361,9 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
             if repaired and repaired.get('kind')=='m4b_part' and copies[index]==repaired['name']:
                 # 0.30.0: a repaired part's chapters are proven on its repaired copy (its plan was made on the same repair).
                 name=repaired['name'];bound={'sha256':repaired['sha256'],'size':repaired['size'],'modified':fingerprint(stage/name)['modified']}
-            checked=verified_source_chapters(stage/name,stage,stop,duration,source=bound,
+            # A part accepted with a short glitch (play_through) is shorter by the dropped frames; its chapters belong to its
+            # container, so they are checked against the container's own length.
+            checked=verified_source_chapters(stage/name,stage,stop,duration if _strict(stage/name) else _container_seconds(stage/name,stage,stop),source=bound,
                 on_check=lambda value:progress('Checking source audio',{'chapter_check':value}))
             if checked['chapters']!=part['chapters']:
                 # Senua M5: a damaged part whose last chapter ran past its audio was planned without a repair; its last end is
@@ -1367,7 +1440,8 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
     """One compressed candidate; no remux or chapter/timescale reconstruction."""
     source=stage/name;output=stage/PRESERVATION_CANDIDATE_NAME;expected=sum(durations)
     tags=preservation_tags(manifest,tags)
-    chapters=source_chapters(source,stage,stop,expected)
+    chapter_seconds=expected if _strict(source) else _container_seconds(source,stage,stop)  # a short glitch shortens the decode only
+    chapters=source_chapters(source,stage,stop,chapter_seconds)
     if manifest.get('source_chapters')!=chapters:
         raise ValidationError('Existing M4B chapters differ from the frozen complete source plan')
     cover_bytes=Path(cover).read_bytes()
@@ -1411,8 +1485,11 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
                     source_evidence=copied_audio_evidence(source,stage,stop,expected,source_relative=True)
                     output_evidence=copied_audio_evidence(output,stage,stop,expected,source_relative=True)
                     if source_evidence!=output_evidence:raise ValidationError('Preservation changed decoder, packets or presentation')
-                    source_pcm=native_pcm_evidence(source,stage,stop,expected,encoding)
-                    output_pcm=native_pcm_evidence(output,stage,stop,expected,encoding)
+                    # A source accepted as playing through with a short glitch is compared by the same ordinary decode on both
+                    # sides (its audio bytes are copied unchanged, so the glitch is the original's own).
+                    strict=bool(_strict(source))
+                    source_pcm=native_pcm_evidence(source,stage,stop,expected,encoding,strict=strict)
+                    output_pcm=native_pcm_evidence(output,stage,stop,expected,encoding,strict=strict)
                     if source_pcm!=output_pcm:raise ValidationError('Preservation changed complete native decoded audio')
                     if fixed is not None:
                         # The audio intact (prove_audio_intact's rules): equal packets, presentation and complete strict
@@ -1425,7 +1502,7 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
                 raw=probe(output,stage,stop);duration,profile=audio_info(raw)
                 if profile!=(encoding.get('codec','aac'),str(encoding['sample_rate']),encoding['channels']):
                     raise ValidationError('Preserved output audio profile is incorrect')
-                actual_chapters=source_chapters(output,stage,stop,expected)
+                actual_chapters=source_chapters(output,stage,stop,chapter_seconds)
                 if actual_chapters!=chapters:raise ValidationError('Preserved source chapter presentation changed')
                 actual_tags={key.lower():str(value) for key,value in raw.get('format',{}).get('tags',{}).items()}
                 # Demuxers omit empty text items; exact binary metadata bytes

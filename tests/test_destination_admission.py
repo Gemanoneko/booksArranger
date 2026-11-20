@@ -197,10 +197,11 @@ class QueuedDestinationNative(unittest.TestCase):
         from unittest import mock
         import press_progress
         row=self.ready();calls=[]
-        with mock.patch.object(press_progress,'report',side_effect=lambda done,total,unit='files':calls.append((done,total))):
+        with mock.patch.object(press_progress,'report',side_effect=lambda done,total,unit='files',step=None:calls.append((done,total,step))):
             self.service.reviews.build_manifest('Audiobooks',row['id'],row['revision'])
         self.assertTrue(calls,'the check reported its count');total=calls[0][1]
-        self.assertEqual(calls,[(n,total) for n in range(total)])
+        # Its QA A delta, 2: counted after each file, so the count ends at N of N (it stopped one short), named as its pass.
+        self.assertEqual(calls,[(n,total,'confirming') for n in range(total+1)])
 
 import test_replacement_jobs as replacement_fixtures
 class QueuedReplacementRoute(unittest.TestCase):
