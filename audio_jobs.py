@@ -93,19 +93,30 @@ def source_remedy(row,journal,manifest):
     return {'kind':'replace_source','cause':'source_decode_failed','path':sources[0]['path'],'sha256':sources[0].get('sha256'),'original_retained':True}
 
 
+def internal_part_repair_failure(failure):
+    """Recognize the repair attempt's own failure, including 0.30.0 journals."""
+    return (isinstance(failure, dict) and failure.get('exception_class') == 'PartRepairError'
+            and failure.get('stage') == 'checking sources' and isinstance(failure.get('part_repair'), dict)
+            and failure['part_repair'].get('kind') == 'failed')
+
+
 def media_failure(row,journal,manifest,group,remedy=None,repair=None):
     """Display facts from an exact producer shape; never admission or repair rights."""
-    if group in {'checking','retry','repair'} or row.get('output') or 'publication_intent' in journal:return None
+    if group in {'checking','repair'} or row.get('output') or 'publication_intent' in journal:return None
     failure=journal.get('failure') or {};sources=manifest.get('sources') or []
     if not isinstance(failure,dict):return None
     if failure.get('stage')!='checking sources':return None
+    if group=='retry' and not internal_part_repair_failure(failure):return None
     code=None;path=None
     part=failure.get('part_repair')
     if isinstance(part,dict) and part.get('kind') in ('unrepairable','failed') and isinstance(part.get('source_index'),int) \
             and 0<=part['source_index']<len(sources) and isinstance(sources[part['source_index']],dict) and sources[part['source_index']].get('path')==part.get('source_path'):
-        # 0.30.0 (Judy 9; Sergei's ruling 2026-11-19): a damaged M4B part of a joined book that the app cannot repair: re-acquire.
         path=part['source_path'];filename=Path(path).name
-        code='m4b_part_unrepairable' if part['kind']=='unrepairable' else 'm4b_part_repair_failed'
+        if part['kind']=='failed':
+            return {'schema':'books-media-failure-v1','code':'m4b_part_repair_failed','source_path':path,'filename':filename,
+                    'status':'Repair stopped','hint':f"The app couldn’t finish the repair for {filename}.",
+                    'source_index':part['source_index'],'source_count':len(sources),'next_step':None}
+        code='m4b_part_unrepairable'
         return {'schema':'books-media-failure-v1','code':code,'source_path':path,'filename':filename,'status':REACQUIRE_STATUS,'hint':reacquire_hint(filename),
                 'source_index':part['source_index'],'source_count':len(sources),'next_step':'intact_source'}
     if remedy and remedy.get('kind')=='replace_source':
@@ -180,6 +191,8 @@ def failure_cause(row, journal):
     if not isinstance(failure, dict):
         return None
     kind, code, number = failure.get('exception_class'), failure.get('sqlite_errorcode'), failure.get('errno')
+    if internal_part_repair_failure(failure):
+        return 'part_repair'
     if kind == 'OperationalError':
         if type(code) is int and code >= 0 and (code & 255) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
             return 'busy'
@@ -924,6 +937,10 @@ class AudioJobs:
         # Retry can resolve (a busy catalog, or a full disk). Every other runtime failure stays out.
         if 'publication_intent' in journal or 'failure' in journal and failure_cause(row, journal) is None:
             return None
+        if internal_part_repair_failure(journal.get('failure')):
+            has_cleanup = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_cleanup'").fetchone()
+            if has_cleanup and db.execute('SELECT 1 FROM source_cleanup WHERE job_id=?', (row['job_id'],)).fetchone():
+                return None
         if hashlib.sha256(row['manifest'].encode('utf-8')).hexdigest() != row['manifest_hash'] or manifest.get('job_id') != row['job_id']:
             return None  # E4
         # E5: no replacement and no Retry/Repair child, except (v0.16.10) a child whose only failure was the

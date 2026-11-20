@@ -9,6 +9,7 @@ import secrets
 import threading
 import uuid
 
+from audio_jobs import internal_part_repair_failure
 from audio_pipeline import INPUT_FORMATS, same_source
 from chapter_plan import prepare as prepare_chapters
 from encoding_policy import AUTOMATIC_PROFILE, freeze_automatic_policy
@@ -710,10 +711,11 @@ class ManualConversions:
 
 
 def retry_offered(journal):
-    """Retry on a stopped manual job: a classified transient failure only. Sergei's ruling (2026-11-19): a damaged part the
-    app can't repair (part_repair 'unrepairable' or 'failed') offers no Retry; the window tells him to get a new copy."""
+    """The caller also checks ownership, publication and cleanup before accepting a retry."""
     failure = journal.get('failure') or {}
-    return failure.get('retryable') is True and not isinstance(failure.get('part_repair'), dict)
+    if isinstance(failure.get('part_repair'), dict):
+        return internal_part_repair_failure(failure)
+    return failure.get('retryable') is True
 
 
 def cleanup_binding(db, manifest):

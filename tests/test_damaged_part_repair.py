@@ -202,6 +202,30 @@ class DamagedPartTests(unittest.TestCase):
         self.assertEqual((media['code'], media['filename']), ('m4b_part_unrepairable', second.name))
         self.assertEqual((media['status'], media['hint']), ('Need to reacquire', second.name + ' is damaged and cannot be repaired safely. Delete the book, then get a new copy.'))
 
+    def test_manual_internal_repair_error_can_retry_after_the_attempt_closes(self):
+        manual = self.manual_service()
+        folder = self.source / 'joined'; folder.mkdir(parents=True)
+        first = make_part(folder / '1.m4b', self.work)
+        second = make_part(folder / '2.m4b', self.work)
+        truncate(second)
+        before = [facts(path) for path in (first, second)]
+        queued = self.queue_folder(manual, folder)
+        with patch.object(pipeline, '_repair_part_copy', side_effect=KeyError('internal fixture')):
+            self.run_queue()
+        draft = manual.list()['drafts'][0]
+        self.assertEqual(draft['part_repair'], {'kind': 'failed', 'file': second.name})
+        self.assertTrue(draft['originals_untouched'])
+        self.assertEqual([facts(path) for path in (first, second)], before)
+        request = {'id': draft['id'], 'revision': draft['revision']}
+        with patch.object(manual, '_retained_work', return_value=True):
+            self.assertFalse(manual.list()['drafts'][0]['retry_allowed'])
+            with self.assertRaisesRegex(ValueError, 'cannot be retried'):
+                manual.retry(request)
+        self.assertTrue(draft['retry_allowed'], draft)
+        with patch.object(manual, '_resume'):
+            retried = manual.retry(request)['draft']
+        self.assertEqual((retried['state'], retried['job_id']), ('queued', queued['job_id']))
+
     def joined(self, damaged, *, terminal=True):
         """A joined-book manifest over private parts (as test_terminal_chapters' join), the second part damaged."""
         from encoding_policy import AUTOMATIC_PROFILE, freeze_automatic_policy
@@ -237,6 +261,7 @@ class DamagedPartTests(unittest.TestCase):
 
     def test_a_repaired_part_that_fails_its_check_stops_with_its_name(self):
         manifest, parts = self.joined(truncate, terminal=False)
+        before = [facts(path) for path in parts]
         real = pipeline.decoded_duration
         def decode(path, *args, **kwargs):
             if Path(path).name.startswith('part-repair-'):
@@ -247,6 +272,47 @@ class DamagedPartTests(unittest.TestCase):
         self.assertEqual({k: caught.exception.part_repair[k] for k in ('kind', 'file', 'source_index')}, {'kind': 'failed', 'file': parts[1].name, 'source_index': 1})
         details = audio_jobs._failure_details(caught.exception, 'checking sources')
         self.assertEqual(details['part_repair']['kind'], 'failed')
+        self.assertEqual([facts(path) for path in parts], before)
+        self.assertFalse(Path(manifest['destination']).exists())
+
+    def test_automatic_join_offers_retry_only_for_a_failed_repair(self):
+        from test_attention_repair import Ledger
+        ledger = Ledger(self.root)
+        self.addCleanup(ledger.jobs.close)
+        for internal in (False, True):
+            with self.subTest(internal=internal):
+                folder = self.root / str(internal); folder.mkdir()
+                with patch.object(self, 'root', folder):
+                    manifest, parts = self.joined(truncate if internal else lambda path: corrupt(path, share=.7), terminal=False)
+                before = [facts(path) for path in parts]
+                manifest['evidence'] = {'approved': True}
+                for source in manifest['sources']:
+                    source['fingerprint'] = pipeline.fingerprint(Path(source['path']))
+                with ledger.jobs._db() as db:
+                    db.execute('INSERT INTO book_groups VALUES(?,?,?)', (manifest['candidate_id'], 1, 'frozen'))
+                job_id = ledger.jobs.enqueue(manifest)
+                expected = pipeline.PartRepairError if internal else pipeline.SourceDecodeError
+                repair = patch.object(pipeline, '_repair_part_copy', side_effect=KeyError('internal fixture')) if internal else contextlib.nullcontext()
+                with repair, self.assertRaises(expected) as caught:
+                    pipeline.create_private(manifest, folder / 'stage', self.stop)
+                failure = audio_jobs._failure_details(caught.exception, 'checking sources')
+                ledger.jobs._update(job_id, state='needs attention', journal=json.dumps({'failure': failure}))
+                attention = ledger.jobs.attention_summary(lambda row: None, job_ids=[job_id])[job_id]
+                self.assertEqual([facts(path) for path in parts], before)
+                self.assertFalse(Path(manifest['destination']).exists())
+                if internal:
+                    self.assertEqual(attention['media_failure']['hint'], f'The app couldn’t finish the repair for {parts[1].name}.')
+                    self.assertTrue(attention['retry']['allowed'])
+                    with self.assertRaises(audio_jobs.RetryRefused):
+                        ledger.jobs.retry_admission_hold(job_id, manifest['candidate_id'], 99, lambda row: None)
+                    ledger.jobs.retry_admission_hold(job_id, manifest['candidate_id'], 1, lambda row: None)
+                    self.assertEqual(ledger.row(job_id)['state'], 'pending')
+                else:
+                    self.assertEqual(attention['media_failure']['code'], 'm4b_part_unrepairable')
+                    self.assertIn('get a new copy', attention['media_failure']['hint'])
+                    self.assertNotIn('retry', attention)
+                    with self.assertRaises(audio_jobs.RetryRefused):
+                        ledger.jobs.retry_admission_hold(job_id, manifest['candidate_id'], 1, lambda row: None)
 
     def test_pause_during_a_repair_stops_it_and_the_book_restarts(self):
         manifest, parts = self.joined(truncate, terminal=False)

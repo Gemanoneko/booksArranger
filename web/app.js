@@ -1622,9 +1622,8 @@ function workDetail(row,finishing){
 function repairTip(row){return row?.kind==='conversion' && row.step==='repairing' && typeof row.step_text==='string' && row.step_text?'Repairing '+row.step_text:'';}
 function partRepairLine(draft){
   const part=draft?.state==='failed'?draft.part_repair:null,file=typeof part?.file==='string'?part.file:'';if(!file)return '';
-  // Sergei's ruling on damaged parts (2026-11-19): a part the app can't repair (or whose repair failed its check) blocks the
-  // conversion: the line says plainly to get a new copy. No Retry (the engine offers none) and no Reopen draft hint.
   const kept=draft.originals_untouched===true?' Original kept.':'';
+  if(part.kind==='failed')return `The app couldn’t finish the repair for ${file}.${kept}`;
   return `Conversion stopped. ${file} is damaged and can't be repaired safely.${kept} Get a new copy of this book.`;
 }
 function repairedPartsLine(draft){
@@ -2091,7 +2090,7 @@ function rowAction(row){
     return {...rowActions.startover,ready:attention.startover==='manual_draft'?STARTOVER_HELD_TIP:STARTOVER_CHANGED_TIP,data:{allowed:true,reason:''}};
   }
   if(refusal && refusalFix(refusal)==='update')return null;
-  if(mediaFailureText(attention))return null;
+  if(mediaFailureText(attention) && attention.media_failure.code!=='m4b_part_repair_failed')return null;
   const [kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair' || refusal?.kind==='repair'?['repair',job.repair]:['retry',job.retry];
   if(!data || typeof data!=='object' || typeof data.allowed!=='boolean')return null;
   if(kind==='retry' && attention?.remedy?.kind==='tag_repair')return {...rowActions.retry,ready:'Check this MP3 again with this app version and queue its audiobook job.',data};

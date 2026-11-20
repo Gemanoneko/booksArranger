@@ -43,10 +43,10 @@ const row=extra=>({id:'conversion:j1',kind:'conversion',label_key:'conversion',s
   // The manual window's stop lines and end line.
   const stopped={state:'failed',originals_untouched:true,reopen_allowed:true};
   context.d={...stopped,part_repair:{kind:'unrepairable',file:'Впусти меня 3.m4b'}};
-  // Sergei's ruling on damaged parts (2026-11-19): get a new copy; no Retry and no Reopen draft hint, whatever stopped the repair.
+  // Only confirmed damage calls for a new copy.
   assert.equal(run('partRepairLine(d)'),"Conversion stopped. Впусти меня 3.m4b is damaged and can't be repaired safely. Original kept. Get a new copy of this book.");
   context.d={...stopped,originals_untouched:false,part_repair:{kind:'failed',file:'Впусти меня 3.m4b'}};
-  assert.equal(run('partRepairLine(d)'),"Conversion stopped. Впусти меня 3.m4b is damaged and can't be repaired safely. Get a new copy of this book.");
+  assert.equal(run('partRepairLine(d)'),"The app couldn’t finish the repair for Впусти меня 3.m4b.");
   context.d={state:'converted',repaired_parts:1,originals_untouched:true};assert.equal(run('repairedPartsLine(d)'),' Repaired 1 damaged part. Original kept.');
   context.d={state:'cleanup',repaired_parts:2,originals_untouched:false};assert.equal(run('repairedPartsLine(d)'),' Repaired 2 damaged parts.');
   context.d={state:'running',repaired_parts:1};assert.equal(run('repairedPartsLine(d)'),'','only when the job ends');
@@ -57,7 +57,13 @@ const row=extra=>({id:'conversion:j1',kind:'conversion',label_key:'conversion',s
     hint:'Впусти меня 3.m4b is damaged and cannot be repaired safely. Delete the book, then get a new copy.'},originals_untouched:true});
   context.a=media('m4b_part_unrepairable');
   assert.deepEqual(JSON.parse(JSON.stringify(run('mediaFailureText(a)'))),{status:'Need to reacquire',hint:'Впусти меня 3.m4b is damaged and cannot be repaired safely. Delete the book, then get a new copy. Original kept.',warn:true});
-  context.a=media('m4b_part_repair_failed');assert.equal(run('mediaFailureText(a)').status,'Need to reacquire');
+  context.a=media('m4b_part_repair_failed');
+  Object.assign(context.a.media_failure,{status:'Repair stopped',hint:'The app couldn’t finish the repair for Впусти меня 3.m4b.'});
+  context.internalRow={kind:'candidate',creation:{job:{state:'Output needs attention',attention:{...context.a,group:'retry'},retry:{allowed:true,reason:''}}}};
+  assert.equal(run('attentionText(internalRow).hint'),'The app couldn’t finish the repair for Впусти меня 3.m4b. Original kept.');
+  assert.equal(run('rowAction(internalRow).kind'),'retry');
+  delete context.internalRow.creation.job.retry;
+  assert.equal(run('rowAction(internalRow)'),null);
 
   // The window before queueing: the track count line says the repair, only for a join that includes an .m4b.
   click('manual-conversion-tab');await flush();
@@ -82,6 +88,10 @@ const row=extra=>({id:'conversion:j1',kind:'conversion',label_key:'conversion',s
   assert.match(get('manual-editor-status').textContent,/Get a new copy of this book\.$/);
   assert.equal(get('manual-job-retry').hidden,true,'no Retry');
   assert.equal(get('manual-job-reopen').hidden,true,'no Reopen draft: the stop line stands alone');
+  stoppedDraft.part_repair.kind='failed';stoppedDraft.retry_allowed=true;
+  click('manual-conversion-tab');await flush();
+  assert.equal(get('manual-editor-status').textContent,'The app couldn’t finish the repair for Впусти меня 3.m4b. Original kept.');
+  assert.equal(get('manual-job-retry').hidden,false,'safe Retry is visible');
   // Futaba 0.30.0 slice D, follow-up 3: a single M4B cut inside its last frame failed its full decode (so the engine keeps a
   // replace-source fact), yet its damage is repairable: the row is "Damaged — can repair", never "the MP3 ... can't be repaired".
   const remedied=(group,path,extra={})=>({id:'r1',kind:'candidate',creation:{job:{state:'Output needs attention',job_id:'job-r1',attention:{group,originals_untouched:true,

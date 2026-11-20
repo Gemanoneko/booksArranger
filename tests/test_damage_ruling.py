@@ -225,15 +225,13 @@ class DamageRulingRowTests(unittest.TestCase):
     def test_unrepairable_damage_tells_him_to_reacquire(self):
         manifest = {'sources': [{'path': 'X:/a/1.m4b'}, {'path': 'X:/a/2.m4b'}]}
         journal = {'failure': {'stage': 'checking sources', 'part_repair': {'kind': 'unrepairable', 'source_index': 1, 'source_path': 'X:/a/2.m4b'}}}
-        for kind in ('unrepairable', 'failed'):
-            journal['failure']['part_repair']['kind'] = kind
-            media = audio_jobs.media_failure({'output': None}, journal, manifest, 'other')
-            self.assertEqual((media['status'], media['hint']), ('Need to reacquire', '2.m4b is damaged and cannot be repaired safely. Delete the book, then get a new copy.'), kind)
+        media = audio_jobs.media_failure({'output': None}, journal, manifest, 'other')
+        self.assertEqual((media['status'], media['hint']), ('Need to reacquire', '2.m4b is damaged and cannot be repaired safely. Delete the book, then get a new copy.'))
         single = {'sources': [{'path': 'X:/a/book.m4b'}]}
         media = audio_jobs.media_failure({'output': None, 'reason': 'Full audio decode failed: x'}, {'failure': {'stage': 'checking sources', 'exception_class': 'ValidationError'}}, single, 'other')
         self.assertEqual((media['code'], media['status'], media['hint']), ('invalid_m4b_source', 'Need to reacquire', 'book.m4b is damaged and cannot be repaired safely. Delete the book, then get a new copy.'))
         import manual_conversion
-        self.assertFalse(manual_conversion.retry_offered({'failure': {'retryable': True, 'part_repair': {'kind': 'failed'}}}), 'no Retry')
+        self.assertFalse(manual_conversion.retry_offered({'failure': {'retryable': True, 'part_repair': {'kind': 'failed'}}}), 'unclassified records do not offer Retry')
 
     def test_a_held_container_only_row_is_ready_to_retry_and_retry_takes_the_normal_route(self):
         from test_m4b_preservation import TEXT_SOURCE, dangling as synthetic_dangling

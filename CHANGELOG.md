@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.30.1] - 2026-11-20
+
+### Fixed
+
+- Manual and automatic conversion now explain when the app could not finish a repair and offer Retry when safe. The original audio is kept. Only confirmed irreparable damage asks for a new copy.
+
 ## [v0.30.0] - 2026-11-20
 
 ### Added
