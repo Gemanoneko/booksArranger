@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.30.0] - Unreleased
+
+### Added
+
+- See every running job by name and progress. Queued actions are restored after a restart.
+- Join parts into one book and review it before filing. Cancel an accepted Repair while it runs.
+
+### Changed
+
+- Gone books also leave Held and Candidate changed. Saving a blank answer for an unclear author clears that attention row.
+- Use Latin surname-first author folders, keep series names in their original language, and allow books longer than 30 hours.
+- Save playable books with a brief glitch and report the affected file and time. Request a new copy when damaged audio cannot be repaired.
+
+### Fixed
+
+- Keep a saved Pause through startup. Restored work that changes files and held cleanup wait for Start or Resume as applicable.
+- Finish an accepted Quit after the action blocking it ends.
+- Group Darwin’s Blade as one book and show why a series move was refused.
+
 ## [v0.29.0] - 2026-11-18
 
 ### Added
