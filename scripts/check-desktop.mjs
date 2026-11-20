@@ -104,6 +104,7 @@ patterns.push('test_source_presence.py','test_light_novels.py');  // 0.29.0 item
 patterns.push('test_http_0290.py');  // 0.29.0 PA-1: every new field and hook through the real server (Futaba B-1, M-1, M-2 passed mocked tests)
 patterns.push('test_live_status.py','test_background_work.py');  // 0.30.0: the running part read at every poll; every background job as a row or a waiting item
 patterns.push('test_recovery_ancestry_moves.py');  // 0.30.0 item B: a cleanup recorded before both storage moves still finds its recovery folder (Brom)
+patterns.push('test_launch_held_cleanup.py');  // 0.30.0 R2-1: a relaunched engine runs no held cleanup without a Start, and keeps a saved Pause
 patterns.push('test_retained_runtime_passes.py');  // 0.30.0 item A: the background passes run in retained-runtime mode; retained jobs left alone
 patterns.push('test_relocated_job_paths.py');  // 0.30.0 sort-1: a job queued before the storage moves passes its pre-conversion check (263 books)
 patterns.push('test_quit_bound.py');  // 0.30.0 item F: Quit closes within seconds; it waits only for real work and says what (waiting_for)
@@ -112,6 +113,7 @@ patterns.push('test_sorting_030_review.py');  // Senua's 0.30.0 review M2, M3, m
 patterns.push('test_scope_view.py');  // 0.30.0 item E: the Book metadata line from scope_view (repaired text), never the grouping key
 patterns.push('test_damaged_part_repair.py');  // 0.30.0 item C: a damaged M4B part is repaired on a working copy before its join (manual and automatic)
 patterns.push('test_damage_ruling.py');  // Sergei's ruling 2026-11-19: container-only damage with proven intact audio converts normally; unrepairable damage says re-acquire
+patterns.push('test_minor_damage.py');  // Sergei's ruling 2026-11-20: audio that plays through with only a short glitch publishes with a minor-damage note
 patterns.push('test_book_join.py');
 patterns.push('test_join_qa_030.py');  // 0.30.0 QA D1, D2, D3, C2: no blocker when nothing blocks, repaired tags in part sets, Cancel retry's 400, Darwin's Blade  // 0.30.0 item D: Join into one book (the record, every 8.5 effect in one transaction, the wait behind a converting part) and answer 9's Cancel
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup

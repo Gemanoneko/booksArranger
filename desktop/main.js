@@ -567,28 +567,29 @@ async function requestQuit({ confirmed }) {
   remember('\nQuit: the engine ' + (sent.outcome === 'refused' ? 'refused it (' : 'did not answer (') + (sent.error ? sent.error.message : 'no reply') + '); stopping it safely through its pipe.\n');
   refreshTray('Books Arranger — stopping safely');
   if (state.win && !state.win.isDestroyed()) state.win.hide();
-  await endLoadingEngine(30000, { holdKill: fileChangeOpen });
+  await endLoadingEngine(30000, { holdKill: stillEnding });
   finishExit(0);
 }
-// Senua's 0.30.0 review, M4: true while the engine's desktop status still names an open file change ('critical'), so a
-// stopping engine is never ended in the middle of one (endOwnEngine holds the kill, bounded by FILE_CHANGE_BOUND_MS). An
+// Senua's 0.30.0 review, M4, and Futaba's slice A delta: true while the engine's desktop status still names an open file
+// change or a press it ends itself and then closes after (endingByItself), so a stopping engine is never ended in the
+// middle of one, nor just before it closes on its own (endOwnEngine holds the kill, bounded by FILE_CHANGE_BOUND_MS). An
 // engine that does not answer names nothing.
-let fileChangeLine = '';
-async function fileChangeOpen() {
+let stillEndingLine = '';
+async function stillEnding() {
   try {
     const status = await request('GET', '/api/desktop/status', { desktop: true, timeout: 2000 });
-    const open = quitWaiting(status).filter((item) => item.kind === 'critical');
+    const open = endingByItself(quitWaiting(status));
     const line = open.length ? quitWaitLine(open) : '';
-    if (line && line !== fileChangeLine) remember('\nQuit: waiting for ' + line + ' to finish before the engine is ended.\n');
-    fileChangeLine = line;
-    return fileChangeNamed(open);
+    if (line && line !== stillEndingLine) remember('\nQuit: waiting for ' + line + ' to finish before the engine is ended.\n');
+    stillEndingLine = line;
+    return open.length > 0;
   } catch { return false; }
 }
 
 // HTTP failure never proves a safe checkpoint, but a closed server after an accepted Quit is the engine's
 // own last step: once connections are refused for a few seconds the engine is gone and the shell exits.
 const { createQuitWatch, outcomeOf, sendQuit, endOwnEngine, createQuitProgress, createQuitBound, QUIT_WAIT_BOUND_MS, quitNow, quitWaiting,
-  fileChangeNamed } = require('./quit-watch');
+  endingByItself } = require('./quit-watch');
 async function engineGoneExit() {
   // Tell the host the shell is done and wait until it has really exited (it exits only after its engine), then leave.
   // Futaba's 0.22.3 QA, m-2: this waited 5 s at most, so the shell could exit while its engine was still finishing its
@@ -639,7 +640,7 @@ async function quitAnyway() {
   refreshTray('Books Arranger — stopping safely');
   if (state.win && !state.win.isDestroyed()) state.win.hide();
   await quitNow({ post: () => engineRequest('POST', '/api/desktop/stop-now', { desktop: true, timeout: 5000 }),
-    endEngine: () => endLoadingEngine(30000, { holdKill: fileChangeOpen }) });
+    endEngine: () => endLoadingEngine(30000, { holdKill: stillEnding }) });
   finishExit(0);
 }
 

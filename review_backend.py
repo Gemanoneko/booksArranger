@@ -433,6 +433,8 @@ class CandidateReviewService:
                 if job['manifest'].get('m4b_repair') or ((job.get('output') or {}).get('validation') or {}).get('source_working_repairs'):
                     from audio_jobs import repair_record;repaired=repair_record(job)
                     if repaired:self.page_local.jobs[job['manifest']['candidate_id']]['repaired']=repaired
+                minor=((job.get('output') or {}).get('validation') or {}).get('minor_audio_damage') if job['state']=='completed' else None
+                if minor:self.page_local.jobs[job['manifest']['candidate_id']]['minor_damage']=copy.deepcopy(minor)  # Sergei 2026-11-20: a note, never a hold
             if status=='output_attention' and hasattr(self.jobs,'attention_summary'):attention=self.jobs.attention_summary(retry=False)
         converted=(self.jobs.converted_ids() if hasattr(self.jobs,'converted_ids') else self.jobs.progress_books()['converted_ids']) if self.jobs and hasattr(self.jobs,'progress_books') else set()
         needs={}

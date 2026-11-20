@@ -79,7 +79,7 @@ class RepairedTagTests(unittest.TestCase):
         self.assertTrue(next(iter(built.values())).get('part_set'))
 
     def test_the_grouping_version_moves_so_every_root_regroups_once(self):
-        self.assertIn('m4b-parts-v4', groups.GROUP_VERSION)
+        self.assertIn('m4b-parts-v5', groups.GROUP_VERSION)  # v5: the C2 delta (a catalog grouped by v4 regroups once more)
 
 
 class AlbumPartNumberTests(unittest.TestCase):
@@ -121,6 +121,99 @@ class DarwinsBladeTests(test_approve_as_is.ApproveFixture):
         reasons = self.research(row)['reasons']
         self.assertIn('Playback order uncertain', reasons, 'a gap in the part numbers is still a question')
         self.assertNotIn('Mixed recordings in this group', reasons)
+
+
+class AutomaticRunTests(test_approve_as_is.ApproveFixture):
+    """C2 delta (Futaba on 03041ee): the grouping still carried "Different book album/title clues may indicate mixed works"
+    for a set joined by its album part numbers, so the real automatic run held «Darwin's Blade» with no job while a
+    same-album control converted. Now the conflict goes for such a set; the negatives still hold or stay apart."""
+    def make(self, folder, album, numbers=(1, 2), artists=None):
+        for n in numbers:
+            part(self.audio / 'Simmons Dan' / folder / ('%s %d.m4b' % (album, n)), '%s %d' % (album, n),
+                 [(0, 500, 'Глава %d' % (2 * n - 1)), (500, 1000, 'Глава %d' % (2 * n))],
+                 album='%s %d' % (album, n), artist=(artists or {}).get(n, 'Dan Simmons'))
+
+    def run_automatic(self, settle=60):
+        """Start automatic processing; once it has finished (or after settle seconds: a held book keeps a run waiting for its
+        next try), stop it and let the conversion queue finish."""
+        import time
+        automatic = self.service.automatic
+        automatic.start()
+        running = lambda: (automatic.thread and automatic.thread.is_alive()) or automatic.status()['state'] in ('Running', 'Stopping')
+        limit = time.monotonic() + settle
+        while running() and time.monotonic() < limit:
+            time.sleep(.1)
+        if running():
+            automatic.stop()
+            limit = time.monotonic() + 60
+            while running():
+                self.assertLess(time.monotonic(), limit, 'automatic processing did not stop')
+                time.sleep(.1)
+        self.wait()
+
+    def jobs_for(self, folder):
+        return [j for j in self.service.jobs.status()['jobs'] if any(Path(s['path']).parent.name == folder for s in j['manifest']['sources'])]
+
+    def test_the_real_automatic_run_converts_darwins_blade_like_a_same_album_set(self):
+        self.make('Dale Stewart', "Dale Stewart 04 - Darwin's Blade")
+        for n in (1, 2):  # the control: one album on both parts, the track tags order it (converted before the fix too)
+            part(self.audio / 'Simmons Dan' / 'Control' / ('Контроль %d.m4b' % n), 'Контроль %d' % n, [(0, 500, 'Глава %d' % (2 * n - 1)), (500, 1000, 'Глава %d' % (2 * n))],
+                 album='Контроль', artist='Dan Simmons', track=n, total=2)
+        rows = self.start()
+        self.assertEqual(sorted(len(r['members']) for r in rows), [2, 2])
+        darwin = next(r for r in rows if 'Dale Stewart' in r['members'][0]['path'])
+        self.assertNotIn('Different book album/title clues may indicate mixed works', darwin['conflicts'])
+        self.assertEqual(darwin['title_clue'], "Dale Stewart 04 - Darwin's Blade")
+        self.run_automatic()
+        control = self.jobs_for('Control')
+        self.assertEqual([j['state'] for j in control], ['completed'], 'positive control: the same-album set converts')
+        jobs = self.jobs_for('Dale Stewart')
+        self.assertEqual([j['state'] for j in jobs], ['completed'], [r.get('reasons') for r in [self.service.automatic.candidate(darwin) or {}]])
+        self.assertEqual([c['title'] for c in jobs[0]['output']['validation']['chapters']], ['Глава 1', 'Глава 2', 'Глава 3', 'Глава 4'])
+
+    def test_a_gap_or_different_artists_never_convert(self):
+        self.make('Gap', "Blade", numbers=(1, 3))
+        self.make('Artists', "Edge", artists={1: 'Dan Simmons', 2: 'Stephen King'})
+        rows = self.start()
+        self.assertEqual(sorted(len(r['members']) for r in rows), [1, 1, 2], 'different artists: two books; the gap: one set')
+        self.run_automatic()
+        self.assertEqual(self.jobs_for('Gap'), [], 'a gap in the part numbers still holds the set')
+        gap = next(r for r in rows if 'Gap' in r['members'][0]['path'])
+        self.assertIn('Playback order uncertain', (self.service.automatic.candidate(gap) or {}).get('reasons') or [])
+
+
+class ProtectedPartSetTests(unittest.TestCase):
+    """C2 delta, the second cause the real run showed: once a part set was approved and queued (protected), a regroup rebuilt
+    it by the per-file rule, which orders its parts differently, so it read "Recording grouping needs stronger evidence", its
+    revision moved and the queued job stopped at "Source changed - review required". It keeps its stored group while its
+    files are the same."""
+    def rows(self, numbers=(1, 2), size=1000):
+        return [catalog_row("Simmons/Dale Stewart 04 - Darwin's Blade %d.m4b" % n, {'album': "Dale Stewart 04 - Darwin's Blade %d" % n, 'artist': 'Dan Simmons',
+                'title': "Dale Stewart 04 - Darwin's Blade %d" % n}, size=size if n == 2 else 1000) for n in numbers]
+
+    def test_a_protected_part_set_keeps_its_group_while_its_files_are_the_same(self):
+        rows = self.rows()
+        scope, group = next(iter(groups.build(rows).items()))
+        self.assertTrue(group['part_set'])
+        again = groups.build(rows, protected={scope: group})
+        self.assertIs(again[scope], group, 'the stored group, unchanged')
+        changed = groups.build(self.rows(size=2000), protected={scope: group})
+        self.assertTrue(changed[scope].get('source_partition_uncertain'), 'positive control: a changed file still asks')
+
+
+class AlbumPartNegativeTests(unittest.TestCase):
+    """C2 delta negatives at grouping: mixed audio profiles and "Metro 2033"/"Metro 2034" stay apart."""
+    def test_mixed_audio_profiles_stay_apart(self):
+        from test_split_books import AAC
+        rows = [catalog_row("Simmons/Blade %d.m4b" % n, {'album': "Blade %d" % n, 'artist': 'Dan Simmons', 'title': "Blade %d" % n},
+                            profile=AAC if n == 1 else ('aac', '22050', 2)) for n in (1, 2)]
+        self.assertEqual(len(groups.build(rows)), 2)
+
+    def test_metro_2033_and_2034_stay_apart(self):
+        rows = [catalog_row("Glukhovsky/Metro %d.m4b" % n, {'album': "Metro %d" % n, 'artist': 'Dmitry Glukhovsky', 'title': "Metro %d" % n}) for n in (2033, 2034)]
+        built = groups.build(rows)
+        self.assertEqual(len(built), 2, list(built))
+        self.assertFalse(any((g.get('part_set') or {}).get('album_parts') for g in built.values()))
 
 
 class RetryCancelTests(test_approve_as_is.ApproveFixture):

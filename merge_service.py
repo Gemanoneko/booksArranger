@@ -1563,7 +1563,7 @@ class MergeService:
         def work():
             while not self._retention_stop.is_set():
                 # Snapshot the existing admitted intent before any slow work/admission wait.
-                cleanup_generation=self.__dict__.get('_automatic_cleanup_generation',0)
+                cleanup_generation=self.__dict__.get('_automatic_cleanup_generation',self.NO_ADMITTED_START)
                 published_revisits=[]
                 # This distinct unpublished-working operation holds only its
                 # relevant job/native leases. No central operation/admission lock
@@ -1645,12 +1645,25 @@ class MergeService:
     # after the storage moves) is checked again by this sweep too, once per Start; CleanupJobs._work decides.
     RECHECKED_HOLDS=HELD_FOR_METADATA+(ANCESTRY_HOLD,)
 
+    # 0.30.0 R2-1: no Start admitted in this launch. Start generations begin at 0, so 0 cannot mean "none": as the default
+    # it let a fresh engine's own generation 0 authorize this sweep at launch, with nothing pressed and a saved Pause.
+    NO_ADMITTED_START=-1
+
+    def _jobs_pause_saved(self):
+        """A jobs Pause saved in the catalog that no Start has ended yet: Sergei's, or a safety hold (AudioJobs._hold_queue,
+        which does not end the current Start). An unreadable catalog counts as paused."""
+        try:
+            with connect(self.inventory.database) as db:return __import__('pause_state').read(db,'jobs') is not None
+        except sqlite3.Error:return True
+
     def _finish_held_cleanups(self,generation=None):
-        """Only an existing admitted Start intent can authorize this automatic held-cleanup sweep."""
-        if generation is None:generation=self.__dict__.get('_automatic_cleanup_generation',0)
-        allow=lambda:self._start_allowed(generation) and generation==self.__dict__.get('_automatic_cleanup_generation',0)
+        """Only a Start admitted in this launch authorizes this automatic held-cleanup sweep: never at launch, never while
+        a saved or in-session Pause is in force (0.30.0 R2-1). The restart restore no press made never authorizes it
+        (_authorize_automatic_cleanup with cleanups=False)."""
+        if generation is None:generation=self.__dict__.get('_automatic_cleanup_generation',self.NO_ADMITTED_START)
+        allow=lambda:self._start_allowed(generation) and generation==self.__dict__.get('_automatic_cleanup_generation',self.NO_ADMITTED_START)
         if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
-        if not allow():
+        if not allow() or self._jobs_pause_saved():
             self._settle_folder_jobs();return
         rows=[row for row in self.cleanup._rows("SELECT id,job_id,reason FROM source_cleanup WHERE state='needs_attention'") if row['reason'] in self.RECHECKED_HOLDS and row['id'] not in self._purge_tried]
         try:kept=self._kept_by_choice([row['job_id'] for row in rows]) if rows else set()
@@ -1979,6 +1992,8 @@ class MergeService:
         if job['state']=='completed':
             validation=(job.get('output') or {}).get('validation') or {}
             if validation.get('passed') is True:value['chapter_corrections']=copy.deepcopy(validation.get('terminal_end_corrections') or [])
+            # Sergei's ruling (2026-11-20): published as a good file; the book's details say it has minor audio damage.
+            if validation.get('passed') is True and validation.get('minor_audio_damage'):value['minor_damage']=copy.deepcopy(validation['minor_audio_damage'])
             folder=self.storage_cleanup.folder_status(job['job_id'])
             if folder:
                 value['folder_cleanup']=folder|self._retry_view(('folder',job['job_id']))
@@ -4468,7 +4483,7 @@ class MergeService:
         result['reasons']=[]
         # Senua's 0.22.0 review, m4: closing or draining the app stops a press still checking the files (hashes, probes).
         stop=threading.Event();presses=self.__dict__.setdefault('_approve_stops',set());presses.add(stop)
-        if self.draining or self.__dict__.get('_closing'):stop.set()
+        if self.draining or self.__dict__.get('_closing') or self.__dict__.get('_presses_stopped'):stop.set()
         try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
         except Exception as error:
             # Senua's 0.22.3 review, M4: once the job is queued the Approve is accepted. Pause still settling (Start refused),
@@ -5709,6 +5724,19 @@ class MergeService:
     def _publication_verified(self,record):
         try:self._remember_identity(record,file_identity(ordinary(record['final_path'])))
         except OSError:pass
+
+    def stop_presses(self):
+        """A safe stop (desktop stop-now, a sign-out, the shell's pipe closing: Futaba's 0.30.0 slice A delta) tells every press
+        that can stop to stop now, before the shutdown waits for presses: an approval still checking its files (the book is
+        not approved, as at Quit and close), Retry all at its next book; an approval that reaches its checks after this stops
+        at once. Delayed starts are invalidated, as at drain and close. Never waits. Unlike drain(), the queue's own pause is
+        left to close (automatic processing records why it paused)."""
+        with _BULK_LOCK:
+            self._presses_stopped=True
+            self._start_generation=self.__dict__.get('_start_generation',0)+1
+            pending=self.__dict__.get('_retry_all_stop')
+            if pending:pending.set()
+            for press in list(self.__dict__.get('_approve_stops',())):press.set()
 
     def stop_background(self):
         """Quit (0.30.0 item F): the background work close() stops is told to stop now, never waited for here, so it ends

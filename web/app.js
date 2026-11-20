@@ -2760,9 +2760,10 @@ function renderAttentionGroups(){
     const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked.`+(state?.automatic_processing?.can_start===true?` ${automaticStartWord()} automatic processing to check ${n===1?'it':'them'}.`:'');
     if(sweep.textContent!==text)sweep.textContent=text;sweep.hidden=!text;}
   const queueLine=$('queue-line');
-  if(queueLine){const n=queueState.queued.length,first=queueState.queued[0],said=n?blockerSentence(queueBlocker(first)).text:'';
-    // 0.30.0 (Judy's spec 2.3): the queue strip says the same sentence as the book row and the Waiting list.
-    const text=!n?'':n===1?`1 action waiting. ${said}`:`${n.toLocaleString()} actions waiting, one at a time. First: ${queueWord(first.action)}: ${first.title || 'a book'}. ${said}`;
+  if(queueLine){const n=queueState.queued.length,first=queueState.queued[0],said=n && first.blocker?blockerSentence(queueBlocker(first)).text:'';
+    // 0.30.0 (Judy's spec 2.3): the queue strip says the same sentence as the book row and the Waiting list. Futaba's QA,
+    // slice D item 2: an action nothing blocks (blocker null, about to run) names no wait (it read "It runs when the app is free.").
+    const text=!n?'':[n===1?'1 action waiting.':`${n.toLocaleString()} actions waiting, one at a time. First: ${queueWord(first.action)}: ${first.title || 'a book'}.`,said].filter(Boolean).join(' ');
     if(queueLine.textContent!==text)queueLine.textContent=text;queueLine.hidden=!text;}
   const run=bulkRun(),running=run?.state==='running';
   if(retryAllRun && !retryAllRun.ended && run?.id===retryAllRun.id && !running)finishRetryAll(run);
@@ -3065,7 +3066,12 @@ function attentionText(row){
   }
   const changed=readmissionOf(row)?.queued_next===true?null:sourceChangedText(a);if(changed)return changed;  // ruling 75b, before the "replace it" line
   const media=mediaFailureText(a);if(media)return media;
-  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",warn:true};
+  // Futaba 0.30.0 slice D: a file whose damage the app can repair (group repair: a single M4B cut inside its last frame) keeps
+  // its "Damaged — can repair" row; the replace-source line names the file's own type (it said "The MP3" for every file).
+  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed' && a.group!=='repair'){
+    const type=String(a.remedy.path || '').split('.').pop().toUpperCase(),word={MP3:'The MP3',M4B:'The M4B',M4A:'The M4A'}[type] || (/^[A-Z0-9]{2,5}$/.test(type)?`The ${type} file`:'The audio file');
+    return {status:'Source audio needs replacement',hint:`${word} failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.`,warn:true};
+  }
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):readmission.origin==='automatic'?AUTO_QUEUED_HINT:'The book is checked again before it runs.'};
@@ -3320,10 +3326,15 @@ function originalTitleFact(row){
   return '';
 }
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
+function minorDamageText(items){
+  return (Array.isArray(items)?items:[]).filter(item=>typeof item?.file==='string' && item.file && Number.isFinite(item.glitch_at_seconds)).map(item=>{
+    const lost=Number.isFinite(item.lost_seconds) && item.lost_seconds>0?` (${Math.max(.1,Math.round(item.lost_seconds*10)/10).toLocaleString()} s skipped)`:'';
+    return `Minor audio damage: ${item.file} has a short glitch at ${clockText(item.glitch_at_seconds,item.glitch_at_seconds>=3600)}${lost}. It plays through.`;}).join(' ');
+}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
   renderProducerRetained(row);
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move,row.admission_error,row.chapter_corrections,row.chapter_check,row.creation?.job?.folder_cleanup]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.minor_damage,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move,row.admission_error,row.chapter_corrections,row.chapter_check,row.creation?.job?.folder_cleanup]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
@@ -3334,6 +3345,8 @@ function renderAutomaticResult(row){
   $('automatic-result-hint').classList?.toggle?.('retry-refused',!!attention?.warn);
   // After Repair: a permanent line and one bullet per patch; the technical note is the last line.
   const repaired=row.creation?.job?.repaired,patched=Array.isArray(repaired?.patched)?repaired.patched:[];
+  // Sergei's ruling (2026-11-20): a file that plays through with only a short glitch was published as a good file; a plain note.
+  const minor=minorDamageText(row.creation?.job?.minor_damage);setText('automatic-minor-damage',minor);$('automatic-minor-damage').hidden=!minor;
   setText('automatic-repaired-title',patched.length?(repaired.applied===true?'Repaired':'Repair queued'):'');$('automatic-repaired-list').replaceChildren(...patched.map(item=>node('li',patchCopy(item))));$('automatic-repaired').hidden=!patched.length;
   // A stopped job with no typed cause reads "Stopped — see details": its own text is here, in Technical details.
   const untyped=row.creation?.job?.state==='Output needs attention' && typeof row.creation.job.reason==='string' && row.creation.job.reason;
@@ -6217,7 +6230,8 @@ function setupManualConversion(){
     }
     $('manual-job-retry').hidden=accepted?.retry_allowed!==true;
     $('manual-job-retry').disabled=!usable || uncertain && editor.unknown.action!=='retry';
-    $('manual-job-reopen').hidden=accepted?.reopen_allowed!==true;
+    // Sergei's ruling (2026-11-19, "just tell me to reacquire"): a part the app can't repair leaves the stop line alone.
+    $('manual-job-reopen').hidden=accepted?.reopen_allowed!==true || !!partRepairLine(accepted);
     $('manual-job-reopen').disabled=!usable || uncertain && editor.unknown.action!=='reopen';
     const jobView=$('manual-job-view');
     jobView.hidden=!accepted?.candidate_id || !['failed','cleanup','converted'].includes(accepted.state);
