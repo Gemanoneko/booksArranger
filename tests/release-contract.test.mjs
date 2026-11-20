@@ -100,9 +100,9 @@ function nativeBundle(candidate,mutations={}) {
 }
 
 function currentBinding(version='0.24.2'){return {version,source_head:pin,product_digest:hex,build_id:id,artifact_manifest_sha256:'c'.repeat(64),runtime_manifest_sha256:'d'.repeat(64),phase_contract_sha256:'e'.repeat(64)};}
-test('native phase is mandatory from 0.24.2 through later major versions',()=>{
- for(const value of ['0.24.2','0.24.3','0.25.0','1.0.0','2.0.0'])assert.equal(requiresNativeQa(value),true,value);
- for(const value of ['0.16.0','0.24.1'])assert.equal(requiresNativeQa(value),false,value);
+test('historical releases retain the native evidence contract through 0.29.x',()=>{
+ for(const value of ['0.24.2','0.24.3','0.25.0','0.29.99'])assert.equal(requiresNativeQa(value),true,value);
+ for(const value of ['0.16.0','0.24.1','0.30.0','1.0.0','2.0.0'])assert.equal(requiresNativeQa(value),false,value);
  for(const value of ['00.24.2','0.24.2-beta','v0.24.2','0.24'])assert.throws(()=>requiresNativeQa(value));
 });
 test('historical artifact readers remain readable but cannot accept a current version',()=>{
@@ -127,7 +127,7 @@ test('authority and functional case cannot be replaced by copied or skipped proo
  for(const mutate of [f=>f.case.title='replacement case',f=>f.assertions.pop(),f=>f.assertions.reverse(),f=>f.assertions[1]=f.assertions[0],f=>f.oldEngineRecovered=false,f=>f.intrusion='visible own window']){const e=nativeBundle(currentBinding(),{functional:mutate});assert.throws(()=>validateNativeEvidence(e.summary,e.records,e.expected));}
 });
 test('mandatory phase inventory cannot omit duplicate or relabel the native case',()=>{
- assert.equal(phaseAccounting().native.required,true);
+ assert.equal(phaseAccounting().native.required,false);assert.equal(phaseAccounting().local_update.required,true);
  for(const list of [CANONICAL_NODE_ENTRIES.slice(1),[...CANONICAL_NODE_ENTRIES,PA1_ENTRY],[...CANONICAL_NODE_ENTRIES.slice(0,-1),CANONICAL_NODE_ENTRIES[0]]])assert.throws(()=>phaseAccounting(list));
  assert.throws(()=>phaseAccounting(CANONICAL_NODE_ENTRIES,[]));
 });

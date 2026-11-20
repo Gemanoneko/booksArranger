@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Canonical non-app Node graph with owned Python/codec CLI fixtures; PA-1 is a separate mandatory native phase.
+// Canonical non-app graph includes the update recovery and tray intent check. Real-tray PA-1 is optional.
 // No GUI launch, installer execution, live catalog or source-library access.
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
 import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport,workerDeadline,gateDeadline} from './python-check-batches.mjs';

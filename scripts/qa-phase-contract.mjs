@@ -37,15 +37,22 @@ export function phaseAccounting(canonical=CANONICAL_NODE_ENTRIES,native=[PA1_ENT
  const all=[...canonical,...native],expected=[...ORIGINAL_NODE_ENTRIES,CONTRACT_ENTRY];
  need(new Set(all).size===all.length&&same([...all].sort(),expected.sort()),'QA phase dropped, duplicated or renamed an entry');
  need(same(canonical,CANONICAL_NODE_ENTRIES)&&same(native,[PA1_ENTRY]),'Fixed canonical/native partition differs');
- return {schema:'books-qa-phases-v1',canonical:{scope:'non-app; owned Python/codec CLI fixtures and Node/DOM doubles',node_entries:[...canonical]},native:{...NATIVE_CASE,required:true,status:'PENDING; separate authority and normal native proof required'},prior_node_entries:18,total_node_entries:19};
+ return {schema:'books-qa-phases-v1',canonical:{scope:'non-app; owned Python/codec CLI fixtures and Node/DOM doubles',node_entries:[...canonical]},local_update:{entry:'tests/main-startup.test.mjs',command:'node scripts/check-update-local.mjs',required:true},native:{...NATIVE_CASE,required:false,status:'OPTIONAL; requires separate authority and eligible Windows profile'},prior_node_entries:18,total_node_entries:19};
+}
+function qaVersion(version){
+ need(typeof version==='string'&&/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version),'Canonical release version required');
+ return version.split('.').map(Number);
+}
+export function requiresLocalUpdateQa(version){
+ const [major,minor]=qaVersion(version);return major>0||minor>=30;
 }
 export function requiresNativeQa(version){
- need(typeof version==='string'&&/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version),'Canonical release version required');
- const v=version.split('.').map(Number);return v[0]>0||v[1]>24||v[1]===24&&v[2]>=2;
+ const [major,minor,patch]=qaVersion(version);
+ return major===0&&minor<30&&(minor>24||minor===24&&patch>=2);
 }
 export function binding(value){
  exact(value,['version','source_head','product_digest','build_id','artifact_manifest_sha256','runtime_manifest_sha256','phase_contract_sha256'],'Candidate binding');
- need(requiresNativeQa(value.version),'Native phase binding is before supported release');
+ need(requiresNativeQa(value.version)||requiresLocalUpdateQa(value.version),'Native phase binding is before supported release');
  need(hex(40).test(value.source_head)&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.build_id),'Candidate source/build identity differs');
  for(const k of ['product_digest','artifact_manifest_sha256','runtime_manifest_sha256','phase_contract_sha256'])need(hex(64).test(value[k]),'Candidate hash missing: '+k);
  return structuredClone(value);

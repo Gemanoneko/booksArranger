@@ -89,6 +89,7 @@ function fixture({version='0.24.2',mutations={}}={}) {
   exists:async path=>path in files,
   prepare:async()=>events.push(['prepare']),
   verifyPayload:async()=>events.push(['verify']),
+  checkLocalUpdate:async candidate=>{assert.deepEqual(candidate,manifest);events.push(['local-update']);},
   hash:async path=>{events.push(['hash',path]);if(path in files){const bytes=Buffer.from(files[path]);return{sha256:sha(bytes),size:bytes.length};}if(manifest.artifacts.some(a=>'dist/'+a.path===path))return{sha256:hex,size:123};throw Error('missingfile: '+path);},
   authenticate:async()=>events.push(['auth']),
   api:async(method,path)=>{events.push([method,path]);return published?{tag_name:releaseTag,draft:false,prerelease:false,assets:names.map(name=>({name,size:123,state:'uploaded',digest:'sha256:'+hex}))}:null;},
@@ -97,6 +98,29 @@ function fixture({version='0.24.2',mutations={}}={}) {
  return {io,files,events,bundle,summaryPath,qaPath,manifest,expected};
 }
 function fileSnapshot(files){return Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,Buffer.from(bytes).toString('hex')]));}
+test('current and future versions run the project-local check on the accepted candidate before auth, with no native receipt',async()=>{
+ for(const version of ['0.30.0','0.31.5','1.0.0']){
+  const f=fixture({version});delete f.files[f.summaryPath];
+  f.files[f.qaPath]=f.files[f.qaPath].replace(/^Native QA evidence SHA256:.*\n/m,'');
+  await releaseFlow(f.io);
+  const order=f.events.map(row=>row[0]);assert.ok(order.indexOf('verify')<order.indexOf('local-update')&&order.indexOf('local-update')<order.indexOf('auth'));
+ }
+ const f=fixture({version:'0.30.0'});f.io.checkLocalUpdate=async()=>{throw Error('local update regression');};
+ await assert.rejects(()=>releaseFlow(f.io),/local update regression/);assert.ok(!f.events.some(([name])=>name==='auth'||name==='node-builder'));
+});
+test('a failed, skipped, missing or incomplete local case cannot pass publication',async()=>{
+ const {verifyLocalUpdateRun,LOCAL_UPDATE_TITLE}=await import('../scripts/check-update-local.mjs');
+ const stdout=['ok 1 - '+LOCAL_UPDATE_TITLE,'1..1','# tests 1','# pass 1','# fail 0','# cancelled 0','# skipped 0','# todo 0'].join('\n');
+ verifyLocalUpdateRun({status:0,stdout});
+ for(const result of [{status:1,stdout},{status:0,stdout:stdout.replace(LOCAL_UPDATE_TITLE,'other')},{status:0,stdout:stdout.replace('# skipped 0','# skipped 1')},{status:null,signal:'SIGTERM',stdout}])assert.throws(()=>verifyLocalUpdateRun(result),/did not pass/);
+});
+test('the local case rejects different packaged shell bytes',async()=>{
+ const {verifyLocalShell}=await import('../scripts/check-update-local.mjs');
+ const {readFileSync}=await import('node:fs');
+ const read=relative=>readFileSync(new URL('../'+relative,import.meta.url));
+ verifyLocalShell(read);
+ assert.throws(()=>verifyLocalShell(relative=>relative==='desktop/main.js'?Buffer.from('different candidate'):read(relative)),/differs from package: desktop\/main.js/);
+});
 async function refusesBeforeEffects(f,pattern){
  const before=fileSnapshot(f.files);
  await assert.rejects(()=>releaseFlow(f.io),pattern);
@@ -122,8 +146,8 @@ test('valid current native bundle reaches original release assertions in gate or
  assert.ok(locate('verify')<locate('auth')&&locate('auth')<locate('node-builder'));
  assert.deepEqual(nativeAttempts,[]);
 });
-test('missing native evidence blocks every current and future publish before credentials',async()=>{
- for(const version of ['0.24.2','0.24.3','0.25.0','1.0.0','2.0.0']){const f=fixture({version});delete f.files[f.summaryPath];await refusesBeforeEffects(f,/missingfile/);}
+test('missing original native evidence blocks a historical publish before credentials',async()=>{
+ for(const version of ['0.24.2','0.24.3','0.25.0','0.29.99']){const f=fixture({version});delete f.files[f.summaryPath];await refusesBeforeEffects(f,/missingfile/);}
 });
 test('GO prose missing duplicate stale or invented native summary SHA is insufficient',async()=>{
  for(const change of [f=>f.files[f.qaPath]=f.files[f.qaPath].replace(/^Native QA evidence SHA256:.*\n/m,''),f=>f.files[f.qaPath]+=f.files[f.qaPath].match(/^Native QA evidence SHA256:.*$/m)[0]+'\n',f=>f.files[f.qaPath]=f.files[f.qaPath].replace(/(Native QA evidence SHA256: )([a-f0-9]{64})/,'$1'+'f'.repeat(64)),f=>f.files[f.summaryPath]+=' ']){const f=fixture();change(f);await refusesBeforeEffects(f,/native QA evidence hash|Native QA summary/i);}

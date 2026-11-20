@@ -46,15 +46,25 @@ const key=p=>path.win32.normalize(p).replace(/[\\]+$/,'').toLowerCase();
 
 // Inputs the checks only read. Any other BOOKS_* path names a place a test writes (C:\BASF-* came from such a root).
 const READ_ONLY_INPUTS=new Set(['BOOKS_QA_RUNTIME_ROOT','BOOKS_MP3_REAL_FIXTURE','BOOKS_QA_TARGET_PYTHON','BOOKS_QA_TARGET_BACKEND']);
-// Refused before anything runs: a BOOKS_* fixture or work root on C: while the checkout is elsewhere. A checkout on C:
-// (the laptop's approved root, C:/Antigravity Projects) keeps its fixtures beside it, so it is not refused there.
-export function cDriveEnvRefusal(env,root,systemDrive='C:'){
- const drive=systemDrive.replace(/[\\/:]+$/,'').toLowerCase()+':';
- if(path.win32.resolve(root).toLowerCase().startsWith(drive))return null;
- const onC=Object.entries(env).filter(([name,value])=>/^BOOKS_/i.test(name)&&!READ_ONLY_INPUTS.has(name.toUpperCase())&&
-  typeof value==='string'&&/^[a-z]:[\\/]/i.test(value)&&value.slice(0,2).toLowerCase()===drive);
- return onC.length?'Refusing to run the checks: '+onC.map(([name,value])=>name+'='+value).join(', ')+
-  ' is on C:, where nothing a check runs may write (Sergei, 2026-11-19). Use a folder beside this checkout or under I:/AI Projects.':null;
+export function cDriveEnvRefusal(env,root,approved=fs.existsSync('I:/AI Projects')?'I:/AI Projects':'C:/Antigravity Projects'){
+ function allowed(value){
+  if(!/^[a-z]:[\\/]/i.test(value)||value.slice(3).split(/[\\/]/).some(part=>part==='..'||/[. ]$|[:*?"<>|]/.test(part)))return false;
+  const dest=key(value);
+  if(!dest.startsWith(key(approved)+'\\'))return false;
+  for(let component=dest;component!==path.win32.dirname(component);component=path.win32.dirname(component)){
+   try{
+    if(fs.lstatSync(component).isSymbolicLink()||key(fs.realpathSync.native(component))!==component)return false;
+   }catch(error){if(error.code!=='ENOENT')return false;}
+  }
+  return true;
+ }
+ const paths=[['checkout',root],['scratch',path.win32.join(root,'scratch')]];
+ for(const [name,value] of Object.entries(env)){
+  if(!value||!/^BOOKS_/i.test(name)||READ_ONLY_INPUTS.has(name.toUpperCase()))continue;
+  if(/^(?:[a-z]:|[\\/])/i.test(value)||/(?:_ROOT|_FIXTURE_SOURCE|_FIXTURE_TARGET)$/i.test(name))paths.push([name,value]);
+ }
+ const refused=paths.filter(([,value])=>!allowed(value)).map(([name,value])=>name+'='+value);
+ return refused.length?'Refusing to run the checks: '+refused.join(', ')+' requires a physical destination inside '+approved:null;
 }
 
 // The places checked by default, from the real profile (os.userInfo, never TEMP or USERPROFILE: the check redirects those).
