@@ -83,6 +83,24 @@ The series row keeps its one label in both steps, as built.
 
 Nothing of the old section 3 was built, so nothing of it has to be removed.
 
+## Amended 2026-11-22, after the final build
+
+Ender finished the 0.31.0 page (`ender/0.31.0`, `89f1f2a`) and reported six gaps. Each is ruled here and written into its section, marked **Amended 2026-11-22, after the final build**. Read for this round, read-only: his `web/app.js` (`sameNameSentence`, `sharedOf`, `buildShowBoth`, `showSameName`, `buildAskActions`, `seriesOriginText`) and `merge_service.series_origin`, `local_identity.py` at the brackets rule. Nothing launched, no rect measured.
+
+| Gap | Ruling | Code | Where |
+|---|---|---|---|
+| 1. A same-name row whose clash has ended | Not confirmed. The sentence follows the row's latest answer, not the recorded hold: `The name is free now. Approve files the book under it.`, or the Name taken sentence when a file is now on disk. | yes, small: one function | 4.1 |
+| 2. `Show both books` and the list's search | Change what the button does, with what exists: it lists **the other book**, by the folder or file name the engine already sends. New face `Show the other book`. Showing both at once needs a list filter by book ids, which is more than a small change: next version. | yes, small: face, tooltip, search text | 4.2, 4.2a |
+| 3. "Last button of the row" | Confirmed as built: after the row's ordinary buttons, before the break; `Delete book` and `Remove this copy` keep their own last line. | no | 4.2a |
+| 4. The reason line on Missing files rows | Confirmed as built: it shows for `Convert what's there`, the press that is blocked. `Scan again` stays enabled. | no | 4.2a |
+| 5. A series read from brackets | Not accepted: `from the file's tags` is untrue when the brackets were in the folder's name. Its own origin, with words true for all three places: ` · from the brackets in its name`. | yes, small: one origin in the engine, one string on the page | 4.3 |
+| 6. `1 other book would get this file name.` | Keep. It is the right singular for a book the engine cannot name. | no | 4.1, 6.1 |
+
+For the record, no objection to any of the three:
+- The same-name presentation is tested with the engine's own fact, `ask.hold.kind`. That is the test 4.1 asked for; the interim test is withdrawn.
+- The origins `title_tag` (` · from the title tag`) and `file_name` (` · from the file name`) are built, as 4.3 words them.
+- A series found and not applied counts as done in the look-up's bar. That is 2.1's "settled": the look-up has finished with that book.
+
 ## Decisions in brief
 
 - **Three finished states, one badge.** When no job runs, waits or is queued, the status line starts with a badge: `All done`, `Waiting for you` or `Background look-ups only`. The badge is there only when the queue is finished, so its presence alone answers Sergei's question; its words say which of the three.
@@ -378,7 +396,7 @@ Why nothing: any visible "possible series" is a question in other clothes. It wo
 | **Q.** It has a question of its own | every other group: `part_of_book` (every cause: chapter, numbered part, siblings, part of a set, a set), `files_unclear` (the folder question included), `order_unclear`, `title_author`, `author_unclear`, `same_author`, `files_missing`, `other` | its own status, sentence, fields and buttons, unchanged. `Part of a bigger book`, `Approve as one book` and `Keep as separate books` all stay. `shared` adds only what 4.2a lists |
 
 - **Do not test `destination.shared.kind`.** It reads `same_destination` on every row that carries `shared` (the object is the hold's shape). The test is the row's own hold: why the engine is holding this row.
-- **No new engine fact is needed** to tell the three apart: the row's group and its own hold kind decide. If the row does not carry its own hold kind apart from `destination.shared`, that is the one fact to add; until then "group Name taken, `taken` false, `shared` set" is the same test.
+- **No new engine fact is needed** to tell the three apart: the row's group and its own hold kind decide. If the row does not carry its own hold kind apart from `destination.shared`, that is the one fact to add; until then "group Name taken, `taken` false, `shared` set" is the same test. **Amended 2026-11-22, after the final build:** the row carries it (`ask.hold.kind`) and the page tests it. The interim test is withdrawn.
 - `shared` and `taken` are read from the row's latest answer: the ask's own, then the `Goes to` preview once he types.
 - Why this is the right split: a class S book has nothing else in doubt (the app would have filed it by itself had the name been free), so the name is the whole question. A class Q row is asking something the clash does not answer: whether a file is a piece or a whole book, which files belong, what order. Replacing that question with the clash would hide it. After step 1 the two Sprawl volumes are no longer class Q at all: each is named from its own title tag (4.3), and if two names still met they would be class S.
 - The preview's series origin and `title_from_title_tag` play no part in this split. They are for 4.3 only.
@@ -400,13 +418,42 @@ The quoted text is the other book's own folder or file name, never its title: th
 - **Destination line:** label `Both go to` (three or more: `All 3 go to`), in the warning style `Already there` uses, then the shared path. The number is the engine's count of other books plus this one (the engine names at most ten of them one by one; the count is whole).
 - **Fields:** Title and Author on the row, as a Name taken row; Series and Number through **Edit names**, as today.
 
+**Amended 2026-11-22, after the final build (gap 1): when the clash has ended.** A class S row can stay listed for a while after the other book has been renamed, removed or converted, until the engine's re-check takes it off the list. Built: it keeps naming the recorded other book. That sentence is then untrue, so the sentence follows the row's **latest answer** (the ask's own, then the `Goes to` preview once he types), never the recorded hold. The status stays `Same name as another book` throughout: it is why the engine lists the row.
+
+| Latest answer | Sentence | Label, Approve, show button |
+|---|---|---|
+| another book still has the name (`shared`) | the table above, naming the other book | as 4.1 and 4.2 |
+| the name is free (a path, no `shared`, not `taken`) | `The name is free now. Approve files the book under it.` | `Goes to`, Approve enabled, no show button (as built) |
+| a file with the name is now on disk (`taken`) | `A book with this name is already in Audiobooks Sorted.` (the Name taken row's own) | `Already there`, Approve disabled with the Name taken reason (as built) |
+| no name could be worked out (no path in the answer) | the recorded other book, as built: unknown is not free | as built |
+
+- The second case is also what he reads once the name he types is free: the sentence, the label and the button turn together.
+- The row still leaves by the 0.29.0 rule and strip line when the engine's re-check clears it.
+
+**Amended 2026-11-22, after the final build (gap 6).** `1 other book would get this file name. Change a title, author, series or number so they differ.` is kept, for one other book the engine sends without a name. Real jobs always have a name, so it is a guard, and it is the right singular of the "several" sentence.
+
 ### 4.2 What he is offered (class S)
 
 | Control | State and words |
 |---|---|
 | **Approve** | `aria-disabled` while the names are the same. The line under the buttons: `Another book would get this name. Change the title, author, series or number.` Enabled as soon as this row's `Goes to` differs. |
-| **Show both books** (new, quiet, 96 x 32 minimum; `Show all 3 books` for more) | Sets Status to All and searches for the shared title, so the rows sit together. Tooltip: `List the books that would get this name: sets Status to All and searches for this title.` |
+| **Show the other book** (new, quiet, 96 x 32 minimum; was `Show both books`, amended after the final build: the table below) | Lists the other book by its own folder or file name. |
 | the other row actions a Name taken row has | unchanged |
+
+**Amended 2026-11-22, after the final build (gap 2): the show button lists the other book.** `Show both books` searched the list for the shared title, but the list's search matches a book's title clue, its grouping and its file paths, not the title the app proposes. So it could list one book, or neither, under a face that promised both. With what exists, on class S and class Q rows alike:
+
+| | One other book | Several |
+|---|---|---|
+| Face | `Show the other book` | `Show one of the others` |
+| What it does | Lists that book: sets Status to All, searches for **its own folder or file name** (the name the engine sends and the sentence quotes), and goes to its row by its id, as `Show in list` does | the same, for the first other book the engine names |
+| Tooltip | `List the other book: sets Status to All and searches for its folder or file name.` | `List one of the other books: sets Status to All and searches for its folder or file name.` |
+| `aria-label` | the face, `: `, that book's name | the same |
+
+- This is reliable: that name is part of the book's own file paths, which the search does match.
+- The way back is the same button on the other row: its sentence names this book.
+- If the engine sends no name for the other book, the button is not shown: there is nothing to search for.
+- It replaces `Show both books` and `Show all 3 books` everywhere in this spec (the table above, 4.2a, 6.1, 7).
+- Showing the books side by side needs a list filter that lists given books by their ids. That is more than a small change and is not in 0.31.0. If it is built later, the face can be `Show both books` again.
 
 - **Never on a class S row** (amended, G9: class S only, not every row with `shared`): the status `Part of a bigger book`, the face `Approve as one book`, `Keep as separate books`. A class S row never had them: the engine held it for the name alone. No Join hint either (Sergei's answer 10, 2026-11-18).
 - When one row's name changes and the clash ends, the other row leaves by the 0.29.0 rule and strip line: `«Title» left this list: the name is free now. The book is checked again.`
@@ -420,8 +467,10 @@ The quoted text is the other book's own folder or file name, never its title: th
 |---|---|
 | Destination label | `Both go to` (`All 3 go to`), in the warning style, in place of `Goes to` or `As one book`. The path is unchanged. |
 | The row's own approve press, whatever its face (`Approve`, `Approve as one book`, `Approve this order`, `Approve these files`, `Convert what's there`) | Face and tooltip unchanged. `aria-disabled`, with the reason on the line under the buttons: `Another book would get this name. Change the title, author, series or number.` (on a `part_of_book` row the line is R17's, below). The engine refuses that press while the clash stands (`same_name`), so the page prevents it instead of letting it be refused, exactly as it does for a name already on disk. The offer is not removed: it works again as soon as the name he types is free. |
-| **Show both books** | Added as the last button of the row, after the row's own (4.2). A press that is blocked by another book must show him that book. |
+| **Show the other book** (was `Show both books`; 4.2 as amended after the final build) | Added as the last button of the row, after the row's own. A press that is blocked by another book must show him that book. |
 
+- **Amended 2026-11-22, after the final build (gap 3): its position, confirmed as built.** "Last" means last of the row's ordinary buttons: after the row's own, `Edit names`, `View metadata` and the folder button, and before the line break. `Delete book` and `Remove this copy` keep their own last line, alone: a button that deletes stays apart from every other.
+- **Amended 2026-11-22, after the final build (gap 4): Missing files rows, confirmed as built.** There the blocked press is `Convert what's there`, the row's second button, and the reason line under the buttons is about it. `Scan again`, the first button, stays enabled and is not part of the clash. This is how a name already on disk reads on the same row today; the disabled button carries the same reason as its tooltip, so the line is never without its button.
 - Untouched and enabled as before: the status, the sentence, the fields, `Keep as separate books`, `Scan again`, `Change order`, `Choose files`, `Remove from list` and every other button the row has.
 - No `Also:` line and no second sentence. The label and the reason line carry the clash; the row's sentence stays its own question.
 - When the name he types is free, the label and the approve press return to normal at once.
@@ -451,8 +500,10 @@ The book is filed without asking, so the row carries no question. It says where 
   | the series tags (sort-album, grouping) | ` · from the file's tags` |
   | the title tag's own text (R15) | ` · from the title tag` |
   | the file name | ` · from the file name` |
+  | brackets in the book's name, `Солнце и Замок (Книга Нового Солнца #3)` (amended after the final build, gap 5) | ` · from the brackets in its name` |
 
-- The engine sends one origin, `tags`, for all three today (it folds the title tag's text and a series in brackets in the file name into it). Until it tells them apart, `tags` reads ` · from the file's tags`. That is true for the first two (a title tag is one of the file's tags), so R15's row is right in this build; it is not true for a series read from the file name. The finer origin is in Notes for Ender.
+- **Amended 2026-11-22, after the final build.** The engine now sends the title tag and the file name as origins of their own, and the page words them as above. The earlier note that all three arrived as `tags` is withdrawn.
+- **Amended 2026-11-22, after the final build (gap 5): a series read from brackets.** Not accepted as built. The brackets rule reads the album tag, the title tag **or the folder's name**, and the record does not keep which. The engine sends it as `tags`, so the row says `from the file's tags` when the text may be the folder's. A row must not say a series came from somewhere it did not. So the brackets rule gets an origin of its own and the words ` · from the brackets in its name`, which are true for all three places and tell him exactly where to look. One more origin in the engine, one more string on the page. Until it is built, such a row must send `unknown` (no suffix) rather than `tags`.
 
 ## 5. Waiting for the online answer (next version, not built in 0.31.0)
 
@@ -502,8 +553,8 @@ R2: a book may wait a few tries for the online answer before it converts; then i
 | the record's summary (3.4) | `Renamed or moved by the app · 1 · 22 Nov, 14:05` | `Renamed or moved by the app · 340 · last 22 Nov, 14:05` |
 | the record, more than 200 | never one | `Showing the newest 200 of 1,240. Find book searches all of them.` |
 | same name, destination label | `Both go to` (this book and one other) | `All 3 go to` |
-| same name, sentence | one other book: it is named (4.1) | `2 other books would get this file name.` |
-| same name, button | `Show both books` | `Show all 3 books` |
+| same name, sentence | one other book: it is named (4.1). One the engine cannot name: `1 other book would get this file name.` (kept, after the final build, gap 6) | `2 other books would get this file name.` |
+| same name, button (amended after the final build, gap 2) | one other book: `Show the other book` | several: `Show one of the others` |
 | section 5 (next version) | `After 1 try a book converts…`, `No online answer after 1 try.` | `After 3 tries…`, `…after 3 tries.` |
 
 Not in this spec's list of changes, noted only: the 0.30.0 status part `N need attention` prints `1 need attention` for one book. `1 needs attention` would be right.
@@ -517,7 +568,7 @@ Not in this spec's list of changes, noted only: the 0.30.0 status part `N need a
 | the record's list (3.4) | none: a scrolling region, `aria-label="Books renamed or moved by the app"` | never | one tab stop; arrow keys and Page Up, Page Down scroll it |
 | **Show in list**, on a record entry (3.4) | `List this book: sets Status to All and searches for its title.` | never | follows its entry in tab order; Enter or Space |
 | **Show in list**, on a grouped Waiting item (3.3) | the same | never | as on any Waiting item |
-| **Show both books** | 4.2 | never | class S: in the row's action order after Approve. Class Q (4.2a): the last button of the row |
+| **Show the other book** / `Show one of the others` (was `Show both books`; amended after the final build) | 4.2: `List the other book: sets Status to All and searches for its folder or file name.` | never disabled; not shown when the name is free, when a file with it is on disk, or when the engine sends no name for the other book | class S: in the row's action order after Approve. Class Q (4.2a): last of the row's ordinary buttons, before `Delete book`'s own line |
 
 - **Amended 2026-11-22, third round (R18, R19).** Every row of the withdrawn dialog is removed: the shortcut, `Review changes`, `Select all`, the groups, the books' checkboxes, `Left as they are`, `Leave as it is`, `Offer again`, `Cancel`, `Rename or move N books`. The record of 3.4 is the only new thing with controls, and none of them changes anything: it has no button that acts on a book's files.
 - The quiet line of 3.2 is not a control and has no tooltip.
@@ -532,7 +583,7 @@ Not in this spec's list of changes, noted only: the 0.30.0 status part `N need a
 - Jobs panel under 560 px: rows stack as built; labels and steps keep their one-line ellipsis and full `title`. The status line wraps; the badge stays whole on the first line.
 - The record (3.4) under 600 px: the label (`Was in`, `Now in`) sits above its path; paths wrap anywhere; an entry's Show in list drops to its own line under the paths, left-aligned.
 
-**No element covers another.** By construction, not by measurement: everything new is in normal flow (no absolute, fixed or sticky positioning), so it can only wrap or push. **Amended, third round:** with the dialog withdrawn, this spec adds no overlay at all. States walked through on paper: each of the eight first parts of 1.1 (with `Checking what is left`, amended) with 0, 1, 2 and 5 rows; `Paused` beside a running look-up row; the badge with and without the as-of suffix; the Waiting-for-you block with its one line; the freshness cue and the unread line shown; the quiet line of 3.2 shown and hidden, alone and under an open record; the record closed, open with 1, 200 and 1,240 entries, loading, failed, with `Find book` matching nothing, with long Cyrillic paths, at each width; the Waiting list with 5 and with 338 queued moves and 290 waiting writes (3.3); the same-name row (class S) in the wide, medium and compact bands with Edit names open; a class Q row with its own buttons plus Show both books, in the same three bands; the Place line with a long series name and each origin suffix. Futaba measures the rects (check 12).
+**No element covers another.** By construction, not by measurement: everything new is in normal flow (no absolute, fixed or sticky positioning), so it can only wrap or push. **Amended, third round:** with the dialog withdrawn, this spec adds no overlay at all. States walked through on paper: each of the eight first parts of 1.1 (with `Checking what is left`, amended) with 0, 1, 2 and 5 rows; `Paused` beside a running look-up row; the badge with and without the as-of suffix; the Waiting-for-you block with its one line; the freshness cue and the unread line shown; the quiet line of 3.2 shown and hidden, alone and under an open record; the record closed, open with 1, 200 and 1,240 entries, loading, failed, with `Find book` matching nothing, with long Cyrillic paths, at each width; the Waiting list with 5 and with 338 queued moves and 290 waiting writes (3.3); the same-name row (class S) in the wide, medium and compact bands with Edit names open; a class Q row with its own buttons plus Show the other book, before `Delete book`'s line, in the same three bands; the Place line with a long series name and each origin suffix. Futaba measures the rects (check 12).
 
 **Contrast, dark tokens (the only theme).** Computed ratios, text against its background:
 
@@ -546,7 +597,7 @@ Not in this spec's list of changes, noted only: the 0.30.0 status part `N need a
 | the record's text, titles, paths (3.4) | `--text` on `--surface` | 13.9:1 |
 | muted path folders, labels, the quiet line (3.2), help lines | `--muted` on `--surface` | 8.9:1 |
 | warning lines | `--warning` on `--surface` | 11.2:1 |
-| quiet button text (Show in list, Show both books) | `--accent` on `--surface` | 8.0:1 |
+| quiet button text (Show in list, Show the other book) | `--accent` on `--surface` | 8.0:1 |
 | disabled button text (a blocked approve press, 4.2a) | `--disabled-text` on `--disabled` | 6.1:1 |
 | focus ring | `--focus` on `--surface` | 11.2:1 |
 
@@ -571,7 +622,7 @@ Nothing new relies on colour alone: each state, warning and disabled reason is a
 
 Added 2026-11-22 after build:
 
-15. **Own question kept (class Q, G9).** Pieces of one book that all carry the set's name, each a `Part of a bigger book` row with `shared` set: every row still reads `Part of a bigger book` with its own sentence, still has `Approve as one book` (disabled, with R17's reason line `Another book would get this name. Join them into one book, or change this title.`) and `Keep as separate books` (enabled), its label reads `All N go to`, and it has Show both books. None reads `Same name as another book`. Typing a free title enables the approve press at once. Positive control for the split: a class S pair on the same list (check 11) reads `Same name as another book`, so both presentations are seen from the same `shared` fact.
+15. **Own question kept (class Q, G9).** Pieces of one book that all carry the set's name, each a `Part of a bigger book` row with `shared` set: every row still reads `Part of a bigger book` with its own sentence, still has `Approve as one book` (disabled, with R17's reason line `Another book would get this name. Join them into one book, or change this title.`) and `Keep as separate books` (enabled), its label reads `All N go to`, and it has the show button of 4.2 (`Show one of the others`; `Show the other book` when there is one). None reads `Same name as another book`. Typing a free title enables the approve press at once. Positive control for the split: a class S pair on the same list (check 11) reads `Same name as another book`, so both presentations are seen from the same `shared` fact.
 16. **Withdrawn 2026-11-22, third round (R18).** Was G4's gate on line 2. Its replacement is check 27: the line and the status part are gone in every build.
 17. **Still counting (G1, G2).** In the 2 minutes after the last book finishes, and in the 3 s before a badge comes up, the status line starts with `Checking what is left`: never with the counts, never with `…could be read`. With a source really unread for 3 s it reads `Nothing running that could be read`.
 18. **Paused beside a look-up (G7).** Pause with only a series look-up running: the line starts `Paused · Finding series for finished audiobooks: <book>`.
@@ -595,6 +646,12 @@ Added 2026-11-22, third round (R18, R19):
 30. **The record.** After that run: `Renamed or moved by the app · N · last <date>` is at the bottom of the jobs panel; opened, its newest entry is the last book moved, with the right `Was in` and `Now in`, the series, number and source it was filed by, and one entry per book (a write followed by a move is one entry). A book only renamed in its folder has an entry. A move he made with `Choose folder…` has none. `Find book` narrows the list; Show in list finds the book's row. Before any automatic move, the record is not on the page.
 31. **R19's books.** With the automatic move on, a finished audiobook the engine keeps back because its name would change again: it is not written, not moved, has no row, no Waiting item and no entry in the record, it is counted in the quiet line, and it does not hold back `All done`.
 32. **A doubtful result is silent.** A finished audiobook whose series result the engine treats as not found: its row, its details panel, the jobs panel and the record say nothing about a series; it is not in the quiet line's number; the look-up counts it as settled.
+
+Added 2026-11-22, after the final build:
+
+33. **A clash that has ended (gap 1).** A class S row whose other book is renamed away while the row is still listed: its sentence reads `The name is free now. Approve files the book under it.`, never the other book's name; the label is `Goes to` and Approve is enabled. Convert the other book instead, so its file is in Audiobooks Sorted: the sentence is the Name taken one and the label `Already there`. Typing a free title on a clashing row gives the first sentence at once.
+34. **The show button (gap 2).** On a class S row and on a class Q row with one other book: the face is `Show the other book`; a press lists that book (Status All, its own folder or file name in the search) and its row is on screen, whatever the two books' titles are. Positive control: two books whose proposed title is nowhere in their tags or paths.
+35. **Brackets (gap 5).** A series read from brackets in the folder's name: the row's suffix is ` · from the brackets in its name` (or none), never `from the file's tags`.
 
 ## Notes for Ender
 
@@ -649,6 +706,10 @@ What the page needs from the engine, in plain words. How is yours.
 - Its count under Name taken (or its own key the page adds to that chip).
 - For R4: where a row's series and number came from (file tags, a named online source, entered by him), and for the details line, that the title came from the file's own title tag.
 - Amended after build (G9): the split of 4.1 needs the row's own hold kind, apart from `destination.shared` (whose `kind` is `same_destination` on every row that has it). If the row does not carry it, add it; nothing else is missing. `shared` must keep coming with the `Goes to` preview, so a typed name that is free clears the label and the disabled press at once.
+- **Amended 2026-11-22, after the final build.** Three small things, one batch:
+  - Gap 5: an origin of its own for a series read from brackets (the album tag, the title tag or the folder's name: the record does not keep which). Today it is sent as `tags`.
+  - Gap 2: nothing new. The show button uses the other book's id and name, which `destination.shared` already carries. A list filter by book ids is the fact a real "show both" would need; not asked for now.
+  - Gap 1: nothing new. The page already has the latest answer's `shared`, `taken` and path.
 - Amended, Sergei's answers (R15): a finer origin for the series than `tags`, so the Place line can say where it was really read: the series tags, the title tag's own text, or the file name (today all three arrive as `tags`; a series in brackets in the file name is not from a tag). And for the details line: that title, series and number all came from the title tag.
 - Amended after build (G9), for your judgement, not a page matter: on class Q rows the page now disables the approve press whenever `shared` is set, because the engine refuses it. If a press on a real piece should go through when the only other books are its own set-mates, that is an engine rule; the page follows `shared`.
 
@@ -671,7 +732,7 @@ What the page needs from the engine, in plain words. How is yours.
 - A13 (third round). The quiet line counts the series look-up's own result, which the engine already has, and not the author-folder corrections the rules would make. Counting those too means computing the whole plan at every poll; if Ender has that number cheaply, the line can read `61 finished audiobooks would get a new name or folder. They stay where they are.` instead. Not built unless he says it is cheap.
 - A14 (third round). "The automatic move is on" is one switch for the page: the engine either applies a found series by itself or it does not. If Sergei approves the certainty rule for some kinds of change first and others later, nothing on the page changes: each element shows from its own fact.
 - A4. A paused queue with nothing pending still reads `Paused`.
-- A5. `showInList` with the shared title lists both same-name rows (it searches by title in the candidates view). If it cannot, the engine's ids of the other books are used.
+- A5. Withdrawn, after the final build: the list's search does not match the proposed title, so a title search cannot be relied on to list both rows. The button lists the other book by its own folder or file name instead (4.2), which the search does match (Ender's report; not run by me).
 - A6. The detail look-up records answers and renames no finished audiobook (`gap_fill.py` docstring; Scope: "92 finished books have a recorded English title never applied").
 - A7. Amended, third round: the guard holds every series write in 0.31.0 as it stands, and nothing waits for an approval any more (R18). The `Finding series…` tooltip has one sentence for each state (2.1).
 - A9 (added after build). On a class Q row the engine refuses the approve press while `shared` is set, set-mates included (`_approve_once` checks every row; read in `merge_service.py`). The page's disabled press in 4.2a rests on that.
