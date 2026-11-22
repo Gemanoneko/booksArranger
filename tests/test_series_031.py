@@ -208,6 +208,18 @@ class SeparatedVolumeTests(Fixture):
         titles = [self.research.identity(books[r['path']], ROOT)[0]['fields']['title']['value'] for r in rows]
         self.assertEqual(titles, ['Торадора! 1', 'Торадора! 2'])
 
+    def test_a_separated_part_book_keeps_the_name_the_part_rule_gave_it(self):
+        # «Имаджика» (tests/test_split_books.PartBookAdmissionTests, on real files): two chaptered parts the app separated,
+        # titled «Книга 1. Пятый Доминион» and «Книга 2. Примирение». The part-book rule names each from its own title tag
+        # without the words that only number it; step 1a took the whole tag again, and the files were published as
+        # «Имаджика - 1 - Книга 1. Пятый Доминион - Barker Clive.m4b».
+        rows = [file_row('Clive Barker\\1290. Имаджика (Светлана Смелова)\\%d. %s.m4b' % (n, name), album='Имаджика', title='Книга %d. %s' % (n, name),
+                         artist='Клайв Баркер', track='%d/2' % n) for n, name in ((1, 'Пятый Доминион'), (2, 'Примирение'))]
+        books = self.shelf(rows, volumes=[r['path'] for r in rows])
+        read = [self.research.identity(books[r['path']], ROOT)[0] for r in rows]
+        self.assertEqual([(i['fields']['title']['value'], i['series']) for i in read],
+                         [('Пятый Доминион', {'name': 'Имаджика', 'number': '1'}), ('Примирение', {'name': 'Имаджика', 'number': '2'})])
+
 
 class RecheckTests(SeparatedVolumeTests):
     """1d: existing held rows of these shapes are read once more from their files, with no online request."""

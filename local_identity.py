@@ -2596,7 +2596,12 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         stem = Path(members[0]['filename']).stem
         tag_title, name_title = own(text(tags.get('title'))), own(stem)
         number = re.match(r'^\s*(\d{1,4})', str(tags.get('track') or tags.get('tracknumber') or '')) or re.search(r'(\d{1,4})\D*$', stem)
-        if tag_title:
+        if part and part['title'] and title and not row['volume_of_set'].get('kept'):
+            # A volume the app separated that the part-book rule already named from its own title tag, without the words
+            # that only number it («Книга 1. Пятый Доминион» of «Имаджика» is «Пятый Доминион», book 1): that name stands.
+            # Step 1a took the whole tag again here, so the file was published as «Имаджика - 1 - Книга 1. Пятый Доминион».
+            pass
+        elif tag_title:
             title = {'state': 'one', 'value': tag_title, 'basis': 'tag', 'how': 'the embedded title tag', 'sources': [{'kind': 'embedded', 'field': 'title', 'value': tag_title}]}
         elif name_title:
             title = {'state': 'one', 'value': name_title, 'basis': 'file_name', 'how': 'the file name', 'sources': [{'kind': 'file name', 'value': stem}]}
