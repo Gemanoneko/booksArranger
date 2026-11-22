@@ -1,6 +1,6 @@
 # Books Arranger 0.31.0: UX spec (honest status)
 
-Judy, 2026-11-22. For Ender. Source: `BooksArranger_0.31.0_Scope.md` (`d134484`): Sergei's report, rulings R1 to R7, step 4 ("Honest status") and the part of step 1 that shows on the page. Sergei, 2026-11-22: "How do I know that the app finished its queue and have nothing to do anymore? ... But what is 'Updating Metadata'? Is it re-researching old books? Or is it still a first pass?"
+Judy, 2026-11-22. For Ender. Source: `BooksArranger_0.31.0_Scope.md` (`d134484`; second round `d28f9ff`): Sergei's report, rulings R1 to R7 and, since the amendment of the same day, R8 to R17, step 4 ("Honest status") and the part of step 1 that shows on the page. Sergei, 2026-11-22: "How do I know that the app finished its queue and have nothing to do anymore? ... But what is 'Updating Metadata'? Is it re-researching old books? Or is it still a first pass?"
 
 **This is an EXTEND of `BooksArranger_0.30.0_UX.md`.** The jobs panel, the Waiting list, the freshness cue, the blocker sentence and every string not named here stay as built. Where this spec replaces a 0.30.0 line it says so.
 
@@ -10,7 +10,7 @@ Basis: read-only look at `web/app.js` (`jobsFirstPart`, `renderWaitingForYou`, `
 
 Ender built sections 1 and 2 (branch `ender/0.31.0`) and hit nine gaps. Each is ruled here and written into its section, marked **Amended 2026-11-22 after build**. Read for this round, read-only: his `web/app.js` (`statusParts`, `jobsFirstPart`, `notReadable`, `badgeState`, `renderWaitingForYou`, `waitingLines`), `destination_clash.py`, and `merge_service.py` (`ask_payload`, `approval_preview`, `series_origin`, the two `same_name` refusals). Nothing launched, no rect measured.
 
-Engine facts settled since the first version: 3 tries per source, 6 hours apart (pending Sergei's OK); the detail look-up has no tries limit; a guard holds every series write into a finished file until he approves it; a book already waiting to convert keeps its name and only the newcomer row is held.
+Engine facts settled since the first version: 3 tries per source, 6 hours apart (since approved, R9); the detail look-up has no tries limit (since given the same one, R16); a guard holds every series write into a finished file until he approves it; a book already waiting to convert keeps its name and only the newcomer row is held.
 
 | Gap | Ruling | Where |
 |---|---|---|
@@ -18,13 +18,49 @@ Engine facts settled since the first version: 3 tries per source, 6 hours apart 
 | G2 | Not acceptable: the line never starts with the counts. While a finished state is reported and its badge is not up yet, the first part is `Checking what is left`. | 1.2 |
 | G3 | Both singulars confirmed (with G5's noun). Every singular is in the table of 6.1. | 6.1 |
 | G4 | Keep the line, as written. In a build without the dialog it has no button and is not reworded. It is released only together with section 3. | 1.4, check 16 |
-| G5 | One count, one list. The word changes from "series moves" to **series changes**; in the dialog each book says `Moves to` or `Renamed to`. `Move N books` is `Add series to N books`; `Keep here` is `Leave as it is`. | 1.3, 1.4, 3 |
-| G6 | Tooltip given. That the detail look-up never gives up is a product question (Question 8). | 2.2 |
+| G5 | One count, one list. The word changes from "series moves" to **series changes**; in the dialog each book says `Moves to` or `Renamed to`. `Move N books` is `Add series to N books`; `Keep here` is `Leave as it is`. **Superseded by Sergei's answers (next section): the list is `Renames and moves` and the button `Rename or move N books`. `Moves to`, `Renamed to` and `Leave as it is` stand.** | 1.3, 1.4, 3 |
+| G6 | Tooltip given. That the detail look-up never gives up is a product question (Question 8). **Superseded by Sergei's answers: R16 gives it the limit, and its tooltip is the series one.** | 2.2 |
 | G7 | Not intended. A paused queue names the look-up that still runs, as 0.30.0 names any work Pause does not stop. | 2.1 |
 | G8 | The tooltip takes the engine's numbers (tries per source, hours apart). Example corrected to 3. | 2.2 |
 | G9 | The presentation follows the row's own question, never the mere presence of `shared`. Only a row held for the clash itself reads `Same name as another book`; a row with its own question keeps it, `Approve as one book` included. No new engine fact is needed. | 4.1, 4.2, 4.2a |
 
 Also closed while reading the build: the Place line had no words for the engine's `folders` and `unknown` origins (4.3).
+
+## Amended 2026-11-22, Sergei's answers
+
+Sergei answered every question of this spec. His rulings are R8 to R17 in `BooksArranger_0.31.0_Scope.md` ("Second round", `d28f9ff`), which is the authority. Each is written into its section, marked **Amended 2026-11-22, Sergei's answers**. Where this round and the "after build" round disagree, this round wins: the list of section 3 is no longer called "series changes".
+
+**The names chosen for the list and its controls** (R10: it holds author-folder changes too, so "series changes" was no longer true; every change in it is a rename, a move or both):
+
+| Thing | Name |
+|---|---|
+| the list, and its shortcut in the list toolbar | `Renames and moves · 55` |
+| status part | `55 renames and moves to approve` (one: `1 rename or move to approve`) |
+| Waiting-for-you line | `55 renames and moves wait for your approval.` |
+| its button | `Review changes` |
+| dialog title | `Rename or move 55 finished audiobooks?` |
+| groups in the dialog | `Series found`, `Author folder`, `Series name` |
+| per-book lines | `Now in`, then `Moves to` or `Renamed to` |
+| approve button | `Rename or move 52 books` |
+| refuse, per book | `Leave as it is`; undone with `Offer again` |
+| second list | `Left as they are (3)` |
+
+| Question | Answer | Ruling | Where it went |
+|---|---|---|---|
+| 1 | The list holds every kind of change the plan holds, author folders too | R10 | section 3 rewritten; 1.1, 1.3, 1.4, 6.1, 7, 9 |
+| 2 | `Leave as it is` is about the book, for good, and can be taken back | R11 | 3.5 |
+| 3 | Books written in Chinese or Japanese are held out of the list | R12 | 3.4 (shown under Left as they are, with the reason) |
+| 4 | No count or Try again for look-ups that gave up | as recommended | 2.3 |
+| 5 | No `Convert now` button | as recommended | 5 |
+| 6 | The window title shows the state | R13 | 1.5: a title for every state |
+| 7 | A drive that is not answering holds back `All done` | R14 | 1.1, as already specced |
+| 8 | The look-up for titles and author names gets the same limit | R16 | 2.2: one tooltip for both look-ups |
+| 9 | The blocked press may say `Join them into one book, or change this title.` | R17 | 4.2a |
+| also | Nothing is written into a finished book without approval | R8 | 2.1, 3 |
+| also | Tries: 3 per source, 6 hours apart, approved as built | R9 | 2.2 |
+| also | A title tag shaped "Series NN - Title" is filed without asking | R15 | 4.3 |
+
+Two questions opened by these answers are at the end (Questions 10 and 11), each with the default that is built until he answers.
 
 ## Decisions in brief
 
@@ -33,7 +69,7 @@ Also closed while reading the build: the Place line had no words for the engine'
 - **Bare `Nothing running` goes from the status line.** It read as "done" while work waited. With work waiting it says `Continues by itself`.
 - **Two background look-ups get plain names** that say which books they are for and whether a file changes. Their bar counts the whole look-up, not one pass, so `691 of 903 books` answers "how much is left".
 - **A look-up between tries is a Waiting item**, grouped, with the next try time.
-- **Series changes get a dialog** (amended, G5: the word was "series moves"): the list he approves is the list he sees (the engine's existing gate). Selected books are approved with one press, `Add series to N books`; a wrong one is refused on its own line with `Leave as it is`. A refused book can be offered again from the same dialog, so no second confirm is needed.
+- **Renames and moves get a dialog** (the word was "series moves", then "series changes"; amended, Sergei's answers: R10 puts author-folder changes in the same list): the list he approves is the list he sees (the engine's existing gate). The books sit in groups by kind of change. Selected books are approved with one press, `Rename or move N books`; a wrong one is refused on its own line with `Leave as it is`. A refused book can be offered again from the same dialog, so no second confirm is needed.
 - **A book held only because another book has its name** reads `Same name as another book` and is offered a name change. A row with a question of its own keeps that question and its buttons (amended, G9).
 - **Section 5 is the next version.** It is specced here so the words match; nothing in it is built in 0.31.0.
 
@@ -41,7 +77,7 @@ Also closed while reading the build: the Place line had no words for the engine'
 
 ### 1.1 The states
 
-"Main work" is everything the 0.30.0 Running and Waiting lists show (conversions, cleanups, checks, queued actions, moves, scans, research of books not converted yet, automatic processing running, stopping, start pending or between tries, timed retries, saved decisions). "Background look-ups" are the two jobs of section 2 only. "Waits for you" is: books that need attention, books on hold, series changes to approve (section 3), a drive that is not answering.
+"Main work" is everything the 0.30.0 Running and Waiting lists show (conversions, cleanups, checks, queued actions, moves, scans, research of books not converted yet, automatic processing running, stopping, start pending or between tries, timed retries, saved decisions). "Background look-ups" are the two jobs of section 2 only. "Waits for you" is: books that need attention, books on hold, renames and moves to approve (section 3), a drive that is not answering (R14, Sergei's answers: confirmed).
 
 | State | True when | Status line starts with |
 |---|---|---|
@@ -80,11 +116,11 @@ Also closed while reading the build: the Place line had no words for the engine'
 
 ### 1.3 Status line and idle line
 
-Status parts, in order (new parts marked): badge or first part, books waiting to convert, cleanup phrase, actions waiting, `N need attention`, **`55 series changes to approve`** (new, zero left out; amended, G5: was `series moves`), `N converted out of M approved books`, `N waiting for retry checks`, **`212 background look-ups left`** (new, zero left out; series and detail look-ups together). Singulars: 6.1.
+Status parts, in order (new parts marked): badge or first part, books waiting to convert, cleanup phrase, actions waiting, `N need attention`, **`55 renames and moves to approve`** (new, zero left out; amended, Sergei's answers, R10: was `series moves`, then `series changes`), `N converted out of M approved books`, `N waiting for retry checks`, **`212 background look-ups left`** (new, zero left out; series and detail look-ups together). Singulars: 6.1.
 
 Examples:
 - `[All done] · 0 need attention · 1,510 converted out of 1,510 approved books`
-- `[Waiting for you] · 329 need attention · 55 series changes to approve · 1,181 converted out of 1,510 approved books · 212 background look-ups left`
+- `[Waiting for you] · 329 need attention · 55 renames and moves to approve · 1,181 converted out of 1,510 approved books · 212 background look-ups left`
 - `[Background look-ups only] · 0 need attention · 1,510 converted out of 1,510 approved books · 212 background look-ups left`
 - `Continues by itself · 3 books waiting to convert · 329 need attention · …`
 
@@ -108,19 +144,36 @@ Shown, as today, only in the `Waiting for you` state. It becomes a short list: h
 ```
 Waiting for you
  329 books need attention.                                        [ Review them ]
- 55 series changes wait for your approval.                        [ Review changes ]
+ 55 renames and moves wait for your approval.                     [ Review changes ]
 ```
 
 - Line 1 and **Review them** are the 0.29.0 line and button (tooltip `Show every book that needs you.`). The as-of suffix stays: `329 books need attention (as of 14:03:21).`
-- Line 2 and **Review changes** are new (section 3). Singular: `1 series change waits for your approval.` (amended, G5: was `series moves` and `Review moves`).
+- Line 2 and **Review changes** are new (section 3). One book: `1 rename or move waits for your approval.` (amended, Sergei's answers, R10: the noun was `series moves`, then `series changes`; the button keeps its name). The number is books: a book with two kinds of change counts once.
 - **Amended 2026-11-22 after build (G4).** Line 2 stays, with these words, in a build that does not have the dialog yet; it simply has no button there. It is not hidden: the changes do wait for him, and they are why the badge says `Waiting for you`. It is not reworded: an interim sentence would have to be taken out again. But a line that says something waits for him and gives no way to answer is a dead end, so line 2, the status part and the list shortcut are released only together with section 3 (check 16).
 - The sentence `The app can't do more until you review them.` goes: the badge says it, and it was untrue while look-ups ran.
 - A drive that is not answering and a book on hold keep their own homes (the Waiting item with its instruction, the On hold list). They make the badge `Waiting for you` but add no line here. If they are the only reason, the block is hidden and the badge sits above the item that explains it.
-- Order is fixed: need attention, then series changes. A line with a zero count is left out.
+- Order is fixed: need attention, then renames and moves. A line with a zero count is left out.
 
-### 1.5 The window title (offered, Question 6)
+### 1.5 The window title
 
-If Sergei says yes: the window title ends with the state, so the taskbar answers without opening the window. `Books Arranger: all done`, `Books Arranger: waiting for you`, `Books Arranger: background look-ups`, otherwise `Books Arranger`. No flashing, no focus, no sound.
+**Amended 2026-11-22, Sergei's answers (R13: yes).** The main window's title ends with the state, so the taskbar and Alt+Tab answer without opening the window. One title for every value the engine sends:
+
+| Engine state | Window title |
+|---|---|
+| all done | `Books Arranger: all done` |
+| waiting for you | `Books Arranger: waiting for you` |
+| background look-ups only | `Books Arranger: background look-ups only` |
+| working | `Books Arranger: working` |
+| paused | `Books Arranger: paused` |
+| continues by itself | `Books Arranger: continues by itself` |
+| not known, still counting (1.1) | `Books Arranger: checking what is left` |
+| not known, a source unread; and before the jobs part has loaded | `Books Arranger` |
+
+- The words are the status line's own, in lower case, so the two never disagree. The one difference: while working the status line names the job and the title says only `working`. A title that changed with every book would flicker in the taskbar.
+- The title follows what the status line shows, the badge's wait included (1.2): in the 3 s before a badge comes up it reads `checking what is left`, never a finished state the badge has not confirmed.
+- Every state starts with a different word, so a taskbar label cut after about 22 characters still tells them apart (`Books Arranger: all d…`, `…: waiti…`, `…: backg…`).
+- The title changes only when the state changes. No flashing taskbar button, no focus, no sound, no notification.
+- Only the main window. The set-up window keeps its own title.
 
 ## 2. Plain names for the background look-ups
 
@@ -160,80 +213,117 @@ A look-up that waits for its next try showed nowhere. It is a Waiting item, one 
 - `Next try 14:05.` is left out when the engine has no time.
 - **Amended 2026-11-22 after build (G8, G6).** Line 2 tooltip, one per item. Every number is the engine's; none is written into the page.
   - Series look-ups (a limit exists): `Each source is asked up to 3 times for a book, 6 hours apart. With no answer after that, the book is left as it is and the app stops asking.` The page fills in the tries per source and the hours between tries. If the engine sends no hours, `, 6 hours apart` is left out. One try: `Each source is asked once for a book. With no answer, the book is left as it is and the app stops asking.`
-  - Detail look-ups (no limit today): `A book waits here until its sources answer. The app asks again by itself.` If Question 8 gives this look-up a limit, it takes the series sentence.
-  - Without a limit, a book whose source never answers waits for ever, and with it `212 background look-ups left` never reaches zero and `All done` never shows. That is why Question 8 is asked.
+  - Detail look-ups: **amended 2026-11-22, Sergei's answers (R16).** This look-up gets the same limit, so its item takes the same sentence as the series item, with its own numbers from the engine: `Each source is asked up to 3 times for a book, 6 hours apart. With no answer after that, the book is left as it is and the app stops asking.` The no-limit text of the "after build" round (`A book waits here until its sources answer…`) is withdrawn and is not built.
+  - R9 approved the numbers as built (3 per source, 6 hours apart). They are still the engine's; the page prints what it is sent.
 - A look-up that pauses inside one book for a source's pacing leaves the Running list and waits here. The row's `No progress for 5 min` text must never show on a look-up that is only being polite to a source.
 - These items do not make the state "Working": with only them left, the badge is `Background look-ups only`.
 
 ### 2.3 After approval, and at the end
 
-- An approved series change runs as `Finding series for finished audiobooks: <book>` with the writing step; a book whose folder changes then gets the 0.30.0 `Moving: <book>` row (amended, G5: a book renamed in its own folder has no second row).
-- When every book is settled there is no row and no item. `All done` is the signal. No summary line is built (Question 4 offers one).
+- An approved book with a series found runs as `Finding series for finished audiobooks: <book>` with the writing step; a book whose folder changes then gets the 0.30.0 `Moving: <book>` row (amended, G5: a book renamed in its own folder has no second row). An approved author-folder or series-name change has no series to write and runs as the `Moving: <book>` row alone.
+- When every book is settled there is no row and no item. `All done` is the signal. No summary line, no count of books the look-up gave up on, no Try again (Sergei's answers, Question 4: as recommended).
+- **Amended 2026-11-22, Sergei's answers (a consequence of R10).** One press can now approve hundreds of books, and the engine queues an approved move like a Choose folder move, so each waits its turn as a queued action (Notes for Ender: confirm). The 0.30.0 Waiting list draws one item per queued action, which would be a wall. So the cleanups' cap applies to them too: with 5 or fewer queued moves, each is its own item as today; with more, one grouped item replaces them: line 1 `Moving finished audiobooks: 338 books`, line 2 `Next: <book>.` followed by that book's blocker sentence when something blocks it (`Next: Оно. It runs when Converting: Dune finishes.`), else `Next: Оно. They run one at a time.`; button Show in list for that book. The status part `338 actions waiting` is unchanged. Each book's own row keeps its Cancel.
 
-## 3. Series changes: the approval control
+## 3. Renames and moves: the approval control
 
-**Amended 2026-11-22 after build (G5).** This section was "Series moves". The engine now holds every series write into a finished file until he approves it, so what waits is not always a move: some books only get the series written and a new name in the folder they are in. They need the same approval, so they stay in one count, one list and one dialog. Calling all of them "moves" would be untrue, so the word is **series changes**, each book says whether it `Moves to` or is `Renamed to`, the button says what every approved book gets (`Add series to N books`), and the refusal is `Leave as it is` (was `Keep here`, which says nothing for a book that stays in its folder either way). Nothing else in the design changed. This section is not built yet.
+**Amended 2026-11-22, Sergei's answers (R8, R10, R11, R12).** This section is rewritten whole; build it from this text. It was "Series moves", then "Series changes". Three things changed it:
 
-The 55 finished audiobooks with a series found, and any found later. The engine's gate stays: he approves the list he saw; if the list changed, nothing is changed.
+- **R10:** the list holds every kind of change the engine's plan holds for a finished audiobook, not the series ones only: a **series found** online for a book that had none, the **author folder** the app now files the author under, and the **series name** it now files the series under.
+- **R8:** nothing is written into a finished audiobook without his approval, so a book whose series only needs writing and a new file name in the folder it is already in waits in this list too.
+- **The name:** every change here ends as a rename, a move or both, whatever caused it, so the list is **Renames and moves**. "Series changes" was untrue for an author-folder move. A series being written into the file is said where it happens, in the dialog.
+
+One book is one line of the count and one decision, however many kinds of change it has: the plan gives each book one new name and place.
+
+The engine's gate stays: he approves the list he saw; if the list changed, nothing is changed.
 
 ### 3.1 Where it lives
 
 | Entry | Place | Face | Shown |
 |---|---|---|---|
-| the list shortcut | list toolbar, right after `Needs attention · N` | `Series changes · 55` (quiet) | Audiobooks library and count above 0, in every state |
+| the list shortcut | list toolbar, right after `Needs attention · N` | `Renames and moves · 55` (quiet) | Audiobooks library, and either a book waits or he has left at least one book as it is (so Offer again is always reachable). With none waiting the face is `Renames and moves · 0`. |
 | **Review changes** | the Waiting-for-you block (1.4) | `Review changes` (quiet, 96 x 32 minimum) | with its line |
 
-Both open the same dialog. Tooltip, both: `List the finished audiobooks with a series found that wait for your approval.`
+Both open the same dialog. Tooltip, both: `List the finished audiobooks that wait for your approval to be renamed or moved.` At `· 0`: `Nothing waits for your approval. Lists the books you left as they are.`
+
+The count is the books he can approve now. It leaves out the books under Left as they are (3.4): the ones he refused, the ones R12 holds, and the ones the app cannot change.
 
 ### 3.2 The dialog
 
-A modal `<dialog>`, built like `join-dialog`: Cancel has `autofocus`, Escape cancels, no form (Enter in the list confirms nothing). Width `min(880px, 100vw - 24px)`: two paths per book do not fit 560. It opens at once with `Checking the list…` while the engine answers.
+A modal `<dialog>`, built like `join-dialog`: Cancel has `autofocus`, Escape cancels, no form (Enter in the list confirms nothing). Width `min(880px, 100vw - 24px)`: two paths per book do not fit 560. It opens at once with `Checking the list…` while the engine answers. The list can hold several hundred books (R8 alone covers 282), so it is grouped.
 
 ```
-Add the series to 55 finished audiobooks?
-Each book has a series found online. A book you approve gets the series written into its file and
-a new name. If its series folder is another folder, it moves there. The audio is not changed.
-The app can't undo it.
+Rename or move 340 finished audiobooks?
+Each book gets the name and folder shown. A series found online is also written into its file.
+The audio is not changed. The app can't undo it.
 
 [x] Select all
 
-[x] Граф Ноль · Gibson William · Series: Sprawl Trilogy · No. 2 · found on FantLab          [ Leave as it is ]
-    Now in      Gibson William\Граф Ноль - Gibson William.m4b
-    Moves to    Gibson William\Sprawl Trilogy\2 - Граф Ноль - Gibson William.m4b
-[x] Мона Лиза овердрайв · Gibson William · Series: Sprawl Trilogy · No. 3 · found on FantLab  [ Leave as it is ]
-    Now in      Gibson William\Sprawl Trilogy\Мона Лиза овердрайв - Gibson William.m4b
-    Renamed to  Gibson William\Sprawl Trilogy\3 - Мона Лиза овердрайв - Gibson William.m4b
- ...
-> Left as they are (3)
+v Series found · 290
+  [x] Select these 290
+  [x] Граф Ноль · Gibson William · Series: Sprawl Trilogy · No. 2 · found on FantLab            [ Leave as it is ]
+      Now in      Gibson William\Граф Ноль - Gibson William.m4b
+      Moves to    Gibson William\Sprawl Trilogy\2 - Граф Ноль - Gibson William.m4b
+  [x] Мона Лиза овердрайв · Gibson William · Series: Sprawl Trilogy · No. 3 · found on FantLab    [ Leave as it is ]
+      Now in      Gibson William\Sprawl Trilogy\Мона Лиза овердрайв - Gibson William.m4b
+      Renamed to  Gibson William\Sprawl Trilogy\3 - Мона Лиза овердрайв - Gibson William.m4b
+  [x] Сияние · Stephen King · Series: The Shining · No. 1 · found on Goodreads · Author folder: King Stephen  [ Leave as it is ]
+      Now in      Stephen King\Сияние - Stephen King.m4b
+      Moves to    King Stephen\The Shining\1 - Сияние - King Stephen.m4b
+  ...
+v Author folder · 45
+  [x] Select these 45
+  [x] Оно · Stephen King · Author folder: King Stephen                                          [ Leave as it is ]
+      Now in      Stephen King\Оно - Stephen King.m4b
+      Moves to    King Stephen\Оно - King Stephen.m4b
+  ...
+v Series name · 5
+  [x] Select these 5
+  [x] Гарри Поттер и тайная комната · Rowling Joanne · Series name: Harry Potter                [ Leave as it is ]
+      Now in      Rowling Joanne\Гарри Поттер\2 - Гарри Поттер и тайная комната - Rowling Joanne.m4b
+      Moves to    Rowling Joanne\Harry Potter\2 - Гарри Поттер и тайная комната - Rowling Joanne.m4b
+> Left as they are (12)
 
-[ Cancel ]                                                           [ Add series to 55 books ]
+[ Cancel ]                                                            [ Rename or move 340 books ]
 ```
 
-- Title, one book: `Add the series to 1 finished audiobook?` While loading: `Series changes`.
-- Body, one book: `This book has a series found online. If you approve, it gets the series written into its file and a new name. If its series folder is another folder, it moves there. The audio is not changed. The app can't undo it.`
-- The list is a `role="group"`, `aria-label="Books to change"`, and scrolls inside the dialog (`max-height: 50vh`); the title, the body and the buttons stay in view. The button row is outside the scrolling list, in normal flow.
+- Title: the number is the books that wait. One book: `Rename or move 1 finished audiobook?` While loading: `Renames and moves`.
+- Body, one book: `This book gets the name and folder shown. A series found online is also written into its file. The audio is not changed. The app can't undo it.` The second sentence is left out of both bodies when no listed book has a series to write.
+- The list is a `role="group"`, `aria-label="Books to rename or move"`, and scrolls inside the dialog (`max-height: 50vh`); the title, the body and the buttons stay in view. The button row is outside the scrolling list, in normal flow.
 - Every book starts selected, each time the dialog opens. `Select all` is a checkbox (mixed when some are selected).
-- Order is the engine's (by current path), so one author's books sit together.
+
+**Groups.** Three kinds of change, three groups, always in this order: `Series found`, `Author folder`, `Series name`. A group with no book is not drawn.
+
+- A group is a native `<details open>`. Its summary is the group's name and count, weight 600: `Series found · 290`. Closing a group only folds it away; its books keep their selection and still count in the button. So that a folded group hides nothing he would approve unseen, the summary says when not all its books are selected: `Series found · 290 · 288 selected`, `Series found · 290 · none selected`.
+- The first line inside a group is its own checkbox, `Select these 290` (mixed when some are selected). With one group only, this line is left out: `Select all` already does it.
+- A book with two or three kinds of change is listed once, in the first of its groups in the order above, and its line 1 names every kind. So the group counts add up to the title's number.
+- Inside a group the order is the engine's (by current path), so one author's books sit together.
+- Series found comes first because it is the one worth reading book by book: an online match can be wrong, and it writes into the file. Author folder and Series name follow a rule and can usually be approved as a group.
 
 ### 3.3 Per book
 
 Three lines. The checkbox's label is line 1, so the whole text of the line is its target; **Leave as it is** is a separate button at the line's right end (flex row, 12 px gap, the button never shrinks), not inside the label.
 
-1. `Title · Author · Series: <name> · No. <n> · found on <source>`. Title in weight 600. The series part is the Place line's form. Source names: `FantLab`, `Goodreads`, `Wikidata`, `Litres`, `the publisher's site`; unknown: `found online`. The source's address is the `title` of that text.
+1. `Title · Author`, then one part per kind of change the book has, ` · ` between, in the groups' order. Title in weight 600. The author is the one the book is filed under now.
+
+   | Kind | Part |
+   |---|---|
+   | series found | `Series: <name> · No. <n> · found on <source>` (the Place line's form). Source names: `FantLab`, `Goodreads`, `Wikidata`, `Litres`, `the publisher's site`; unknown: `found online`. The source's address is the `title` of that text. |
+   | author folder | `Author folder: <the new folder's name>` |
+   | series name | `Series name: <the new name>` |
+
 2. `Now in` and the current path under Audiobooks Sorted (labels and path style of the row's destination block; the full path is the `title`).
-3. The new path, under one of two labels: **`Moves to`** when its folder differs from line 2's, **`Renamed to`** when the folder is the same and only the file name changes. The leading folders it shares with line 2 are `--muted`; what is new (a folder, the file name) is `--text`, so the eye lands on what changes. Both pass 4.5:1; the labels carry the meaning without the colour.
+3. The new path, under one of two labels: **`Moves to`** when its folder differs from line 2's, **`Renamed to`** when the folder is the same and only the file name changes. The page tells them apart by comparing the two folders. The leading folders the new path shares with line 2 are `--muted`; what is new (a folder, the file name) is `--text`, so the eye lands on what changes. Both pass 4.5:1; the labels carry the meaning without the colour.
 
-A book that was approved and then could not be changed comes back to this list with a fourth line in `--warning`: `Approved, but not changed: its file changed. Check it and approve again.` or `Approved, but not changed: its new name or place changed. Check it and approve again.` It counts in `Series changes · N` again. An approved change never fails in silence.
-
-If Question 1 is answered "all", line 1's reason part is, per kind: `Author folder: <name>` and `Series name: <name>`; a book with two reasons shows both, ` · ` between.
+A book that was approved and then could not be changed comes back to this list with a fourth line in `--warning`: `Approved, but not changed: its file changed. Check it and approve again.` or `Approved, but not changed: its new name or place changed. Check it and approve again.` It counts in `Renames and moves · N` again. An approved change never fails in silence.
 
 ### 3.4 Left as they are
 
-A `<details>` under the list, closed by default, summary `Left as they are (3)`, tooltip `Books with a series found that the app does not change, and why.` Hidden when empty. Each entry: `Title · Author`, the `Now in` line, and one reason sentence. These books do not wait for him and do not hold back `All done`.
+A `<details>` under the groups, closed by default (open when no book waits), summary `Left as they are (12)`, tooltip `Finished audiobooks the app would rename or move but does not, and why.` Hidden when empty. Each entry: `Title · Author`, the `Now in` line, and one reason sentence. These books do not count in `Renames and moves · N` and are not selectable.
 
 | Reason (the engine sends a key, never the sentence) | Sentence |
 |---|---|
-| refused by him | `Left as it is by you.` with **Offer again** |
+| refused by him (R11) | `Left as it is by you.` with **Offer again** |
+| written in Chinese or Japanese (R12) | `Written in Chinese or Japanese: held until its series has an English name.` |
 | a file with the new name exists | `A file with the new name is already in that folder.` |
 | two listed books, one target | `Another book on this list would get the same name.` |
 | he chose its folder | `You chose its folder.` |
@@ -247,47 +337,58 @@ A `<details>` under the list, closed by default, summary `Left as they are (3)`,
 | no name can be built, or it could not be planned | `The app can't work out its new name or place.` |
 | any other key | `The app leaves it as it is.` |
 
+**Amended 2026-11-22, Sergei's answers (R12).** A book whose original is Chinese or Japanese is held out of the list. It is not simply absent: it is shown here, with its reason, so a book he knows has a series does not seem to have vanished. Nothing else shows it: no count in the status line, no line under Waiting for you, no shortcut of its own.
+- The reason states the condition, not a version: it ends by itself when the app can give the series an English name.
+- The whole book is held, whatever kinds of change it has (R12 names the books, not the series change), and it has no button: he cannot offer it himself.
+- It does not wait for him. Whether it holds back `All done` is Question 11; until he answers, it does not.
+
 ### 3.5 Approve all, approve some, refuse
 
 One pass down the list: a right book stays selected, a book to decide later is unselected, a wrong book gets **Leave as it is**. The dialog is the confirm: it is opened on purpose, shows the exact list, and the one bulk button says what it does and to how many.
 
 | He wants | He does | Result |
 |---|---|---|
-| approve all | **Add series to 55 books** | dialog closes |
-| approve some | unselects the ones to leave for later, **Add series to 52 books** | dialog closes; the 3 stay waiting |
+| approve all | **Rename or move 340 books** | dialog closes |
+| approve one kind | unselects the other groups with their `Select these N`, **Rename or move 45 books** | dialog closes; the rest stay waiting |
+| approve some | unselects the ones to leave for later, **Rename or move 337 books** | dialog closes; the 3 stay waiting |
 | refuse | **Leave as it is** on that book | it goes to Left as they are at once; the dialog stays open |
 
-- **Add series to N books** (default button, right end; the count is the selected books; one: `Add series to 1 book`). Tooltip: `Write the series into each selected book and rename it. A book whose series folder is another folder moves there. The audio is not changed. The app can't undo it.`
-- **Leave as it is** (quiet, 96 x 32 minimum, one per book; `aria-label` `Leave as it is: <Title>`). Tooltip: `Leave this book as it is and take it off this list. Its series is not written. Offer again brings it back.` While it is sent the face is `Leaving…`. Then focus goes to the next book's Leave as it is (the previous one for the last book; Cancel when the list is empty).
-- **Offer again** (quiet, 96 x 32 minimum, on a refused book). Tooltip: `Put this book back on the list of series changes.` The book returns to the list, selected.
+- **Rename or move N books** (default button, right end; the count is the selected books in every group, folded ones included; one: `Rename or move 1 book`). Tooltip: `Give each selected book the name and folder shown. A series found online is written into its file first. The audio is not changed. The app can't undo it.`
+- **Leave as it is** (quiet, 96 x 32 minimum, one per book; `aria-label` `Leave as it is: <Title>`). Tooltip: `Leave this book as it is, for good: no rename, no move, no series written. Offer again brings it back.` While it is sent the face is `Leaving…`. Then focus goes to the next book's Leave as it is (the previous one for the last book; Cancel when the list is empty).
+- **Offer again** (quiet, 96 x 32 minimum, on a book he refused). Tooltip: `Put this book back on the list of renames and moves.` The book returns to its group, selected.
 - **Cancel** (quiet). Tooltip: `Close without changing any book.` A book already left as it is stays so; the tooltip is about the approval.
 - Leave as it is needs no second confirm: it touches no file, and Offer again undoes it at any time. There is no bulk refuse, so no single press can empty the list.
-- Until the engine can record a refused book (Notes for Ender), **Leave as it is** and **Offer again** are not shown at all (no disabled ghost). They are needed before release: without a refusal, a wrong series waits for ever and `All done` can never show.
+
+**Amended 2026-11-22, Sergei's answers (R11): what Leave as it is means.**
+- It is about **the book**, for good. The app stops asking about that book: it is never listed here again by itself, whatever it finds for it later (another series, a new author rule). It is not about the series: other books of the same series are still offered.
+- **A book with two kinds of change** (say an author folder and a series found) gets one answer, and it covers both: neither is done. The plan gives a book one new name and place, built from all its changes together, so the page has no half to refuse. If the series is wrong and the author folder is right, the author folder is lost for that book too. Whether he should be able to refuse one kind and keep the other is Question 10; until he answers, it is the whole book.
+- **It can be taken back.** Offer again puts the book back with whatever the plan holds for it at that moment, which may differ from what he refused. The shortcut stays visible while any book is left as it is by him (3.1), so the way back never disappears.
+- The book keeps its place, its name and its file exactly as they are. It is still an ordinary finished audiobook everywhere else in the app.
 
 **Result line**, one string, shown beside the control that opened the dialog (`role="status"`, in normal flow: under the Waiting-for-you block, or under the list toolbar like `#restart-summary`). It stays until the dialog is opened again. No toast.
 
 | Outcome | Line |
 |---|---|
-| all accepted | `52 series changes approved. The app writes each series into its file, then renames or moves the book.` |
-| some refused | `50 series changes approved. 2 books were not accepted: open Series changes to see why.` (`--warning`) |
-| none accepted | `No series change was accepted. Open Series changes to see why.` (`--warning`) |
+| all accepted | `340 renames and moves approved. They run one at a time and show in Audiobook jobs.` |
+| some refused | `338 renames and moves approved. 2 books were not accepted: open Renames and moves to see why.` (`--warning`) |
+| none accepted | `No rename or move was accepted. Open Renames and moves to see why.` (`--warning`) |
 | refused (inside the dialog, above the buttons, `role="status"`) | `«Граф Ноль» left as it is.` |
 | offered again (the same line) | `«Граф Ноль» is back on the list.` |
 
-After **Add series**, focus returns to the control that opened the dialog; if it is gone (the count reached 0), to the Status select `#filter`.
+After **Rename or move**, focus returns to the control that opened the dialog; if it is gone, to the Status select `#filter`.
 
 ### 3.6 Loading, a changed list, refusals
 
 | Moment | The dialog shows | Buttons |
 |---|---|---|
-| loading | `Checking the list…` | Add series `aria-disabled`, tooltip `The list is still loading.` |
-| nothing selected | the list | Add series `aria-disabled`, face `Add series`, tooltip `Select at least one book.` Leave as it is stays enabled (it does not use the selection). |
-| sending an approval | the button's face `Approving…` | Add series, Cancel, every Leave as it is and Offer again `aria-disabled`, tooltip `Sending your answer.`; Escape does nothing until it returns |
-| sending a Leave or an Offer | that button's face `Leaving…` / `Offering…` | Add series and the other Leave as it is and Offer again buttons `aria-disabled`, tooltip `Sending your answer.`; Cancel stays enabled |
-| the list changed since it was shown | the new list in place, selections kept for books still listed, and above the buttons, in `--warning`, `role="status"`: `The list changed. Check it, then press Add series again. Nothing was changed.` | enabled |
-| the app is closing | `Books Arranger is closing. Nothing was changed.` (`--warning`) | Add series, Leave as it is and Offer again `aria-disabled`, tooltip `Books Arranger is closing.` |
+| loading | `Checking the list…` | Rename or move `aria-disabled`, tooltip `The list is still loading.` |
+| nothing selected | the list | Rename or move `aria-disabled`, face `Rename or move`, tooltip `Select at least one book.` Leave as it is stays enabled (it does not use the selection). |
+| sending an approval | the button's face `Approving…` | Rename or move, Cancel, every checkbox, every Leave as it is and Offer again `aria-disabled`, tooltip `Sending your answer.`; Escape does nothing until it returns |
+| sending a Leave or an Offer | that button's face `Leaving…` / `Offering…` | Rename or move and the other Leave as it is and Offer again buttons `aria-disabled`, tooltip `Sending your answer.`; Cancel stays enabled |
+| the list changed since it was shown | the new list in place, selections kept for books still listed, and above the buttons, in `--warning`, `role="status"`: `The list changed. Check it, then press Rename or move again. Nothing was changed.` | enabled |
+| the app is closing | `Books Arranger is closing. Nothing was changed.` (`--warning`) | Rename or move, Leave as it is and Offer again `aria-disabled`, tooltip `Books Arranger is closing.` |
 | the list could not be loaded | `The list couldn't be loaded. Close this and try again.` | Cancel only, face `Close` |
-| nothing waits | `No books wait for a series change.` and Left as they are, if any | Cancel only, face `Close` |
+| nothing waits | `No books wait to be renamed or moved.` and Left as they are, open, if it has any | Cancel only, face `Close` |
 
 ## 4. Two books, one destination
 
@@ -343,13 +444,15 @@ The quoted text is the other book's own folder or file name, never its title: th
 | What | Words |
 |---|---|
 | Destination label | `Both go to` (`All 3 go to`), in the warning style, in place of `Goes to` or `As one book`. The path is unchanged. |
-| The row's own approve press, whatever its face (`Approve`, `Approve as one book`, `Approve this order`, `Approve these files`, `Convert what's there`) | Face and tooltip unchanged. `aria-disabled`, with the reason on the line under the buttons: `Another book would get this name. Change the title, author, series or number.` The engine refuses that press while the clash stands (`same_name`), so the page prevents it instead of letting it be refused, exactly as it does for a name already on disk. The offer is not removed: it works again as soon as the name he types is free. |
+| The row's own approve press, whatever its face (`Approve`, `Approve as one book`, `Approve this order`, `Approve these files`, `Convert what's there`) | Face and tooltip unchanged. `aria-disabled`, with the reason on the line under the buttons: `Another book would get this name. Change the title, author, series or number.` (on a `part_of_book` row the line is R17's, below). The engine refuses that press while the clash stands (`same_name`), so the page prevents it instead of letting it be refused, exactly as it does for a name already on disk. The offer is not removed: it works again as soon as the name he types is free. |
 | **Show both books** | Added as the last button of the row, after the row's own (4.2). A press that is blocked by another book must show him that book. |
 
 - Untouched and enabled as before: the status, the sentence, the fields, `Keep as separate books`, `Scan again`, `Change order`, `Choose files`, `Remove from list` and every other button the row has.
 - No `Also:` line and no second sentence. The label and the reason line carry the clash; the row's sentence stays its own question.
 - When the name he types is free, the label and the approve press return to normal at once.
-- On a `part_of_book` row and on the folder question, the reason line could name both ways out (`Another book would get this name. Join them into one book, or change this title.`), because for real pieces of one book joining is the answer and renaming is not. Sergei said no to a Join hint on rows once (answer 10), so this is Question 9; until he answers, the plain line above is built.
+- **Amended 2026-11-22, Sergei's answers (R17: yes).** On a `part_of_book` row (every cause) whose approve press is blocked this way, the reason line names both ways out: **`Another book would get this name. Join them into one book, or change this title.`** For real pieces of one book joining is the answer and renaming is not. Build this line, not the plain one, on those rows.
+  - Only there, and only while the press is blocked. Every other class Q row (the folder question included), every class S row and the late refusal of 4.2 keep the plain line. The line goes when the press is free again.
+  - Nothing else about Join is added: no hint on a row that is not blocked, no Join button on the row. His "no Join hint on rows" of 2026-11-18 otherwise stands. "Join them" is the existing `Join into one book` in the bar above the list, for the rows he selects.
 
 ### 4.3 A volume named from its own tags (R4)
 
@@ -360,6 +463,21 @@ The book is filed without asking, so the row carries no question. It says where 
 - **Amended 2026-11-22 after build.** The suffix, by the origin the engine sends: `tags`: ` · from the file's tags`; `folders`: ` · from the folder names`; `entered`: ` · entered by you`; `source`: ` · found on Wikidata` (the source names of 3.3; a source with no name: ` · found online`); `unknown`: no suffix. `folders` and `unknown` had no words. `source` shows whenever the engine says so, not only from the next version.
 - Details panel, the `Book metadata` basis line of a `volume` (0.30.0 section 10), gains two sentences after `Kept as a separate book: …`: `Title from this file's own title tag. Series and number from its tags.`
 - The title cell shows the volume's own title (`Граф Ноль`), never the album.
+
+**Amended 2026-11-22, Sergei's answers (R15).** A file whose only clue is a title tag shaped "Series NN - Title" (`Sprawl Trilogy 01 - Neuromancer`) is filed without asking, as R4 files a book whose series is in its series tags. Its row carries no question either, and it must not say the series came from somewhere it did not.
+
+- Title cell: the title part only (`Neuromancer`), never the whole tag.
+- Place line: `Series: Sprawl Trilogy · No. 1 · from the title tag`.
+- Details panel, basis line, after the sentence its kind already has: `Title, series and number from this file's title tag.`
+- The suffix words, by where the series was really read:
+
+  | Read from | Suffix |
+  |---|---|
+  | the series tags (sort-album, grouping) | ` · from the file's tags` |
+  | the title tag's own text (R15) | ` · from the title tag` |
+  | the file name | ` · from the file name` |
+
+- The engine sends one origin, `tags`, for all three today (it folds the title tag's text and a series in brackets in the file name into it). Until it tells them apart, `tags` reads ` · from the file's tags`. That is true for the first two (a title tag is one of the file's tags), so R15's row is right in this build; it is not true for a series read from the file name. The finer origin is in Notes for Ender.
 
 ## 5. Waiting for the online answer (next version, not built in 0.31.0)
 
@@ -381,7 +499,7 @@ R2: a book may wait a few tries for the online answer before it converts; then i
 - The Waiting item replaces 0.30.0's `Metadata sources` item (`3 books wait for a source to answer. Next try 14:05.`).
 - "No answer" (the sources did not reply) and "nothing found" (they replied) are different sentences and are never merged.
 - The numbers (`3`) are the engine's.
-- No new control (Question 5 offers one).
+- No new control. No `Convert now` button on a waiting book (Sergei's answers, Question 5: as recommended).
 
 ## 6. Other places this touches
 
@@ -393,25 +511,28 @@ R2: a book may wait a few tries for the online answer before it converts; then i
 
 ### 6.1 Singular forms
 
-**Amended 2026-11-22 after build (G3).** Ender's two are confirmed, with G5's noun. Every count this spec prints, one and many:
+**Amended 2026-11-22 after build (G3); the rows about the list amended 2026-11-22, Sergei's answers (R10: its new name).** Every count this spec prints, one and many. A count of the list is always books: a book with two kinds of change is one.
 
 | Place | One | Many |
 |---|---|---|
-| status part | `1 series change to approve` | `55 series changes to approve` |
+| status part | `1 rename or move to approve` | `55 renames and moves to approve` |
 | status part | `1 background look-up left` | `212 background look-ups left` |
 | Waiting-for-you | `1 book needs attention.` | `329 books need attention.` |
-| Waiting-for-you | `1 series change waits for your approval.` | `55 series changes wait for your approval.` |
+| Waiting-for-you | `1 rename or move waits for your approval.` | `55 renames and moves wait for your approval.` |
 | look-up Waiting items, line 1 | `…: 1 book` | `…: 212 books` |
 | look-up rows, detail | `1 of 1 book` | `691 of 903 books` |
+| grouped moves waiting (2.3), line 1 | never one: it groups above 5 | `Moving finished audiobooks: 338 books` |
 | tries tooltip (2.2) | `Each source is asked once for a book.` | `…asked up to 3 times for a book` |
 | tries tooltip, the gap | `, 1 hour apart` | `, 6 hours apart` |
-| list shortcut | `Series changes · 1` | `Series changes · 55` (the noun names the list and stays plural) |
-| dialog title | `Add the series to 1 finished audiobook?` | `Add the series to 55 finished audiobooks?` |
-| dialog body | `This book has a series found online. If you approve, it gets…` (3.2) | `Each book has a series found online. A book you approve gets…` |
-| dialog button | `Add series to 1 book` | `Add series to 52 books` |
-| dialog, second list | `Left as they are (1)` (a heading, stays plural) | `Left as they are (3)` |
-| result line | `1 series change approved. The app writes the series into its file, then renames or moves the book.` | `52 series changes approved. The app writes each series into its file, then renames or moves the book.` |
-| result line, the refused part | `1 book was not accepted: open Series changes to see why.` | `2 books were not accepted: open Series changes to see why.` |
+| list shortcut | `Renames and moves · 1` | `Renames and moves · 55` (the noun names the list and stays plural; `· 0` as 3.1 says) |
+| dialog title | `Rename or move 1 finished audiobook?` | `Rename or move 340 finished audiobooks?` |
+| dialog body | `This book gets the name and folder shown. …` (3.2) | `Each book gets the name and folder shown. …` |
+| group summary | `Series found · 1` | `Series found · 290` (the same for `Author folder`, `Series name`) |
+| group checkbox | `Select this 1` | `Select these 290` |
+| dialog button | `Rename or move 1 book` | `Rename or move 52 books` |
+| dialog, second list | `Left as they are (1)` (a heading, stays plural) | `Left as they are (12)` |
+| result line | `1 rename or move approved. It shows in Audiobook jobs when it runs.` | `340 renames and moves approved. They run one at a time and show in Audiobook jobs.` |
+| result line, the refused part | `1 book was not accepted: open Renames and moves to see why.` | `2 books were not accepted: open Renames and moves to see why.` |
 | same name, destination label | `Both go to` (this book and one other) | `All 3 go to` |
 | same name, sentence | one other book: it is named (4.1) | `2 other books would get this file name.` |
 | same name, button | `Show both books` | `Show all 3 books` |
@@ -423,19 +544,21 @@ Not in this spec's list of changes, noted only: the 0.30.0 status part `N need a
 
 | Control | Tooltip | Disabled when, and what it says | Keyboard |
 |---|---|---|---|
-| `Series changes · N` | 3.1 | never disabled; hidden at 0 or outside Audiobooks | in the toolbar's tab order after Needs attention; Enter or Space |
+| `Renames and moves · N` | 3.1 (two tooltips: books waiting, and `· 0`) | never disabled; hidden outside Audiobooks, and when no book waits and he has left none as it is | in the toolbar's tab order after Needs attention; Enter or Space |
 | **Review changes** | 3.1 | never disabled; shown with its line | tab order after Review them |
 | Select all | `Select or unselect every book in this list.` | while loading or sending | Space |
+| a group's summary (`Series found · 290`) | `Show or hide these books. Hidden books keep their selection.` | never | Enter or Space folds and unfolds |
+| a group's checkbox (`Select these 290`) | `Select or unselect the books of this group.` | while loading or sending | Space |
 | a book's checkbox | none of its own: its label is the book's line 1; `aria-label` is `Title, Author` | while sending | Space; focus scrolls it into view |
 | Left as they are | 3.4 | never | Enter or Space opens and closes |
 | **Leave as it is** (per book) | 3.5 | while anything is being sent, app closing (3.6) | Enter or Space; follows its book's checkbox in tab order |
 | **Offer again** | 3.5 | the same | Enter or Space |
 | **Cancel** / `Close` | `Close without changing any book.` | while an approval is being sent | Escape, Enter or Space |
-| **Add series to N books** | 3.5 | nothing selected, loading, sending, app closing (3.6) | Enter or Space; never Enter from the list |
+| **Rename or move N books** | 3.5 | nothing selected, loading, sending, app closing (3.6) | Enter or Space; never Enter from the list |
 | **Show both books** | 4.2 | never | class S: in the row's action order after Approve. Class Q (4.2a): the last button of the row |
 
-- The names in this table follow section 3 as amended (G5).
-- Dialog tab order: Cancel (focused on open), Add series, then round to Select all, each book (its checkbox, its Leave as it is), Left as they are. Cancel and Add series are one or two presses from the start in either direction, whatever the list's length.
+- The names in this table follow section 3 as amended (Sergei's answers).
+- Dialog tab order: Cancel (focused on open), Rename or move, then round to Select all, each group (its summary, its checkbox, then each book: its checkbox, its Leave as it is), Left as they are. Cancel and Rename or move are one or two presses from the start in either direction, whatever the list's length. A folded group takes its books out of the tab order, so folding is also the keyboard's way past 290 books.
 - A reload of the list in place never moves focus off the dialog and never resets the scroll position.
 - Hover-only texts on things that are not controls: the badge (1.2), the two step lines (2.1), line 2 of the grouped look-up items (2.2), the source name (3.3). None carries anything that is not also on screen in short form.
 - Every `aria-disabled` button keeps its focus stop and says why in its tooltip (the app's existing pattern).
@@ -445,9 +568,9 @@ Not in this spec's list of changes, noted only: the 0.30.0 status part `N need a
 **Narrow layouts.** No string differs by width.
 - Review table: every new row text is in the status cell or the destination cell, which the medium (600 to 799) and compact (under 600) bands never hide. Nothing new goes into columns 3 and 4, which they fold.
 - Jobs panel under 560 px: rows stack as built; labels and steps keep their one-line ellipsis and full `title`. The status line wraps; the badge stays whole on the first line.
-- Dialog under 600 px: the label (`Now in`, `Moves to`, `Renamed to`) sits above its path; paths wrap anywhere; a book's Leave as it is drops to its own line under the paths, left-aligned; Cancel and Add series keep one row.
+- Dialog under 600 px: the label (`Now in`, `Moves to`, `Renamed to`) sits above its path; paths wrap anywhere; a book's Leave as it is drops to its own line under the paths, left-aligned; Cancel and Rename or move keep one row.
 
-**No element covers another.** By construction, not by measurement: everything new is in normal flow (no absolute, fixed or sticky positioning), so it can only wrap or push. The dialog is the one overlay, modal and dismissible, which is the allowed class. States walked through on paper: each of the eight first parts of 1.1 (with `Checking what is left`, amended) with 0, 1, 2 and 5 rows; `Paused` beside a running look-up row; the badge with and without the as-of suffix; the Waiting-for-you block with one and two lines, and line 2 with no button (G4's interim build); the freshness cue and the unread line shown; the list toolbar with the error, attention and series shortcuts all shown at 600 px; the dialog loading, with 1, 55 and 200 books, with `Moves to` and `Renamed to` books, with Left as they are open and closed, with the warning line, while sending; the same-name row (class S) in the wide, medium and compact bands with Edit names open; a class Q row with its own buttons plus Show both books, in the same three bands; the Place line with a long series name and each origin suffix. Futaba measures the rects (check 12).
+**No element covers another.** By construction, not by measurement: everything new is in normal flow (no absolute, fixed or sticky positioning), so it can only wrap or push. The dialog is the one overlay, modal and dismissible, which is the allowed class. States walked through on paper: each of the eight first parts of 1.1 (with `Checking what is left`, amended) with 0, 1, 2 and 5 rows; `Paused` beside a running look-up row; the badge with and without the as-of suffix; the Waiting-for-you block with one and two lines, and line 2 with no button (G4's interim build); the freshness cue and the unread line shown; the list toolbar with the error, attention and `Renames and moves` shortcuts all shown at 600 px; the dialog loading, with 1, 55 and 400 books, with one, two and three groups, each open and folded, a book with three kinds of change on its first line, with `Moves to` and `Renamed to` books, with Left as they are open and closed, with the warning line, while sending; the Waiting list with 5 and with 338 queued moves (2.3); the same-name row (class S) in the wide, medium and compact bands with Edit names open; a class Q row with its own buttons plus Show both books, in the same three bands; the Place line with a long series name and each origin suffix. Futaba measures the rects (check 12).
 
 **Contrast, dark tokens (the only theme).** Computed ratios, text against its background:
 
@@ -470,16 +593,16 @@ Nothing new relies on colour alone: each state, warning and disabled reason is a
 
 ## 9. Acceptance checks (Futaba)
 
-1. **All done is true.** Force every other state in turn (a conversion, a queued action, a timed cleanup retry, automatic processing between tries, a series look-up between tries, a detail look-up running, one book needing attention, one series change waiting, a drive not answering): the badge never reads `All done`. Positive control: with all of them cleared it does, within 3 s, and the four lists are empty.
+1. **All done is true.** Force every other state in turn (a conversion, a queued action, a timed cleanup retry, automatic processing between tries, a series look-up between tries, a detail look-up running, one book needing attention, one rename or move waiting for approval, a drive not answering (R14)): the badge never reads `All done`. Positive control: with all of them cleared it does, within 3 s, and the four lists are empty.
 2. **Three badges.** Each of `All done`, `Waiting for you`, `Background look-ups only` shows for its state, and `Waiting for you` wins when both apply while the look-up item stays on screen.
 3. **No bare `Nothing running`** in the status line in any state.
 4. **No flicker.** A job under 1 s does not remove the badge.
 5. **Counts behind.** At 45 s the badge is followed by `(as of …)`.
 6. **Names.** A running series look-up reads `Finding series for finished audiobooks: <book>`, its step says no file is changed, and its count is the whole look-up (it does not start again at the next pass). Writing shows the writing step.
 7. **Between tries.** With look-ups deferred and none running: a grouped Waiting item with a count and a next try time; the badge is `Background look-ups only`; no row carries `No progress for 5 min`.
-8. **Dialog.** Opens from both entries. 55 books, all selected. Unselect 3, Add series: the engine receives exactly 52 and the digest shown. The result line shows beside the opener. A book whose folder stays the same reads `Renamed to`; one whose folder changes reads `Moves to`.
-9. **Changed list.** Change the plan while the dialog is open, press Add series: nothing is changed, the warning line shows, the list is the new one.
-10. **Leave as it is and Offer again.** Leave as it is on 3 books: each goes under Left as they are with `Left as it is by you.`, the shortcut count drops by 3, the scroll position holds, and the look-up does not list them again. Offer again brings one back, selected.
+8. **Dialog.** Opens from both entries. 55 books, all selected. Unselect 3, Rename or move: the engine receives exactly 52 and the digest shown. The result line shows beside the opener. A book whose folder stays the same reads `Renamed to`; one whose folder changes reads `Moves to`.
+9. **Changed list.** Change the plan while the dialog is open, press Rename or move: nothing is changed, the warning line shows, the list is the new one.
+10. **Leave as it is and Offer again (R11).** Leave as it is on 3 books: each goes under Left as they are with `Left as it is by you.`, the shortcut count drops by 3, the scroll position holds, and the app does not list them again by itself, for any kind of change. Offer again brings one back, selected. Leave the last waiting book as it is: the shortcut stays, reading `Renames and moves · 0`, and Offer again is still reachable.
 11. **Same name (class S).** Two books the app would have filed by itself under one name: each row held for it reads `Same name as another book`, names the other's folder or file, has Approve disabled with its reason, and shows neither `Part of a bigger book` nor `Approve as one book`. Changing one title frees both.
 12. **Layout, measured rects.** At 1280, 960, 760, 600 px and 200% zoom, long Cyrillic names: the toolbar rect is identical with and without the badge; no rect of the badge, block lines, shortcut buttons, dialog buttons or row buttons intersects another; the dialog's buttons stay in view with 200 books.
 13. **Keyboard.** The dialog is fully usable without the mouse; focus returns as 3.5 says; Escape cancels except while sending.
@@ -487,11 +610,20 @@ Nothing new relies on colour alone: each state, warning and disabled reason is a
 
 Added 2026-11-22 after build:
 
-15. **Own question kept (class Q, G9).** Pieces of one book that all carry the set's name, each a `Part of a bigger book` row with `shared` set: every row still reads `Part of a bigger book` with its own sentence, still has `Approve as one book` (disabled, with the reason line) and `Keep as separate books` (enabled), its label reads `All N go to`, and it has Show both books. None reads `Same name as another book`. Typing a free title enables the approve press at once. Positive control for the split: a class S pair on the same list (check 11) reads `Same name as another book`, so both presentations are seen from the same `shared` fact.
-16. **Line and control together (G4).** In the build offered for release, the Waiting-for-you line 2, the status part `N series changes to approve` and the list shortcut never show without the dialog behind them.
+15. **Own question kept (class Q, G9).** Pieces of one book that all carry the set's name, each a `Part of a bigger book` row with `shared` set: every row still reads `Part of a bigger book` with its own sentence, still has `Approve as one book` (disabled, with R17's reason line `Another book would get this name. Join them into one book, or change this title.`) and `Keep as separate books` (enabled), its label reads `All N go to`, and it has Show both books. None reads `Same name as another book`. Typing a free title enables the approve press at once. Positive control for the split: a class S pair on the same list (check 11) reads `Same name as another book`, so both presentations are seen from the same `shared` fact.
+16. **Line and control together (G4).** In the build offered for release, the Waiting-for-you line 2, the status part `N renames and moves to approve` and the list shortcut never show without the dialog behind them.
 17. **Still counting (G1, G2).** In the 2 minutes after the last book finishes, and in the 3 s before a badge comes up, the status line starts with `Checking what is left`: never with the counts, never with `…could be read`. With a source really unread for 3 s it reads `Nothing running that could be read`.
 18. **Paused beside a look-up (G7).** Pause with only a series look-up running: the line starts `Paused · Finding series for finished audiobooks: <book>`.
-19. **Tries tooltip (G8, G6).** The series item's tooltip prints the engine's tries per source and hours apart (3 and 6 today); change the engine's numbers and the tooltip follows. The detail item's tooltip is the no-limit sentence.
+19. **Tries tooltip (G8, R16).** Both look-up items' tooltips print the engine's tries per source and hours apart (3 and 6 today, each look-up its own numbers); change the engine's numbers and the tooltip follows. The no-limit sentence appears nowhere.
+
+Added 2026-11-22, Sergei's answers:
+
+20. **Every kind in one list (R10).** A plan with a series found, an author-folder change, a series-name change, a book with two kinds, and an in-place rename: the dialog shows the groups `Series found`, `Author folder`, `Series name` in that order; the two-kind book is listed once, in its first group, with both parts on line 1; the group counts add up to the title's number and to the shortcut's; the in-place book reads `Renamed to`. Unselect a group with its checkbox: the button's number drops by that group's count, and a folded group's summary says how many are selected.
+21. **Held books (R12).** A finished audiobook written in Chinese or Japanese with a series found: it is not in any group and not in the count; it is under Left as they are with `Written in Chinese or Japanese: held until its series has an English name.`, with no button. With only such books left, the badge is not `Waiting for you` (Question 11's default).
+22. **Whole book (R11).** Leave as it is on a book with an author-folder change and a series found: neither is done, the file and its place are untouched, and the book is not offered again for either.
+23. **Window title (R13).** Force each engine state: the main window's title is the one in table 1.5, and it changes with the status line, never ahead of the badge. No taskbar flash, no focus change.
+24. **Many approved at once.** Approve 340: the Waiting list shows one grouped item `Moving finished audiobooks: N books`, not 340 items; with 5 queued, five items.
+25. **Title tag (R15).** A file whose only clue is the title tag `Sprawl Trilogy 01 - Neuromancer`: no question on its row, title `Neuromancer`, Place line `Series: Sprawl Trilogy · No. 1` with the tag suffix of 4.3.
 
 ## Notes for Ender
 
@@ -500,8 +632,10 @@ What the page needs from the engine, in plain words. How is yours.
 **Section 1**
 - One finished-state value per poll, decided by the engine from live facts: working, paused, continues by itself, waiting for you, background look-ups only, all done; and "not known" while a source is unread. The truth rules are table 1.1 and its bullets.
 - For every row and Waiting item: whether it is a background look-up (so the page never guesses which work is "main").
-- Counts: series changes waiting for approval (every write the guard holds, moves and renames alike); background look-ups left (series and detail, apart and together); drives not answering; books on hold (existing).
-- The reasons something waits for him, as keys (attention, series changes, hold, drive).
+- Counts: renames and moves waiting for approval; background look-ups left (series and detail, apart and together); drives not answering; books on hold (existing).
+- Amended, Sergei's answers (R8, R10, R11, R12): that count is books, and it is every book the plan would change that he can approve now: every kind of change (series found, author folder, series name), moves and in-place writes alike, **less** the books he left as they are and the books R12 holds. It must equal the number of books the dialog lists in its groups.
+- The reasons something waits for him, as keys (attention, renames and moves, hold, drive). A book R12 holds is not one of them (Question 11's default).
+- Amended, Sergei's answers (R13): nothing new for the window title. It is made from the state the page already has. If the shell does not take its title from the page (F3), that is the one thing to wire.
 - Amended after build (G1): when the state is "not known", whether a source is unread or the engine is still counting. The page reads this today from the unread list being empty; that is enough.
 
 **Section 2**
@@ -509,16 +643,28 @@ What the page needs from the engine, in plain words. How is yours.
 - For each look-up between tries: how many books wait, the time of the next try, the tries limit. Amended after build (G8): the limit is tries per source, and the tooltip also prints the hours between tries, so the page needs that number too; without it that part of the sentence is left out.
 - For a series write held by a job: the book, and a blocker object of the 0.30.0 shape.
 - A look-up that waits on a source's pacing is not a running row.
-- A real end: each book is settled after a limited number of tries (the limit is a product number, not mine). Amended after build: the series look-up has one (3 per source); the detail look-up has none, so its books can wait for ever and `All done` with them (Question 8).
-- If Question 4 is yes: how many books ended with a series, without one, and given up.
+- A real end: each book is settled after a limited number of tries (the limit is a product number, not mine). Amended, Sergei's answers: both look-ups have one now (R9: 3 per source, 6 hours apart; R16: the detail look-up the same). The detail look-up's Waiting item needs its own tries per source and hours apart, as the series item has; the page prints one sentence for both.
+- Question 4 was answered no: nothing is needed for books a look-up gave up on.
+- Amended, Sergei's answers (2.3): approved moves that wait as queued actions are grouped above 5. Confirm that an approved move does wait as a queued action of its own (the plan's note says "queued like a Choose folder move"). If approved moves wait some other way, tell me how they show and I will word that instead.
 
 **Section 3**
-- The count of series changes waiting (amended after build, G5: moves and in-place renames together).
-- The list: per book, its id, title, author, series, number, source name and address, current and new path (shown under Audiobooks Sorted, and whole), which kinds of change it is, and whether it was approved and then not changed, with a reason key. The list's fingerprint (the existing digest). The page tells `Moves to` from `Renamed to` by comparing the two folders; nothing more is needed for that.
-- The books left as they are: per book a reason key (table 3.4), never a sentence, and whether he refused it.
-- New: leave a book as it is (it leaves the plan and the count, and the look-up never offers it again), and take that back (Offer again).
+Amended 2026-11-22, Sergei's answers. This list replaces the earlier one; it is everything the dialog of section 3 needs.
+
+- The count of books waiting (Section 1 above says what is in it).
+- The list of books he can approve. Per book: its id, title, the author it is filed under now, its current and new path (shown under Audiobooks Sorted, and whole), and **each kind of change it has, with that kind's own value**:
+  - series found: the series name, the number, the source's name and address;
+  - author folder: the new folder's name;
+  - series name: the new name.
+  The plan's own reason text (`why`) is an engine sentence and is never printed, so these values must come as fields.
+- Whether a book was approved and then not changed, with a reason key (file changed; new name or place changed).
+- The list's fingerprint (the existing digest), sent back with the approval and the selected books.
+- The page groups the books by kind and tells `Moves to` from `Renamed to` by comparing the two folders; nothing more is needed for either.
+- The books left as they are. Per book: a reason key (table 3.4), never a sentence. Two keys are new: **left as it is by him**, and **held because its original is Chinese or Japanese** (R12). For R12 the page needs nothing but the key.
+- New: **leave a book as it is** (R11). It is recorded for the book, not for a series or a kind of change: the book leaves the plan and the count and is never offered again by itself, whatever the app finds for it later. And **take that back** (Offer again): the book is planned again from scratch.
 - The approve answer per book: accepted, or refused with a reason key.
 - An approved change that then fails comes back to the list or to Left as they are. Today such a book drops out of the plan (`series_backfill` holds it with a reason the plan does not read).
+- R12's hold is the engine's: the page never decides from a language field which books are held.
+- A fact I could not settle from the code: for an author-folder change and a series-name change, is anything written into the file, or is the book only renamed and moved? The dialog's body says a series found is written into the file and says nothing about the other two. If they write too, tell me and I will add the sentence.
 
 **Section 4**
 - The new hold as its own reason on a row: the shared destination, how many others, and for each other book its id, whether it is a row or a queued book, and a name that tells it apart (its folder or file name, different from this row's).
@@ -526,6 +672,7 @@ What the page needs from the engine, in plain words. How is yours.
 - Its count under Name taken (or its own key the page adds to that chip).
 - For R4: where a row's series and number came from (file tags, a named online source, entered by him), and for the details line, that the title came from the file's own title tag.
 - Amended after build (G9): the split of 4.1 needs the row's own hold kind, apart from `destination.shared` (whose `kind` is `same_destination` on every row that has it). If the row does not carry it, add it; nothing else is missing. `shared` must keep coming with the `Goes to` preview, so a typed name that is free clears the label and the disabled press at once.
+- Amended, Sergei's answers (R15): a finer origin for the series than `tags`, so the Place line can say where it was really read: the series tags, the title tag's own text, or the file name (today all three arrive as `tags`; a series in brackets in the file name is not from a tag). And for the details line: that title, series and number all came from the title tag.
 - Amended after build (G9), for your judgement, not a page matter: on class Q rows the page now disables the approve press whenever `shared` is set, because the engine refuses it. If a press on a real piece should go through when the only other books are its own set-mates, that is an engine rule; the page follows `shared`.
 
 **Section 5 (next version)**
@@ -539,8 +686,11 @@ What the page needs from the engine, in plain words. How is yours.
 ## Assumptions
 
 - A1. Read-only look at code and docs; nothing launched, no rects measured.
-- A2. The page control covers the series changes the app's own look-up found (55 today; with the guard, in-place renames too). R6's re-check of already-sorted books is a studio job and has no page surface.
-- A3. A drive that is not answering and a book on hold count as "waits for you" (Question 7 asks).
+- A2. Amended, Sergei's answers: the page control covers every change the engine's plan holds for a finished audiobook (R10), in-place series writes included (R8: 282 flat-named books), less R12's books. R6's re-check of already-sorted books is a studio job and has no page surface.
+- A3. Settled (R14): a drive that is not answering holds back `All done`. A book on hold does too, as before.
+- A10 (Sergei's answers). R12 holds the whole book, whatever kinds of change it has: the ruling names the books, not the series change. If only its series change should be held and an author-folder change may go ahead, the engine sends that book in the list with the kinds it may have, and the page needs no change.
+- A11 (Sergei's answers). A book R12 holds does not wait for him and is not background work, so it does not hold back `All done` (Question 11 asks).
+- A12 (Sergei's answers). An approved move waits as a queued action of its own (the plan's note; not run). The grouping in 2.3 rests on it.
 - A4. A paused queue with nothing pending still reads `Paused`.
 - A5. `showInList` with the shared title lists both same-name rows (it searches by title in the candidates view). If it cannot, the engine's ids of the other books are used.
 - A6. The detail look-up records answers and renames no finished audiobook (`gap_fill.py` docstring; Scope: "92 finished books have a recorded English title never applied").
@@ -551,21 +701,28 @@ What the page needs from the engine, in plain words. How is yours.
 ## Open questions (facts the docs and code did not settle)
 
 - F1. Settled by the build: no. A guard holds every series write into a finished file until approval, so the writing step shows only after one.
-- F2. Settled for the series look-up: 3 tries per source, 6 hours apart (pending Sergei's OK); the copy prints the engine's numbers. The detail look-up has no limit (Question 8). Still open: how many tries before a waiting book converts (section 5, R2 says "a few").
-- F3. Does the Electron shell take its window title from the page? (Question 6 depends on it.)
+- F2. Settled (R9, R16): both look-ups, 3 tries per source, 6 hours apart; the copy prints the engine's numbers. Still open: how many tries before a waiting book converts (section 5, R2 says "a few").
+- F3. Does the Electron shell take its window title from the page? R13 makes the title part of 0.31.0, so this needs Ender's answer before 1.5 is built. (`desktop/main.js` gives the window the title `Books Arranger` and the page has the same `<title>`; I did not run it.)
+- F5 (Sergei's answers). Does an author-folder change or a series-name change write anything into the file? (Notes for Ender, Section 3.)
 - F4. Whether the series look-up of finished books keeps running after R6's job (Scope: not ruled). If it stops, section 2's series row and item simply never appear.
 
-## Questions for Sergei (one word each)
+## Questions for Sergei: answered (2026-11-22)
 
-1. The approval list: **series** changes only, or **all** moves the 0.30.0 plan holds (author folders and series names too)? I recommend series: R1 changes how series folders of translated books are named, so the other moves may change again.
-2. `Leave as it is` on a wrong series (the button was `Keep here` when this was first asked): stop asking about that **book** for good, or only about that **series**? I recommend book. `Offer again` takes it back either way.
-3. Translated books from Chinese or Japanese among the 55: R1 names their series folder in English from the next version. **Hold** them out of the list until then, or let them move **now** and again later? I recommend hold.
-4. When the look-up gives up on a book (no source answered), show how many gave up, with a Try again button? I recommend **no**: R6's job re-checks old books. no / yes
-5. Next version: a `Convert now` button on a book that waits for the online answer? I recommend **no**: it converts by itself after a few tries. no / yes
-6. Offer: show the state in the window title (`Books Arranger: all done`), so the taskbar answers without opening the window? I recommend **yes**. yes / no
-7. A drive that is not answering: does it hold back `All done` (the panel says `Waiting for you`)? I recommend **yes**: its books cannot be reached. yes / no
+Questions 1 to 9 are closed. The answers, as ruled in the Scope's second round:
 
-Added 2026-11-22 after build:
+1. The approval list: series only, or all? **All: every kind of change the plan holds, author folders too** (R10). I had recommended series only; section 3 is rewritten for all.
+2. `Leave as it is`: the book or the series? **The book, for good; it can be taken back** (R11).
+3. Books written in Chinese or Japanese: hold or let them move now? **Hold them out of the list until English series names ship** (R12).
+4. A count and Try again for look-ups that gave up? **No.**
+5. A `Convert now` button on a book waiting for the online answer (next version)? **No.**
+6. The state in the window title? **Yes** (R13).
+7. Does a drive that is not answering hold back `All done`? **Yes** (R14).
+8. The same limit for the titles-and-author-names look-up? **Yes: 3 tries per source** (R16).
+9. May the blocked press say `Join them into one book, or change this title.`? **Yes, only on a blocked press** (R17).
 
-8. The look-up for original titles and author names never gives up: a book whose source never answers waits for ever, and `All done` never shows while it does. Give it the same limit as the series look-up (3 tries per source)? I recommend **yes**. yes / no
-9. A `Part of a bigger book` row whose pieces would all get one name has its approve press disabled. May its reason line name both ways out: `Join them into one book, or change this title.`? You said no to a Join hint on rows on 2026-11-18; this one shows only where a press is blocked. I recommend **yes**. Until you answer, the line says only to change the name. yes / no
+## Questions for Sergei: open (one word each)
+
+Opened by the answers above. Each has a default, and the default is what is built until he answers.
+
+10. A book with two kinds of change, say a new author folder and a series found: `Leave as it is` refuses both, because R11 is about the book. If the series is wrong and the author folder is right, that book keeps its old author folder. Should he be able to refuse the series alone and let the author folder go ahead? I recommend **no** for now: it is one book at a time, and Offer again brings it back. no / yes
+11. A book R12 holds waits for the app to learn English series names, not for him and not for any job. Does it hold back `All done`? I recommend **no**: otherwise `All done` could not show until that ships. It stays listed under Left as they are with its reason. no / yes
