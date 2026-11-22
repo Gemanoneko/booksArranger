@@ -61,43 +61,43 @@ run('queueState={queued:[],running:null,outcomes:[]}');
 // 4 and 5. Every row, none folded; the status line counts them.
 const five=[conversion,{id:'series',kind:'series',subject:'Мухи',state:'running',started:ago(5000)},{id:'finished_check',kind:'finished_check',state:'running',started:ago(5000)},
   {id:'scan',kind:'scan',subject:'Audiobooks',step:'scanning',state:'running',started:ago(5000)},{id:'research',kind:'research',subject:'Foo',step:'researching',state:'running',started:ago(5000)}];
-let rows=show({rows:five});assert.equal(rows.length,5,'5 rows, none folded');assert.match(get('jobs-status').textContent,/^5 tasks running · /);
+let rows=show({rows:five});assert.equal(rows.length,5,'5 rows, none folded');assert.match(get('jobs-status-text').textContent,/^5 tasks running · /);
 assert.deepEqual(ids(rows),five.map(row=>row.id),'scan and research both show, in the engine order');
 // 6. A running queued action beside a conversion.
 rows=show({rows:[conversion,{id:'action:q7',kind:'action',label_key:'delete',subject:'Bar',book_id:'b7',state:'running',started:ago(3000)}]});
-assert.deepEqual(ids(rows),['conversion:j1','action:q7']);assert.match(get('jobs-status').textContent,/^2 tasks running · /);
+assert.deepEqual(ids(rows),['conversion:j1','action:q7']);assert.match(get('jobs-status-text').textContent,/^2 tasks running · /);
 
 // 7. Counts: three paused cleanups and one queued conversion are never "4 books waiting to convert".
 const paused=n=>({id:'cleanup:p'+n,kind:'cleanup',subject:'Paused '+n,job_id:'p'+n,step:'originals',done:1,total:9,unit:'files',state:'paused',started:ago(90000)});
 rows=show({rows:[paused(1),paused(2),paused(3)],waiting:[{id:'conversions',kind:'conversions',subject:'Next book',count:1}],counts:{queued_conversions:1,cleanups_paused:3}},{state:'Paused',queued:4});
-assert.match(get('jobs-status').textContent,/^Paused · 1 book waiting to convert · Cleanup paused for 3 books · 329 need attention · /);
-assert.doesNotMatch(get('jobs-status').textContent,/4 books/);assert.equal(rows.length,3);assert.equal(get('jobs-wait').children.length,1);
-show({counts:{cleanups_paused:3,cleanups_waiting:2}},{state:'Paused'});assert.match(get('jobs-status').textContent,/· Cleanup paused for 3 books, waiting for 2 · /);
-show({counts:{cleanups_waiting:2}},{state:'Running'});assert.match(get('jobs-status').textContent,/^Nothing running · Cleanup waiting for 2 books · /);
-show({counts:{actions_waiting:3,retry_checks_waiting:2}});assert.match(get('jobs-status').textContent,/ · 3 actions waiting · 329 need attention · 12 converted out of 40 approved books · 2 waiting for retry checks$/);
+assert.match(get('jobs-status-text').textContent,/^Paused · 1 book waiting to convert · Cleanup paused for 3 books · 329 need attention · /);
+assert.doesNotMatch(get('jobs-status-text').textContent,/4 books/);assert.equal(rows.length,3);assert.equal(get('jobs-wait').children.length,1);
+show({counts:{cleanups_paused:3,cleanups_waiting:2}},{state:'Paused'});assert.match(get('jobs-status-text').textContent,/· Cleanup paused for 3 books, waiting for 2 · /);
+show({counts:{cleanups_waiting:2},state:'continues'},{state:'Running'});assert.match(get('jobs-status-text').textContent,/^Continues by itself · Cleanup waiting for 2 books · /);
+show({counts:{actions_waiting:3,retry_checks_waiting:2},state:'continues'});assert.match(get('jobs-status-text').textContent,/^Continues by itself · 3 actions waiting · 329 need attention · 12 converted out of 40 approved books · 2 waiting for retry checks$/);
 
 // 8. Counts behind: the cue (muted from 10 s, warning from 30 s), the (as of …) suffixes, Refreshing… only while refreshing.
 run('receivedAt.set("Audiobooks",'+NOW+')');
 rows=show({rows:[conversion],snapshot_age_ms:45000,refreshing:false},{},{needs_you_only:false});run('renderFreshness('+NOW+')');
 const cue=get('jobs-fresh');assert.equal(cue.textContent,'Counts updated 45 s ago');assert.equal(cue.hidden,false);assert.equal(cue.classes.has('behind'),true,'warning color from 30 s');
-const asOf=run('wallClock('+(NOW-45000)+')');assert.match(get('jobs-status').textContent,new RegExp('12 converted out of 40 approved books \\(as of '+asOf+'\\)'));
+const asOf=run('wallClock('+(NOW-45000)+')');assert.match(get('jobs-status-text').textContent,new RegExp('12 converted out of 40 approved books \\(as of '+asOf+'\\)'));
 assert.equal(cue.title,`Need attention, converted and candidate counts were last computed at ${asOf}. The running jobs below are live.`);
 assert.equal(get('book-candidate-counts').textContent,`50 book candidates found · 3 not approved (as of ${asOf})`);
 assert.equal(rows[0].children[2].children[1].hidden,false,'positive control: a live row keeps its clock while the counts are behind');
 show({snapshot_age_ms:45000,refreshing:true});run('renderFreshness('+NOW+')');assert.equal(cue.textContent,'Counts updated 45 s ago. Refreshing…');
 show({snapshot_age_ms:20000});run('renderFreshness('+NOW+')');assert.equal(cue.textContent,'Counts updated 20 s ago');assert.equal(cue.classes.has('behind'),false,'muted under 30 s');
-assert.doesNotMatch(get('jobs-status').textContent,/as of/,'no suffix under 30 s');
+assert.doesNotMatch(get('jobs-status-text').textContent,/as of/,'no suffix under 30 s');
 show({snapshot_age_ms:9000});run('renderFreshness('+NOW+')');assert.equal(cue.hidden,true,'under 10 s: no cue');
 show({snapshot_age_ms:150000});run('renderFreshness('+NOW+')');assert.equal(cue.textContent,'Counts updated 2 min ago');
 show({snapshot_age_ms:4000000});run('renderFreshness('+NOW+')');assert.equal(cue.textContent,'Counts updated over 1 h ago');
 show({snapshot_age_ms:null});run('renderFreshness('+NOW+')');assert.equal(cue.hidden,true,'the engine cannot tell: hidden');
 // Waiting for you, behind.
-show({snapshot_age_ms:45000},{},{needs_you_only:true});assert.equal(get('jobs-you-line').children.map(item=>item.textContent).join(''),`Waiting for you: 329 books need attention (as of ${asOf}). The app can't do more until you review them.`);
+show({snapshot_age_ms:45000,state:'waiting_for_you'});assert.equal(get('jobs-you-line').textContent,`329 books need attention (as of ${asOf}).`);
 
 // 9. Unread: one failed poll never flashes; 3 s or more names the source, and an empty panel does not claim idle.
-run('unreadSince.clear()');show({unread:['workers']},{},{needs_you_only:true});
-assert.equal(get('jobs-unread').hidden,true,'first poll: nothing');assert.equal(get('jobs-idle').textContent,'Nothing running.');
-run('unreadSince.set("workers",'+(NOW-4000)+')');show({unread:['workers','jobs']},{},{needs_you_only:true});run('unreadSince.set("jobs",'+(NOW-4000)+')');show({unread:['workers','jobs']},{},{needs_you_only:true});
+run('unreadSince.clear()');show({unread:['workers'],state:'unknown'});
+assert.equal(get('jobs-unread').hidden,true,'first poll: nothing');assert.equal(get('jobs-idle').textContent,'Nothing is running right now.','one failed poll never flashes "could not be read"');
+run('unreadSince.set("workers",'+(NOW-4000)+')');show({unread:['workers','jobs'],state:'unknown'});run('unreadSince.set("jobs",'+(NOW-4000)+')');show({unread:['workers','jobs'],state:'unknown'});
 assert.equal(get('jobs-unread').hidden,false);assert.equal(get('jobs-unread').textContent,'Could not read just now: background lookups and repairs, conversion and cleanup. Some work may be missing below.');
 assert.equal(get('jobs-idle').textContent,'Nothing running that could be read.');assert.equal(get('jobs-you').hidden,true,'no absence claimed while a source is unread');
 show({unread:[]});assert.equal(get('jobs-unread').hidden,true,'read again: the line goes');

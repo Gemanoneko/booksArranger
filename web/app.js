@@ -503,7 +503,8 @@ function loadPlaceholders(){
   if(!(state && partReady('jobs'))){
     setText('automatic-status',`Automatic processing: ${word}`);setText('research-status',`Research: ${word}`);
     setText('automatic-start-reason',loadStopped()?'':'Automatic processing can start when loading finishes.');$('automatic-start-reason').hidden=loadStopped();
-    setText('jobs-status',loadStopped()?'Jobs: not loaded.':'Jobs: loading…');setText('book-candidate-counts',loadStopped()?'Book candidates: not loaded.':'Book candidates: loading…');
+    // 0.31.0 (1.1): the status parts are in #jobs-status-text; no badge until the jobs part has loaded.
+    setText('jobs-status-text',loadStopped()?'Jobs: not loaded.':'Jobs: loading…');renderBadge(null);setText('book-candidate-counts',loadStopped()?'Book candidates: not loaded.':'Book candidates: loading…');
     $('jobs-idle').hidden=true;
     // Futaba's 0.22.1 QA, m-7: the panel itself was hidden until the jobs part came, so these lines never showed (3.5:
     // the Audiobook jobs panel is shown at its reserved height with them).
@@ -1311,7 +1312,11 @@ function renderJobs(){
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
   const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved${asOf}`:'Book candidate totals unavailable');
   const shown=shownRows(work,now);
-  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+statusParts(jobs,work,shown,counts,asOf).join(' · '));
+  // 0.31.0 (1.2, 1.3): the badge is the first thing in #jobs-status, the parts follow it. No badge while the last answer is
+  // only "last confirmed" (the engine is not answering now). From 30 s the as-of time follows the badge as plain text.
+  const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge);
+  renderBadge(badge);
+  text('jobs-status-text',(stale?'Last confirmed — ':'')+(badge?(asOf?asOf:'')+(parts.length?' · ':''):'')+parts.join(' · '));
   renderActivities(shown,jobs,unread,asOf);renderWaitingList(work);renderHold(heldRows(jobs));renderFreshness(now);renderUnread(unread);renderSourceCheck();
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
@@ -1322,26 +1327,42 @@ function renderJobs(){
 }
 // The status line (sections 1.3, 3 and 4): what runs, then the split counts. Three numbers, three phrases: books waiting to
 // convert, cleanups paused or waiting, actions waiting (work.counts); jobs.queued is never read (it adds them together).
-function statusParts(jobs,work,shown,counts,asOf){
+function statusParts(jobs,work,shown,counts,asOf,badge=null){
   const c=work.counts,n=key=>Number.isInteger(c?.[key]) && c[key]>0?c[key]:0,paused=n('cleanups_paused'),waiting=n('cleanups_waiting');
   const cleanup=paused && waiting?`Cleanup paused for ${plural(paused,'book','books')}, waiting for ${waiting.toLocaleString()}`:paused?`Cleanup paused for ${plural(paused,'book','books')}`:waiting?`Cleanup waiting for ${plural(waiting,'book','books')}`:'';
-  return [admissionLine(jobs) || jobsFirstPart(jobs,shown),n('queued_conversions')?plural(n('queued_conversions'),'book','books')+' waiting to convert':'',cleanup,
+  // 0.31.0 (1.3): the badge or the first part; "N on hold" its own part after it when nothing runs; the series moves to
+  // approve after "need attention"; the background look-ups left last. Zero counts are left out.
+  const first=admissionLine(jobs) || (badge?'':jobsFirstPart(jobs,shown,work)),moves=pendingCount(work,'moves'),lookups=pendingCount(work,'lookups'),held=heldTotal(jobs);
+  const onHold=held && !runningActs(mainRows(shown)).length && !['Paused','Pausing audiobook jobs…'].includes(first)?`${held} on hold`:'';
+  return [first,onHold,n('queued_conversions')?plural(n('queued_conversions'),'book','books')+' waiting to convert':'',cleanup,
     n('actions_waiting')?plural(n('actions_waiting'),'action','actions')+' waiting':'',`${attentionTotal(jobs)} need attention`,
-    counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books${asOf}`:'Approved book progress unavailable',
-    n('retry_checks_waiting')?`${n('retry_checks_waiting')} waiting for retry checks`:''].filter(Boolean);
+    moves?`${plural(moves,'series move','series moves')} to approve`:'',
+    counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books${badge?'':asOf}`:'Approved book progress unavailable',
+    n('retry_checks_waiting')?`${n('retry_checks_waiting')} waiting for retry checks`:'',
+    lookups?`${plural(lookups,'background look-up','background look-ups')} left`:''].filter(Boolean);
 }
 // 0.29.0 (Sergei 2026-11-17; Judy section 7): the jobs line starts with what is running, in plain words; a held item is never
 // counted as running; the queue worker's own momentary state word ("Running") is not shown. 0.30.0 (section 1.3): two or more
 // running read "3 tasks running"; every one of them is a row below.
 function runningActs(shown){return shown.filter(row=>row && ['running','pausing'].includes(row.state));}
 function rowName(row){const subject=rowSubject(row);return workLabel(row)+(subject?': '+subject:'');}
-function jobsFirstPart(jobs,shown){
-  const running=runningActs(shown),held=heldTotal(jobs),queuePaused=['Paused','paused'].includes(jobs?.state),paused=queuePaused || shown.some(row=>row.state==='paused');
+function jobsFirstPart(jobs,shown,work={}){
+  // 0.31.0 (2.1): a look-up row counts in "N tasks running" only beside main work; alone, the badge leads the line.
+  const all=runningActs(shown),running=runningActs(mainRows(shown)).length?all:[],queuePaused=['Paused','paused'].includes(jobs?.state),paused=queuePaused || shown.some(row=>row.state==='paused');
   if(!running.length && paused)return 'Paused';
   if(!running.length && jobs?.state==='Pausing')return 'Pausing audiobook jobs…';
   const named=running.length===1?rowName(running[0]):running.length>1?`${running.length.toLocaleString()} tasks running`:'';
   if(named)return (queuePaused?'Paused · ':'')+named;  // the queue paused while other work (a series update, a check) runs
-  return held?`Nothing running · ${held} on hold`:'Nothing running';
+  // 0.31.0 (1.1, 1.3): bare "Nothing running" is gone from the status line. Main work that waits reads "Continues by
+  // itself"; an unread source keeps its 0.30.0 words; a finished state has no first part (its badge leads the line).
+  if(notReadable(work))return 'Nothing running that could be read';
+  return work.state==='continues'?'Continues by itself':'';
+}
+// "Not known" (1.1): a source has been unread for 3 s or more (the 0.30.0 rule: one failed poll never flashes), or the
+// engine cannot say for another reason (a look-up that has not counted its books yet).
+function notReadable(work){
+  if(work.state!=='unknown')return false;
+  return !work.unread.length || unreadShown(work,Date.now()).length>0;
 }
 // On hold (Judy section 7, unchanged): the held cleanup (jobs.attention_row) leaves the Running list. Line 2 is the plain
 // cause, never the engine's text.
@@ -1487,11 +1508,16 @@ let sourceRowsAt=0;
 globalThis.addEventListener?.('focus',()=>{if(ended || loadingActive || Date.now()-sourceRowsAt<30000)return;sourceRowsAt=Date.now();request('/api/sources/rows',{}).catch(()=>{});});
 // Item 8 (Judy section 8): only Sergei's review can move things on. The engine decides (needs_you_only); the count is the
 // Needs attention shortcut's own number. 0.30.0 (section 3): from 30 s old it says when it was counted.
-function renderWaitingForYou(shown,jobs,asOf=''){
-  const block=$('jobs-you');if(!block)return;block.hidden=!shown;if(!shown)return;
-  const review=$('jobs-review');writeText(review,'Review them');review.title='Show every book that needs you.';
-  const n=attentionTotal(jobs),line=$('jobs-you-line'),key=String(n)+asOf;
-  if(line.dataset.key!==key){line.dataset.key=key;const strong=node('strong','Waiting for you:');line.replaceChildren(strong,node('span',` ${plural(n,'book needs','books need')} attention${asOf}. The app can't do more until you review them.`));}
+// 0.31.0 (1.4): a short list under the heading "Waiting for you": one line per kind that has a count, need attention first,
+// then series moves. A drive that is not answering and a book on hold keep their own homes and add no line; when they are the
+// only reason the block is hidden. The Review moves button belongs to the Series moves dialog (section 3), not built yet.
+function renderWaitingForYou(shown,jobs,asOf='',work={}){
+  const block=$('jobs-you');if(!block)return;
+  const n=attentionTotal(jobs),moves=pendingCount(work,'moves');shown=shown && (n>0 || moves>0);
+  block.hidden=!shown;if(!shown)return;
+  const review=$('jobs-review');writeText(review,'Review them');review.title='Show every book that needs you.';review.hidden=!n;
+  const line=$('jobs-you-line');line.hidden=!n;writeText(line,n?`${plural(n,'book needs','books need')} attention${asOf}.`:'');
+  const second=$('jobs-you-moves');if(second){second.hidden=!moves;writeText(second,moves?(moves===1?'1 series move waits for your approval.':`${moves.toLocaleString()} series moves wait for your approval.`):'');}
 }
 // 0.30.0 (Judy's BooksArranger_0.30.0_UX.md, section 1): every running, pausing or paused job is a row, in the engine's order
 // (work.rows), keyed by its id, updated in place; no cap and no "+N more". A row shows once it has run 1 s, except one a waiting
@@ -1499,8 +1525,37 @@ function renderWaitingForYou(shown,jobs,asOf=''){
 const activityRows=new Map();let activityTimer=null;
 function workOf(){
   const work=state?.work,list=(value,check)=>Array.isArray(value)?value.filter(check):[];
-  return {rows:list(work?.rows,row=>row && typeof row.id==='string' && typeof row.kind==='string'),waiting:list(work?.waiting,item=>item && typeof item.id==='string' && typeof item.kind==='string'),
-    counts:work?.counts && typeof work.counts==='object'?work.counts:{},unread:Array.isArray(work?.unread)?work.unread:[]};
+  const item=value=>value && typeof value.id==='string' && typeof value.kind==='string',object=value=>value && typeof value==='object' && !Array.isArray(value)?value:{};
+  // 0.31.0 (Judy's BooksArranger_0.31.0_UX.md): the engine's finished state and what is behind it. The page never works the
+  // state out from rows; an engine that does not send one (older, or still loading) gives no badge.
+  return {rows:list(work?.rows,item),waiting:list(work?.waiting,item),
+    counts:work?.counts && typeof work.counts==='object'?work.counts:{},unread:Array.isArray(work?.unread)?work.unread:[],
+    state:typeof work?.state==='string'?work.state:'',pending:object(work?.pending),background:object(work?.background),lookups:list(work?.lookups_waiting,item)};
+}
+// The two background look-ups (2.1): their rows and Waiting items are never "main work".
+const LOOKUP_KINDS=['series','gap_fill','series_lookup','detail_lookup','series_write'];
+function isLookup(row){return LOOKUP_KINDS.includes(row?.kind);}
+function mainRows(shown){return shown.filter(row=>!isLookup(row));}
+function pendingCount(work,key){const value=key==='lookups'?work.pending?.lookups?.all:work.pending?.[key];return Number.isInteger(value) && value>0?value:0;}
+// The badge (1.2): shown only for a finished state, and only while no main job has a row (a page-owned loop is one). No
+// flicker: it shows once its state has been reported for 3 s in a row and goes once another has been reported for 1 s.
+const BADGES={all_done:['All done','state-done','Nothing is running, queued or waiting, background look-ups included. Nothing waits for you.'],
+  waiting_for_you:['Waiting for you','state-you','No conversion, cleanup or other job is running or queued. The items under Waiting for you need your answer.'],
+  background_only:['Background look-ups only','state-background','No conversion, cleanup or other job is running or queued, and nothing waits for you. Only online look-ups are left.']};
+let badgeSeen={state:null,since:0},badgeShown=null;
+function badgeState(work,shown,now){
+  const reported=BADGES[work.state] && !mainRows(shown).length?work.state:null;
+  if(badgeSeen.state!==reported)badgeSeen={state:reported,since:now};
+  const held=now-badgeSeen.since;
+  if(reported && held>=3000)badgeShown=reported;
+  else if(badgeShown && reported!==badgeShown && held>=1000)badgeShown=null;
+  return badgeShown;
+}
+function renderBadge(key){
+  const badge=$('jobs-state');if(!badge)return;
+  const [words,look,tip]=BADGES[key] || ['','',''];
+  badge.hidden=!key;writeText(badge,words);badge.title=tip;
+  if(badge.className!==look)badge.className=look;  // its only class: the look of its state
 }
 // Page-owned rows (A9): Approve selected and Let the app handle selected are loops of this page; the engine keeps no record.
 let pageRun=null;  // {kind:'approve_selected'|'release_selected', done, total, started}
@@ -1646,9 +1701,14 @@ function renderActivities(shown,jobs,unread=[],asOf=''){
     const key=[row.step,row.kind==='research'?'':row.subject,row.started].join('\u001f');if(view.key!==key){view.key=key;view.samples=[];view.eta='';view.etaAt=0;}
     view.row=row;updateActivity(view,Date.now());
   });
-  const you=!shown.length && !unread.length && state?.needs_you_only===true && attentionTotal(jobs)>0;
-  const idle=shown.length?'':unread.length?'Nothing running that could be read.':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.':you?'Nothing running.':'Nothing running';
-  writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;renderWaitingForYou(you,jobs,asOf);
+  // 0.31.0 (1.3, 1.4): the engine's finished state decides (needs_you_only is no longer read). The idle line, shown as
+  // before only when the Running list is empty: nothing at all is left ("All done", or "Waiting for you" with no look-up
+  // left), or nothing runs right now. Paused and unread keep their 0.30.0 lines.
+  const work=workOf(),nothingLeft=work.state==='all_done' || work.state==='waiting_for_you' && !pendingCount(work,'lookups');
+  const idle=shown.length?'':unread.length || notReadable(work)?'Nothing running that could be read.':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.'
+    :nothingLeft?'Nothing is running, queued or waiting.':'Nothing is running right now.';
+  writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;
+  renderWaitingForYou(work.state==='waiting_for_you' && !mainRows(shown).length && !unread.length,jobs,asOf,work);
   if(shown.length && activityTimer===null && typeof setInterval==='function')activityTimer=setInterval(()=>{const now=Date.now();for(const view of activityRows.values())updateActivity(view,now);},1000);
   if(!shown.length && activityTimer!==null && typeof clearInterval==='function'){clearInterval(activityTimer);activityTimer=null;}
 }
@@ -2913,6 +2973,9 @@ function renderAutomatic(){
   else if(automatic?.state==='Completed'){
     const converted=verifiedCount(state?.audiobook_jobs?.converted_total),approved=verifiedCount(state?.audiobook_jobs?.approved_total),held=verifiedCount(automatic.research?.held);
     detail=converted!==null && approved!==null && approved>=converted && held!==null?'Automatic pass complete — '+converted+' converted · '+held+' held':'Automatic pass complete — result counts unavailable';
+    // 0.31.0 (section 6): the line speaks of one pass and read as "all done"; it says what is still left, from the engine's state.
+    const left=workOf().state;
+    detail+=['working','paused','continues'].includes(left)?' Other jobs are still running or waiting.':left==='background_only'?' Background look-ups continue.':'';
   }else if(automatic?.state==='Running' && automatic.phase==='waiting' && automatic.automatic_retry_enabled===true){
     detail='Waiting for metadata sources; saved research retries automatically.';
     const retry=retryDate(automatic.next_retry_at);detail+=retry?' Next automatic retry check: '+retry:' Automatic retry time unavailable';

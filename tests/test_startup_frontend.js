@@ -32,7 +32,7 @@ function harness({protocol='http:',desktop=true}={}){
   const segments=[0,1,2,3].map(i=>{const segment=make('segment-'+i);segment.children=[make('fill-'+i)];return segment;});
   // The page's own initial placeholders (index.html).
   const initial={status:'Library status: loading…',root:'Source folders: loading…','automatic-status':'Automatic processing: loading…','research-status':'Research: loading…',
-    'jobs-status':'Jobs: loading…','book-candidate-counts':'Book candidates: loading…',empty:'Loading your books…',page:'Loading your books…','automatic-start-reason':'Automatic processing can start when loading finishes.'};
+    'jobs-status-text':'Jobs: loading…','book-candidate-counts':'Book candidates: loading…',empty:'Loading your books…',page:'Loading your books…','automatic-start-reason':'Automatic processing can start when loading finishes.'};
   for(const [id,text] of Object.entries(initial))node(id).textContent=text;
   node('jobs-idle').hidden=true;node('version').hidden=true;node('load-actions').hidden=true;node('load-details').hidden=true;node('load-restart').hidden=true;node('load-retry').hidden=true;
   // M3 (Judy's implementation check): the book list's body is busy while the books part is missing; <body> never is,
@@ -79,7 +79,7 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     assert.match(h.node('load-detail').textContent,/running 0:00 · no answer from the engine yet · last load took 1 min 39 s/);
     assert.equal(h.node('filter').children.length,1);assert.equal(h.node('filter').children[0].textContent,'Loading…');
     assert.equal(h.node('version').hidden,true);assert.equal(h.node('jobs-idle').hidden,true);
-    digitFree(h,['status','root','automatic-status','research-status','jobs-status','book-candidate-counts','empty','page']);
+    digitFree(h,['status','root','automatic-status','research-status','jobs-status-text','book-candidate-counts','empty','page']);
     // Ruling 35 (Sergei 2026-10-26): a changing press is accepted while loading and runs when loading finishes.
     assert.equal(h.node('start').hasAttribute('data-not-yet'),false);assert.equal(h.node('start').disabled,false,'never the disabled attribute');
     assert.equal(h.node('library').title,'Not yet: Books Arranger is still loading. You can switch library when loading finishes.');
@@ -106,7 +106,7 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     assert.equal(h.node('load-retry').hidden,false);assert.equal(h.node('load-restart').hidden,true);assert.equal(h.node('load-detail').hidden,true);
     assert.match(h.node('load-technical').textContent,/Pending output moves need recovery first/);
     assert.equal(h.node('status').textContent,'Library status: not loaded.');assert.equal(h.node('empty').textContent,'Your books are not loaded.');
-    assert.equal(h.node('jobs-status').textContent,'Jobs: not loaded.');assert.equal(h.node('book-candidate-counts').textContent,'Book candidates: not loaded.');
+    assert.equal(h.node('jobs-status-text').textContent,'Jobs: not loaded.');assert.equal(h.node('book-candidate-counts').textContent,'Book candidates: not loaded.');
     assert.equal(h.node('load-announce').textContent,'Books Arranger stopped loading. Try again is available.');
     // A taken port names the other process.
     const p=harness({protocol:'file:'});await flush();p.startup({phase:'stopped',portPid:4321,exited:{code:1,lastLines:''}});
@@ -117,15 +117,15 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     const h=harness();h.answer=answerWith(loading({parts:{...ALL,[withheld]:false}}));await h.poll();await flush();
     if(withheld==='status')digitFree(h,['status']);
     if(withheld==='jobs'){
-      digitFree(h,['jobs-status','book-candidate-counts','automatic-status','research-status']);
+      digitFree(h,['jobs-status-text','book-candidate-counts','automatic-status','research-status']);
       // Futaba's 0.22.1 QA, m-7: the jobs panel shows its placeholders (it was hidden), and every answer before the jobs
       // part keeps "loading…" (it said "Automatic processing: status unavailable", words 3.5 removed).
       assert.equal(h.node('audio-jobs').hidden,false,'the Audiobook jobs panel is shown while loading');
-      assert.equal(h.node('jobs-status').textContent,'Jobs: loading…');assert.equal(h.node('book-candidate-counts').textContent,'Book candidates: loading…');
+      assert.equal(h.node('jobs-status-text').textContent,'Jobs: loading…');assert.equal(h.node('book-candidate-counts').textContent,'Book candidates: loading…');
       for(let n=0;n<2;n++){await h.poll();await flush();}
       assert.equal(h.node('automatic-status').textContent,'Automatic processing: loading…');
       assert.equal(h.node('research-status').textContent,'Research: loading…');
-      for(const id of ['automatic-status','research-status','jobs-status','book-candidate-counts'])assert.doesNotMatch(h.node(id).textContent,/unavailable/i,id);
+      for(const id of ['automatic-status','research-status','jobs-status-text','book-candidate-counts'])assert.doesNotMatch(h.node(id).textContent,/unavailable/i,id);
     }
     assert.equal(h.body.getAttribute('aria-busy'),null,'never on <body>');
     if(withheld==='books'){assert.equal(h.node('inventory').getAttribute('aria-busy'),'true','busy while the books part is missing');digitFree(h,['empty','page']);assert.equal(h.calls.inventory,0,'no list read before the books part');assert.equal(h.node('filter').title,'Not yet: your books are still loading. This works as soon as they appear.');}

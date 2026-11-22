@@ -58,7 +58,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(get('group-same_author').textContent,'Same author? · 1');assert.equal(get('group-name_taken').hidden,false);assert.equal(get('group-all').textContent,'All · 9');
   assert.equal(get('attention-set-needs').hidden,false);
   assert.equal(get('attention-shortcut').textContent,'Needs attention · 9');assert.equal(get('attention-shortcut').hidden,false);
-  assert.equal(get('jobs-status').textContent,'Nothing running · 9 need attention · 0 converted out of 0 approved books');
+  assert.equal(get('jobs-status-text').textContent,'9 need attention · 0 converted out of 0 approved books');
   run('state={...state,audiobook_jobs:{...state.audiobook_jobs,attention_counts:{...state.audiobook_jobs.attention_counts,files_missing:0,title_author:0,author_unclear:0,same_author:0,name_taken:0}}};controls()');
   assert.equal(get('group-title_author').hidden,true);assert.equal(get('attention-set-needs').hidden,true,'a set with no chips hides its label');
   run('state={...state,audiobook_jobs:{...state.audiobook_jobs,attention_counts:{retry:0}}};controls()');assert.equal(get('attention-shortcut').hidden,true,'hidden at zero');
