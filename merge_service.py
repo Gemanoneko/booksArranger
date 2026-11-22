@@ -2969,6 +2969,10 @@ class MergeService:
                 found[identity]={'group':'other','reasons':reasons,'ask':None};continue
             if exact and any('already exists at this path' in r for r in reasons):
                 found[identity]={'group':'name_taken','reasons':reasons,'ask':None};continue
+            if exact and isinstance(hold,dict) and hold.get('kind')=='same_destination':
+                # 0.31.0 step 1c: another row plans this name or a waiting book has it. Listed and counted under Name taken
+                # (the same question: this name cannot be used); 'hold' tells the two apart and names the other books.
+                found[identity]={'group':'name_taken','reasons':reasons,'ask':None,'hold':hold};continue
             # Senua's 0.22.0 review, G5 (rulings 10 and 5): a held book with a reason is listed whether or not it waits for a
             # change (a refusal at the approval step is retried on a timer and was never listed). Still checking: a record
             # from an older research version (researched once more after an update) or one a newer author rule decides (G6:
@@ -3052,7 +3056,9 @@ class MergeService:
         if entry['group']!='files_missing' or payload['missing']['present']:
             try:
                 preview=self.approval_preview(row['id'],row['revision'])
-                payload['destination']={'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
+                payload['destination']={'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason'],
+                                        # 0.31.0 step 1c: the other books that would get this name (destination_clash hold), else None.
+                                        'shared':preview.get('shared')}
                 shown_series=preview.get('series')
                 # The proposals are the values Approve uses (local_identity.shown): a suspected reader is never proposed
                 # as the author (ruling 14), and an empty author files the book under Без автора.
@@ -3552,6 +3558,40 @@ class MergeService:
         path=self._chosen_display(row,preview.get('path') or '')
         return (self._shown_path(path,output_root) if path else ''),path,('' if path else preview.get('reason',''))
 
+    # --- 0.31.0 step 1c (Sergei 2026-11-22): two books never share one destination (destination_clash).
+    def _planned_note(self,row,path,names=None):
+        """Note the name this current row plans (its "Goes to" with nothing typed, or its researched review), in memory
+        only: a read never writes the catalog. names: {'title','author'} for the other row's line."""
+        import destination_clash
+        planned=self.__dict__.setdefault('_planned',{})
+        if len(planned)>=20000:planned.clear()
+        if not path:planned.pop(row['id'],None);return
+        names=names if isinstance(names,dict) else {}
+        planned[row['id']]={'revision':row['revision'],'fingerprint':row['fingerprint'],'key':destination_clash.key(path),
+                            'name':destination_clash.name_of([m['path'] for m in row.get('members') or []]),
+                            'title':str(names.get('title') or ''),'author':str(names.get('author') or '')}
+
+    def note_planned(self,row,result):
+        """Automatic processing recorded this row's research: a result with a review plans a name (noted); one that got its
+        job no longer needs a note (the job's destination is read from the catalog)."""
+        if not isinstance(result,dict) or not isinstance(result.get('review'),dict) or result.get('job_id'):
+            if isinstance(result,dict) and result.get('job_id'):self.__dict__.setdefault('_planned',{}).pop(row['id'],None)
+            return
+        try:_relative,path,_reason=self._approval_destination(row,result)
+        except (ValueError,KeyError,TypeError,AttributeError,OSError):return
+        self._planned_note(row,path,{'title':result['review'].get('title'),'author':result['review'].get('canonical_author') or result['review'].get('author')})
+
+    def _destination_shared(self,row,path,relative=''):
+        """The same_destination hold when another current row plans this path or a book waiting to convert has it, else
+        None. Catalog reads only; an unreadable catalog answers None (the disk check and the publication itself still
+        never overwrite)."""
+        import destination_clash
+        try:
+            with connect(self.inventory.database) as db:
+                others=destination_clash.queued(db,path,row['id'])+destination_clash.rows(db,path,row['id'],self.__dict__.get('_planned'))
+        except (sqlite3.Error,OSError,ValueError,TypeError):return None
+        return destination_clash.hold(path,relative,others)
+
     def routing_preview(self,id,revision,review):
         """The panel's "Unsaved destination preview" for a book (Senua's 0.22.3 review, m14). Ruling 40: a book's names are
         edited on its row only, so the six name fields are the ones its Goes to line files with (research and Edit names),
@@ -3578,6 +3618,11 @@ class MergeService:
         approval=result['approval']
         answer={'path':relative,'absolute':path,'taken':bool(path and os.path.lexists(path)),
                 'title':approval['title'],'author':approval['author'],'collection':approval['collection'],'reason':reason}
+        # 0.31.0 step 1c: the name is also taken when another row plans it or a book waiting to convert has it
+        # (destination_clash): 'shared' is that hold (the destination, how many others, each other book), else None. The
+        # name the row itself shows (nothing typed) is noted, so the other row sees this one too.
+        if path and title is None and author is None and names is None:self._planned_note(row,path,approval)
+        answer['shared']=self._destination_shared(row,path,relative) if path else None
         # The series Approve files this book in (Judy 0.23.1 section 8.4; 2026-10-29, Tolkien: «Властелин Колец» 1).
         review=result.get('review') or {}
         if str(review.get('series') or '').strip() and str(review.get('number') or '').strip():
@@ -4484,6 +4529,12 @@ class MergeService:
         # in build_manifest stays (and the publication itself never overwrites).
         _relative,destination,_reason=self._approval_destination(row,result)
         if destination and os.path.lexists(destination) and not self._recording_review(row,result,threading.Event()):raise ValueError('An audiobook already exists at this path; nothing was overwritten')
+        # 0.31.0 step 1c: nor when another row plans this name or a book waiting to convert has it (a late clash: the row
+        # showed it free). Refused with its own code (same_name) and the other books; nothing is written.
+        shared=self._destination_shared(row,destination,_relative) if destination else None
+        if shared:
+            import destination_clash
+            raise destination_clash.Shared(shared)
         approval=result['approval']
         files=[m['path'] for m in sorted(row['members'],key=lambda m:m.get('order') or 0) if include is None or m['path'] in include]
         ctx=self.reviews._context(row)
@@ -4613,6 +4664,16 @@ class MergeService:
         import shutil
         if stop.is_set():raise InterruptedError()
         if result.get('reasons') or not result.get('work') or not result.get('review'):raise ValueError('Book identity uncertain')
+        if approved_by is None:
+            # 0.31.0 step 1c: automatic filing never queues a book under a name another row plans or a waiting book has.
+            # Held with the same_destination reason and the other books (automatic processing records the hold and tries
+            # again by itself); Sergei's own Approve was checked before it came here (approve_book).
+            try:planned_relative,planned_path,_=self._approval_destination(row,result)
+            except (ValueError,KeyError,TypeError,AttributeError,OSError):planned_relative,planned_path='',''
+            shared=self._destination_shared(row,planned_path,planned_relative) if planned_path else None
+            if shared:
+                import destination_clash
+                raise destination_clash.Shared(shared)
         # Local agreement (Sergei decision 2026-10-12) replaces the fetched credit only for
         # identity; it is re-derived from the current sources below. Media, publication,
         # retirement and recovery checks are unchanged.

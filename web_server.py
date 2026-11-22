@@ -175,6 +175,8 @@ def approve_code(text):
 
 APPROVE_CODES = (('changed', ('Candidate changed', 'Source files changed', 'evidence changed')), ('moved', ('Destination changed',)),
                  ('job_exists', ('Audiobook job already exists',)), ('name_taken', ('already exists',)),
+                 # 0.31.0 step 1c (destination_clash.REFUSED): another row plans this name or a waiting book has it.
+                 ('same_name', ('Another book would get the same name',)),
                  ('format', ('Audio format needs an encoding decision',)), ('profiles', ('audio profiles differ',)),
                  ('chapters', ('carry their own chapters', 'must keep its chapters', 'has no chapters of its own', 'without its own chapters', 'could not be checked; the whole set')),
                  ('cover', ('Cover not verified', 'Cover evidence bytes changed', 'Cover decoder unavailable', 'Neutral artwork cache changed')),

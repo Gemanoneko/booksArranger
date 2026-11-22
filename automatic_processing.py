@@ -179,6 +179,11 @@ class AutomaticProcessing:
             db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',(row['id'],row['revision'],row['fingerprint'],state,json.dumps(recorded,ensure_ascii=False),retry_at,stamp(),VERSION))
         worker=threading.current_thread() is self.thread
         transaction(self.database,persist,self.stop_event if worker else None)
+        # 0.31.0 step 1c: the name a researched row plans is noted for the other rows' same-destination check (memory only).
+        note=getattr(self.merge,'note_planned',None)
+        if callable(note) and state in ('Held','Waiting for source','Queued'):
+            try:note(row,dict(supplied,job_id=True) if state=='Queued' else supplied)
+            except Exception:pass
     def _paused_checkpoint(self,id,checkpoint):
         encoded=json.dumps(checkpoint);updated=stamp()
         def persist(db):
@@ -926,7 +931,11 @@ class AutomaticProcessing:
                               else:
                                   result['reasons']=[MEDIA_HELD];self._record(fresh,'Held',result,self.clock()+86400);deferred.append(identity)
                           else:
-                              result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
+                              result['reasons']=[str(error)[:300] or 'Automatic source checks failed']
+                              # 0.31.0 step 1c: a refusal with a typed hold (destination_clash.Shared: another book would get
+                              # this name) keeps it, so the row says which books; tried again by itself like any refusal.
+                              if isinstance(getattr(error,'identity_hold',None),dict):result['reasons']=[__import__('destination_clash').REASON];result['identity_hold']=json.loads(json.dumps(error.identity_hold,ensure_ascii=False))
+                              self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
                   checkpoint['pending'].pop(0)
                   if identity not in checkpoint['done']:checkpoint['done'].append(identity)
                   self._update(id,checkpoint=json.dumps(checkpoint))
