@@ -70,6 +70,23 @@ class SeparatedVolumeTests(Fixture):
             ('Count Zero', 'Sprawl Trilogy', '2', SORTED + '\\Gibson William\\Sprawl Trilogy\\Sprawl Trilogy - 2 - Count Zero - Gibson William.m4b'),
             ('Mona Lisa Overdrive', 'Sprawl Trilogy', '3', SORTED + '\\Gibson William\\Sprawl Trilogy\\Sprawl Trilogy - 3 - Mona Lisa Overdrive - Gibson William.m4b')])
 
+    def test_the_row_can_say_where_the_series_and_the_title_came_from(self):
+        # Judy's 0.31.0 spec, 4.3: "Series: Sprawl Trilogy · No. 2 · from the file's tags"; "Title from this file's own title tag."
+        from merge_service import MergeService
+        result = self.lookup(self.volumes()[0])
+        self.assertEqual(MergeService.series_origin(result), {'origin': 'tags', 'title_from_title_tag': True})
+        row = next(iter(self.shelf(dark_forest_rows()).values()))
+        self.assertEqual(MergeService.series_origin(self.research.approved(row, ROOT)), {'origin': 'tags', 'title_from_title_tag': False},
+                         'its title is the album tag; its series the sort-album tag')
+        folders = {'local_agreement': {'series': {'state': 'green', 'value': 'Sigma Force', 'sources': [{'kind': 'folder structure', 'value': 'Sigma Force'}]}}}
+        entered = {'local_agreement': {'series': {'state': 'entered', 'value': 'Sprawl Trilogy', 'basis': 'entered', 'sources': [{'kind': 'entered by you', 'value': 'Sprawl Trilogy'}]}}}
+        online = {'local_agreement': {'series': {'state': 'grey', 'value': '', 'sources': []}},
+                  'metadata_facts': {'series_source': {'provider': 'fantlab', 'url': 'https://fantlab.ru/work3650'}}}
+        self.assertEqual(MergeService.series_origin(folders)['origin'], 'folders')
+        self.assertEqual(MergeService.series_origin(entered)['origin'], 'entered')
+        self.assertEqual(MergeService.series_origin(online), {'origin': 'source', 'title_from_title_tag': False, 'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work3650'})
+        self.assertEqual(MergeService.series_origin({})['origin'], 'unknown')
+
     def test_the_fix_is_the_volume_fact_and_nothing_else(self):
         # Positive control: the same two rows read without their volume fact (before 0.31.0 only {'kept': True} took the
         # branch, so {'kept': False} read as no fact at all) are one part each, named from the album: the held record of

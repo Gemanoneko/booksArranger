@@ -3564,6 +3564,26 @@ class MergeService:
         path=self._chosen_display(row,preview.get('path') or '')
         return (self._shown_path(path,output_root) if path else ''),path,('' if path else preview.get('reason',''))
 
+    @staticmethod
+    def series_origin(result):
+        """0.31.0 (Judy's spec 4.3, ruling R4): where a result's series and number came from, as keys the page words:
+        {'origin': 'tags' (the files' own tags) | 'folders' (his folder structure) | 'entered' (by him) | 'source' (an online
+        source, with 'provider' and 'source_url') | 'unknown', 'title_from_title_tag': the title is the file's own title tag}."""
+        agreed=(result.get('local_agreement') or (result.get('metadata_facts') or {}).get('local_agreement') or {}) if isinstance(result,dict) else {}
+        series=agreed.get('series') if isinstance(agreed.get('series'),dict) else {}
+        kinds=[str(source.get('kind') or '') for source in series.get('sources') or [] if isinstance(source,dict)]
+        title=agreed.get('title') if isinstance(agreed.get('title'),dict) else {}
+        own_title=any(isinstance(s,dict) and s.get('kind')=='embedded' and s.get('field')=='title' for s in title.get('sources') or [])
+        found={'origin':'unknown','title_from_title_tag':own_title}
+        source=((result.get('metadata_facts') or {}).get('series_source') or {}) if isinstance(result,dict) else {}
+        if series.get('state')=='entered' or 'entered by you' in kinds:found['origin']='entered'
+        elif 'folder structure' in kinds:found['origin']='folders'
+        elif series.get('value') and (series.get('basis')=='tag' or 'embedded' in kinds or any(kind.startswith('the title (tag') or kind=='brackets in the name' for kind in kinds)):
+            found['origin']='tags'
+        elif source.get('provider') and source['provider'] not in ('local','entered'):
+            found.update(origin='source',provider=str(source['provider']),source_url=str(source.get('url') or source.get('source_url') or ''))
+        return found
+
     # --- 0.31.0 step 1c (Sergei 2026-11-22): two books never share one destination (destination_clash).
     def _planned_note(self,row,path,names=None):
         """Note the name this current row plans (its "Goes to" with nothing typed, or its researched review), in memory
@@ -3633,6 +3653,7 @@ class MergeService:
         review=result.get('review') or {}
         if str(review.get('series') or '').strip() and str(review.get('number') or '').strip():
             answer['series']={'name':str(review['series']).strip(),'number':str(review['number']).strip()}
+            answer['series'].update(self.series_origin(result))  # 0.31.0 (Judy 4.3): where the series and number came from
         from tolkien_trilogy import author_world,DECISION
         if author_world(review,result.get('metadata_facts')):answer['names_decision']=DECISION
         if names is not None:
