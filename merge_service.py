@@ -3034,6 +3034,13 @@ class MergeService:
                  'fields':ask.get('fields') or {},'candidates':ask.get('candidates') or [],
                  # 0.22.1: an odd-name question is approved on its own row only, never in bulk (Judy 11.4, item 2).
                  'odd_name':ask.get('odd_name') is True}
+        # 0.31.0 (Judy's spec 4.1, amended G9): why the engine itself holds this row, apart from destination.shared, which
+        # every row carries whose name another book also has. Only a row held for the clash alone (kind same_destination)
+        # reads "Same name as another book"; its recorded other books word the sentence when the live check names none.
+        held=entry.get('hold') if isinstance(entry.get('hold'),dict) else {}
+        payload['hold']={'kind':str(held.get('kind') or '')}
+        if held.get('kind')=='same_destination':
+            payload['hold'].update(count=int(held.get('count') or 0),others=[dict(other) for other in held.get('others') or [] if isinstance(other,dict)])
         if isinstance(ask.get('volume'),dict):
             # Ruling 74b ("Number unclear"): the title's number, the source's number and the source's provider, for the
             # row's sentence (the page names the provider's site); Series, Number and Title come in fields.
@@ -3659,6 +3666,9 @@ class MergeService:
         if author_world(review,result.get('metadata_facts')):answer['names_decision']=DECISION
         if names is not None:
             answer['place']=self._place(result.get('review') or {})
+            # 0.31.0 (Judy 4.3): the Place line says where the series and number came from; the open editor's line too.
+            if answer.get('series') and answer['place'].get('series'):
+                answer['place'].update({key:answer['series'][key] for key in ('origin','provider') if key in answer['series']})
             values=dict(names)
             if title is not None:values['title']=title
             if author is not None:values['author']=author

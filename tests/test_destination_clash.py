@@ -150,6 +150,31 @@ class ClashTests(unittest.TestCase):
         self.assertEqual(approve_code('An audiobook already exists at this path; nothing was overwritten'), 'name_taken', 'the disk check keeps its code')
         self.assertTrue(str(error).endswith('Nothing was changed.'))
 
+    def test_the_to_do_row_says_why_the_engine_itself_holds_it(self):
+        # Judy's 0.31.0 spec 4.1 as amended (G9): destination.shared comes on every row whose name another book also has
+        # (its kind reads same_destination on all of them), so the page needs the row's own hold to tell a row held for the
+        # clash alone from a real piece of one book that is named after its set.
+        self.service._planned_note(self.mona_lisa, SHARED, {'title': 'Sprawl Trilogy', 'author': 'Gibson William'})
+        hold = self.shared(self.count_zero)
+        live = {'path': 'Gibson William\\Sprawl Trilogy - Gibson William.m4b', 'absolute': SHARED, 'taken': False, 'reason': '', 'title': 'Sprawl Trilogy',
+                'author': 'Gibson William', 'shared': hold}
+        self.service.approval_preview = lambda *_, **__: dict(live)
+        self.service._identity_lines = self.service._membership_lines = self.service._hold_payload = lambda *_: None
+        asked = lambda entry: self.service.ask_payload(self.count_zero, dict({'reasons': ['x'], 'ask': None}, **entry))
+        clash = asked({'group': 'name_taken', 'reasons': [destination_clash.REASON], 'hold': hold})
+        self.assertEqual(clash['hold'], {'kind': 'same_destination', 'count': 1, 'others': hold['others']})
+        self.assertEqual(clash['destination']['shared'], hold)
+        piece = asked({'group': 'part_of_book', 'hold': {'kind': 'piece', 'detail': 'x', 'piece': {'piece': 'siblings', 'count': 1}}})
+        self.assertEqual(piece['hold'], {'kind': 'piece'}, 'its own question: Part of a bigger book stays')
+        self.assertEqual(piece['destination']['shared']['kind'], 'same_destination', 'positive control: the shared object reads the same on both')
+        self.assertEqual(asked({'group': 'name_taken', 'reasons': ['An audiobook already exists at this path']})['hold'], {'kind': ''}, 'a file on disk: no hold of its own')
+        self.assertEqual(asked({'group': 'title_author', 'ask': {'why': 'title_series'}})['hold'], {'kind': ''})
+        # The live check names no other book any more (the other row changed its name): what was recorded still words the row.
+        live['shared'] = None
+        ended = asked({'group': 'name_taken', 'reasons': [destination_clash.REASON], 'hold': hold})
+        self.assertIsNone(ended['destination']['shared'])
+        self.assertEqual([other['name'] for other in ended['hold']['others']], ['03-Мона Лиза овердрайв'])
+
     def test_the_name_that_tells_a_book_apart(self):
         self.assertEqual(destination_clash.name_of([COUNT_ZERO]), '02-Граф Ноль')
         self.assertEqual(destination_clash.name_of(['Z:\\Audiobooks\\Misc\\1408.m4b']), '1408')

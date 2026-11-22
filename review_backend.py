@@ -390,6 +390,17 @@ class CandidateReviewService:
                 # 0.29.0 item 4: the Place line's "Light novel" lead, only when it is one (his saved value wins).
                 if saved.get('light_novel',review.get('light_novel') is True) is True:place['light_novel']=True
                 if not (place['series'] and place['number']):place['series']=place['number']=''
+                # 0.31.0 (Judy's spec 4.3, rulings R4 and R15): where the series and number came from, as a key the page
+                # words (the file's tags, the folder names, entered by him, a named online source, unknown), and whether
+                # the title is the file's own title tag (the details panel's line for a separated volume). Stored facts only.
+                found=row.get('metadata_facts') or (row.get('automatic') or {}).get('metadata_facts') or {}  # what it was approved with
+                try:origin=self.jobs.series_origin({'metadata_facts':found}) if self.jobs and hasattr(self.jobs,'series_origin') and isinstance(found,dict) else {}
+                except (AttributeError,TypeError,ValueError):origin={}  # a record of an unexpected shape: no origin, the line stays
+                row['title_from_title_tag']=origin.get('title_from_title_tag') is True
+                if place['series']:
+                    if 'series' in saved or 'number' in saved:origin={'origin':'entered'}
+                    place['origin']=origin.get('origin') or 'unknown'
+                    if place['origin']=='source':place['provider']=str(origin.get('provider') or '')
                 row['place']=place
                 row['entered']=entered_names.entered(saved)
         except (sqlite3.Error,OSError,KeyError,TypeError):

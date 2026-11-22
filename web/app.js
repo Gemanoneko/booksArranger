@@ -742,8 +742,10 @@ function scopeFolderLine(view){
   const folders=scopeFolders(view);
   return !folders.length?'':folders.length===1?folders[0]:`${shortFolder(folders[0])} and ${plural(folders.length-1,'more folder','more folders')}`;
 }
-function scopeBasisText(view){
+function scopeBasisText(view,row=null){
   if(!view || typeof view!=='object')return '';
+  // 0.31.0 (Judy's 0.31.0 spec 4.3): a volume named from its own tags says so after "Kept as a separate book".
+  const own=[row?.title_from_title_tag===true?"Title from this file's own title tag.":'',row?.place?.origin==='tags' && row.place.series && row.place.number?'Series and number from its tags.':''];
   const has=value=>typeof value==='string' && value.trim()!=='',quote=value=>`«${value}»`,count=value=>Number.isInteger(value) && value>0;
   const by=(what,value)=>`Grouped by ${what} ${quote(value)}${has(view.artist)?` and artist ${quote(view.artist)}`:''}.`;
   const album=()=>has(view.album)?`Album ${quote(view.album)}${count(view.track)?`, track ${view.track}${count(view.track_total)?` of ${view.track_total}`:''}`:''}.`:'';
@@ -751,7 +753,7 @@ function scopeBasisText(view){
   switch(view.kind){
     case 'album':if(has(view.album)){parts.push(by('album',view.album));tags=true;}break;
     case 'single_file':parts.push('One audiobook file.',album());tags=has(view.album);break;
-    case 'volume':parts.push(`Kept as a separate book${has(view.basis)?': '+view.basis:''}.`,album(),'If these files are one book, select them and use Join into one book.');tags=has(view.album);break;
+    case 'volume':parts.push(`Kept as a separate book${has(view.basis)?': '+view.basis:''}.`,...own,album(),'If these files are one book, select them and use Join into one book.');tags=has(view.album);break;
     case 'split_book':parts.push('Parts of one book, grouped by the file names.');break;
     case 'filename_work':parts.push(has(view.author) && has(view.title)?`Grouped by the file names: ${quote(view.author)} - ${quote(view.title)}.`:'Grouped by the file names.');break;
     case 'numbered_set':parts.push('Numbered files in one folder. The order comes from the file names.');break;
@@ -767,7 +769,7 @@ function scopeBasisText(view){
   return parts.filter(Boolean).join(' ');
 }
 function showSource(row,candidate){
-  const view=candidate?row.scope_view:null,path=candidate?scopeFolderLine(view):row.path || '',basis=candidate?scopeBasisText(view):'';
+  const view=candidate?row.scope_view:null,path=candidate?scopeFolderLine(view):row.path || '',basis=candidate?scopeBasisText(view,row):'';
   writeText($('source'),path);$('source').hidden=!path;$('source').title=candidate?scopeFolders(view).join('\n'):'';
   const line=$('source-basis');if(line){writeText(line,basis);line.hidden=!basis;}
 }
@@ -927,6 +929,7 @@ function renderRows(force=false) {
     // One "Open source folder" on every book row (Judy 0.23.1 section 3; ruling 70: "Open book folder" once the originals are gone).
     if(row.kind==='candidate')buildFolderButton(row,buttons);
     else{const folder=node('button','Open folder','quiet');folder.type='button';folder.title="Open this source file's folder in File Explorer.";folder.setAttribute('aria-label','Open folder: '+name);folder.setAttribute('aria-describedby','folder-help');folder.disabled=!recordIdentity(row).id;const status=node('span','','folder-message');status.setAttribute('role','status');folderState(row,folder,status);folder.addEventListener('click',event=>{event.stopPropagation();select(row,selectedPath!==row.path);openFolder(row,folder,status);});folder.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folder,status);}
+    if(askOf(row))buildShowBoth(row,buttons);  // 0.31.0 (Judy 4.2a, class Q): the last button of the row, after its own
     if(row.kind==='candidate' && deleteOffer(row))buildDeleteButton(row,buttons);  // ruling 23: last, on its own line
     else if(row.kind==='candidate' && copyOffer(row))buildDeleteButton(row,buttons,'copy');  // ruling 25: the same slot
     actions.append(buttons);
@@ -3624,6 +3627,32 @@ function askValues(row,forPreview=false){
 }
 function askTitleEmpty(row){const ask=askOf(row),d=askDrafts.get(row.id) || {};return askFieldPlan(ask,row).title && typeof d.title==='string'?!d.title.trim():!askProposal(ask,'title');}
 function askDestination(row){const d=askDrafts.get(row.id);return d?.preview || askOf(row)?.destination || null;}
+// ---- 0.31.0 (Judy's 0.31.0 spec, section 4 as amended by G9): two books, one destination. The engine reports
+// destination.shared on every to-do row whose planned name another book also has. The presentation follows the row's own
+// question: only a row the engine holds for the clash itself (ask.hold.kind) reads "Same name as another book" (class S);
+// every other row keeps its status, sentence and buttons and gains the label, the disabled approve press and Show both
+// books while shared is set in its latest answer (class Q). A name already on disk wins over both (class D, unchanged).
+const SAME_NAME_STATUS='Same name as another book',SAME_NAME_FIX=' Change a title, author, series or number so they differ.';
+const SAME_NAME_BLOCK='Another book would get this name. Change the title, author, series or number.';
+const SAME_NAME_SHOW_TIP='List the books that would get this name: sets Status to All and searches for this title.';
+function sharedValue(value){return value && typeof value==='object' && Number(value.count)>0?value:null;}
+function sameNameRow(ask){return ask?.kind==='name_taken' && ask.hold?.kind==='same_destination';}
+// The other books of the row's latest answer (the Goes to preview once he types, else the ask's own): null when the name
+// is free, when a file with it is on disk (the name on disk wins), and once the row is settled or leaving.
+function sharedOf(row){
+  if(!askOf(row) || askDone.has(row.id) || row.leaving==='name_free')return null;
+  const dest=askDestination(row);return dest?.taken===true?null:sharedValue(dest?.shared);
+}
+function sharedBooks(shared){return (Number(shared?.count) || 0)+1;}  // the engine's count of other books, plus this one
+function sharedLabel(shared){return sharedBooks(shared)===2?'Both go to':`All ${sharedBooks(shared).toLocaleString()} go to`;}
+function sharedShowLabel(shared){return sharedBooks(shared)===2?'Show both books':`Show all ${sharedBooks(shared).toLocaleString()} books`;}
+// What holds the name, then the fix (4.1). The quoted text is the other book's own folder or file name, never its title.
+function sameNameSentence(row){
+  const ask=askOf(row),held=sharedValue(askDestination(row)?.shared) || sharedValue(ask?.destination?.shared) || sharedValue(ask?.hold);
+  const count=Number(held?.count) || 0,other=count===1 && Array.isArray(held.others)?held.others[0]:null,name=typeof other?.name==='string'?other.name.trim():'';
+  if(name)return `${other.kind==='queued'?'A book waiting to convert has this file name':'Another book would get this file name'}: «${name}».`+SAME_NAME_FIX;
+  return count>0?`${count.toLocaleString()} other ${count===1?'book':'books'} would get this file name.`+SAME_NAME_FIX:SAME_NAME_FIX.trim();
+}
 function outputName(){const root=state?.audiobook_output_root;return typeof root==='string' && root.trim()?root.replace(/[\\/]+$/,'').split(/[\\/]/).pop():'Audiobooks Sorted';}
 // Why Approve does nothing yet ('' when it works): the press is prevented rather than refused.
 function askInert(row){
@@ -3632,6 +3661,8 @@ function askInert(row){
   if(names?.series && !names.number)return 'Type the number in the series, or clear the series.';
   if(names?.number && !names.series)return 'Type the series name, or clear the number.';
   if(askDestination(row)?.taken===true && row.leaving!=='name_free')return chosenCopy(row,'That name is already in Audiobooks Sorted. Change the title or author.');
+  // 0.31.0 (4.2, 4.2a): the engine refuses this press while another book plans the name (same_name), so it is prevented.
+  if(sharedOf(row))return SAME_NAME_BLOCK;
   return askPanelEdits(row);
 }
 // Unsaved metadata, order or file edits in the panel for this book (Judy 2026-10-24, 0.22.0 review A5: trackDirty too). The
@@ -3660,6 +3691,7 @@ function askText(row){
   if(ask.kind==='same_author')return {status:'Same author?',hint:`Is "${ask.same_author?.new || ''}" the same author as "${ask.same_author?.existing || ''}"?`};
   if(holdKind(ask))return {status:HOLD_STATUS[ask.kind],hint:holdSentence(ask.kind,ask.cause,{...(ask.facts || {}),membership:ask.membership})};
   if(ask.kind==='title_author' && ask.why==='number_unclear')return {status:'Number unclear',hint:numberUnclear(ask)};
+  if(sameNameRow(ask))return {status:SAME_NAME_STATUS,hint:sameNameSentence(row)};  // 0.31.0 class S; listed under Name taken
   const copy=ASK_COPY[['title_author','author_unclear'].includes(ask.kind)?ask.why:ask.kind] || ASK_COPY[{title_author:'both_missing',author_unclear:'two_people'}[ask.kind] || 'other'];
   return {status:copy[0],hint:copy[1]};
 }
@@ -3805,9 +3837,44 @@ function buildAskActions(row,buttons){
   entry.buttons=kinds.map(kind=>{const button=node('button',askLabel(entry,kind),'quiet row-retry'+(kind==='convert'?' ask-convert':wide));button.type='button';button.setAttribute('aria-describedby',entry.hint.id);
     button.addEventListener('click',event=>{event.stopPropagation();askPress(entry,kind);});button.addEventListener('keydown',event=>event.stopPropagation());buttons.append(button);return {kind,button};});
   entry.primaryKind=kinds[0];entry.primary=entry.buttons[0]?.button;entry.secondKind=kinds[1];entry.second=entry.buttons[1]?.button;
+  if(sameNameRow(ask))buildShowBoth(row,buttons);  // 0.31.0 (4.2, class S): in the row's action order after Approve
   // Ruling 35: a queued press on this row has its own Cancel beside the buttons (Judy 0.22.1 1.1).
   if(kinds.some(kind=>ASK_QUEUE[kind])){entry.cancel=queueCancelButton(row,ASK_QUEUE[kinds.find(kind=>ASK_QUEUE[kind])]);buttons.append(entry.cancel);}
   updateAskRow(entry);
+}
+// Show both books (0.31.0, Judy 4.2 and 4.2a; a quiet button, never disabled): a press that another book blocks must show
+// him that book. Shown while the row's latest answer names other books (sharedOf); its face counts them.
+function buildShowBoth(row,buttons){
+  const entry=askRows.get(row.id);if(!entry || entry.both)return;
+  const button=node('button','Show both books','quiet row-retry');button.type='button';button.title=SAME_NAME_SHOW_TIP;button.hidden=true;
+  button.addEventListener('click',event=>{event.stopPropagation();return showSameName(entry.row);});button.addEventListener('keydown',event=>event.stopPropagation());
+  buttons.append(button);entry.both=button;updateShowBoth(entry);
+}
+function updateShowBoth(entry){
+  const button=entry.both;if(!button)return;
+  const shared=sharedOf(entry.row),hadFocus=!shared && document.activeElement===button;
+  button.hidden=!shared;if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(!shared)return;
+  const label=sharedShowLabel(shared);if(button.textContent!==label)button.textContent=label;
+  button.setAttribute('aria-label',label+': '+askName(entry.row));
+}
+// Sets Status to All and searches for the shared title, so the rows sit together (showInList: the book list's own search).
+function showSameName(row){
+  const shared=sharedOf(row);if(!shared)return;
+  const d=askDrafts.get(row.id),typed=typeof d?.shownTitle==='string'?d.shownTitle.trim():'',other=Array.isArray(shared.others)?shared.others.find(item=>typeof item?.title==='string' && item.title.trim()):null;
+  return showInList({id:row.id,title:typed || askProposal(askOf(row),'title') || other?.title?.trim() || askName(row)});
+}
+// 0.31.0 (Judy 4.2): Approve was refused for a clash the row had not shown (same_name). With nothing typed no Goes to
+// preview is asked (askPreview), so the row's own line is read again here; its label, its prevented press and Show both
+// books then follow the engine's answer. The next list read replaces it.
+async function askSharedRefresh(id){
+  const entry=askRows.get(id),row=entry?.row;if(!row || !askOf(row))return;
+  const names=namesFor(row);if(JSON.stringify({...askValues(row,true),...(names?{names}:{})})!=='{}')return;  // typed values: askPreview asked with them
+  try{
+    const preview=(await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision}))?.preview,fresh=askRows.get(id);
+    if(!fresh || !askOf(fresh.row) || fresh.row.revision!==row.revision || typeof preview?.path!=='string')return;
+    fresh.row.ask.destination={...(fresh.row.ask.destination || {}),path:preview.path,absolute:preview.absolute || '',taken:preview.taken===true,reason:preview.reason || '',shared:sharedValue(preview.shared)};
+    updateAskRow(fresh);batchCounts();
+  }catch(error){}  // the list read brings the engine's line
 }
 function askMode(row,kind){
   if(ended || recoveryDisconnected)return 'offline';
@@ -3868,8 +3935,12 @@ function updateAskRow(entry){
   const folders=folderRows.get(row.id);if(folders){folders.row=row;updateFolderRow(folders);}
   renderGoesTo(entry);
   for(const {kind,button} of entry.buttons || [])updateAskButton(entry,button,kind);
+  updateShowBoth(entry);
   if(entry.cancel)updateQueueCancel(entry.cancel,row,ASK_QUEUE_ACTIONS);
-  if(entry.block){const mode=entry.primary?askMode(row,entry.primaryKind):'';const block=result?.code==='draft'?{text:'',fix:'panel'}:mode==='inert' && (entry.primaryKind==='approve' || entry.primaryKind==='convert')?approveBlock(row):{text:'',fix:null};
+  if(entry.block){const mode=entry.primary?askMode(row,entry.primaryKind):'';let block=result?.code==='draft'?{text:'',fix:'panel'}:mode==='inert' && (entry.primaryKind==='approve' || entry.primaryKind==='convert')?approveBlock(row):{text:'',fix:null};
+    // 0.31.0 (4.2a): the row's own approve press is not always its first button (Missing files: Scan again, then Convert
+    // what's there); the reason another book gives stands under the buttons there too.
+    if(!block.text && !block.fix && sharedOf(row) && (entry.buttons || []).some(({kind})=>(kind==='approve' || kind==='convert') && askMode(row,kind)==='inert'))block=approveBlock(row);
     renderBlock(entry.block,block,row,!namesOpen(row.id) || block.fix==='panel' || result?.code==='draft',entry.primary);if(entry.primary){const ids=[entry.hint.id,block.text || block.fix?entry.block.id:''].filter(Boolean).join(' ');if(entry.primary.getAttribute('aria-describedby')!==ids)entry.primary.setAttribute('aria-describedby',ids);}}
   const tip=cellTip(row);if(entry.cell.title!==tip)entry.cell.title=tip;
 }
@@ -3886,7 +3957,7 @@ function askPreview(entry,delay){
   if(names && (names.series && !names.number || names.number && !names.series))return;  // Series and Number go together (Judy 1.3)
   const send=async()=>{
     d.timer=null;d.previewKey=key;const seq=++d.seq;
-    try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string'){d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true,reason:p.reason || ''};d.shownTitle=typeof values.title==='string'?values.title:undefined;}
+    try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string'){d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true,reason:p.reason || '',shared:sharedValue(p.shared)};d.shownTitle=typeof values.title==='string'?values.title:undefined;}
       const state=namesState.get(id);if(seq===d.seq && names && state && p)state.preview={...(state.preview || {}),place:p.place,applies:p.applies,path:p.path,absolute:p.absolute};}
     catch(error){if(seq===d.seq)d.previewKey=null;}
     finally{const fresh=askRows.get(id);if(fresh && seq===d.seq)updateAskRow(fresh);batchCounts();}
@@ -3900,6 +3971,8 @@ function askPrimary(entry){const kind=entry.primaryKind==='scan'?(entry.secondKi
 // Each Approve gate's code (web_server.approve_code): the real reason and the next step. Provisional copy, sent to Judy
 // (0.22.2 spec, Ender's notes); a code with no line here shows the engine's own sentence, never the bare refusal.
 const APPROVE_REFUSALS={name_taken:'An audiobook with this name is already in Audiobooks Sorted. Change the title or author, then approve.',
+  // 0.31.0 (Judy 4.2): the clash appeared only at the press (the engine's same_name refusal, on a row of any class).
+  same_name:'Another book would get this name. Change the title, author, series or number, then approve.',
   title:'Type a title first.',job_exists:'This book already has an audiobook job. Find it under Queued / creating.',
   profiles:'The files are different recordings (their audio differs). Choose the files that belong in the details panel, then approve.',
   chapters:'The parts carry chapters of their own. Approve them as one book on the set row, or keep them as separate books.',
@@ -4118,9 +4191,9 @@ function clueText(clue,fallback){const text=typeof clue?.text==='string'?clue.te
 function seriesLine(row){
   const ask=askOf(row),series=ask?.series;
   if(series && typeof series.name==='string' && series.name.trim()){
-    const place=row.place && typeof row.place==='object'?row.place:{},text=placeText({universe:place.universe,collection:place.collection,series:series.name.trim(),number:String(series.number ?? '').trim()}) || `Series: ${series.name.trim()}`;
-    // The Place line in the status cell already says it: once is enough.
-    return text===placeText(row.place)?'':text;
+    const place=row.place && typeof row.place==='object'?row.place:{},text=placeBase({universe:place.universe,collection:place.collection,series:series.name.trim(),number:String(series.number ?? '').trim()}) || `Series: ${series.name.trim()}`;
+    // The Place line in the status cell already says it: once is enough (0.31.0: compared without its origin suffix).
+    return text===placeBase(row.place)?'':text;
   }
   const clue=typeof ask?.series_clue==='string'?ask.series_clue.trim():'';
   return clue?`The title mentions a series: ${clue}. Not used in the file name.`:'';
@@ -4192,8 +4265,10 @@ function destPlan(row){
   const ask=askOf(row),members=Array.isArray(row.members)?row.members:[];
   if(ask?.kind==='files_missing' && !(Number(ask.missing?.present)>0))return null;  // nothing will be written and nothing exists to move
   if(members.length && members.every(member=>member?.missing))return null;
-  let dest=null,label='Goes to',taken=false;const job=row.creation?.job;
-  if(ask){dest=askDestination(row);taken=dest?.taken===true && !askDone.has(row.id) && row.leaving!=='name_free';label=taken?'Already there':setCause(ask) || folderQuestion(ask)?'As one book':'Goes to';}
+  let dest=null,label='Goes to',taken=false,shared=null;const job=row.creation?.job;
+  // 0.31.0 (4.1, 4.2a): while another book plans this name the label says so, in the warning style Already there uses,
+  // in place of Goes to or As one book; the path is unchanged. A file with the name on disk wins (sharedOf).
+  if(ask){dest=askDestination(row);taken=dest?.taken===true && !askDone.has(row.id) && row.leaving!=='name_free';shared=sharedOf(row);label=taken?'Already there':shared?sharedLabel(shared):setCause(ask) || folderQuestion(ask)?'As one book':'Goes to';}
   else if(namesOpen(row.id) && (namesState.get(row.id)?.preview || namesData(row.id)?.destination))dest=namesState.get(row.id)?.preview || namesData(row.id)?.destination;
   else if(job && typeof job==='object')dest=job.state==='Output needs attention'?job.destination:null;
   else if(typeof row.preview?.path==='string' && row.preview.path)dest=row.preview;
@@ -4204,7 +4279,7 @@ function destPlan(row){
   // that folder (Judy 15.1: the chosen folder plus the computed file name, which comes with the title).
   const chosen=path?null:overrideOf(row);
   if(chosen)return {label,path:shownFolder(chosen.folder),absolute:chosen.folder,taken,finished:false,undecided:false};
-  return {label,path,absolute:dest?.absolute || (isAbsolutePath(raw)?raw:path),taken,finished:false,undecided:!path};
+  return {label,path,absolute:dest?.absolute || (isAbsolutePath(raw)?raw:path),taken:taken || !!shared,finished:false,undecided:!path};
 }
 function buildDestination(row,td,line=null){
   const entry={row,box:node('div','','goes-to-block'),line:line || node('p','','goes-to'),chosen:node('p','','field-help dest-chosen'),controls:node('div','','row-actions dest-controls'),
@@ -4334,7 +4409,8 @@ function applyDestination(row,answer,folder){
   if(Object.hasOwn(answer || {},'destination_override'))row.destination_override=answer.destination_override || null;
   if(preview && typeof preview.path==='string'){
     row.preview={...(row.preview || {}),path:preview.path,absolute:preview.absolute || ''};
-    if(askOf(row)){row.ask.destination={...(row.ask.destination || {}),path:preview.path,absolute:preview.absolute || '',taken:preview.taken===true,reason:''};const d=askDrafts.get(id);if(d){d.preview=null;d.previewKey=null;const entry=askRows.get(id);if(entry)askPreview(entry,0);}}
+    // 0.31.0: another folder is another name, so the other books of the old one go with it (the next read brings the engine's).
+    if(askOf(row)){row.ask.destination={...(row.ask.destination || {}),path:preview.path,absolute:preview.absolute || '',taken:preview.taken===true,reason:'',shared:sharedValue(preview.shared)};const d=askDrafts.get(id);if(d){d.preview=null;d.previewKey=null;const entry=askRows.get(id);if(entry)askPreview(entry,0);}}
   }
   if(answer?.move && typeof answer.move==='object')row.move=answer.move;
   // m1: a book with no file name yet goes to the chosen folder itself (destPlan); a sentence never ends in an empty path.
@@ -4399,7 +4475,19 @@ function namesChanged(row){if(!namesData(row.id))return false;const v=namesValue
 // Why Save does nothing yet ('' when it works), Judy 1.6.
 function namesInert(row){return saveBlock(row).text;}  // 0.22.3: the cause the line under Save shows (Judy 3)
 // The Place line (Judy 2): a collection in a series, or a universe book; parts in order and only when set.
-function placeText(place){
+// 0.31.0 (Judy's 0.31.0 spec 4.3, amended; rulings R4 and R15): the line ends with where the series and number came from,
+// by the origin key the engine sends. An unknown origin has no suffix; a source with no name the page knows is "online".
+const SERIES_SOURCES={...NUMBER_SOURCES,publisher:"the publisher's site"};
+function seriesOriginText(place){
+  if(!place || typeof place!=='object' || !(place.series && place.number))return '';
+  if(place.origin==='tags')return " · from the file's tags";
+  if(place.origin==='folders')return ' · from the folder names';
+  if(place.origin==='entered')return ' · entered by you';
+  if(place.origin==='source'){const name=SERIES_SOURCES[String(place.provider || '').toLowerCase()];return name?` · found on ${name}`:' · found online';}
+  return '';
+}
+function placeText(place){const base=placeBase(place);return base?base+seriesOriginText(place):'';}
+function placeBase(place){
   if(!place || typeof place!=='object')return '';
   const series=place.series && place.number?[`Series: ${place.series}`,`No. ${place.number}`]:[];
   if(place.light_novel===true)return ['Light novel',...(place.universe?[`Universe: ${place.universe}`]:[]),...series].join(' · ');  // 0.29.0 item 4
@@ -4627,7 +4715,7 @@ function namesSavedText(row,answer){
 function keepShownDestination(id){
   const row=rows.find(item=>item.id===id),d=askDrafts.get(id);if(!row || !askOf(row) || typeof d?.preview?.path!=='string')return;
   const names=namesFor(row);if(d.previewKey!==JSON.stringify({...askValues(row,true),...(names?{names}:{})}))return;
-  row.ask={...row.ask,destination:{...(row.ask.destination || {}),path:d.preview.path,absolute:d.preview.absolute || '',taken:d.preview.taken===true,reason:d.preview.reason || ''}};
+  row.ask={...row.ask,destination:{...(row.ask.destination || {}),path:d.preview.path,absolute:d.preview.absolute || '',taken:d.preview.taken===true,reason:d.preview.reason || '',shared:sharedValue(d.preview.shared)}};
 }
 async function namesSave(id){
   const row=rows.find(item=>item.id===id),state=namesState.get(id),entry=namesRows.get(id);if(!row || !state || state.pending)return;
@@ -4750,6 +4838,7 @@ function approveBlock(row){
   if(names?.series && !names.number)return {text:'Type the number in the series, or clear the series.',fix:'series'};
   if(names?.number && !names.series)return {text:'Type the series name, or clear the number.',fix:'number'};
   if(askDestination(row)?.taken===true && row.leaving!=='name_free')return {text:'That name is already in Audiobooks Sorted. Change the title or author.',fix:null};
+  if(sharedOf(row))return {text:SAME_NAME_BLOCK,fix:null};  // 0.31.0 (4.2, 4.2a): the reason on the line under the buttons
   if(askPanelEdits(row))return {text:panelEditsLine(),fix:'panel'};
   return {text:'',fix:null};
 }
@@ -5678,7 +5767,8 @@ async function askPress(entry,kind){
     else askResults.set(id,{text:askErrorText(error,kind,row),code:error.body?.code || ''});
     // A gate refused it (for example Name taken, or the destination moved): the row shows the current Goes to line, with
     // his typed values kept.
-    if(['name_taken','changed','moved'].includes(error.body?.code)){askDraft(id).previewKey=null;askPreview(entry,0);}
+    if(['name_taken','same_name','changed','moved'].includes(error.body?.code)){askDraft(id).previewKey=null;askPreview(entry,0);}
+    if(error.body?.code==='same_name')askSharedRefresh(id);  // 0.31.0 (4.2): a clash that appeared only at the press
     if(error.body?.code==='changed')lastKey=null;  // ruling 75a: the row on screen is old; the list is read again at once
     if(!error.httpStatus && !approval)refreshFailed(error);
   }finally{if(!press.unconfirmed)askPendings.delete(id);}
@@ -5735,7 +5825,7 @@ async function runApproveSelected(){
     // Each book gets its own durable receipt before later work admission.
     try{const answer=await bookDecision(row,'approve',{title:null,author:null,names:null,without_missing:false,choice:null,path:shown || null});
       askSettled(askRows.get(row.id) || {row},'approve',answer,{},draft!==decisionPacked({ask:askDrafts.get(row.id) || {},names:namesState.get(row.id)?.draft || {}}) || !sameDecisionRow(rows.find(item=>item.id===row.id),row));selectedBooks.delete(row.id);approved++;}
-    catch(error){askResults.set(row.id,{text:error.decisionUnknown?error.message:'Approval not saved: '+(error.httpStatus?askErrorText(error,'approve',row):error.message),warn:true});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}}
+    catch(error){askResults.set(row.id,{text:error.decisionUnknown?error.message:'Approval not saved: '+(error.httpStatus?askErrorText(error,'approve',row):error.message),warn:true});const entry=askRows.get(row.id);if(['name_taken','same_name','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(error.body?.code==='same_name')askSharedRefresh(row.id);}
     finally{askPendings.delete(row.id);if(pageRun?.kind==='approve_selected')pageRun.done++;}
   }
   askBulk=false;pageRun=null;

@@ -87,6 +87,44 @@ class SeparatedVolumeTests(Fixture):
         self.assertEqual(MergeService.series_origin(online), {'origin': 'source', 'title_from_title_tag': False, 'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work3650'})
         self.assertEqual(MergeService.series_origin({})['origin'], 'unknown')
 
+    def test_the_list_row_carries_the_origin_its_place_line_prints(self):
+        # Judy's 0.31.0 spec 4.3 as amended: a book filed without a question says where its series came from on the Place
+        # line of its row, so the origin comes with the row's stored place (no research per row), as a key the page words.
+        from types import SimpleNamespace
+        from unittest import mock
+        import entered_names
+        from merge_service import MergeService
+        from review_backend import CandidateReviewService
+        volume = self.volumes()[0]
+        result = self.lookup(volume)
+        service = CandidateReviewService.__new__(CandidateReviewService)
+        service.inventory = SimpleNamespace(database=self.research.client.database); service.jobs = MergeService
+
+        def listed(review, facts, **extra):
+            row = dict(volume, review=review, metadata_facts=facts, **extra)
+            service._names_lines([row])
+            return row
+        facts = dict(result.get('metadata_facts') or {}, local_agreement=result['local_agreement'])
+        row = listed(result['review'], facts)
+        self.assertEqual((row['place']['series'], row['place']['number'], row['place']['origin']), ('Sprawl Trilogy', '2', 'tags'))
+        self.assertNotIn('provider', row['place'])
+        self.assertIs(row['title_from_title_tag'], True, "the details panel's line of a volume named from its own title tag")
+        # The research record, when the row has no approved facts of its own.
+        self.assertEqual(listed(result['review'], None, automatic={'metadata_facts': facts})['place']['origin'], 'tags')
+        online = {'local_agreement': {'series': {'state': 'grey', 'value': '', 'sources': []}}, 'series_source': {'provider': 'fantlab', 'url': 'https://fantlab.ru/work3650'}}
+        found = listed(result['review'], online)
+        self.assertEqual((found['place']['origin'], found['place']['provider'], found['title_from_title_tag']), ('source', 'fantlab', False))
+        folders = {'local_agreement': {'series': {'state': 'green', 'value': 'Sprawl Trilogy', 'sources': [{'kind': 'folder structure', 'value': 'Sprawl Trilogy'}]}}}
+        self.assertEqual(listed(result['review'], folders)['place']['origin'], 'folders')
+        self.assertEqual(listed(result['review'], {})['place']['origin'], 'unknown', 'an older record: the line prints no suffix')
+        self.assertEqual(listed(result['review'], {'local_agreement': 'not a record'})['place']['origin'], 'unknown', 'an odd record never drops the line')
+        # A series he saved himself is his, whatever the record said before.
+        with mock.patch.object(entered_names, 'book_values', return_value={'series': 'Киберпространство', 'number': '2'}):
+            mine = listed(result['review'], facts)
+        self.assertEqual((mine['place']['series'], mine['place']['origin']), ('Киберпространство', 'entered'))
+        # No series, no origin (the page prints the suffix only after "Series: … · No. …").
+        self.assertNotIn('origin', listed(dict(result['review'], series='', number=''), facts)['place'])
+
     def test_the_fix_is_the_volume_fact_and_nothing_else(self):
         # Positive control: the same two rows read without their volume fact (before 0.31.0 only {'kept': True} took the
         # branch, so {'kept': False} read as no fact at all) are one part each, named from the album: the held record of
