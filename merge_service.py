@@ -3575,10 +3575,13 @@ class MergeService:
     def series_origin(result):
         """0.31.0 (Judy's spec 4.3, ruling R4): where a result's series and number came from, as keys the page words:
         {'origin': 'tags' (the files' own tags) | 'title_tag' (R15: the text of one file's title tag alone, "Series NN -
-        Title") | 'file_name' (the series before the number in the file name) | 'folders' (his folder structure, or the
-        folder's name) | 'entered' (by him) | 'source' (an online source, with 'provider' and 'source_url') | 'unknown',
-        'title_from_title_tag': the title is the file's own title tag}. A row never says a series came from somewhere it
-        did not (Judy 4.3 as amended with his answers): an origin the record does not prove is 'unknown'."""
+        Title") | 'file_name' (the series before the number in the file name) | 'brackets' (the series a name mentions in
+        brackets, «Солнце и Замок (Книга Нового Солнца #3)»: the album tag, the title tag or the folder's name, and the
+        record does not keep which, so it is never 'tags'; Judy 4.3 as amended after the final build, gap 5) | 'folders'
+        (his folder structure, or the folder's name) | 'entered' (by him) | 'source' (an online source, with 'provider'
+        and 'source_url') | 'unknown', 'title_from_title_tag': the title is the file's own title tag}. A row never says a
+        series came from somewhere it did not (Judy 4.3 as amended with his answers): an origin the record does not
+        prove is 'unknown'."""
         agreed=(result.get('local_agreement') or (result.get('metadata_facts') or {}).get('local_agreement') or {}) if isinstance(result,dict) else {}
         series=agreed.get('series') if isinstance(agreed.get('series'),dict) else {}
         kinds=[str(source.get('kind') or '') for source in series.get('sources') or [] if isinstance(source,dict)]
@@ -3590,7 +3593,9 @@ class MergeService:
         elif 'folder structure' in kinds:found['origin']='folders'
         elif series.get('value') and any(isinstance(s,dict) and str(s.get('kind') or '').startswith('the title (tag') and s.get('field')=='title' for s in series.get('sources') or []):
             found['origin']='title_tag'  # R15: nothing but the title tag's own text names it
-        elif series.get('value') and (series.get('basis')=='tag' or 'embedded' in kinds or any(kind.startswith('the title (tag') or kind=='brackets in the name' for kind in kinds)):
+        elif series.get('value') and 'brackets in the name' in kinds:
+            found['origin']='brackets'  # gap 5: the brackets rule reads two tags and the folder's name; "its tags" may be untrue
+        elif series.get('value') and (series.get('basis')=='tag' or 'embedded' in kinds or any(kind.startswith('the title (tag') for kind in kinds)):
             found['origin']='tags'
         elif series.get('value') and 'the title (file_name)' in kinds:found['origin']='file_name'
         elif series.get('value') and 'the title (folder_name)' in kinds:found['origin']='folders'

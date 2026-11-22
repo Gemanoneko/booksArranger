@@ -932,7 +932,7 @@ function renderRows(force=false) {
     // One "Open source folder" on every book row (Judy 0.23.1 section 3; ruling 70: "Open book folder" once the originals are gone).
     if(row.kind==='candidate')buildFolderButton(row,buttons);
     else{const folder=node('button','Open folder','quiet');folder.type='button';folder.title="Open this source file's folder in File Explorer.";folder.setAttribute('aria-label','Open folder: '+name);folder.setAttribute('aria-describedby','folder-help');folder.disabled=!recordIdentity(row).id;const status=node('span','','folder-message');status.setAttribute('role','status');folderState(row,folder,status);folder.addEventListener('click',event=>{event.stopPropagation();select(row,selectedPath!==row.path);openFolder(row,folder,status);});folder.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folder,status);}
-    if(askOf(row))buildShowBoth(row,buttons);  // 0.31.0 (Judy 4.2a, class Q): the last button of the row, after its own
+    if(askOf(row))buildShowOther(row,buttons);  // 0.31.0 (Judy 4.2a, class Q): the last button of the row, after its own
     if(row.kind==='candidate' && deleteOffer(row))buildDeleteButton(row,buttons);  // ruling 23: last, on its own line
     else if(row.kind==='candidate' && copyOffer(row))buildDeleteButton(row,buttons,'copy');  // ruling 25: the same slot
     actions.append(buttons);
@@ -3675,8 +3675,8 @@ function askDestination(row){const d=askDrafts.get(row.id);return d?.preview || 
 // ---- 0.31.0 (Judy's 0.31.0 spec, section 4 as amended by G9): two books, one destination. The engine reports
 // destination.shared on every to-do row whose planned name another book also has. The presentation follows the row's own
 // question: only a row the engine holds for the clash itself (ask.hold.kind) reads "Same name as another book" (class S);
-// every other row keeps its status, sentence and buttons and gains the label, the disabled approve press and Show both
-// books while shared is set in its latest answer (class Q). A name already on disk wins over both (class D, unchanged).
+// every other row keeps its status, sentence and buttons and gains the label, the disabled approve press and Show the
+// other book while shared is set in its latest answer (class Q). A name already on disk wins over both (class D, unchanged).
 const SAME_NAME_STATUS='Same name as another book',SAME_NAME_FIX=' Change a title, author, series or number so they differ.';
 const SAME_NAME_BLOCK='Another book would get this name. Change the title, author, series or number.';
 // R17 (Sergei 2026-11-22; Judy 4.2a as amended with his answers): where the pieces of one book would all get one name,
@@ -3685,7 +3685,12 @@ const SAME_NAME_BLOCK='Another book would get this name. Change the title, autho
 // plain line; no Join hint anywhere else (his answer 10 of 2026-11-18 stands).
 const SAME_NAME_BLOCK_JOIN='Another book would get this name. Join them into one book, or change this title.';
 function sameNameBlock(row){return holdKind(askOf(row))==='part_of_book'?SAME_NAME_BLOCK_JOIN:SAME_NAME_BLOCK;}
-const SAME_NAME_SHOW_TIP='List the books that would get this name: sets Status to All and searches for this title.';
+// Amended after the final build (Judy 4.2, gap 2): the show button lists the other book, by the folder or file name the
+// engine sends for it. With several others it lists the first one the engine names.
+const SAME_NAME_SHOW={one:['Show the other book','List the other book: sets Status to All and searches for its folder or file name.'],
+  several:['Show one of the others','List one of the other books: sets Status to All and searches for its folder or file name.']};
+// Amended after the final build (4.1, gap 1): what a class S row reads once its latest answer says the name is free.
+const SAME_NAME_FREE='The name is free now. Approve files the book under it.';
 function sharedValue(value){return value && typeof value==='object' && Number(value.count)>0?value:null;}
 function sameNameRow(ask){return ask?.kind==='name_taken' && ask.hold?.kind==='same_destination';}
 // The other books of the row's latest answer (the Goes to preview once he types, else the ask's own): null when the name
@@ -3696,10 +3701,24 @@ function sharedOf(row){
 }
 function sharedBooks(shared){return (Number(shared?.count) || 0)+1;}  // the engine's count of other books, plus this one
 function sharedLabel(shared){return sharedBooks(shared)===2?'Both go to':`All ${sharedBooks(shared).toLocaleString()} go to`;}
-function sharedShowLabel(shared){return sharedBooks(shared)===2?'Show both books':`Show all ${sharedBooks(shared).toLocaleString()} books`;}
+// The book the show button lists: the first other book the engine names by its own folder or file name, which is part of
+// that book's file paths (the list's search matches a book's title clue, its grouping and its file paths, never the title
+// the app proposes). null when the engine sends no name: there is nothing to search for, and the button is not shown.
+function sharedOther(shared){
+  const other=Array.isArray(shared?.others)?shared.others.find(item=>typeof item?.name==='string' && item.name.trim()):null;
+  return other?{id:other.book_id,name:other.name.trim()}:null;
+}
+function sharedShow(shared){return SAME_NAME_SHOW[sharedBooks(shared)===2?'one':'several'];}
 // What holds the name, then the fix (4.1). The quoted text is the other book's own folder or file name, never its title.
+// Amended after the final build (gap 1): a class S row can stay listed for a while after its clash has ended, so the
+// sentence follows the row's latest answer (the Goes to preview once he types, else the ask's own), never the recorded
+// hold. A file with the name now on disk reads as the Name taken row does; a name that is free says so; only an answer
+// with no name worked out (no path: unknown is not free) keeps the recorded other book.
 function sameNameSentence(row){
-  const ask=askOf(row),held=sharedValue(askDestination(row)?.shared) || sharedValue(ask?.destination?.shared) || sharedValue(ask?.hold);
+  const ask=askOf(row),dest=askDestination(row),latest=sharedValue(dest?.shared);
+  if(dest?.taken===true)return ASK_COPY.name_taken[1];
+  if(!latest && typeof dest?.path==='string' && dest.path)return SAME_NAME_FREE;
+  const held=latest || sharedValue(ask?.destination?.shared) || sharedValue(ask?.hold);
   const count=Number(held?.count) || 0,other=count===1 && Array.isArray(held.others)?held.others[0]:null,name=typeof other?.name==='string'?other.name.trim():'';
   if(name)return `${other.kind==='queued'?'A book waiting to convert has this file name':'Another book would get this file name'}: «${name}».`+SAME_NAME_FIX;
   return count>0?`${count.toLocaleString()} other ${count===1?'book':'books'} would get this file name.`+SAME_NAME_FIX:SAME_NAME_FIX.trim();
@@ -3888,35 +3907,36 @@ function buildAskActions(row,buttons){
   entry.buttons=kinds.map(kind=>{const button=node('button',askLabel(entry,kind),'quiet row-retry'+(kind==='convert'?' ask-convert':wide));button.type='button';button.setAttribute('aria-describedby',entry.hint.id);
     button.addEventListener('click',event=>{event.stopPropagation();askPress(entry,kind);});button.addEventListener('keydown',event=>event.stopPropagation());buttons.append(button);return {kind,button};});
   entry.primaryKind=kinds[0];entry.primary=entry.buttons[0]?.button;entry.secondKind=kinds[1];entry.second=entry.buttons[1]?.button;
-  if(sameNameRow(ask))buildShowBoth(row,buttons);  // 0.31.0 (4.2, class S): in the row's action order after Approve
+  if(sameNameRow(ask))buildShowOther(row,buttons);  // 0.31.0 (4.2, class S): in the row's action order after Approve
   // Ruling 35: a queued press on this row has its own Cancel beside the buttons (Judy 0.22.1 1.1).
   if(kinds.some(kind=>ASK_QUEUE[kind])){entry.cancel=queueCancelButton(row,ASK_QUEUE[kinds.find(kind=>ASK_QUEUE[kind])]);buttons.append(entry.cancel);}
   updateAskRow(entry);
 }
-// Show both books (0.31.0, Judy 4.2 and 4.2a; a quiet button, never disabled): a press that another book blocks must show
-// him that book. Shown while the row's latest answer names other books (sharedOf); its face counts them.
-function buildShowBoth(row,buttons){
-  const entry=askRows.get(row.id);if(!entry || entry.both)return;
-  const button=node('button','Show both books','quiet row-retry');button.type='button';button.title=SAME_NAME_SHOW_TIP;button.hidden=true;
-  button.addEventListener('click',event=>{event.stopPropagation();return showSameName(entry.row);});button.addEventListener('keydown',event=>event.stopPropagation());
-  buttons.append(button);entry.both=button;updateShowBoth(entry);
+// Show the other book (0.31.0, Judy 4.2 and 4.2a as amended after the final build, gap 2; a quiet button, never disabled):
+// a press that another book blocks must show him that book. Shown while the row's latest answer names another book by its
+// folder or file name (sharedOf, sharedOther); with several others its face says it lists one of them.
+function buildShowOther(row,buttons){
+  const entry=askRows.get(row.id);if(!entry || entry.showOther)return;
+  const button=node('button',SAME_NAME_SHOW.one[0],'quiet row-retry');button.type='button';button.title=SAME_NAME_SHOW.one[1];button.hidden=true;
+  button.addEventListener('click',event=>{event.stopPropagation();return showOtherBook(entry.row);});button.addEventListener('keydown',event=>event.stopPropagation());
+  buttons.append(button);entry.showOther=button;updateShowOther(entry);
 }
-function updateShowBoth(entry){
-  const button=entry.both;if(!button)return;
-  const shared=sharedOf(entry.row),hadFocus=!shared && document.activeElement===button;
-  button.hidden=!shared;if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(!shared)return;
-  const label=sharedShowLabel(shared);if(button.textContent!==label)button.textContent=label;
-  button.setAttribute('aria-label',label+': '+askName(entry.row));
+function updateShowOther(entry){
+  const button=entry.showOther;if(!button)return;
+  const shared=sharedOf(entry.row),other=sharedOther(shared),hadFocus=!other && document.activeElement===button;
+  button.hidden=!other;if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(!other)return;
+  const [label,tip]=sharedShow(shared);if(button.textContent!==label)button.textContent=label;if(button.title!==tip)button.title=tip;
+  button.setAttribute('aria-label',label+': '+other.name);
 }
-// Sets Status to All and searches for the shared title, so the rows sit together (showInList: the book list's own search).
-function showSameName(row){
-  const shared=sharedOf(row);if(!shared)return;
-  const d=askDrafts.get(row.id),typed=typeof d?.shownTitle==='string'?d.shownTitle.trim():'',other=Array.isArray(shared.others)?shared.others.find(item=>typeof item?.title==='string' && item.title.trim()):null;
-  return showInList({id:row.id,title:typed || askProposal(askOf(row),'title') || other?.title?.trim() || askName(row)});
+// Sets Status to All, searches for the other book's own folder or file name and goes to its row by its id (showInList: the
+// book list's own search). The way back is the same button on that row: its sentence names this book.
+function showOtherBook(row){
+  const other=sharedOther(sharedOf(row));if(!other)return;
+  return showInList({id:other.id,title:other.name});
 }
 // 0.31.0 (Judy 4.2): Approve was refused for a clash the row had not shown (same_name). With nothing typed no Goes to
-// preview is asked (askPreview), so the row's own line is read again here; its label, its prevented press and Show both
-// books then follow the engine's answer. The next list read replaces it.
+// preview is asked (askPreview), so the row's own line is read again here; its label, its prevented press and Show the
+// other book then follow the engine's answer. The next list read replaces it.
 async function askSharedRefresh(id){
   const entry=askRows.get(id),row=entry?.row;if(!row || !askOf(row))return;
   const names=namesFor(row);if(JSON.stringify({...askValues(row,true),...(names?{names}:{})})!=='{}')return;  // typed values: askPreview asked with them
@@ -3986,7 +4006,7 @@ function updateAskRow(entry){
   const folders=folderRows.get(row.id);if(folders){folders.row=row;updateFolderRow(folders);}
   renderGoesTo(entry);
   for(const {kind,button} of entry.buttons || [])updateAskButton(entry,button,kind);
-  updateShowBoth(entry);
+  updateShowOther(entry);
   if(entry.cancel)updateQueueCancel(entry.cancel,row,ASK_QUEUE_ACTIONS);
   if(entry.block){const mode=entry.primary?askMode(row,entry.primaryKind):'';let block=result?.code==='draft'?{text:'',fix:'panel'}:mode==='inert' && (entry.primaryKind==='approve' || entry.primaryKind==='convert')?approveBlock(row):{text:'',fix:null};
     // 0.31.0 (4.2a): the row's own approve press is not always its first button (Missing files: Scan again, then Convert
@@ -4536,6 +4556,9 @@ function seriesOriginText(place){
   // text of the title tag alone is the title tag; a series before the number in the file name is the file name.
   if(place.origin==='title_tag')return ' · from the title tag';
   if(place.origin==='file_name')return ' · from the file name';
+  // Amended after the final build (gap 5): the brackets rule reads the album tag, the title tag or the folder's name and
+  // the record does not keep which, so these words are true for all three. Never "from the file's tags" for it.
+  if(place.origin==='brackets')return ' · from the brackets in its name';
   if(place.origin==='folders')return ' · from the folder names';
   if(place.origin==='entered')return ' · entered by you';
   if(place.origin==='source'){const name=SERIES_SOURCES[String(place.provider || '').toLowerCase()];return name?` · found on ${name}`:' · found online';}

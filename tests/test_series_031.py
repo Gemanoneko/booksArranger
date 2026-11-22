@@ -93,6 +93,8 @@ class SeparatedVolumeTests(Fixture):
         self.assertEqual(MergeService.series_origin(named('the title (file_name)'))['origin'], 'file_name')
         self.assertEqual(MergeService.series_origin(named('the title (folder_name)'))['origin'], 'folders')
         self.assertEqual(MergeService.series_origin(named('the title (number_rule)'))['origin'], 'unknown')
+        # Amended after the final build (gap 5): the brackets rule's own origin, never 'tags' (BracketsOriginTests).
+        self.assertEqual(MergeService.series_origin(named('brackets in the name'))['origin'], 'brackets')
 
     def test_the_list_row_carries_the_origin_its_place_line_prints(self):
         # Judy's 0.31.0 spec 4.3 as amended: a book filed without a question says where its series came from on the Place
@@ -219,6 +221,52 @@ class SeparatedVolumeTests(Fixture):
         read = [self.research.identity(books[r['path']], ROOT)[0] for r in rows]
         self.assertEqual([(i['fields']['title']['value'], i['series']) for i in read],
                          [('Пятый Доминион', {'name': 'Имаджика', 'number': '1'}), ('Примирение', {'name': 'Имаджика', 'number': '2'})])
+
+
+class BracketsOriginTests(Fixture):
+    """Judy's 0.31.0 spec 4.3 as amended after the final build (gap 5, acceptance check 35): a series read from brackets
+    in the book's name has an origin of its own. The brackets rule (rulings 51, 52, 71e: «Солнце и Замок (Книга Нового
+    Солнца #3)») reads the album tag, the title tag or the folder's name and the record does not keep which, so the row
+    must never say "from the file's tags" for it: the page words 'brackets' as " · from the brackets in its name"."""
+
+    BOOK = 'Солнце и Замок (Книга Нового Солнца #3)'
+    WOLFE = 'Джин Вулф\\'
+
+    def read(self, rows):
+        return self.lookup(next(iter(self.shelf(rows).values())))
+
+    def parts(self, folder, album):
+        return [file_row(self.WOLFE + folder + '\\%02d.mp3' % n, track='%d/2' % n, title='%02d' % n, album=album, artist='Джин Вулф') for n in (1, 2)]
+
+    def test_each_place_the_rule_reads_gives_the_brackets_origin_and_never_tags(self):
+        from merge_service import MergeService
+        places = {"the folder's name": self.parts(self.BOOK, 'Солнце и Замок'),
+                  'the album tag': self.parts('Солнце и Замок', self.BOOK),
+                  'the title tag': [file_row(self.WOLFE + 'Солнце и Замок.m4b', title=self.BOOK, artist='Джин Вулф')]}
+        for place, rows in places.items():
+            with self.subTest(place=place):
+                result = self.read(rows)
+                series = result['local_agreement']['series']
+                self.assertEqual((series['value'], result['local_agreement']['number']['value']), ('Книга Нового Солнца', '3'))
+                self.assertEqual(series['sources'], [{'kind': 'brackets in the name', 'value': self.BOOK}], 'the record keeps the text, not which place carried it')
+                self.assertEqual(MergeService.series_origin(result)['origin'], 'brackets')
+        # Positive control: the same book with no brackets anywhere has no series and no origin to print.
+        plain = self.read(self.parts('Солнце и Замок', 'Солнце и Замок'))
+        self.assertEqual((plain['local_agreement']['series']['value'], MergeService.series_origin(plain)['origin']), ('', 'unknown'))
+
+    def test_the_list_row_carries_it_to_the_place_line(self):
+        # The row's stored place is what the Place line prints (review_backend._names_lines): 'brackets', with no provider.
+        from types import SimpleNamespace
+        from merge_service import MergeService
+        from review_backend import CandidateReviewService
+        book = next(iter(self.shelf(self.parts(self.BOOK, 'Солнце и Замок')).values()))
+        result = self.lookup(book)
+        service = CandidateReviewService.__new__(CandidateReviewService)
+        service.inventory = SimpleNamespace(database=self.research.client.database); service.jobs = MergeService
+        row = dict(book, review={'title': 'Солнце и Замок', 'series': 'Книга Нового Солнца', 'number': '3'}, metadata_facts={'local_agreement': result['local_agreement']})
+        service._names_lines([row])
+        self.assertEqual((row['place']['series'], row['place']['number'], row['place']['origin']), ('Книга Нового Солнца', '3', 'brackets'))
+        self.assertNotIn('provider', row['place'])
 
 
 class RecheckTests(SeparatedVolumeTests):

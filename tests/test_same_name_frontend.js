@@ -4,8 +4,11 @@
 // row the engine holds for the clash itself (ask.hold.kind same_destination, listed under Name taken) reads "Same name as
 // another book" (class S). A file with the name on disk keeps the 0.30.0 Name taken row (class D). Every other row keeps its
 // own status, sentence, fields and buttons and gains three things while shared is set: the label, its approve press
-// prevented with the reason, and Show both books (class Q). Also the engine's same_name refusal, the Name taken chip's
+// prevented with the reason, and Show the other book (class Q). Also the engine's same_name refusal, the Name taken chip's
 // tooltip, the Place line's origin suffix and the details line of a volume named from its own tags (4.3).
+// Amended 2026-11-22, after the final build (checks 33-35): the sentence of a class S row follows its latest answer once
+// the clash has ended (gap 1); the show button lists the other book by its own folder or file name (gap 2); a series read
+// from brackets has its own origin words (gap 5).
 // Real frontend on the Retry test's DOM/transport doubles. No server, no library.
 const fs=require('node:fs'),path=require('node:path');
 let harness=fs.readFileSync(path.join(__dirname,'test_retry_frontend.js'),'utf8');
@@ -48,13 +51,14 @@ const goesTo=tr=>{const found=line(tr);return found.hidden?'':found.children.map
 const warned=tr=>line(tr).classes.has('taken');
 const reason=tr=>{const block=actions(tr).children[1];return block.hidden?'':block.children[0].textContent;};
 const faces=tr=>buttonsOf(tr).filter(b=>b.id==='button' && !b.hidden).map(b=>b.textContent);
-const showBoth=tr=>buttonsOf(tr).find(b=>/^Show (both|all \d+) books$/.test(b.textContent));
+const showOther=tr=>buttonsOf(tr).find(b=>/^Show (the other book|one of the others)$/.test(b.textContent));
 const press={stopPropagation(){}};
 function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row,ask:{...row.ask,destination:{...row.ask.destination}}}));totalRows=rows.length;askDrafts.clear();askResults.clear();renderRows(true);controls()');}
 const BLOCK='Another book would get this name. Change the title, author, series or number.';
 // R17 (Sergei 2026-11-22): only on the blocked press of a Part of a bigger book row, every cause (spec 4.2a as amended).
 const JOIN='Another book would get this name. Join them into one book, or change this title.';
-const TIP='List the books that would get this name: sets Status to All and searches for this title.';
+const TIP='List the other book: sets Status to All and searches for its folder or file name.',TIP_MANY='List one of the other books: sets Status to All and searches for its folder or file name.';
+const FREE='The name is free now. Approve files the book under it.',ON_DISK='A book with this name is already in Audiobooks Sorted.';
 (async()=>{
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";attentionGroup="all";viewControls();controls()');
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),source=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');
@@ -63,17 +67,17 @@ const TIP='List the books that would get this name: sets Status to All and searc
   assert.equal(get('group-name_taken').textContent,'Name taken · 5');
 
   // 1. Class S (check 11): held for the clash alone. Status, the sentence naming the other book's file or folder, the label
-  // in the warning style, Approve prevented with its reason, Show both books right after Approve.
+  // in the warning style, Approve prevented with its reason, Show the other book right after Approve.
   const one=sameName('s1',shared(other('03-Мона Лиза овердрайв'))),queued=sameName('s2',shared(other('Нейромант (Гибсон)','queued'))),three=sameName('s3',more(2)),many=sameName('s4',more(14));
   paint([one,queued,three,many]);
   let tr=trOf('cand-s1');
   assert.equal(statusCell(tr).textContent,'Same name as another book');assert.equal(run('candidateStatus(rows[0])'),'Same name as another book');
   assert.equal(hint(tr),'Another book would get this file name: «03-Мона Лиза овердрайв». Change a title, author, series or number so they differ.');
   assert.equal(goesTo(tr),'Both go to Audiobooks Sorted\\'+SHARED);assert.equal(warned(tr),true,'the warning style Already there uses');
-  assert.deepEqual(faces(tr).slice(0,2),['Approve','Show both books'],'in the action order after Approve');
+  assert.deepEqual(faces(tr).slice(0,2),['Approve','Show the other book'],'in the action order after Approve');
   assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[0].title,BLOCK,'a prevented press says why in its tooltip');assert.equal(reason(tr),BLOCK);
-  assert.equal(showBoth(tr).title,TIP);assert.equal(showBoth(tr).getAttribute('aria-disabled'),null,'never disabled');assert.equal(showBoth(tr).getAttribute('aria-label'),'Show both books: Title s1');
-  assert.ok(String(showBoth(tr).className || '').split(' ').includes('quiet') && String(showBoth(tr).className || '').split(' ').includes('row-retry'),'quiet, 96 x 32 minimum (.row-actions .row-retry)');
+  assert.equal(showOther(tr).title,TIP);assert.equal(showOther(tr).getAttribute('aria-disabled'),null,'never disabled');assert.equal(showOther(tr).getAttribute('aria-label'),'Show the other book: 03-Мона Лиза овердрайв',"the face, then that book's name");
+  assert.ok(String(showOther(tr).className || '').split(' ').includes('quiet') && String(showOther(tr).className || '').split(' ').includes('row-retry'),'quiet, 96 x 32 minimum (.row-actions .row-retry)');
   // Never on a class S row: Part of a bigger book, Approve as one book, Keep as separate books, a Join hint.
   for(const never of ['Approve as one book','Keep as separate books'])assert.ok(!faces(tr).includes(never),never);
   assert.ok(!walk(tr).some(e=>/Part of a bigger book|Join/.test(e.textContent)),'no Part of a bigger book and no Join hint on a class S row');
@@ -85,44 +89,67 @@ const TIP='List the books that would get this name: sets Status to All and searc
   assert.equal(goesTo(trOf('cand-s2')),'Both go to Audiobooks Sorted\\'+SHARED);
   // Several: the count is the engine's (it names at most ten one by one), plus this book.
   tr=trOf('cand-s3');assert.equal(hint(tr),'2 other books would get this file name. Change a title, author, series or number so they differ.');
-  assert.equal(goesTo(tr),'All 3 go to Audiobooks Sorted\\'+SHARED);assert.equal(showBoth(tr).textContent,'Show all 3 books');
+  assert.equal(goesTo(tr),'All 3 go to Audiobooks Sorted\\'+SHARED);assert.equal(showOther(tr).textContent,'Show one of the others');
+  assert.equal(showOther(tr).title,TIP_MANY);assert.equal(showOther(tr).getAttribute('aria-label'),'Show one of the others: 02-Граф Ноль','the first other book the engine names');
   tr=trOf('cand-s4');assert.equal(hint(tr),'14 other books would get this file name. Change a title, author, series or number so they differ.');
-  assert.equal(goesTo(tr),'All 15 go to Audiobooks Sorted\\'+SHARED);assert.equal(showBoth(tr).textContent,'Show all 15 books');
+  assert.equal(goesTo(tr),'All 15 go to Audiobooks Sorted\\'+SHARED);assert.equal(showOther(tr).textContent,'Show one of the others');
 
-  // A name he types that is free: the label and the press return to normal at once and Show both books goes. The row is
-  // still the engine's same-name row (its own hold), so its status and what held the name stay until it is checked again.
+  // A name he types that is free: the sentence, the label and the press turn together and Show the other book goes (gap 1,
+  // check 33). The row is still the engine's same-name row (its own hold), so its status stays until it is checked again.
   tr=trOf('cand-s1');let [title]=inputs(tr);title.value='Граф Ноль';title.handlers.input();await title.handlers.blur();await tick();
   assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null,'enabled as soon as this row\'s Goes to differs');assert.equal(reason(tr),'');
-  assert.equal(goesTo(tr),'Goes to Audiobooks Sorted\\Gibson William\\Граф Ноль - Gibson William.m4b');assert.equal(warned(tr),false);assert.equal(showBoth(tr).hidden,true);
-  assert.equal(run('candidateStatus(rows[0])'),'Same name as another book');assert.match(hint(tr),/^Another book would get this file name: «03-Мона Лиза овердрайв»\./);
+  assert.equal(goesTo(tr),'Goes to Audiobooks Sorted\\Gibson William\\Граф Ноль - Gibson William.m4b');assert.equal(warned(tr),false);assert.equal(showOther(tr).hidden,true);
+  assert.equal(run('candidateStatus(rows[0])'),'Same name as another book');assert.equal(hint(tr),FREE,'never the recorded other book once the name is free');
   // A typed name another book has too: the latest answer decides (the preview carries shared).
   previewAnswer=data=>({ok:true,status:200,json:async()=>({preview:{path:'Gibson William\\'+data.title+' - Gibson William.m4b',absolute:'',taken:false,shared:{...shared(other('01-Нейромант','queued')),destination:'x'}}})});
   title.value='Нейромант';title.handlers.input();await title.handlers.blur();await tick();
-  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(reason(tr),BLOCK);assert.match(goesTo(tr),/^Both go to /);assert.equal(showBoth(tr).hidden,false);
-  assert.match(hint(tr),/^A book waiting to convert has this file name: «01-Нейромант»\./);
-  // A typed name that is on disk: the name on disk wins (the 0.30.0 line and reason), Show both books goes.
+  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(reason(tr),BLOCK);assert.match(goesTo(tr),/^Both go to /);assert.equal(showOther(tr).hidden,false);
+  assert.match(hint(tr),/^A book waiting to convert has this file name: «01-Нейромант»\./);assert.equal(showOther(tr).getAttribute('aria-label'),'Show the other book: 01-Нейромант',"the latest answer's other book");
+  // A typed name that is on disk: the name on disk wins (the 0.30.0 line and reason), Show the other book goes, and the
+  // sentence is the Name taken row's own (gap 1).
   previewAnswer=data=>({ok:true,status:200,json:async()=>({preview:{path:'Gibson William\\'+data.title+'.m4b',absolute:'',taken:true,shared:shared(other('01-Нейромант'))}})});
   title.value='Нейромант 1';title.handlers.input();await title.handlers.blur();await tick();
-  assert.match(goesTo(tr),/^Already there /);assert.equal(reason(tr),'That name is already in Audiobooks Sorted. Change the title or author.');assert.equal(showBoth(tr).hidden,true);
+  assert.match(goesTo(tr),/^Already there /);assert.equal(reason(tr),'That name is already in Audiobooks Sorted. Change the title or author.');assert.equal(showOther(tr).hidden,true);
+  assert.equal(hint(tr),ON_DISK);assert.equal(run('candidateStatus(rows[0])'),'Same name as another book','the status stays: it is why the engine lists the row');
+  // A typed name for which no name could be worked out (no path in the answer): unknown is not free, so the recorded
+  // other book stays.
+  previewAnswer=()=>({ok:true,status:200,json:async()=>({preview:{path:'',absolute:'',taken:false,reason:'No name could be worked out',shared:null}})});
+  title.value='Нейромант 2';title.handlers.input();await title.handlers.blur();await tick();
+  assert.match(hint(tr),/^Another book would get this file name: «03-Мона Лиза овердрайв»\./);
   previewAnswer=null;
 
-  // The live check names no other book any more (the clash ended, the row waits to be checked again): the sentence keeps
-  // what the engine recorded when it held the row; nothing is prevented.
-  paint([askRow('s5',base('name_taken',{hold:{kind:'same_destination',count:1,others:[other('03-Мона Лиза овердрайв')]},destination:dest()}))]);tr=trOf('cand-s5');
-  assert.equal(statusCell(tr).textContent,'Same name as another book');assert.match(hint(tr),/^Another book would get this file name: «03-Мона Лиза овердрайв»\./);
-  assert.match(goesTo(tr),/^Goes to /);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.equal(showBoth(tr).hidden,true);
+  // Gap 1 (check 33): the row's own answer names no other book any more (the other book was renamed away and this row
+  // waits to be checked again). The sentence says the name is free, never the recorded other book; nothing is prevented.
+  const ended=extra=>askRow('s5',base('name_taken',{hold:{kind:'same_destination',count:1,others:[other('03-Мона Лиза овердрайв')]},destination:dest(extra)}));
+  paint([ended()]);tr=trOf('cand-s5');
+  assert.equal(statusCell(tr).textContent,'Same name as another book');assert.equal(hint(tr),FREE);
+  assert.match(goesTo(tr),/^Goes to /);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.equal(showOther(tr).hidden,true);
+  // The other book was converted instead, so its file is in Audiobooks Sorted: the Name taken sentence, label and reason.
+  paint([ended({taken:true})]);tr=trOf('cand-s5');
+  assert.equal(statusCell(tr).textContent,'Same name as another book');assert.equal(hint(tr),ON_DISK);assert.match(goesTo(tr),/^Already there /);
+  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(reason(tr),'That name is already in Audiobooks Sorted. Change the title or author.');assert.equal(showOther(tr).hidden,true);
+  // No name could be worked out (no path in the answer): unknown is not free, so the recorded other book stays, as built.
+  paint([ended({path:'',absolute:''})]);tr=trOf('cand-s5');
+  assert.equal(hint(tr),'Another book would get this file name: «03-Мона Лиза овердрайв». Change a title, author, series or number so they differ.');assert.equal(showOther(tr).hidden,true);
+  // Positive control: the same row while the clash stands names the other book.
+  paint([ended({shared:shared(other('03-Мона Лиза овердрайв'))})]);assert.match(hint(trOf('cand-s5')),/^Another book would get this file name: «03-Мона Лиза овердрайв»\./);
+  // Gap 6: one other book the engine sends without a name keeps its singular sentence. Gap 2: there is nothing to search
+  // for, so the show button is not shown. The label and the prevented press stay.
+  paint([sameName('s8',shared(other('')))]);tr=trOf('cand-s8');
+  assert.equal(hint(tr),'1 other book would get this file name. Change a title, author, series or number so they differ.');assert.equal(showOther(tr).hidden,true);
+  assert.ok(!faces(tr).some(face=>/^Show /.test(face)));assert.equal(goesTo(tr),'Both go to Audiobooks Sorted\\'+SHARED);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');
 
   // 2. Class D: a file with the name is on disk. The 0.30.0 Name taken row, unchanged; shared adds nothing to it.
   const disk=askRow('d1',base('name_taken',{reasons:['An audiobook already exists at this path.'],destination:dest({taken:true,shared:shared(other('03-Мона Лиза овердрайв'))})}));
   paint([disk]);tr=trOf('cand-d1');
   assert.equal(statusCell(tr).textContent,'Name taken');assert.equal(hint(tr),'A book with this name is already in Audiobooks Sorted.');
   assert.equal(goesTo(tr),'Already there Audiobooks Sorted\\'+SHARED);assert.equal(buttonsOf(tr)[0].title,'That name is already in Audiobooks Sorted. Change the title or author.');
-  assert.equal(reason(tr),'That name is already in Audiobooks Sorted. Change the title or author.');assert.equal(showBoth(tr).hidden,true);
-  assert.ok(!faces(tr).some(face=>/^Show (both|all)/.test(face)));
+  assert.equal(reason(tr),'That name is already in Audiobooks Sorted. Change the title or author.');assert.equal(showOther(tr).hidden,true);
+  assert.ok(!faces(tr).some(face=>/^Show (the other|one of)/.test(face)));
 
   // 3. Class Q (check 15): pieces of one book that all carry the set's name. Each keeps Part of a bigger book, its own
   // sentence, Approve as one book (prevented, with the reason) and Keep as separate books (enabled); the label counts them;
-  // Show all 3 books is the last button of the row. shared.kind reads same_destination here too: it is never the test.
+  // Show one of the others is the last button of the row. shared.kind reads same_destination here too: it is never the test.
   const piece=holdRow('q1','part_of_book','set_unclear',more(2)),sibling=holdRow('q2','part_of_book','part_set',more(2));
   paint([piece,sibling,sameName('s6',shared(other('02-Граф Ноль')))]);tr=trOf('cand-q1');
   assert.equal(piece.ask.destination.shared.kind,'same_destination');
@@ -134,7 +161,7 @@ const TIP='List the books that would get this name: sets Status to All and searc
   assert.equal(reason(trOf('cand-q2')),JOIN);assert.equal(reason(trOf('cand-s6')),BLOCK,'never on a class S row: it was held for the name alone');
   assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),null,'Keep as separate books stays enabled');assert.equal(buttonsOf(tr)[2].getAttribute('aria-disabled'),null,'Scan again too');
   assert.equal(goesTo(tr),'All 3 go to Audiobooks Sorted\\'+SHARED,'in place of As one book');assert.equal(warned(tr),true);
-  assert.equal(faces(tr).at(-1),'Show all 3 books','the last button of the row');assert.equal(showBoth(tr).title,TIP);
+  assert.equal(faces(tr).at(-1),'Show one of the others','the last button of the row');assert.equal(showOther(tr).title,TIP_MANY);
   assert.ok(!walk(tr).some(e=>e.textContent==='Same name as another book'),'never the class S presentation');
   assert.ok(!walk(statusCell(tr)).some(e=>/^Also:/.test(e.textContent) && !e.hidden),'no Also line and no second sentence');
   // Positive control for the split (check 15): a class S row on the same list, from the same shared fact.
@@ -143,7 +170,7 @@ const TIP='List the books that would get this name: sets Status to All and searc
   // Typing a free title enables the approve press at once; the label returns to the row's own.
   [title]=inputs(tr);title.value='Sprawl Trilogy (все три)';title.handlers.input();await title.handlers.blur();await tick();
   assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.equal(buttonsOf(tr)[0].title,'Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.');
-  assert.equal(reason(tr),'');assert.match(goesTo(tr),/^As one book /);assert.equal(warned(tr),false);assert.equal(showBoth(tr).hidden,true);
+  assert.equal(reason(tr),'');assert.match(goesTo(tr),/^As one book /);assert.equal(warned(tr),false);assert.equal(showOther(tr).hidden,true);
 
   // Every other group keeps its status, sentence and approve face; the three additions come with shared.
   const two=shared(other('03-Мона Лиза овердрайв'));
@@ -163,31 +190,31 @@ const TIP='List the books that would get this name: sets Status to All and searc
     const said=row.id==='cand-g7'?JOIN:BLOCK;  // R17: a Part of a bigger book row only; the folder question (g5) keeps the plain line
     assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true',row.id);assert.equal(reason(tr),said,row.id);assert.equal(buttonsOf(tr)[0].title,said,row.id);
     assert.equal(goesTo(tr),'Both go to Audiobooks Sorted\\'+SHARED,row.id);assert.equal(warned(tr),true,row.id);
-    assert.equal(faces(tr).at(-1),'Show both books',row.id);
+    assert.equal(faces(tr).at(-1),'Show the other book',row.id);assert.equal(showOther(tr).title,TIP,row.id);
   }
   // Missing files (class Q): the row's own approve press is Convert what's there, its second button; the reason stands
-  // under the buttons there too, Scan again stays enabled, and Show both books sits before Delete book's own line.
+  // under the buttons there too, Scan again stays enabled, and Show the other book sits before Delete book's own line.
   const FOLDER='Z:\\Audiobooks\\William Gibson\\Sprawl\\';
   const gone=askRow('m1',base('files_missing',{also:null,missing:{folders:[FOLDER.slice(0,-1)],files:[FOLDER+'03.m4b'],present:2,total:3},delete:{kind:'files_missing',present:2},destination:dest({shared:two})}));
   paint([gone]);tr=trOf('cand-m1');
   assert.equal(statusCell(tr).textContent,'Missing files');assert.equal(hint(tr),'1 of 3 files is missing.');
   assert.deepEqual(faces(tr).slice(0,2),['Scan again',"Convert what's there"]);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);
   assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[1].title,BLOCK);assert.equal(reason(tr),BLOCK);
-  const order=buttonsOf(tr).filter(b=>!b.hidden).map(b=>b.textContent),at=order.indexOf('Show both books');
-  assert.ok(at>0 && order.indexOf('Delete book')===order.length-1 && at<order.indexOf('Delete book'),'Show both books before Delete book, which keeps its own last line: '+order.join(' | '));
+  const order=buttonsOf(tr).filter(b=>!b.hidden).map(b=>b.textContent),at=order.indexOf('Show the other book');
+  assert.ok(at>0 && order.indexOf('Delete book')===order.length-1 && at<order.indexOf('Delete book'),'Show the other book before Delete book, which keeps its own last line: '+order.join(' | '));
   // A row with shared and a file on disk too: the name on disk wins and the row shows as it does today (4.2a).
   paint([holdRow('q3','part_of_book','set_unclear',more(2),{destination:dest({taken:true,shared:more(2)})})]);tr=trOf('cand-q3');
-  assert.match(goesTo(tr),/^Already there /);assert.equal(reason(tr),'That name is already in Audiobooks Sorted. Change the title or author.');assert.equal(showBoth(tr).hidden,true);
+  assert.match(goesTo(tr),/^Already there /);assert.equal(reason(tr),'That name is already in Audiobooks Sorted. Change the title or author.');assert.equal(showOther(tr).hidden,true);
   // A row whose name no other book has: nothing of this shows (control for every assertion above).
   paint([holdRow('q4','part_of_book','set_unclear',null)]);tr=trOf('cand-q4');
-  assert.match(goesTo(tr),/^As one book /);assert.equal(warned(tr),false);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.equal(reason(tr),'');assert.equal(showBoth(tr).hidden,true);
-  assert.ok(!faces(tr).some(face=>/^Show (both|all)/.test(face)));
+  assert.match(goesTo(tr),/^As one book /);assert.equal(warned(tr),false);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.equal(reason(tr),'');assert.equal(showOther(tr).hidden,true);
+  assert.ok(!faces(tr).some(face=>/^Show (the other|one of)/.test(face)));
   // R17 is only the reason of a blocked press: with the press free no row carries a Join hint (his answer 10 stands).
   assert.ok(!walk(tr).some(e=>!e.hidden && /Join them into one book/.test(e.textContent)),'no Join hint on a row whose press is free');
   assert.equal(source.split('Join them into one book, or change this title.').length-1,1,'the sentence has one home: the blocked-press reason');
 
   // 4. The clash appears only at the press (the engine's same_name refusal, on a row of any class): Approve answers with
-  // the sentence, and the row's Goes to line is read again, so its label, reason and Show both books follow.
+  // the sentence, and the row's Goes to line is read again, so its label, reason and Show the other book follow.
   const late=askRow('l1',base('title_author',{why:'title_series'}));paint([late]);tr=trOf('cand-l1');
   assert.match(goesTo(tr),/^Goes to /);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Another book would get the same name. Change the title, author, series or number. Nothing was changed.',code:'same_name',row:null})});
@@ -197,16 +224,28 @@ const TIP='List the books that would get this name: sets Status to All and searc
   assert.equal(statusCell(tr).children[0].textContent,'Approval not saved: Another book would get this name. Change the title, author, series or number, then approve.');
   assert.ok(statusCell(tr).children[0].classes.has('retry-refused'));
   assert.deepEqual(posted('/api/candidate/approve-preview').slice(asked),[{library:'Audiobooks',id:'cand-l1',revision:2}],'nothing typed: the row\'s own line is asked for once');
-  assert.equal(goesTo(tr),'Both go to Audiobooks Sorted\\'+SHARED);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(showBoth(tr).hidden,false);
+  assert.equal(goesTo(tr),'Both go to Audiobooks Sorted\\'+SHARED);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(showOther(tr).hidden,false);
   assert.equal(statusCell(tr).textContent,'Title unclear','a row of another class keeps its own status');
   approveAnswer=null;previewAnswer=null;
   assert.equal(run('APPROVE_REFUSALS.same_name'),'Another book would get this name. Change the title, author, series or number, then approve.');
 
-  // 5. Show both books: Status All and a search for the shared title, so the rows sit together.
+  // 5. Show the other book (gap 2, check 34): Status All, a search for the other book's own folder or file name, and its
+  // row by its id. Never the shared title: the list's search matches a book's title clue, its grouping and its file paths
+  // (groups.page), and the title the app proposes may be in none of them. Here it is in neither book's clue or path.
+  const there={...askRow('o7',null),id:'other-03-Мона Лиза овердрайв',path:'other-03-Мона Лиза овердрайв',ask:undefined,members:[{path:'Z:\\Audiobooks\\William Gibson\\Уильям Гибсон - 03-Мона Лиза овердрайв.m4b'}]};
   paint([sameName('s7',shared(other('03-Мона Лиза овердрайв')))]);tr=trOf('cand-s7');
-  inventoryRows=[run('rows[0]')];get('search').value='';run('filters.candidates="output_attention";attentionGroup="name_taken"');
-  await showBoth(tr).handlers.click(press);await tick();
-  assert.equal(get('search').value,'Sprawl Trilogy');assert.equal(run('filters.candidates'),'all');assert.equal(run('attentionGroup'),'all');
+  inventoryRows=[run('rows[0]'),there];get('search').value='';run('filters.candidates="output_attention";attentionGroup="name_taken"');
+  let listed=calls.length;await showOther(tr).handlers.click(press);await tick();
+  assert.equal(get('search').value,'03-Мона Лиза овердрайв','its own file name, not «Sprawl Trilogy»');assert.equal(run('filters.candidates'),'all');assert.equal(run('attentionGroup'),'all');
+  let asks=calls.slice(listed).filter(call=>call.route.startsWith('/api/inventory')).map(call=>new URL(call.route,'http://x').searchParams);
+  assert.ok(asks.some(query=>query.get('search')==='03-Мона Лиза овердрайв' && query.get('status')==='all'),'the list is asked for that name under All');
+  assert.equal(run('selectedRow?.id'),there.id,'and goes to the other book\'s row by its id, as Show in list does');assert.notEqual(run('rows[0].id'),there.id,'positive control: the pressed row is another book');
+  // Several others: the first one the engine names (here the first has no name).
+  run('filters.candidates="output_attention";attentionGroup="all"');get('search').value='';
+  paint([sameName('s9',{...shared(other(''),other('02-Граф Ноль'),other('03-Мона Лиза овердрайв')),count:3})]);tr=trOf('cand-s9');
+  assert.equal(showOther(tr).textContent,'Show one of the others');assert.equal(showOther(tr).getAttribute('aria-label'),'Show one of the others: 02-Граф Ноль');
+  inventoryRows=[run('rows[0]')];await showOther(tr).handlers.click(press);await tick();
+  assert.equal(get('search').value,'02-Граф Ноль');assert.equal(run('filters.candidates'),'all');
   run('filters.candidates="output_attention";attentionGroup="all"');get('search').value='';inventoryRows=[];
 
   // 6. The Place line says where the series and number came from, by the engine's origin key (4.3, amended).
@@ -217,6 +256,10 @@ const TIP='List the books that would get this name: sets Status to All and searc
   // R15 (amended with Sergei's answers): by where the series was really read.
   assert.equal(place('title_tag',{number:'1'}),'Series: Sprawl Trilogy · No. 1 · from the title tag');
   assert.equal(place('file_name'),'Series: Sprawl Trilogy · No. 2 · from the file name');
+  // Gap 5 (check 35): a series read from brackets in the book's name (the album tag, the title tag or the folder's name)
+  // has its own words, true for all three. Never "from the file's tags".
+  assert.equal(place('brackets',{series:'Книга Нового Солнца',number:'3'}),'Series: Книга Нового Солнца · No. 3 · from the brackets in its name');
+  assert.equal(source.split(' · from the brackets in its name').length-1,1,'one home for the words');
   assert.equal(place('unknown'),'Series: Sprawl Trilogy · No. 2','unknown: no suffix');assert.equal(place(undefined),'Series: Sprawl Trilogy · No. 2');
   for(const [provider,name] of [['wikidata','Wikidata'],['fantlab','FantLab'],['goodreads','Goodreads'],['litres','Litres'],['publisher',"the publisher's site"]])
     assert.equal(place('source',{provider}),'Series: Sprawl Trilogy · No. 2 · found on '+name,provider);
