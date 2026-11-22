@@ -43,7 +43,7 @@ class FinishedStateTests(WorkTests):
         work = self.state()
         self.assertEqual((work['state'], work['rows'], work['waiting'], work['waits_for_you']), ('all_done', [], [], []))
         self.assertEqual(work['pending'], {'any': False, 'running': 0, 'paused': 0, 'waiting': 0, 'still_checking': 0, 'attention': 0, 'hold': 0, 'moves': 0,
-                                           'drives': 0, 'lookups': {'series': 0, 'details': 0, 'all': 0}, 'same_name': 0})
+                                           'writes': 0, 'drives': 0, 'lookups': {'series': 0, 'details': 0, 'all': 0}, 'same_name': 0})
 
     def test_each_thing_that_is_pending_gives_another_state(self):
         self.lookups()
@@ -65,10 +65,34 @@ class FinishedStateTests(WorkTests):
                 self.assertEqual(self.state(**arguments)['state'], expected)
         self.assertEqual(self.state()['state'], 'all_done', 'positive control: the same engine with none of them')
 
-    def test_a_series_move_to_approve_waits_for_him(self):
-        self.lookups(series={'moves_waiting': 55})
+    def test_a_series_found_and_not_applied_holds_nothing_back(self):
+        # Third round (Sergei's R18 and R19, 2026-11-22; Judy 1.1 and 3.2, check 26): he approves no rename or move of a
+        # finished audiobook, so a series found that the app has not applied waits for the app's rules, not for him and not
+        # for a job. It is no reason, it is in no state, and All done shows with any number of them. The number stays, for
+        # the one quiet line.
+        self.lookups(series={'moves_waiting': 61, 'writes_held': 61})
         work = self.state()
-        self.assertEqual((work['state'], work['waits_for_you'], work['pending']['moves']), ('waiting_for_you', ['moves'], 55))
+        self.assertEqual((work['state'], work['waits_for_you'], work['pending']['moves']), ('all_done', [], 61))
+        self.assertEqual((work['rows'], work['waiting'], work['lookups_waiting'], work['pending']['lookups']['all']), ([], [], [], 0),
+                         'no row, no Waiting item and no look-up left because of them')
+        self.assertNotIn('moves', background_work.WAITS_FOR_YOU)
+        # Positive control that the number is not a state: one book that needs him turns the state, the number unchanged.
+        needs = self.state(jobs=jobs_state(attention_counts={'stopped': 1}))
+        self.assertEqual((needs['state'], needs['waits_for_you'], needs['pending']['moves']), ('waiting_for_you', ['attention'], 61))
+        # And with a look-up still asking, it is the look-up that keeps the badge, never the found books.
+        self.lookups(series={'moves_waiting': 61, 'left': 4, 'to_look_up': 4})
+        self.assertEqual(self.state()['state'], 'background_only')
+
+    def test_a_drive_that_is_not_answering_holds_back_all_done_r14(self):
+        # R14 (Sergei 2026-11-22): its books cannot be reached, so the state reads waiting for you, look-ups left or not.
+        self.lookups()
+        away = [{'path': 'Z:\\Audiobooks', 'available': False}]
+        work = self.state(roots=away)
+        self.assertEqual((work['state'], work['waits_for_you'], work['pending']['drives']), ('waiting_for_you', ['drive'], 1))
+        self.assertEqual([item['kind'] for item in work['waiting']], ['drive'], 'its home is the Waiting item with the instruction')
+        self.assertEqual(self.state(roots=[{'path': 'Z:\\Audiobooks', 'available': True}])['state'], 'all_done', 'positive control: the drive answers')
+        self.lookups(series={'left': 4, 'to_look_up': 4})
+        self.assertEqual(self.state(roots=away)['state'], 'waiting_for_you', 'his action wins over the look-ups that remain')
 
     def test_a_lookup_between_tries_is_background_only_and_shows_in_the_waiting_list(self):
         self.lookups(series={'left': 212, 'between_tries': 212, 'next_at': 1795343400.0, 'done': 691, 'total': 903}, details={'left': 31, 'between_tries': 31, 'next_at': 1795343460.0})
@@ -96,6 +120,7 @@ class FinishedStateTests(WorkTests):
         work = self.state(jobs=jobs_state(series_update=row))
         self.assertEqual((work['state'], [(r['kind'], r['done'], r['total']) for r in work['rows']]), ('background_only', [('series', 902, 903)]))
         self.assertEqual(work['pending']['running'], 0, 'a look-up row is not main work')
+        self.assertEqual([r['background'] for r in work['rows']], [True], 'the row says so itself: the page never guesses')
         paced = self.state(jobs=jobs_state(series_update=dict(row, pacing=True)))
         self.assertEqual((paced['state'], paced['rows']), ('background_only', []), "only waiting for a site's pacing: no running row")
 
@@ -107,7 +132,37 @@ class FinishedStateTests(WorkTests):
         item = next(item for item in work['lookups_waiting'] if item['kind'] == 'series_write')
         self.assertEqual((item['subject'], item['book_id'], item['job_id']), ('Оно', 'book-c', 'job-c'))
         self.assertEqual(item['blocker'], {'kind': 'jobs', 'cause': 'conversion', 'title': 'Дюна', 'book_id': 'book-a', 'count': None})
-        self.assertEqual(self.state()['state'], 'background_only', 'with nothing else running it is still a look-up that is left')
+        # Third round (Judy 1.1, 2.2): a write that waits changes his files when it runs, so it is main work. With nothing
+        # else running the state is "continues by itself", never "background look-ups only", and All done waits for it.
+        alone = self.state()
+        self.assertEqual((alone['state'], alone['pending']['writes'], alone['pending']['lookups']['series']), ('continues', 1, 0))
+        self.assertEqual([(i['kind'], i['background']) for i in alone['lookups_waiting']], [('series_write', False)])
+        self.assertIs(KIND_FACTS['series_write']['background'], False)
+
+    def test_writing_a_series_into_a_finished_file_is_main_work_never_a_background_lookup(self):
+        # Third round (Judy 1.1, 2.1; T6): only the asking online is a look-up. The series row in its writing step changes a
+        # finished file, so the state is "working" and no finished-state badge can show over it. Built now although the
+        # guard keeps such writes off: the rule is the state's, not the guard's.
+        self.lookups(series={'writing': 1, 'done': 902, 'total': 903})
+        row = {'title': 'Тёмный лес', 'done': 902, 'total': 903, 'pass_done': 0, 'pass_total': 1, 'pacing': False}
+        writing = self.state(jobs=jobs_state(series_update=dict(row, step='updating')))
+        self.assertEqual((writing['state'], [(r['kind'], r['step'], r['background']) for r in writing['rows']]), ('working', [('series', 'updating', False)]))
+        self.assertEqual(writing['pending']['running'], 1)
+        # Positive control: the same row asking online is a look-up, and the badge may read background look-ups only.
+        self.lookups(series={'left': 1, 'to_look_up': 1, 'done': 902, 'total': 903})
+        asking = self.state(jobs=jobs_state(series_update=dict(row, step='looking up')))
+        self.assertEqual((asking['state'], [(r['step'], r['background']) for r in asking['rows']]), ('background_only', [('looking_up', True)]))
+        # A write that is next (approved by the rules, the pass has not reached it): no row yet, and still not done.
+        self.lookups(series={'writing': 2})
+        self.assertEqual(self.state()['state'], 'continues')
+        # Paused stays paused, and a look-up row beside a paused queue never makes it "working".
+        self.assertEqual(self.state(jobs=jobs_state(state='Paused'))['state'], 'paused')
+        # The rule in one place.
+        self.assertTrue(background_work.is_background({'kind': 'series', 'step': 'looking_up'}))
+        self.assertFalse(background_work.is_background({'kind': 'series', 'step': 'updating'}))
+        self.assertFalse(background_work.is_background({'kind': 'series_write'}))
+        self.assertTrue(all(background_work.is_background({'kind': kind}) for kind in ('gap_fill', 'series_lookup', 'detail_lookup')))
+        self.assertFalse(background_work.is_background({'kind': 'conversion', 'step': 'updating'}))
 
     def test_not_known_is_never_all_done(self):
         self.lookups(series={'known': False, 'left': None, 'to_look_up': None, 'total': None})

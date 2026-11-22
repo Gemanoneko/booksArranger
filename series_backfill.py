@@ -260,10 +260,16 @@ class SeriesBackfill:
           between_tries waiting for a later try (a source's limit or pause); next_at: the earliest, epoch seconds
           write_waiting a series was found and its write waits for the queue, a cleanup or a scan (job ids in 'writes')
           writing       being written or renamed now, or approved and next
-          moves_waiting a series was found; the move into its series folder waits for Sergei's approval
+          moves_waiting a series was found and is not applied: the guard holds every write (WRITE_WITHOUT_APPROVAL), or its
+                        series folder is another folder. Third round (Sergei's R18 and R19, 2026-11-22): he approves none,
+                        so it waits for the app's rules, not for him; it is the quiet line's number (Judy 3.2) and holds
+                        back no state. For the look-up itself such a book is settled: its series was found.
+          applies_by_itself  the app writes a found series into a finished file without anyone's approval (false while the
+                        guard is at 'hold'): the one fact the page reads for the series row's tooltip (Judy 2.1)
           blocked       the book's cleanup is on hold; not looked up until that has finished
           settled       with_series + without + gave_up + left_alone (held or skipped for a lasting reason)
-          done, total   settled books and every book that needed the look-up, for the row's bar
+          done, total   books the look-up has settled (a series found, applied or not; none found; given up) and every book
+                        that needed it, for the row's bar: it only grows and ends at the total
           tries         {'per_source', 'spacing_seconds', 'failures'}: the limits (SOURCE_TRIES, TRY_SPACING, FAILURE_TRIES)"""
         now = self.clock()
         with connect(self.database) as db:
@@ -308,8 +314,9 @@ class SeriesBackfill:
         value = {'known': unvisited is not None, 'left': left, 'to_look_up': to_look_up, 'between_tries': counts['between_tries'],
                  'next_at': min(nexts) if nexts else None, 'write_waiting': counts['write_waiting'], 'writes': writes[:100], 'writing': counts['writing'],
                  'moves_waiting': counts['moves_waiting'], 'writes_held': writes_held, 'write_without_approval': WRITE_WITHOUT_APPROVAL,
+                 'applies_by_itself': WRITE_WITHOUT_APPROVAL == 'allow',
                  'blocked': counts['blocked'], 'settled': settled, 'with_series': counts['with_series'],
-                 'without': counts['without'], 'gave_up': counts['gave_up'], 'left_alone': counts['left_alone'], 'done': settled,
+                 'without': counts['without'], 'gave_up': counts['gave_up'], 'left_alone': counts['left_alone'], 'done': settled + counts['moves_waiting'],
                  'total': None if left is None else settled + left + counts['write_waiting'] + counts['writing'] + counts['moves_waiting'],
                  'tries': {'per_source': SOURCE_TRIES, 'spacing_seconds': TRY_SPACING, 'failures': FAILURE_TRIES}}
         self.__dict__['_summary'] = (finished, min(nexts) if nexts else None, value)

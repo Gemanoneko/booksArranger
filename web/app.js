@@ -1323,7 +1323,7 @@ function renderJobs(){
   const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge);
   renderBadge(badge);
   text('jobs-status-text',(stale?'Last confirmed — ':'')+(badge?(asOf?asOf:'')+(parts.length?' · ':''):'')+parts.join(' · '));
-  renderActivities(shown,jobs,unread,asOf);renderWaitingList(work);renderHold(heldRows(jobs));renderFreshness(now);renderUnread(unread);renderSourceCheck();
+  renderActivities(shown,jobs,unread,asOf);renderWaitingList(work);renderHold(heldRows(jobs));renderSeriesFound(work);renderFreshness(now);renderUnread(unread);renderSourceCheck();
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
   $('resume-jobs').title=cleanup?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.';
@@ -1336,15 +1336,15 @@ function renderJobs(){
 function statusParts(jobs,work,shown,counts,asOf,badge=null){
   const c=work.counts,n=key=>Number.isInteger(c?.[key]) && c[key]>0?c[key]:0,paused=n('cleanups_paused'),waiting=n('cleanups_waiting');
   const cleanup=paused && waiting?`Cleanup paused for ${plural(paused,'book','books')}, waiting for ${waiting.toLocaleString()}`:paused?`Cleanup paused for ${plural(paused,'book','books')}`:waiting?`Cleanup waiting for ${plural(waiting,'book','books')}`:'';
-  // 0.31.0 (1.3): the badge or the first part; "N on hold" its own part after it when nothing runs; the series changes to
-  // approve after "need attention"; the background look-ups left last. Zero counts are left out.
-  const first=admissionLine(jobs) || (badge?'':jobsFirstPart(jobs,shown,work)),moves=pendingCount(work,'moves'),lookups=pendingCount(work,'lookups'),held=heldTotal(jobs);
+  // 0.31.0 (1.3): the badge or the first part; "N on hold" its own part after it when nothing runs; the background
+  // look-ups left last. Zero counts are left out. Third round (R18, R19): no part about renames or moves to approve, and
+  // none for a series found that is not applied (3.2: it is said once, in the quiet line, and is part of no state).
+  const first=admissionLine(jobs) || (badge?'':jobsFirstPart(jobs,shown,work)),lookups=pendingCount(work,'lookups'),held=heldTotal(jobs);
   // "N on hold" stays where it was glued to "Nothing running": beside a badge or a first part that says nothing runs,
   // never beside Paused or a named job (a paused queue that names a look-up included, G7).
   const onHold=held && ['','Continues by itself','Checking what is left','Nothing running that could be read'].includes(first)?`${held} on hold`:'';
   return [first,onHold,n('queued_conversions')?plural(n('queued_conversions'),'book','books')+' waiting to convert':'',cleanup,
     n('actions_waiting')?plural(n('actions_waiting'),'action','actions')+' waiting':'',`${attentionTotal(jobs)} need attention`,
-    moves?`${plural(moves,'series change','series changes')} to approve`:'',
     counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books${badge?'':asOf}`:'Approved book progress unavailable',
     n('retry_checks_waiting')?`${n('retry_checks_waiting')} waiting for retry checks`:'',
     lookups?`${plural(lookups,'background look-up','background look-ups')} left`:''].filter(Boolean);
@@ -1517,16 +1517,25 @@ let sourceRowsAt=0;
 globalThis.addEventListener?.('focus',()=>{if(ended || loadingActive || Date.now()-sourceRowsAt<30000)return;sourceRowsAt=Date.now();request('/api/sources/rows',{}).catch(()=>{});});
 // Item 8 (Judy section 8): only Sergei's review can move things on. The engine decides (needs_you_only); the count is the
 // Needs attention shortcut's own number. 0.30.0 (section 3): from 30 s old it says when it was counted.
-// 0.31.0 (1.4): a short list under the heading "Waiting for you": one line per kind that has a count, need attention first,
-// then series changes (amended G5: moves and in-place renames, one count). A drive that is not answering and a book on hold keep their own homes and add no line; when they are the
-// only reason the block is hidden. The Review moves button belongs to the Series moves dialog (section 3), not built yet.
-function renderWaitingForYou(shown,jobs,asOf='',work={}){
+// 0.31.0 (1.4, third round): under the heading "Waiting for you" the block has one line, the books that need attention,
+// with Review them. A drive that is not answering and a book on hold keep their own homes and add no line; when they are
+// the only reason the block is hidden. Nothing about a finished book's name or place ever appears here (R18: he approves
+// no rename or move).
+function renderWaitingForYou(shown,jobs,asOf=''){
   const block=$('jobs-you');if(!block)return;
-  const n=attentionTotal(jobs),moves=pendingCount(work,'moves');shown=shown && (n>0 || moves>0);
+  const n=attentionTotal(jobs);shown=shown && n>0;
   block.hidden=!shown;if(!shown)return;
-  const review=$('jobs-review');writeText(review,'Review them');review.title='Show every book that needs you.';review.hidden=!n;
-  const line=$('jobs-you-line');line.hidden=!n;writeText(line,n?`${plural(n,'book needs','books need')} attention${asOf}.`:'');
-  const second=$('jobs-you-moves');if(second){second.hidden=!moves;writeText(second,moves?(moves===1?'1 series change waits for your approval.':`${moves.toLocaleString()} series changes wait for your approval.`):'');}
+  const review=$('jobs-review');writeText(review,'Review them');review.title='Show every book that needs you.';
+  writeText($('jobs-you-line'),`${plural(n,'book needs','books need')} attention${asOf}.`);
+}
+// 0.31.0 (Judy 3.2, third round): finished audiobooks with a series found that the app has not applied (the engine's
+// number; the guard holds every write, or the rules keep the book for later). They wait for the app's rules, not for him
+// and not for a job, so they are said once, quietly, at the bottom of the panel: no state, no status part, no control,
+// no tooltip, not announced. Hidden at zero and when the engine sends no number.
+function renderSeriesFound(work){
+  const line=$('jobs-series-found');if(!line)return;
+  const n=pendingCount(work,'moves');
+  writeText(line,n===1?'Series found for 1 finished audiobook. It is recorded and stays where it is.':n?`Series found for ${n.toLocaleString()} finished audiobooks. They are recorded and stay where they are.`:'');line.hidden=!n;
 }
 // 0.30.0 (Judy's BooksArranger_0.30.0_UX.md, section 1): every running, pausing or paused job is a row, in the engine's order
 // (work.rows), keyed by its id, updated in place; no cap and no "+N more". A row shows once it has run 1 s, except one a waiting
@@ -1541,10 +1550,14 @@ function workOf(){
     counts:work?.counts && typeof work.counts==='object'?work.counts:{},unread:Array.isArray(work?.unread)?work.unread:[],
     state:typeof work?.state==='string'?work.state:'',pending:object(work?.pending),background:object(work?.background),lookups:list(work?.lookups_waiting,item)};
 }
-// The two background look-ups (2.1): their rows and Waiting items are never "main work".
-const LOOKUP_KINDS=['series','gap_fill','series_lookup','detail_lookup','series_write'];
+// The two background look-ups (2.1): their rows keep the look-up's own bar (no time estimate, never "No progress").
+const LOOKUP_KINDS=['series','gap_fill','series_lookup','detail_lookup'];
 function isLookup(row){return LOOKUP_KINDS.includes(row?.kind);}
-function mainRows(shown){return shown.filter(row=>!isLookup(row));}
+// Which work is "main" (1.1, third round): the engine says so on every row and item (background). Only the asking online
+// is a background look-up; writing a series into a finished file changes his files and is main work, so the status line
+// names it and no finished-state badge shows over it. An engine that sends no fact is read by the same rule.
+function isBackground(row){return typeof row?.background==='boolean'?row.background:isLookup(row) && !(row.kind==='series' && row.step==='updating');}
+function mainRows(shown){return shown.filter(row=>!isBackground(row));}
 function pendingCount(work,key){const value=key==='lookups'?work.pending?.lookups?.all:work.pending?.[key];return Number.isInteger(value) && value>0?value:0;}
 // The badge (1.2): shown only for a finished state, and only while no main job has a row (a page-owned loop is one). No
 // flicker: it shows once its state has been reported for 3 s in a row and goes once another has been reported for 1 s.
@@ -1684,8 +1697,15 @@ function workDetail(row,finishing){
   return '';
 }
 // 0.30.0 (Judy 9): a damaged part's repair names its file in the step's tooltip; the manual window's stop and end lines.
-const LOOKUP_TIPS={series:'Finished audiobooks without a series are looked up online, one by one. A series that is found changes a book only after you approve it.',
+// 0.31.0 (2.1, third round): the series row's tooltip follows one engine fact, whether the app applies a found series by
+// itself (no while the guard is at hold). Neither sentence is about approval: he approves nothing (R18).
+const LOOKUP_TIPS={series:'Finished audiobooks without a series are looked up online, one by one. A series that is found is recorded. No audiobook is renamed or moved.',
+  series_applies:'Finished audiobooks without a series are looked up online, one by one. When author and series are found for certain, the book is filed under them. Otherwise it stays as it is.',
   gap_fill:'Books approved without an original title or a full author name are looked up online, one by one. The answers are recorded. No audiobook is renamed.'};
+function lookupTip(row){
+  if(row?.kind==='series')return workOf().background?.series?.applies_by_itself===true?LOOKUP_TIPS.series_applies:LOOKUP_TIPS.series;
+  return row?.kind==='gap_fill'?LOOKUP_TIPS.gap_fill:'';
+}
 function repairTip(row){return row?.kind==='conversion' && row.step==='repairing' && typeof row.step_text==='string' && row.step_text?'Repairing '+row.step_text:'';}
 function partRepairLine(draft){
   const part=draft?.state==='failed'?draft.part_repair:null,file=typeof part?.file==='string'?part.file:'';if(!file)return '';
@@ -1720,7 +1740,7 @@ function renderActivities(shown,jobs,unread=[],asOf=''){
   const idle=shown.length?'':unread.length || notReadable(work)?'Nothing running that could be read.':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.'
     :nothingLeft?'Nothing is running, queued or waiting.':'Nothing is running right now.';
   writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;
-  renderWaitingForYou(work.state==='waiting_for_you' && !mainRows(shown).length && !unread.length,jobs,asOf,work);
+  renderWaitingForYou(work.state==='waiting_for_you' && !mainRows(shown).length && !unread.length,jobs,asOf);
   if(shown.length && activityTimer===null && typeof setInterval==='function')activityTimer=setInterval(()=>{const now=Date.now();for(const view of activityRows.values())updateActivity(view,now);},1000);
   if(!shown.length && activityTimer!==null && typeof clearInterval==='function'){clearInterval(activityTimer);activityTimer=null;}
 }
@@ -1735,7 +1755,7 @@ function updateActivity(view,now){
   const stepShown=frozen?'No progress for 5 min':step;view.item.classList.toggle('stalled',frozen);
   writeText(view.detail,detail);writeText(view.step,stepShown);
   // The chapter check's file name is its tooltip (1.5); every other step line carries its own text.
-  view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:repairTip(row) || LOOKUP_TIPS[row.kind] || stepShown;
+  view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:repairTip(row) || lookupTip(row) || stepShown;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',false);
   const fraction=typeof row.fraction==='number' && row.fraction>=0 && row.fraction<=1?row.fraction:row.done/row.total;
   if(determinate){const value=approveFiles && row.done===row.total?100:Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}

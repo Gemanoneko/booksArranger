@@ -93,6 +93,11 @@ class GuardTests(unittest.TestCase):
         self.backfill.run_pass()
         value = self.backfill.summary()
         self.assertEqual((value['moves_waiting'], value['writes_held'], value['write_without_approval'], value['left']), (1, 1, 'hold', 0))
+        self.assertIs(value['applies_by_itself'], False)
+        self.backfill._changed()
+        with patch.object(series_backfill, 'WRITE_WITHOUT_APPROVAL', 'allow'):
+            self.assertIs(self.backfill.summary()['applies_by_itself'], True, 'the one fact the series row\'s tooltip follows (Judy 2.1)')
+        self.backfill._changed()
         with connect(self.lib.db) as db:
             plan = sorting_moves.plan(db, str(self.lib.root))
         item = next(i for i in plan['items'] if i['job_id'] == self.lib.job_id)

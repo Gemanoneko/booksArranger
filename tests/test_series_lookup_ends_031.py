@@ -285,6 +285,11 @@ class SummaryTests(Fixture):
         self.backfill._set('2', 'held', 'The book changed since you approved its move; nothing was changed', {'move_approved': True, 'approved_failed': {'reason': 'x'}})
         value = self.backfill.summary()
         self.assertEqual((value['moves_waiting'], value['write_waiting'], value['writes'], value['left']), (2, 1, ['1'], 0))
+        # Third round (R18, R19; Judy 2.1 and 3.2): a series found and not applied is settled for the look-up (its bar ends
+        # at the total); only a write that still has to run is left of the total.
+        total = value['total']
+        self.assertEqual((value['done'], total - value['done']), (value['settled'] + 2, 1), 'the two found books count as done; the write that waits does not')
+        self.assertIs(value['applies_by_itself'], False, 'the guard is at hold: the page says a found series is recorded, nothing renamed or moved')
 
     def test_a_book_that_finishes_converting_makes_the_count_unknown_until_it_is_counted(self):
         self.passes(1)

@@ -49,15 +49,18 @@ assert.equal(view.line,' · 0 need attention · 1510 converted out of 1510 appro
 assert.equal(view.idle.textContent,'Nothing is running, queued or waiting.');assert.equal(get('jobs-you').hidden,true);
 
 reset();
-view=show({state:'waiting_for_you',waits_for_you:['attention','moves'],pending:pending({attention:329,moves:55,lookups:lookups(200,12)})},{attention_counts:{other:329},converted_total:1181});
+view=show({state:'waiting_for_you',waits_for_you:['attention'],pending:pending({attention:329,moves:55,lookups:lookups(200,12)})},{attention_counts:{other:329},converted_total:1181});
 assert.equal(view.badge.textContent,'Waiting for you');assert.equal(view.badge.className,'state-you');
 assert.equal(view.badge.title,'No conversion, cleanup or other job is running or queued. The items under Waiting for you need your answer.');
-assert.equal(view.line,' · 329 need attention · 55 series changes to approve · 1181 converted out of 1510 approved books · 212 background look-ups left');
+// Third round (R18, R19): no status part about renames or moves to approve; 55 books with a series found add none.
+assert.equal(view.line,' · 329 need attention · 1181 converted out of 1510 approved books · 212 background look-ups left');
 assert.equal(view.idle.textContent,'Nothing is running right now.','look-ups are left: never "queued or waiting" nothing');
-// The Waiting-for-you block (1.4): one line per kind with a count; the old "can't do more" sentence is gone.
+// The Waiting-for-you block (1.4, third round): one line again, the books that need attention; the old "can't do more"
+// sentence is gone, and nothing about a finished book's name or place is ever in it.
 assert.equal(get('jobs-you').hidden,false);assert.equal(get('jobs-you-line').textContent,'329 books need attention.');assert.equal(get('jobs-review').hidden,false);
-assert.equal(get('jobs-you-moves').hidden,false);assert.equal(get('jobs-you-moves').textContent,'55 series changes wait for your approval.');
-for(const id of ['jobs-you-line','jobs-you-moves'])assert.doesNotMatch(get(id).textContent,/can't do more/);
+assert.doesNotMatch(get('jobs-you-line').textContent,/can't do more/);assert.equal(nodes.has('jobs-you-moves'),false,'the page never asks for a second line');
+// The books with a series found are said once, in the quiet line, whatever the state.
+assert.equal(get('jobs-series-found').hidden,false);assert.equal(get('jobs-series-found').textContent,'Series found for 55 finished audiobooks. They are recorded and stay where they are.');
 
 reset();
 view=show({state:'background_only',pending:pending({lookups:lookups(200,12)})});
@@ -94,12 +97,33 @@ assert.match(view.line,/^ · 1 on hold · 0 need attention · /);assert.equal(vi
 assert.equal(get('jobs-you').hidden,true,'a book on hold keeps its own home: the block has no line, so it is hidden');
 
 // 4. Singular forms, and a drive as the only reason.
-reset();view=show({state:'waiting_for_you',waits_for_you:['moves'],pending:pending({moves:1,lookups:lookups(1)})});
-assert.match(view.line,/ · 1 series change to approve · .* · 1 background look-up left$/);
-assert.equal(get('jobs-you').hidden,false);assert.equal(get('jobs-you-line').hidden,true);assert.equal(get('jobs-review').hidden,true);
-assert.equal(get('jobs-you-moves').textContent,'1 series change waits for your approval.');
+reset();view=show({state:'background_only',pending:pending({moves:1,lookups:lookups(1)})});
+assert.match(view.line,/^ · 0 need attention · .* · 1 background look-up left$/);assert.doesNotMatch(view.line,/series|to approve|move/);
+assert.equal(get('jobs-series-found').textContent,'Series found for 1 finished audiobook. It is recorded and stays where it is.');
+reset();view=show({state:'waiting_for_you',waits_for_you:['attention'],pending:pending({attention:1})},{attention_counts:{other:1}});
+assert.equal(get('jobs-you').hidden,false);assert.equal(get('jobs-you-line').textContent,'1 book needs attention.');assert.equal(get('jobs-review').hidden,false);
+// 4a. A series found and not applied (3.2, check 26; the guard is at hold). 61 such books and nothing else pending: All
+// done, the block hidden, no status part about them, and the one quiet line at the bottom of the panel.
+reset();view=show({state:'all_done',pending:pending({any:false,moves:61})});
+assert.equal(view.badge.hidden,false);assert.equal(view.badge.textContent,'All done');assert.equal(get('jobs-you').hidden,true);
+assert.equal(view.line,' · 0 need attention · 1510 converted out of 1510 approved books','no part about them');
+const quiet=get('jobs-series-found');
+assert.equal(quiet.hidden,false);assert.equal(quiet.textContent,'Series found for 61 finished audiobooks. They are recorded and stay where they are.');
+assert.equal(quiet.title,'','no tooltip');assert.equal(quiet.getAttribute('aria-live'),null);assert.equal(quiet.getAttribute('role'),null);assert.equal(quiet.children.length,0,'no control');
+assert.equal(view.idle.textContent,'Nothing is running, queued or waiting.');
+// Positive control that the line is not a state: one book needing attention turns the badge, the line unchanged.
+reset();view=show({state:'waiting_for_you',waits_for_you:['attention'],pending:pending({attention:1,moves:61})},{attention_counts:{other:1}});
+assert.equal(view.badge.textContent,'Waiting for you');assert.equal(quiet.textContent,'Series found for 61 finished audiobooks. They are recorded and stay where they are.');
+// A large number prints as the page prints its counts; none, or no number from the engine: no line.
+reset();show({state:'all_done',pending:pending({any:false,moves:1240})});assert.equal(quiet.textContent,'Series found for 1,240 finished audiobooks. They are recorded and stay where they are.');
+for(const moves of [0,null,undefined,'61',-1,1.5]){reset();show({state:'all_done',pending:pending({any:false,moves})});assert.equal(quiet.hidden,true,String(moves));assert.equal(quiet.textContent,'');}
+reset();show({state:'all_done',pending:undefined});assert.equal(quiet.hidden,true,'an engine that sends no pending');
 reset();view=show({state:'waiting_for_you',waits_for_you:['drive'],pending:pending({drives:1}),waiting:[{id:'drive:Z',kind:'drive',subject:'Z:\\Audiobooks'}]});
 assert.equal(view.badge.textContent,'Waiting for you');assert.equal(get('jobs-you').hidden,true);
+// The same with books that have a series found: they add no line to the block, so it stays hidden (1.4: nothing about a
+// finished book's name or place ever appears in it), and the quiet line says them.
+reset();view=show({state:'waiting_for_you',waits_for_you:['drive'],pending:pending({drives:1,moves:61}),waiting:[{id:'drive:Z',kind:'drive',subject:'Z:\\Audiobooks'}]});
+assert.equal(get('jobs-you').hidden,true);assert.equal(get('jobs-series-found').hidden,false);
 
 // 5. No flicker (1.2, check 4): 3 s of the same state before the badge shows; another state for 1 s before it goes.
 reset();
@@ -123,6 +147,21 @@ assert.equal(view.badge.textContent,'Background look-ups only');assert.match(vie
 assert.equal(get('jobs-rows').children.length,1);assert.equal(view.idle.hidden,true,'the Running list is not empty');
 // Beside main work it counts as a task.
 reset();view=show({state:'working',rows:[conversion,series]},{state:'Running'});assert.match(view.line,/^2 tasks running · /);
+// 6a. Third round (1.1, 2.1): writing a series into a finished file is main work, not a look-up. The status line names
+// the row and no finished-state badge shows over a file change, whatever state is reported beside it.
+const writing={...series,step:'updating',background:false};
+for(const reported of ['working','background_only','all_done']){
+  reset();view=show({state:reported,pending:pending({writes:1}),rows:[writing]});
+  assert.equal(view.badge.hidden,true,reported+': no badge over a write');assert.match(view.line,/^Finding series for finished audiobooks: Тёмный лес · /,reported);
+}
+// The engine's fact decides; an engine that sends none is read by the same rule (asking: a look-up; writing: main work).
+reset();view=show({state:'background_only',pending:pending({lookups:lookups(1)}),rows:[{...series,background:true}]});assert.equal(view.badge.textContent,'Background look-ups only');
+reset();view=show({state:'background_only',pending:pending({writes:1}),rows:[{...series,step:'updating'}]});assert.equal(view.badge.hidden,true);assert.match(view.line,/^Finding series for finished audiobooks: /);
+assert.equal(run('isBackground({kind:"series",step:"updating",background:true})'),true,'the fact, when sent, is the engine\'s');
+assert.equal(run('isBackground({kind:"gap_fill"})'),true);assert.equal(run('isBackground({kind:"conversion"})'),false);
+// A write that waits is main work too: the engine reports "continues by itself", and the line says so, with no badge.
+reset();view=show({state:'continues',pending:pending({writes:1}),lookups_waiting:[{id:'series_write:j9',kind:'series_write',subject:'Оно',book_id:'b9',job_id:'j9',blocker:null,background:false}]});
+assert.equal(view.badge.hidden,true);assert.match(view.line,/^Continues by itself · /);
 
 // 7. Counts behind (1.2, check 5): from 30 s the as-of time follows the badge as plain text, once.
 run('receivedAt.set("Audiobooks",'+NOW+')');
@@ -143,13 +182,20 @@ for(const [state,suffix] of [['working',' Other jobs are still running or waitin
   assert.equal(get('automatic-detail').textContent,'Automatic pass complete — 12 converted · 3 held'+suffix,state || 'no state');
 }
 
-// 10. The page's markup: the badge is the first thing in the status line; the block has its heading and both lines.
+// 10. The page's markup: the badge is the first thing in the status line; the block has its heading and its one line; the
+// quiet line is the last thing above the two help lines.
 const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');
 assert.match(html,/<p id="jobs-status" aria-live="polite"><strong id="jobs-state" hidden><\/strong><span id="jobs-status-text">Jobs: loading…<\/span><\/p>/);
-assert.match(html,/<div id="jobs-you" hidden><p class="jobs-hold-heading">Waiting for you<\/p><div class="jobs-you"><p id="jobs-you-line"><\/p><button id="jobs-review" type="button" class="quiet" title="Show every book that needs you\.">Review them<\/button><\/div><div class="jobs-you"><p id="jobs-you-moves" hidden><\/p><\/div><\/div>/);
-assert.doesNotMatch(html,/Nothing running/);assert.doesNotMatch(html,/moves-shortcut|moves-dialog|Review moves/,'the Series moves control is not built yet');
+assert.match(html,/<div id="jobs-you" hidden><p class="jobs-hold-heading">Waiting for you<\/p><div class="jobs-you"><p id="jobs-you-line"><\/p><button id="jobs-review" type="button" class="quiet" title="Show every book that needs you\.">Review them<\/button><\/div><\/div><\/div><p id="jobs-series-found" class="field-help" hidden><\/p><p id="approved-help" class="field-help">/);
+assert.doesNotMatch(html,/Nothing running/);
+// Check 27, nothing asks: no status part, second line, shortcut, dialog or button about a rename or move to approve.
+const pageSource=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');
+for(const gone of [/jobs-you-moves/,/to approve`/,/waits? for your approval/,/Review (changes|moves)/,/Renames and moves/,/Leave as it is/,/Offer again/,/Series changes ·/,/moves-shortcut|moves-dialog/,/only after you approve it/])
+  {assert.doesNotMatch(html,gone,String(gone));assert.doesNotMatch(pageSource,gone,String(gone));}
+assert.match(css,/:root \.field-help\{font-size:13px;color:var\(--muted\)/,'the quiet line has the help lines\' look: 13 px, muted');
 // Layout by construction (section 8): everything new is in normal flow, one line, with the look and the reserved height.
 const rule=selector=>{const found=css.match(new RegExp(selector.replace(/[.#]/g,'\\$&')+'\\{([^}]*)\\}'));assert.ok(found,selector);return found[1];};
+assert.doesNotMatch(css,/#jobs-series-found[^{]*\{[^}]*(position|float|z-index)/,'the quiet line is in normal flow');
 assert.match(rule('#jobs-state'),/white-space:nowrap/);assert.match(rule('#jobs-state'),/font-size:15px;font-weight:600/);assert.match(rule('#jobs-state'),/padding:0 8px;border:1px solid/);
 for(const selector of ['#jobs-state','#jobs-state.state-done','#jobs-state.state-you','#jobs-state.state-background','#jobs-status','#jobs-you .jobs-you'])
   assert.doesNotMatch(rule(selector),/position\s*:|float\s*:|z-index|margin[^;]*-\d/,selector+': normal flow only');

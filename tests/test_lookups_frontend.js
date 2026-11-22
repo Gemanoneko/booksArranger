@@ -46,7 +46,17 @@ let rows=show({rows:[series(),details()]});
 let row=parts(rows[0]);
 assert.equal(row.label+row.subject,'Finding series for finished audiobooks: Тёмный лес');assert.equal(row.step,'Asking online sources. No file is changed.');
 assert.equal(row.detail,'691 of 903 books','done and total are the whole look-up, as the engine sends them');
-assert.equal(row.tip,'Finished audiobooks without a series are looked up online, one by one. A series that is found changes a book only after you approve it.');
+// Third round (2.1, check 28): the tooltip follows one engine fact, whether the app applies a found series by itself.
+// The guard is at hold (the fact is false, or not sent): a found series is recorded and nothing is renamed or moved.
+const HOLD_TIP='Finished audiobooks without a series are looked up online, one by one. A series that is found is recorded. No audiobook is renamed or moved.';
+const APPLIES_TIP='Finished audiobooks without a series are looked up online, one by one. When author and series are found for certain, the book is filed under them. Otherwise it stays as it is.';
+assert.equal(row.tip,HOLD_TIP);
+assert.equal(parts(show({rows:[series()],background:{series:{tries,applies_by_itself:false},gap_fill:{tries:null}}})[0]).tip,HOLD_TIP);
+assert.equal(parts(show({rows:[series()],background:{series:{tries,applies_by_itself:true},gap_fill:{tries:null}}})[0]).tip,APPLIES_TIP,'the automatic move is on');
+assert.equal(parts(show({rows:[series({step:'updating'})],background:{series:{tries,applies_by_itself:true},gap_fill:{tries:null}}})[0]).tip,APPLIES_TIP,'the writing step too');
+assert.equal(parts(show({rows:[series()],background:{series:{tries,applies_by_itself:'yes'},gap_fill:{tries:null}}})[0]).tip,HOLD_TIP,'only the engine\'s own true');
+for(const tip of [HOLD_TIP,APPLIES_TIP])assert.doesNotMatch(tip,/approv/,'neither is about approval: he approves nothing (R18)');
+rows=show({rows:[series(),details()]});row=parts(rows[0]);
 assert.equal(row.bar.value,Math.floor(691/903*100),'determinate');
 row=parts(rows[1]);
 assert.equal(row.label+row.subject,'Finding original titles and author names: Дюна');assert.equal(row.step,'For books you already approved. Recorded only, no file is changed.');

@@ -53,9 +53,15 @@ WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_re
 #   'waiting_for_you'  no main work runs or waits; something waits for Sergei (also when look-ups remain)
 #   'background_only'  no main work, nothing waits for him; a background look-up runs or waits for its next try
 #   'all_done'         none of the above: the Running, Waiting and On hold lists and the waits-for-you reasons are empty
-# work['pending']: {'any', 'running', 'paused', 'waiting', 'still_checking', 'attention', 'hold', 'moves', 'drives',
+# work['pending']: {'any', 'running', 'paused', 'waiting', 'still_checking', 'attention', 'hold', 'moves', 'writes', 'drives',
 #                   'lookups': {'series', 'details', 'all'} (None while not counted), 'same_name'}
-# work['waits_for_you']: the reasons something waits for him, as keys in a fixed order: 'attention', 'moves', 'hold', 'drive'
+#                   'moves': finished audiobooks with a series found that is not applied (Judy 3.2, the quiet line's number);
+#                   it is part of no state. 'writes': series writes into finished files that wait or run (main work).
+# work['waits_for_you']: the reasons something waits for him, as keys in a fixed order: 'attention', 'hold', 'drive'
+#   Third round (Sergei's R18 and R19, 2026-11-22): he approves no rename or move of a finished audiobook, so a series found
+#   and not applied is no reason and holds back no state, 'all_done' included. Writing a series into a finished file, and a
+#   write that waits for a job, change his files: main work, never a background look-up. Only the asking online is one
+#   (is_background; every row and item carries it as 'background').
 # work['background']: {'series': SeriesBackfill.summary(), 'gap_fill': GapFill.summary()} (a look-up the engine does not run is
 #                     absent): books left, between tries and the next try, the tries limits, done and total of the whole look-up
 # work['lookups_waiting']: [item] of kinds series_lookup, detail_lookup (count: books between tries; at: the next try) and
@@ -64,8 +70,16 @@ WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_re
 #                work), 'about' ('new' books not converted yet, 'finished' audiobooks, 'approved' books whatever their state,
 #                'any'), 'writes_finished_files' (it can change a finished audiobook's file, name or place)
 STATES = ('unknown', 'working', 'paused', 'continues', 'waiting_for_you', 'background_only', 'all_done')
-BACKGROUND_KINDS = ('series', 'gap_fill', 'series_lookup', 'detail_lookup', 'series_write')
-WAITS_FOR_YOU = ('attention', 'moves', 'hold', 'drive')
+BACKGROUND_KINDS = ('series', 'gap_fill', 'series_lookup', 'detail_lookup')
+WAITS_FOR_YOU = ('attention', 'hold', 'drive')
+WRITING_STEP = 'updating'  # the series row while it writes a found series into a finished file and renames it
+
+
+def is_background(entry):
+    """True for a row or waiting item that is a background look-up: the asking online of the two look-ups. The series row in
+    its writing step and a series write that waits for a job are main work (Judy 1.1, third round)."""
+    kind = entry.get('kind')
+    return kind in BACKGROUND_KINDS and not (kind == 'series' and entry.get('step') == WRITING_STEP)
 
 
 def _fact(about, writes=False, background=False):
@@ -81,14 +95,14 @@ KIND_FACTS = {
     'discovery': _fact('new'), 'source_check': _fact('new'), 'drive_check': _fact('any'), 'metadata_sources': _fact('new'), 'drive': _fact('any'),
     'resume': _fact('new'), 'automatic_start': _fact('new'), 'automatic': _fact('new'),
     # The two background look-ups (Judy's section 2). Series: finished audiobooks without a series are looked up online; a
-    # series found is written into the file and the file renamed in its folder, or, when its series folder is another
-    # folder, only after Sergei approves the move. Details: books already approved get their original title and full
-    # author name looked up; the answers are recorded and no audiobook is changed.
-    'series': _fact('finished', True, True), 'series_lookup': _fact('finished', False, True), 'series_write': _fact('finished', True, True),
+    # series found is recorded, and written into the file only where the engine applies it by itself (its writing step,
+    # which is main work: the row's own 'background' is false then). Details: books already approved get their original
+    # title and full author name looked up; the answers are recorded and no audiobook is changed.
+    'series': _fact('finished', True, True), 'series_lookup': _fact('finished', False, True), 'series_write': _fact('finished', True),
     'gap_fill': _fact('approved', False, True), 'detail_lookup': _fact('approved', False, True)}
 ROW_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'step', 'step_text', 'state', 'done', 'total', 'unit',
-            'fraction', 'started', 'count', 'task_kind')
-ITEM_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'blocker', 'ahead', 'at', 'count')
+            'fraction', 'started', 'count', 'task_kind', 'background')
+ITEM_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'blocker', 'ahead', 'at', 'count', 'background')
 CLEANUP_STEPS = {'recovery copies', 'originals', 'temporary', 'folders', 'former outputs', 'verifying replacement', 'retiring former outputs'}
 LIST_LIMIT = 100  # waiting cleanups listed one by one; the counts carry the rest (a NAS backlog can hold hundreds)
 
@@ -524,29 +538,36 @@ def explain_queue(queue, jobs, merge=None):
 def finished_state(rows, waiting, jobs, automatic, background, unread):
     """(pending, state, waits_for_you) of one poll (0.31.0; the keys and the truth rules are at STATES above). rows and
     waiting: this poll's work lists; background: {'series', 'gap_fill'} summaries; unread: sources that could not be read.
-    "Main work" is every row and waiting item that is not a background look-up or a drive that does not answer."""
+    "Main work" is every row and waiting item that is not a background look-up (is_background) or a drive that does not
+    answer, and every series write into a finished file that waits or runs."""
     jobs = jobs if isinstance(jobs, dict) else {}
     automatic = automatic if isinstance(automatic, dict) else {}
-    main_rows = [row for row in rows if row['kind'] not in BACKGROUND_KINDS]
+    main_rows = [row for row in rows if not is_background(row)]
     running = sum(row['state'] in ('running', 'pausing') for row in main_rows)
     paused = sum(row['state'] == 'paused' for row in main_rows)
-    main_waiting = [item for item in waiting if item['kind'] not in BACKGROUND_KINDS and item['kind'] != 'drive']
+    main_waiting = [item for item in waiting if not is_background(item) and item['kind'] != 'drive']
     still_checking = jobs.get('todo_still_checking') if type(jobs.get('todo_still_checking')) is int else 0
     counts = jobs.get('attention_counts')
     attention = sum(value for key, value in counts.items() if key != 'all' and type(value) is int and value > 0) if isinstance(counts, dict) else 0
     held = jobs.get('attention_row') if isinstance(jobs.get('attention_row'), dict) else None
     hold = (held.get('held_total') if type(held.get('held_total')) is int else 1) if held else 0
     series, details = background.get('series') or {}, background.get('gap_fill') or {}
+    # A series found and not applied (the guard holds it, or the rules keep the book for later): the quiet line's number.
+    # It waits for the app's rules, not for him and not for a job, so it is in no reason and in no state (R18, R19).
     moves = series.get('moves_waiting') if type(series.get('moves_waiting')) is int else 0
     drives = sum(item['kind'] == 'drive' for item in waiting)
-    reasons = [key for key, value in zip(WAITS_FOR_YOU, (attention, moves, hold, drives)) if value]
-    # A look-up counts while a book is left, a series found still has to be written, or its pass shows a row.
-    left = {'series': None if series and not series.get('known') else (series.get('left') or 0) + (series.get('write_waiting') or 0) + (series.get('writing') or 0),
+    reasons = [key for key, value in zip(WAITS_FOR_YOU, (attention, hold, drives)) if value]
+    # A series write into a finished file that waits for a job, or runs or is next, is main work: the state is never
+    # 'background_only' over a file change, and 'all_done' waits for the last one.
+    count = lambda key: series.get(key) if type(series.get(key)) is int and series.get(key) > 0 else 0
+    writes = count('write_waiting') + count('writing')
+    # A look-up counts while a book is left to ask about, or its pass shows a row that is asking.
+    left = {'series': None if series and not series.get('known') else (series.get('left') or 0),
             'details': None if details and not details.get('known') else (details.get('left') or 0)}
     left['all'] = None if None in (left['series'], left['details']) else left['series'] + left['details']
-    looking = any(row['kind'] in BACKGROUND_KINDS for row in rows) or bool(left['all'])
+    looking = any(is_background(row) for row in rows) or bool(left['all'])
     is_paused = jobs.get('state') in ('Paused', 'Pausing') or automatic.get('state') == 'Paused' or paused > 0
-    by_itself = bool(main_waiting or still_checking or jobs.get('timed_retry') or jobs.get('cleanup_active')
+    by_itself = bool(main_waiting or writes or still_checking or jobs.get('timed_retry') or jobs.get('cleanup_active')
                      or automatic.get('state') in ('Running', 'Stopping') or automatic.get('start_pending') or automatic.get('next_retry_at') is not None)
     if unread:
         state = 'unknown'
@@ -565,7 +586,7 @@ def finished_state(rows, waiting, jobs, automatic, background, unread):
     else:
         state = 'all_done'
     pending = {'any': state != 'all_done', 'running': running, 'paused': paused, 'waiting': len(main_waiting), 'still_checking': still_checking,
-               'attention': attention, 'hold': hold, 'moves': moves, 'drives': drives, 'lookups': left,
+               'attention': attention, 'hold': hold, 'moves': moves, 'writes': writes, 'drives': drives, 'lookups': left,
                'same_name': jobs.get('same_name_total') if type(jobs.get('same_name_total')) is int else 0}
     return pending, state, reasons
 
@@ -604,6 +625,8 @@ def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo
         except Exception:
             info = None
     count = lambda key: jobs.get(key) if type(jobs.get(key)) is int else 0
+    for entry in [*rows, *reader.waiting, *reader.lookup_items]:
+        entry['background'] = is_background(entry)  # the page never guesses which work is "main"
     pending, state, reasons = finished_state(rows, [item for _n, item in waiting], jobs, automatic, reader.background, reader.unread)
     return {'schema': SCHEMA, 'state': state, 'pending': pending, 'waits_for_you': reasons, 'background': reader.background, 'kinds': KIND_FACTS,
             # The look-ups' own waiting items (series_lookup, detail_lookup, series_write), in the item shape. Kept out of
