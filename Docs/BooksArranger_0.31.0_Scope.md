@@ -21,6 +21,23 @@ Scope and rulings, 2026-11-22 (Jane, from Sergei's answers that day). Diagnosis:
 | R6 | **Already-sorted books are re-checked and moved into series folders as a separate job, run from the studio, not as an app feature.** New books must convert correctly by themselves. | — |
 | R7 | **Start with steps 1 and 4 below.** | — |
 
+### Second round — Sergei, 2026-11-22 (after the engine build and Judy's spec)
+
+| # | Ruling |
+| --- | --- |
+| R8 | **The series look-up writes nothing into a finished book without approval until English names ship** (step 3). The write guard stays at `hold`; this covers the 282 flat-named finished books. |
+| R9 | **Look-up tries: 3 per source, 6 hours apart.** Approved as built. |
+| R10 | **The approval list shows every kind of change the plan holds: series and author folders too**, not series only. |
+| R11 | **"Leave as it is" on a wrong series stops asking about that book for good** (the book, not the whole series). It can be taken back. |
+| R12 | **Books whose original is Chinese or Japanese are held out of the approval list until English series names ship.** |
+| R13 | **The window title shows the state** (`Books Arranger: all done`), so the taskbar answers. |
+| R14 | **A drive that is not answering holds back "All done".** |
+| R15 | **A file whose only clue is a title tag shaped "Series NN - Title" is filed without asking** (Neuromancer). R4 covers it. |
+| R16 | **The look-up for original titles and author names gets the same limit** as the series look-up (3 tries per source). |
+| R17 | **Where pieces of one book would all get one name and Approve is blocked, the reason may say "Join them into one book, or change this title."** Only on a blocked press; the 2026-11-18 "no Join hint on rows" otherwise stands. |
+
+Left as they work today (Sergei did not change them): no "Try again" count for look-ups that gave up; no "Convert now" button on a book waiting for the online answer; a book already queued to convert is not stopped by a later same-name clash; the 22 older jobs planned without the series their tags name wait for R6's job.
+
 Not ruled yet (ask before building on them): which source wins a disagreement; whether a parent folder named after the series counts as confirmation (ruling 55 says no); what to do with author names the app cannot order beyond the Liu Cixin fix; whether the series back-fill of old books keeps running once R6's job has been done.
 
 ## Steps
