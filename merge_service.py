@@ -6347,6 +6347,12 @@ class MergeService:
             if job_id in listed:continue
             results.append({'job_id':job_id,'state':'refused','reason':refusals[job_id]} if job_id in refusals else
                            {'job_id':job_id,'state':'not_listed','reason':'Not in the list'})
+        # 0.31.0 step 4d (Judy 3.5): each answer is 'accepted' or 'refused', a refusal with a reason key the page words
+        # (sorting_moves.reason_key; 'not_listed' for a book the list does not hold).
+        for result in results:
+            refused=result.get('state') in ('refused','failed','cancelled','not_listed')
+            result['code']='refused' if refused else 'accepted'
+            if refused:result['reason_key']='not_listed' if result['state']=='not_listed' else sorting_moves.reason_key(result.get('reason'))
         return {'digest':digest,'results':results}
 
     def sorting_target(self,job_id,series=None,placed=None):

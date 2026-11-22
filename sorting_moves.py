@@ -152,24 +152,59 @@ def _moved(db, job_id):
         return ''
 
 
+# 0.31.0 step 4d (Judy's BooksArranger_0.31.0_UX.md, section 3 and Notes for Ender): what a page control needs beside the
+# 0.30.0 plan, all additive (the digest signs the same four values per book as before). Every item and refusal also carries
+# 'book_id', 'title', 'author', 'from_shown' and 'to_shown' (the paths under Audiobooks Sorted), 'kept' (False: keeping a
+# book where it is has no engine yet) and 'approved_not_moved' (None, or {'key', 'reason'}: he approved this move and it
+# could not run; the book is listed again, never dropped in silence). A refusal carries 'refused_key', the reason as a
+# key the page words (REFUSAL_KEYS; 'other' for a sentence with no key).
+REFUSAL_KEYS = (('name_exists', ('A file with the new name is already there',)), ('same_target', ('Another listed book would get the same name',)),
+                ('chosen_folder', ('You chose its folder', 'Already moved to a folder you chose')), ('not_in_sorted', ('Not in Audiobooks Sorted',)),
+                ('not_app_name', ("Its name does not follow the app's naming",)),
+                ('not_where_recorded', ('The audiobook is not where the catalog says', 'The audiobook is not where its series update put it')),
+                ('newer_version', ('Part of a replacement or a newer version',)), ('kept_files', ('Files kept at your choice',)),
+                ('data_move', ('Kept as published while the data folder move is unfinished',)), ('sources_disagree', ('Series sources need review',)),
+                ('no_name', ('No name for it', 'Could not be planned')))
+NOT_MOVED_KEYS = (('file_changed', ('The book changed since you approved', 'The published audiobook changed', 'no longer matches')),
+                  ('place_changed', ('The planned place changed',)), ('name_exists', ('A file with the series name already exists',)))
+
+
+def reason_key(text, table=REFUSAL_KEYS):
+    """The key of a refusal sentence, 'other' when it has none."""
+    text = str(text or '')
+    return next((name for name, marks in table if any(mark in text for mark in marks)), 'other')
+
+
+def _shown(path, output_root):
+    """The path under Audiobooks Sorted, as the page shows it; the whole path when it is not inside."""
+    path = str(path or '')
+    return path[len(str(output_root).rstrip('\\/')) + 1:] if _inside(path, output_root) else path
+
+
 def _held_series(db):
     """{job_id: {'name','number','provider','source_url'}}: series backfill found a series and held the book only because its
-    series folder is another folder (item 2), or holds it for Sergei's approval of that move."""
+    series folder is another folder (item 2), or holds it for Sergei's approval of that move. 0.31.0 (Judy 3.3): also a book
+    whose approved move then could not run (record 'approved_failed'): it comes back to the list, with why ('failed')."""
     import series_backfill
     if not _table(db, 'series_backfill'):
         return {}
     found = {}
     reasons = SERIES_FOLDER_REASONS + (series_backfill.MOVE_WAITS,)
     for job_id, reason, record in db.execute("SELECT job_id,reason,record FROM series_backfill WHERE state='held'"):
-        if reason not in reasons:
-            continue
         try:
             record = json.loads(record)
         except (TypeError, ValueError):
             continue
-        if record.get('series') and str(record.get('number') or '').strip():
-            found[job_id] = {'name': record['series'], 'number': str(record['number']), 'provider': record.get('provider') or '',
-                             'source_url': record.get('source_url') or ''}
+        failed = record.get('approved_failed') if isinstance(record.get('approved_failed'), dict) else None
+        if reason not in reasons and not failed:
+            continue
+        approved = record.get('approved_found') if isinstance(record.get('approved_found'), dict) else {}
+        name, number = record.get('series') or approved.get('name'), str(record.get('number') or approved.get('number') or '').strip()
+        if name and number:
+            found[job_id] = {'name': name, 'number': number, 'provider': record.get('provider') or approved.get('provider') or '',
+                             'source_url': record.get('source_url') or approved.get('source_url') or ''}
+            if failed:
+                found[job_id]['failed'] = str(failed.get('reason') or reason)
     return found
 
 
@@ -241,8 +276,12 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
             continue
         if not found:
             continue
+        failed = (series.get(row['job_id']) or {}).get('failed')
+        if failed:
+            found['approved_not_moved'] = {'key': reason_key(failed, NOT_MOVED_KEYS), 'reason': failed}
         if row['job_id'] in placed and 'to' in found:
             found['placed'] = True  # its series is in the file already: an approval only moves it (sorting_moves_apply)
+            found['approved_not_moved'] = {'key': 'other', 'reason': 'Its series was written; the move into its series folder did not run'}
         if 'refused' not in found:
             why = (RETAINED if row['job_id'] in retained else
                    'Part of a replacement or a newer version; left as it is' if row['job_id'] in replaced else
@@ -260,6 +299,20 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
     clash = {id(item) for group in targets.values() if len(group) > 1 for item in group}
     refused += [dict(item, refused=SAME_TARGET) for item in items if id(item) in clash]
     items = [item for item in items if id(item) not in clash]
+    # 0.31.0 step 4d: what the page's list shows per book (one catalog read for every listed book).
+    listed = items + refused
+    names = {}
+    if listed:
+        names = {r[0]: (r[1], r[2] or '', r[3] or r[4] or '') for r in db.execute(
+            "SELECT job_id,json_extract(manifest,'$.candidate_id'),json_extract(manifest,'$.metadata.title'),json_extract(manifest,'$.metadata.canonical_author'),"
+            "json_extract(manifest,'$.metadata.author') FROM audio_jobs WHERE job_id IN (SELECT value FROM json_each(?))", (json.dumps([i['job_id'] for i in listed]),))}
+    for item in listed:
+        book_id, title, author = names.get(item['job_id'], (None, '', ''))
+        item.update(book_id=book_id, title=title, author=author, from_shown=_shown(item.get('from'), output_root),
+                    to_shown=_shown(item.get('to'), output_root) if item.get('to') else None, kept=False)
+        item.setdefault('approved_not_moved', None)
+        if 'refused' in item:
+            item['refused_key'] = reason_key(item['refused'])
     return _answer(output_root, items, refused)
 
 
