@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.31.0] - 2026-11-22
+
+### Added
+
+- An All done badge and the window title show when nothing is left to do, background look-ups included.
+- Series name and number are read from the file's own tags.
+
+### Changed
+
+- A volume the app separated is named from its own title tag. So is a file whose title tag reads "Series NN - Title", such as Neuromancer.
+- Two books never share one name. When they would, both are held.
+- The series look-up and the look-up for original titles and author names each end after 3 tries per source.
+- Background look-ups are named in plain words.
+- In this version the app does not write or move any file of a finished book by itself.
+
 ## [v0.30.1] - 2026-11-20
 
 ### Fixed
