@@ -82,8 +82,9 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.start();self.research_all()
         row=self.service.reviews.page(status='output_attention')['rows'][0]
         preview=self.service.approval_preview(row['id'],row['revision'])
-        self.assertEqual(preview.get('series'),{'name':'Дозоры','number':'2'},'positive control: Approve files it in the series')
-        self.assertEqual((row['ask']['kind'],row['ask']['series']),('order_unclear',{'name':'Дозоры','number':'2','basis':'research'}))
+        # 0.31.0 (f3dc8e4, Judy's spec 4.3): the preview's series also says where it came from, here his folder structure.
+        self.assertEqual(preview.get('series'),{'name':'Дозоры','number':'2','origin':'folders','title_from_title_tag':False},'positive control: Approve files it in the series')
+        self.assertEqual((row['ask']['kind'],row['ask']['series']),('order_unclear',{'name':'Дозоры','number':'2','origin':'folders','title_from_title_tag':False,'basis':'research'}))
         self.assertNotIn('series_clue',row['ask'])
 
     def number_unclear_book(self,researched=True):
@@ -144,7 +145,7 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.assertEqual(ask['volume'],{'title_number':1,'series_number':'2','provider':'fantlab'})
         self.assertEqual({name:ask['fields'][name]['proposal'] for name in ('title','author','series','number')},
                          {'title':'Хранители. Летопись первая','author':'Tolkien J. R. R.','series':'Властелин колец','number':'1'})
-        self.assertEqual(self.service.approval_preview(row['id'],row['revision']).get('series'),{'name':'Властелин колец','number':'1'},'its Goes to line')
+        self.assertEqual(self.service.approval_preview(row['id'],row['revision']).get('series'),{'name':'Властелин колец','number':'1','origin':'entered','title_from_title_tag':False},'its Goes to line')  # 0.31.0: with its origin (approved as shown: his)
         metadata,destination=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))  # nothing typed
         self.assertEqual((metadata['title'],metadata['canonical_author'],metadata['series'],metadata['number']),('Хранители. Летопись первая','Tolkien J. R. R.','Властелин колец','1'))
         self.assertIn(os.path.join('Tolkien J. R. R','Властелин колец',''),destination)
