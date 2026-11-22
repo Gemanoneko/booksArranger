@@ -205,6 +205,16 @@ class TagSeriesTests(Fixture):
         local_identity._INDEX.clear()
         self.assertEqual(self.research.identity(row, ROOT)[0]['series'], {'name': 'Тёмная Башня', 'number': '1'}, 'one folder, the one Sorted has')
 
+    def test_an_author_question_still_lists_its_candidates(self):
+        # Regression (found by test_approve_as_is before this shipped): the tag reading reused the name of the list of tag
+        # credits, so a book whose tags credit two people raised instead of asking "Author unclear" with both.
+        for tags in ({}, {'sort_album': 'Клейн. Книга 2'}):
+            with self.subTest(tags=tags):
+                row = self.book('Новое\\Империя', album='Империя атома', artist='Иван Петров', album_artist='Сергей Сидоров', **tags)
+                identity, _ = self.research.identity(row, ROOT)
+                self.assertEqual((identity['ask']['kind'], identity['ask']['why']), ('author_unclear', 'two_people'))
+                self.assertEqual(sorted(c['name'] for c in identity['ask']['candidates']), ['Иван Петров', 'Сергей Сидоров'])
+
 
 if __name__ == '__main__':
     unittest.main()

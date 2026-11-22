@@ -2893,14 +2893,14 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         # ("Память о прошлом Земли. Книга 2") file the book in that series without a question. Sergei's own folder
         # structure, when it names a series, still decides (above). A series folder Sorted already holds for this author
         # under the same name gives its spelling (ruling 52), so the book joins that folder.
-        tagged = tag_series(members, author['name'] if author else '')
-        if tagged:
-            name = sorted_spelling(tagged['series'], author['name'] if author else '', index, rules) or tagged['series']
-            source = [{'kind': 'embedded', 'field': tagged['field'], 'value': tagged['value']}]
+        by_tags = tag_series(members, author['name'] if author else '')
+        if by_tags:
+            name = sorted_spelling(by_tags['series'], author['name'] if author else '', index, rules) or by_tags['series']
+            source = [{'kind': 'embedded', 'field': by_tags['field'], 'value': by_tags['value']}]
             fields['series'] = {'state': 'green', 'value': name, 'basis': 'tag', 'sources': source,
-                                'how': 'the series the %s tag names (ruling R4, 2026-11-22)' % tagged['field'].replace('_', '-')}
-            fields['number'] = {'state': 'green', 'value': tagged['number'], 'basis': 'tag', 'sources': source,
-                                'how': 'the book\'s number in the %s tag' % tagged['field'].replace('_', '-')}
+                                'how': 'the series the %s tag names (ruling R4, 2026-11-22)' % by_tags['field'].replace('_', '-')}
+            fields['number'] = {'state': 'green', 'value': by_tags['number'], 'basis': 'tag', 'sources': source,
+                                'how': 'the book\'s number in the %s tag' % by_tags['field'].replace('_', '-')}
     # Ruling 41 (Sergei 2026-10-27, "2. Yes"): a name that reads "Series N. Title" fills Series, Number and Title itself and
     # the series never stays inside the title; the book files without a question once its series is confirmed (ruling 52,
     # below), else the row asks with the split filled in. A series the files already name the
