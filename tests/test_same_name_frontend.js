@@ -52,7 +52,7 @@ const showBoth=tr=>buttonsOf(tr).find(b=>/^Show (both|all \d+) books$/.test(b.te
 const press={stopPropagation(){}};
 function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row,ask:{...row.ask,destination:{...row.ask.destination}}}));totalRows=rows.length;askDrafts.clear();askResults.clear();renderRows(true);controls()');}
 const BLOCK='Another book would get this name. Change the title, author, series or number.';
-// R17 (Sergei 2026-11-22): only on the blocked press of a Part of a bigger book row and of the folder question.
+// R17 (Sergei 2026-11-22): only on the blocked press of a Part of a bigger book row, every cause (spec 4.2a as amended).
 const JOIN='Another book would get this name. Join them into one book, or change this title.';
 const TIP='List the books that would get this name: sets Status to All and searches for this title.';
 (async()=>{
@@ -160,7 +160,7 @@ const TIP='List the books that would get this name: sets Status to All and searc
   for(const [row,status,sentence,face] of groups){
     tr=trOf(row.id);assert.equal(statusCell(tr).textContent,status,row.id);assert.equal(hint(tr),sentence,row.id);
     if(face)assert.equal(faces(tr)[0],face,row.id);else assert.equal(faces(tr)[0],run('FOLDER_QUESTION.approve[0]'),'the folder question keeps its own face');
-    const said=['cand-g5','cand-g7'].includes(row.id)?JOIN:BLOCK;  // R17: the folder question and a Part of a bigger book row only
+    const said=row.id==='cand-g7'?JOIN:BLOCK;  // R17: a Part of a bigger book row only; the folder question (g5) keeps the plain line
     assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true',row.id);assert.equal(reason(tr),said,row.id);assert.equal(buttonsOf(tr)[0].title,said,row.id);
     assert.equal(goesTo(tr),'Both go to Audiobooks Sorted\\'+SHARED,row.id);assert.equal(warned(tr),true,row.id);
     assert.equal(faces(tr).at(-1),'Show both books',row.id);
