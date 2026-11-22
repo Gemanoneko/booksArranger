@@ -71,7 +71,7 @@ const oldHeld={title:'Похититель детей',book_id:'b0',cause:'other
 let mixed=render({state:'Paused',queued:418,attention_counts:{other:65},approved_total:1200,converted_total:778,pause:{origin:'interrupted'},attention_row:oldHeld},[series],{queued_conversions:418});
 assert.match(get('jobs-status-text').textContent,/^Paused · 418 books waiting to convert · 65 need attention · 778 converted out of 1200 approved books/,'0.31.0 (2.1): a look-up row alone never leads the status line; it shows as its row below');
 assert.match(get('jobs-help').textContent,/has not identified which book stopped them/);assert.doesNotMatch(get('jobs-help').textContent,/Похититель|Возрожденный/);
-assert.equal(parts(mixed.find(item=>item.dataset.id==='series')).label,'Metadata: Updating series: ');
+assert.equal(parts(mixed.find(item=>item.dataset.id==='series')).label,'Finding series for finished audiobooks: ');
 assert.equal(parts(mixed.find(item=>item.dataset.id==='series')).detail,'0 of 292 books');
 // 0.29.0 (Judy section 7): a held cleanup is not a Running row; it is On hold, with its plain cause.
 assert.equal(mixed.length,1);assert.equal(get('jobs-hold-block').hidden,false);

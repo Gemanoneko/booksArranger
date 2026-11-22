@@ -1601,7 +1601,7 @@ const DECISION_LABELS={decision_names:['Saving names','Save names'],decision_app
   decision_metadata_choices:['Saving choices','Save choices'],decision_file_review:['Saving file review','Save file review']};
 function decisionLabel(key,waiting){return (DECISION_LABELS[key] || ['Saving your answers','Save your answers'])[waiting?1:0];}
 const WORK_LABELS={queue:'Conversion queue',source_folders:'Removing source folders',move:'Moving',move_recovery:'Finishing interrupted moves',start_check:'Checking books before conversion',retry_check:'Checking retry',
-  maintenance:'Checking audiobook before cleanup',finished_check:'Re-checking finished audiobooks',series:'Metadata: Updating series',gap_fill:'Looking up book details',lookup:'Looking up metadata',
+  maintenance:'Checking audiobook before cleanup',finished_check:'Re-checking finished audiobooks',series:'Finding series for finished audiobooks',gap_fill:'Finding original titles and author names',lookup:'Looking up metadata',
   repair_check:'Checking M4B for repair',recovery_delete:'Deleting recovery copies',regroup:'Regrouping split books',scan:'Scanning files',research:'Researching books',discovery:'Automatic processing: finding books',
   source_check:'Checking source folders',drive_check:'Checking drives',chapter_check:'Checking source audio',approve_selected:'Approving selected books',release_selected:'Handing selected books to the app'};
 function workLabel(row){
@@ -1639,8 +1639,9 @@ function workStep(row,finishing){
     case 'retry_check':return prefix('Checking this book can be converted again');
     case 'maintenance':return row.state==='pausing'?'Stopping finished-book checks…':'Checking the finished audiobook before removing originals';
     case 'finished_check':return prefix('Checking each finished file is still the right one');
-    case 'series':return prefix(row.step==='updating'?'Writing the series into the audiobook':'Looking up the series');
-    case 'gap_fill':return prefix('Asking sources for the original title and full author name');
+    // 0.31.0 (2.1): each step says what happens this second and whether a file changes.
+    case 'series':return prefix(row.step==='updating'?'Writing the series into the file and renaming it. Audio unchanged.':'Asking online sources. No file is changed.');
+    case 'gap_fill':return prefix('For books you already approved. Recorded only, no file is changed.');
     case 'lookup':return prefix('Asking metadata sources');
     case 'decisions':return prefix('Applying your answers');
     case 'repair_check':return prefix('Reading the M4B file to see if it needs repair');
@@ -1674,6 +1675,8 @@ function workDetail(row,finishing){
   return '';
 }
 // 0.30.0 (Judy 9): a damaged part's repair names its file in the step's tooltip; the manual window's stop and end lines.
+const LOOKUP_TIPS={series:'Finished audiobooks without a series are looked up online, one by one. A book moves into a series folder only after you approve it.',
+  gap_fill:'Books approved without an original title or a full author name are looked up online, one by one. The answers are recorded. No audiobook is renamed.'};
 function repairTip(row){return row?.kind==='conversion' && row.step==='repairing' && typeof row.step_text==='string' && row.step_text?'Repairing '+row.step_text:'';}
 function partRepairLine(draft){
   const part=draft?.state==='failed'?draft.part_repair:null,file=typeof part?.file==='string'?part.file:'';if(!file)return '';
@@ -1719,11 +1722,11 @@ function updateActivity(view,now){
   const label=workLabel(row),subject=rowSubject(row),step=workStep(row,finishing),detail=workDetail(row,finishing);
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
   const progressKey=[row.done,row.fraction,row.step,row.subject].join('\u001f');if(view.progressKey!==progressKey){view.progressKey=progressKey;view.progressAt=now;}
-  const frozen=running && Number.isFinite(view.progressAt) && now-view.progressAt>=300000;
+  const frozen=running && !isLookup(row) && Number.isFinite(view.progressAt) && now-view.progressAt>=300000;  // 0.31.0 (2.2): never on a look-up that is only being polite to a source
   const stepShown=frozen?'No progress for 5 min':step;view.item.classList.toggle('stalled',frozen);
   writeText(view.detail,detail);writeText(view.step,stepShown);
   // The chapter check's file name is its tooltip (1.5); every other step line carries its own text.
-  view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:repairTip(row) || stepShown;
+  view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:repairTip(row) || LOOKUP_TIPS[row.kind] || stepShown;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',false);
   const fraction=typeof row.fraction==='number' && row.fraction>=0 && row.fraction<=1?row.fraction:row.done/row.total;
   if(determinate){const value=approveFiles && row.done===row.total?100:Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}
@@ -1736,7 +1739,7 @@ function updateActivity(view,now){
   // ETA from the measured rate over the last 30 s (samples only when the data changed), once trustworthy.
   if(determinate && running && (!view.samples.length || view.samples[view.samples.length-1][1]!==fraction))view.samples.push([now,fraction]);
   while(view.samples.length>2 && now-view.samples[1][0]>30000)view.samples.shift();
-  if(!(determinate && running) || elapsed<10 || fraction<0.05)view.eta='';
+  if(!(determinate && running) || isLookup(row) || elapsed<10 || fraction<0.05)view.eta='';  // 0.31.0 (2.1): no time estimate on a look-up
   else if(now-view.etaAt>=5000 && view.samples.length>1){
     const [t0,d0]=view.samples[0],[t1,d1]=view.samples[view.samples.length-1],rate=(d1-d0)/((t1-t0)/1000);
     view.etaAt=now;
@@ -1749,7 +1752,9 @@ function updateActivity(view,now){
 const waitingItems=new Map();
 function waitingList(work){
   // QA D1 (0.30.0): a queued action nothing blocks (blocker null) is about to run: no Waiting item (its row comes when it runs).
-  const waiting=work.waiting.filter(item=>!(item.kind==='action' && !item.blocker));
+  const listed=work.waiting.filter(item=>!(item.kind==='action' && !item.blocker)),after=['drive','resume','automatic_start','automatic'];
+  // 0.31.0 (2.2): the engine sends the look-ups' items on their own (work.lookups_waiting); their place is the engine's order.
+  const at=listed.findIndex(item=>after.includes(item.kind)),waiting=at<0?[...listed,...work.lookups]:[...listed.slice(0,at),...work.lookups,...listed.slice(at)];
   const cleanups=waiting.filter(item=>item.kind==='cleanup');if(cleanups.length<=5)return waiting;
   const counted=work.counts.cleanups_waiting,n=Number.isInteger(counted) && counted>=cleanups.length?counted:cleanups.length,grouped={...cleanups[0],id:'cleanup:group',group:n};
   const out=[];let placed=false;for(const item of waiting){if(item.kind!=='cleanup'){out.push(item);continue;}if(!placed){out.push(grouped);placed=true;}}
@@ -1768,6 +1773,12 @@ function waitingLines(item,work){
     case 'recovery_delete':return ['Delete recovery copies',subject,RECOVERY_WAITS.deletion];
     case 'decisions':return [decisionLabel(item.label_key,true),subject,'Your answers are recorded. They apply one at a time.'];
     case 'metadata_sources':return ['Metadata sources','',[n?`${plural(n,'book waits','books wait')} for a source to answer.`:'',Number.isFinite(item.at)?`Next try ${waitingClock(item.at)}.`:''].filter(Boolean).join(' ')];
+    case 'series_lookup':case 'detail_lookup':{
+      const tries=item.kind==='series_lookup'?work.background?.series?.tries?.per_source:work.background?.gap_fill?.tries?.per_source;
+      return [item.kind==='series_lookup'?WORK_LABELS.series:WORK_LABELS.gap_fill,plural(n,'book','books'),
+        ['Waiting for online sources.',Number.isFinite(item.at)?`Next try ${waitingClock(item.at)}.`:'','No file is changed.'].filter(Boolean).join(' '),
+        Number.isInteger(tries) && tries>0?`A book that gets no answer after ${tries} tries is left as it is. The app stops asking about it.`:''];}
+    case 'series_write':{const said=blockerSentence(item.blocker,work);return ['Write series into audiobook',subject,said.text,said.tip];}
     case 'drive':return ['Drive not answering',subject,'Its books stay on the list. Check that the drive is connected, then press Check again in Library scan controls.'];
     case 'resume':return ['Resume audiobook jobs','','It starts when the pause finishes.'];
     case 'automatic_start':return ['Start automatic processing','',pendingNotice(state?.automatic_processing?.start_pending?.kind) || ''];

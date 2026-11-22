@@ -36,7 +36,7 @@ const shown=text=>assert.doesNotMatch(text,/Connection interrupted|Local server 
   run('pressTick('+(t0+2000)+')');assert.equal(get('connection-notice').textContent,'','under 3 s: nothing');
   run('pressTick('+(t0+4000)+')');
   assert.equal(get('connection-notice').hidden,false);
-  assert.equal(get('connection-notice').textContent,'The app is busy with background work and answers slowly. This page refreshes by itself.\nBusy with: Re-checking finished audiobooks, Metadata: Updating series: Dune, Researching books: Foo, Looking up book details: Bar.');
+  assert.equal(get('connection-notice').textContent,'The app is busy with background work and answers slowly. This page refreshes by itself.\nBusy with: Re-checking finished audiobooks, Finding series for finished audiobooks: Dune, Researching books: Foo, Finding original titles and author names: Bar.');
   assert.equal(get('status').textContent,'Last update '+clock+' · Discovery: idle · Files cataloged 5');
   assert.match(get('jobs-status-text').textContent,/^Last confirmed — /);
   run('pressTick('+(t0+150000)+')');
