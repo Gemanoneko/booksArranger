@@ -59,10 +59,41 @@ MOVE_WAITS = 'Series found. Moving it into its series folder waits for your appr
 # without approval), so its series is found again under 0.30.0's rules (item 6: the original-language name) and it then
 # waits for approval with MOVE_WAITS.
 OLD_FOLDER_REASON = 'The recorded series paths do not share their original parent'
+# 0.31.0 step 4a (Sergei 2026-11-22: "the series look-up of finished books must come to an end"). A book was recorded "no
+# series" only when every source answered in one pass, and any source that waited sent the whole book round again, every
+# source asked anew: on a copy of the live catalog 745 of 907 ledger rows were deferred, 576 of them more than 1,000 times
+# (one 3,287), and 98% of the app's requests in the last hour (129 of 131) were these repeats. DuckDuckGo sat behind a
+# human check for weeks, so no book it was asked about could ever end. The rule now, per book:
+#   - each source's answer is kept: a source that answered "no series" is never asked about that book again;
+#   - the app's own hourly limits (kind app_limit) are no try: the book waits for the limit and goes on where it stopped;
+#   - a source that could not be reached, or whose answer could not be used, is tried SOURCE_TRIES times for that book,
+#     at least TRY_SPACING apart, then given up: it counts as no answer;
+#   - when every source has answered or is given up, the book is settled: a series found, or "none" with the sources
+#     that never answered named (record 'unreached'); it is not looked up again under this lookup policy;
+#   - a look-up that fails for another reason is tried FAILURE_TRIES times, TRY_SPACING apart, then held;
+#   - a book whose cleanup is on hold (waiting for Sergei) is 'blocked': not tried, not counted as a look-up, and looked
+#     up once its cleanup has finished.
+# The numbers are product numbers Sergei may overrule; the page prints them (summary()['tries']).
+SOURCE_TRIES = 3
+TRY_SPACING = 6 * 3600
+FAILURE_TRIES = 3
+SOURCES = ('goodreads', 'fantlab', 'wikidata', 'publisher', 'litres')
+NO_SERIES = 'No verified narrative series found in the supported sources'
+UNREACHED = 'No series found. Sources that could not be reached are no longer asked: '
+BLOCKED = 'Its source cleanup is on hold; the series look-up waits for it'
+WAITING_ON = ('blocked',)
+# The hosts a deferral recorded before 0.31.0 named, as the sources that ask them.
+HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
+                'html.duckduckgo.com': ('publisher', 'litres'), 'en.wikipedia.org': ('publisher',), 'ru.wikipedia.org': ('publisher',),
+                'ja.wikipedia.org': ('publisher',), 'www.penguinrandomhouse.com': ('publisher',), 'www.litres.ru': ('litres',)}
 
 
 class Held(ValueError):
     """The book is left as it is, with this reason."""
+
+
+class Blocked(Exception):
+    """Step 4a: the book's cleanup is on hold (it waits for Sergei); the look-up is not tried until that has finished."""
 
 
 class Later(Exception):
@@ -158,9 +189,25 @@ class SeriesBackfill:
         return max(30, min(PASS_WAIT, min(due) - self.clock())) if due else PASS_WAIT
 
     def status(self):
-        """The progress row: {'title', 'done', 'total', 'step'} while a pass works on a book, else None."""
+        """The progress row: {'title', 'done', 'total', 'step'} while a pass works on a book, else None. 0.31.0 (Judy's
+        spec 2.1): done and total are the whole look-up's (settled books of every book that needed it, summary()), not
+        one pass's, which started again every ten minutes and read as no progress; 'pass_done' and 'pass_total' keep the
+        pass's own. 'pacing': the pass only waits for a site's pacing now (no running row then, Judy 2.2)."""
         value = self.progress
-        return dict(value) if value else None
+        if not value:
+            return None
+        value = dict(value, pass_done=value.get('done'), pass_total=value.get('total'), pacing=bool(self.__dict__.get('_pacing_until', 0) > time.monotonic()))
+        try:
+            whole = self.summary()
+        except sqlite3.Error:
+            whole = None
+        if whole and whole.get('total'):
+            value.update(done=whole['done'], total=whole['total'])
+        return value
+
+    def _pacing(self, seconds):
+        """PublicClient's note (budget['pacing']): it waits this long for a site's pacing before its request; 0 when done."""
+        self.__dict__['_pacing_until'] = time.monotonic() + seconds if seconds and seconds > 1 else 0
 
     # ------------------------------------------------------------------ ledger
     def _rows(self, sql, params=()):
@@ -181,6 +228,73 @@ class SeriesBackfill:
             value = record if record is not None else (json.loads(prior[0]) if prior else {})
             db.execute('INSERT OR REPLACE INTO series_backfill VALUES(?,?,?,?,?)',
                        (job_id, state, reason, json.dumps(value, ensure_ascii=False), _stamp()))
+        self._changed()
+
+    def _changed(self):
+        """The ledger was written: the cached summary is recounted at its next read."""
+        self.__dict__['_summary'] = None
+
+    # ------------------------------------------------------------------ what is left (0.31.0 step 4b)
+    def summary(self):
+        """Plain counts of the whole look-up for /api/state (background_work), read from the ledger: no manifest is parsed,
+        and the answer is kept until the ledger is written again or a book finishes converting.
+          left          finished books that still wait for a series look-up (to_look_up + between_tries)
+          to_look_up    due now or not visited yet; None until the first pass has counted the books not visited
+          between_tries waiting for a later try (a source's limit or pause); next_at: the earliest, epoch seconds
+          write_waiting a series was found and its write waits for the queue, a cleanup or a scan (job ids in 'writes')
+          writing       being written or renamed now, or approved and next
+          moves_waiting a series was found; the move into its series folder waits for Sergei's approval
+          blocked       the book's cleanup is on hold; not looked up until that has finished
+          settled       with_series + without + gave_up + left_alone (held or skipped for a lasting reason)
+          done, total   settled books and every book that needed the look-up, for the row's bar
+          tries         {'per_source', 'spacing_seconds', 'failures'}: the limits (SOURCE_TRIES, TRY_SPACING, FAILURE_TRIES)"""
+        now = self.clock()
+        with connect(self.database) as db:
+            finished = db.execute("SELECT count(*) FROM audio_jobs WHERE state='completed'").fetchone()[0]
+            kept = self.__dict__.get('_summary')
+            if kept is not None and kept[0] == finished and (kept[1] is None or kept[1] > now):
+                return dict(kept[2])
+            rows = db.execute("SELECT job_id,state,reason,json_extract(record,'$.next_attempt'),json_extract(record,'$.found') IS NOT NULL,"
+                              "json_extract(record,'$.unreached') IS NOT NULL,json_extract(record,'$.approved_failed') IS NOT NULL FROM series_backfill").fetchall()
+        counts = dict.fromkeys(('between_tries', 'due', 'write_waiting', 'writing', 'moves_waiting', 'blocked', 'with_series', 'without', 'gave_up', 'left_alone'), 0)
+        writes, nexts = [], []
+        for job_id, state, reason, next_attempt, found, unreached, failed in rows:
+            later = isinstance(next_attempt, (int, float)) and next_attempt > now
+            if state == 'held' and (reason in (MOVE_WAITS, OLD_FOLDER_REASON) or failed):
+                counts['moves_waiting' if reason != OLD_FOLDER_REASON else 'due'] += 1
+            elif state in ACTIVE or state == 'pending':
+                counts['writing'] += 1
+            elif state in WAITING_ON:
+                counts['blocked'] += 1
+            elif state == 'deferred' and found:
+                counts['write_waiting'] += 1
+                writes.append(job_id)
+            elif state == 'deferred':
+                counts['between_tries' if later else 'due'] += 1
+                if later:
+                    nexts.append(next_attempt)
+            elif state == 'done':
+                counts['with_series'] += 1
+            elif state == 'none':
+                counts['gave_up' if unreached else 'without'] += 1
+            else:
+                counts['left_alone'] += 1
+        backlog = self.__dict__.get('_backlog')
+        # Not visited yet: counted at the last pass's start, less the books that got a ledger row since.
+        unvisited = len(backlog['unvisited'] - {row[0] for row in rows}) if backlog and backlog['finished'] == finished else None
+        if unvisited is None and self.thread and self.thread.is_alive():
+            self.wake.set()  # a book finished converting (or nothing was counted yet): the pass counts the books not visited
+        settled = counts['with_series'] + counts['without'] + counts['gave_up'] + counts['left_alone']
+        to_look_up = None if unvisited is None else counts['due'] + unvisited
+        left = None if to_look_up is None else to_look_up + counts['between_tries']
+        value = {'known': unvisited is not None, 'left': left, 'to_look_up': to_look_up, 'between_tries': counts['between_tries'],
+                 'next_at': min(nexts) if nexts else None, 'write_waiting': counts['write_waiting'], 'writes': writes[:100], 'writing': counts['writing'],
+                 'moves_waiting': counts['moves_waiting'], 'blocked': counts['blocked'], 'settled': settled, 'with_series': counts['with_series'],
+                 'without': counts['without'], 'gave_up': counts['gave_up'], 'left_alone': counts['left_alone'], 'done': settled,
+                 'total': None if left is None else settled + left + counts['write_waiting'] + counts['writing'] + counts['moves_waiting'],
+                 'tries': {'per_source': SOURCE_TRIES, 'spacing_seconds': TRY_SPACING, 'failures': FAILURE_TRIES}}
+        self.__dict__['_summary'] = (finished, min(nexts) if nexts else None, value)
+        return dict(value)
 
     def approve(self, job_id, found, target):
         """0.30.0 item 2: Sergei approved this book's listed move (sorting_moves). found: the series it is filed under
@@ -200,6 +314,7 @@ class SeriesBackfill:
                       approved_utc=_stamp())
         record.pop('next_attempt', None)
         record.pop('follow_up', None)
+        record.pop('approved_failed', None)  # a new approval of a move that could not run before
         self._set(job_id, 'pending', '', record)
         self.wake.set()
 
@@ -257,7 +372,15 @@ class SeriesBackfill:
                 continue
             if review.get('series') or not review.get('title') or not review.get('canonical_author'):
                 continue
+            if entry and entry['state'] in WAITING_ON and self._cleanup(row['job_id']) == 'held':
+                continue  # step 4a: still blocked by a cleanup on hold; a cheap catalog read, never a try
             result.append(row)
+        # Step 4b: the books that need a look-up and have no ledger row yet, for summary() (with the count of finished
+        # jobs it was taken at: a book that finishes converting makes it unknown until the next pass).
+        with connect(self.database) as db:
+            finished = db.execute("SELECT count(*) FROM audio_jobs WHERE state='completed'").fetchone()[0]
+        self.__dict__['_backlog'] = {'unvisited': {row['job_id'] for row in result if row['job_id'] not in entries}, 'finished': finished}
+        self._changed()
         # Unvisited books go first; one slow oldest candidate cannot monopolize a pass.
         return sorted(result, key=lambda row: json.loads(entries[row['job_id']]['record']).get('last_attempt', 0)
                       if row['job_id'] in entries else 0)
@@ -266,7 +389,7 @@ class SeriesBackfill:
         function = getattr(self.research, 'local_generation', None)
         return function() if callable(function) else None
 
-    def _defer(self, job_id, wait, found=None, state='deferred', manifest=None):
+    def _defer(self, job_id, wait, found=None, state='deferred', manifest=None, sources=None, failures=None):
         entry = self.entry(job_id)
         record = dict(entry['record']) if entry else {}
         if state == 'deferred' and entry and entry['state'] in ACTIVE:
@@ -274,6 +397,10 @@ class SeriesBackfill:
         now = self.clock()
         record.update(last_attempt=now, next_attempt=max(now + 60, wait.retry_at or now + PASS_WAIT),
                       waits=wait.waits, deferrals=record.get('deferrals', 0) + 1)
+        if sources is not None:
+            record['sources'] = sources  # step 4a: what each source answered so far, and its tries
+        if failures is not None:
+            record['failures'] = failures
         if found:
             binding = encoded(manifest)[1] if manifest is not None else None
             found_at = self._finding_time(found, now)
@@ -336,6 +463,7 @@ class SeriesBackfill:
             title = manifest['metadata']['title']
             self.progress = {'title': title, 'done': index, 'total': len(books), 'step': 'looking up'}
             found = None
+            memory = None
             try:
                 reason = self.unsafe(row, jobs)
                 if reason:
@@ -343,6 +471,7 @@ class SeriesBackfill:
                     continue
                 entry = self.entry(row['job_id'])
                 prior = entry['record'] if entry else {}
+                memory = self._memory(prior)
                 lookup_generation = self._local_generation()
                 if prior.get('move_approved'):
                     # 0.30.0 item 2: the series Sergei approved with its move, exactly; never a new lookup.
@@ -353,19 +482,30 @@ class SeriesBackfill:
                     continue
                 found = prior.get('found') if prior.get('found_binding') == encoded(manifest)[1] and prior.get('found_at', 0) > 0 \
                     and 0 <= self.clock() - prior.get('found_at', 0) <= 7 * 86400 else None
-                found = found or self.lookup(manifest)
+                found = found or self.lookup(manifest, memory)
                 preferred = prior.get('found') or {}
                 if found and prior.get('found_binding') == encoded(manifest)[1] and preferred.get('provider') == 'goodreads' \
                         and (found['name'], found['number']) != (preferred.get('name'), preferred.get('number')):
                     raise Held('The new series answer conflicts with the retained Goodreads sequence; copies kept')
                 if not found:
-                    self._set(row['job_id'], 'none', 'No verified narrative series found in the supported sources',
-                              dict(prior, lookup_policy=LOOKUP_POLICY, local_generation=lookup_generation, last_attempt=self.clock()))
+                    # Step 4a: settled. Every source answered "no series", or was given up after SOURCE_TRIES tries (named
+                    # in 'unreached', so a later job can ask just those again).
+                    unreached = [name for name in SOURCES if (memory.get(name) or {}).get('gave_up')]
+                    record = dict(prior, lookup_policy=LOOKUP_POLICY, local_generation=lookup_generation, last_attempt=self.clock(), sources=memory)
+                    record.pop('next_attempt', None)
+                    record.pop('unreached', None)
+                    if unreached:
+                        record['unreached'] = unreached
+                    self._set(row['job_id'], 'none', UNREACHED + ', '.join(unreached) if unreached else NO_SERIES, record)
                     continue
                 self.progress = {'title': title, 'done': index, 'total': len(books), 'step': 'updating'}
                 self.apply(row['job_id'], found)
+            except Blocked as blocked:
+                entry = self.entry(row['job_id'])
+                self._set(row['job_id'], 'blocked', str(blocked), dict(entry['record']) if entry else {})
+                continue
             except Later as wait:
-                self._defer(row['job_id'], wait, found, manifest=manifest)
+                self._defer(row['job_id'], wait, found, manifest=manifest, sources=memory)
                 continue
             except InterruptedError:
                 return
@@ -373,9 +513,26 @@ class SeriesBackfill:
                 entry = self.entry(row['job_id'])
                 evidence = dict(entry['record']) if entry else {}
                 evidence['last_attempt'] = self.clock()
+                if memory is not None:
+                    evidence['sources'] = memory
+                if evidence.get('move_approved'):
+                    # Judy's 0.31.0 spec, 3.3: an approved move that then could not run comes back to the list with why
+                    # (sorting_moves reads it); it never fails in silence. A new approval clears it (approve()).
+                    evidence['approved_failed'] = {'reason': str(held)[:300], 'at': _stamp()}
                 self._set(row['job_id'], 'held', str(held), evidence)
             except Exception as error:
-                self._defer(row['job_id'], Later('Series lookup could not finish: ' + (str(error) or type(error).__name__)), found, manifest=manifest)
+                # Step 4a: a look-up that cannot finish is tried FAILURE_TRIES times, TRY_SPACING apart, then held. It was
+                # tried again every ten minutes without end.
+                entry = self.entry(row['job_id'])
+                failures = int(((entry or {}).get('record') or {}).get('failures') or 0) + 1
+                text = 'Series lookup could not finish: ' + (str(error) or type(error).__name__)
+                if failures >= FAILURE_TRIES:
+                    evidence = dict(entry['record']) if entry else {}
+                    evidence.update(last_attempt=self.clock(), failures=failures)
+                    evidence.pop('next_attempt', None)
+                    self._set(row['job_id'], 'held', text[:400] + ' (tried %d times; left as it is)' % failures, evidence)
+                else:
+                    self._defer(row['job_id'], Later(text, self.clock() + TRY_SPACING), found, manifest=manifest, sources=memory, failures=failures)
 
     # ------------------------------------------------------------------ checks
     def unsafe(self, row, jobs=None):
@@ -401,6 +558,10 @@ class SeriesBackfill:
             folders = db.execute('SELECT state FROM source_folder_cleanup_jobs WHERE job_id=?', (job_id,)).fetchone() if table('source_folder_cleanup_jobs') else None
         if cleanup and cleanup[0] != 'completed' or recovery and recovery[0] != 'deleted' or not storage or storage[0] != 'completed' \
                 or folders and folders[0] not in ('completed', 'unsupported') or job_id in merge.__dict__.get('_post_jobs', set()):
+            # Step 4a: a cleanup on hold waits for Sergei, not for time. Such a book was deferred every ten minutes without
+            # end (129 ledger rows on the live copy, one 3,287 times); it is blocked until its cleanup has finished.
+            if any(state and state[0] == 'needs_attention' for state in (cleanup, storage, folders)):
+                raise Blocked(BLOCKED)
             raise Later('Its cleanup is not finished yet')
         from encoding_policy import AUTOMATIC_PROFILE, LEGACY_PROFILE, PROFILE
         if output.get('validation', {}).get('profile') not in {PROFILE, LEGACY_PROFILE, AUTOMATIC_PROFILE}:
@@ -412,33 +573,90 @@ class SeriesBackfill:
                 return 'Has a chapter update or a newer version; left as it is'
         return ''
 
-    def lookup(self, manifest):
+    def _cleanup(self, job_id):
+        """'held' when one of the book's cleanups is on hold (needs attention), else ''. A catalog read only."""
+        with connect(self.database) as db:
+            for table in ('source_cleanup', 'storage_cleanup_jobs', 'source_folder_cleanup_jobs'):
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() and \
+                        db.execute('SELECT 1 FROM %s WHERE job_id=? AND state=?' % table, (job_id, 'needs_attention')).fetchone():
+                    return 'held'
+        return ''
+
+    @staticmethod
+    def _memory(prior):
+        """Step 4a: {source: {'answer': 'none', 'tries', 'next', 'gave_up', 'reason'}}, what each source has answered for
+        this book and how often it could not be reached. A book deferred SOURCE_TRIES times or more before 0.31.0 kept no
+        such record: each source its last deferral named as closed (not the app's own limit) gets one last try."""
+        memory = {name: dict(value) for name, value in (prior.get('sources') or {}).items() if name in SOURCES and isinstance(value, dict)}
+        if 'sources' not in prior and int(prior.get('deferrals') or 0) >= SOURCE_TRIES:
+            for wait in prior.get('waits') or []:
+                if not isinstance(wait, dict) or wait.get('kind') == 'app_limit':
+                    continue
+                for name in HOST_SOURCES.get(wait.get('source'), (wait.get('source'),)):
+                    if name in SOURCES:
+                        memory[name] = {'tries': SOURCE_TRIES - 1, 'reason': str(wait.get('reason') or '')[:200]}
+        return memory
+
+    def lookup(self, manifest, memory=None):
+        """The series a source names for this book, or None when every source is settled without one; Later while a source
+        can still answer. memory (step 4a, kept in the ledger by the caller): a source that answered is not asked again, the
+        app's own limits are no try, and a source that could not be reached is given up after SOURCE_TRIES tries."""
         from public_research import ResearchWait
         from public_work_identity import EvidenceConflict
         review = manifest['metadata']
         result = {'sources': []}
         budget = {'remaining': 6, 'lane': 'series'}  # 0.22.1: its own share of each site's hourly bound (public_research.LANES)
+        pacing = getattr(self, '_pacing', None)
+        if callable(pacing):
+            budget['pacing'] = pacing  # 0.31.0: the client says when it only waits for a site's pacing (no running row then)
+        memory = {} if memory is None else memory
         waits = []
-        for provider, args in (('_series_goodreads', (review['title'], review['canonical_author'], self.stop, budget, result)),
-                               ('_series_fantlab', (review['title'], review['canonical_author'], False, self.stop, budget, result)),
-                               ('_series_wikidata', (review['title'], review['canonical_author'], self.stop, budget, result)),
-                               ('_series_publisher', (review['title'], review['canonical_author'], self.stop, budget, result)),
-                               ('_series_litres', (review['title'], review['canonical_author'], self.stop, budget, result))):
+        now = self.clock()
+
+        def closed(name, wait, limit):
+            state = memory.setdefault(name, {})
+            retry = wait['retry_at'] if isinstance(wait.get('retry_at'), (int, float)) else now + PASS_WAIT
+            if limit:
+                # The app's own bound (an hourly site share, or this try's six requests): no try; it goes on from here.
+                state['next'] = now + PASS_WAIT if wait.get('scope') == 'candidate' else retry
+            else:
+                state['tries'] = int(state.get('tries') or 0) + 1
+                state['reason'] = str(wait.get('reason') or '')[:200]
+                if state['tries'] >= SOURCE_TRIES:
+                    state['gave_up'] = True
+                    state.pop('next', None)
+                else:
+                    state['next'] = max(retry, now + TRY_SPACING)
+            waits.append(wait)
+
+        for name, provider, args in (('goodreads', '_series_goodreads', (review['title'], review['canonical_author'], self.stop, budget, result)),
+                                     ('fantlab', '_series_fantlab', (review['title'], review['canonical_author'], False, self.stop, budget, result)),
+                                     ('wikidata', '_series_wikidata', (review['title'], review['canonical_author'], self.stop, budget, result)),
+                                     ('publisher', '_series_publisher', (review['title'], review['canonical_author'], self.stop, budget, result)),
+                                     ('litres', '_series_litres', (review['title'], review['canonical_author'], self.stop, budget, result))):
+            state = memory.get(name) or {}
+            if state.get('answer') == 'none' or state.get('gave_up'):
+                continue  # settled for this book: never asked again
+            if isinstance(state.get('next'), (int, float)) and state['next'] > now:
+                continue  # not due yet; the book waits for it (below)
             try:
                 found = getattr(self.research, provider)(*args)
                 if found:
                     return dict(found, receipts=result['sources'], deferred_sources=waits)
+                memory[name] = {'answer': 'none', 'at': now}
             except ResearchWait as wait:
-                waits.append({'source': wait.source, 'reason': wait.reason, 'retry_at': wait.retry_at,
-                              'kind': wait.kind, 'scope': wait.scope})
+                closed(name, {'source': wait.source, 'reason': wait.reason, 'retry_at': wait.retry_at, 'kind': wait.kind, 'scope': wait.scope},
+                       wait.kind == 'app_limit')
             except EvidenceConflict as error:
                 raise Held('Series sources need review: ' + str(error)) from None
             except (ValueError, TypeError, KeyError, AttributeError) as error:
-                waits.append({'source': provider.removeprefix('_series_'), 'reason': str(error) or type(error).__name__,
-                              'retry_at': self.clock() + PASS_WAIT, 'kind': 'unverified_response', 'scope': 'candidate'})
-        if waits:
-            raise Later('; '.join(item['source'] + ': ' + item['reason'] for item in waits),
-                        min(item['retry_at'] for item in waits), waits)
+                closed(name, {'source': name, 'reason': str(error) or type(error).__name__, 'retry_at': now + TRY_SPACING,
+                              'kind': 'unverified_response', 'scope': 'candidate'}, False)
+        open_sources = [name for name in SOURCES if not ((memory.get(name) or {}).get('answer') == 'none' or (memory.get(name) or {}).get('gave_up'))]
+        if open_sources:
+            due = [memory[name]['next'] for name in open_sources if isinstance((memory.get(name) or {}).get('next'), (int, float))]
+            raise Later('; '.join(item['source'] + ': ' + item['reason'] for item in waits) or 'Waiting for its next try',
+                        min(due) if due else now + PASS_WAIT, waits)
         return None
 
     def _idle(self):

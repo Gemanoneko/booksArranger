@@ -368,7 +368,9 @@ class BackfillTests(unittest.TestCase):
         real=series_backfill.SeriesBackfill.apply
         def watch(self,job_id,found):seen.append(self.status());return real(self,job_id,found)
         with patch.object(series_backfill.SeriesBackfill,'apply',watch):backfill.run_pass()
-        self.assertEqual(seen,[{'title':TITLE,'done':0,'total':1,'step':'updating'}]);self.assertIsNone(backfill.status())
+        # 0.31.0 step 4b: done and total are the whole look-up's (one book, not settled yet); the pass's own and the pacing
+        # flag are new keys beside them.
+        self.assertEqual(seen,[{'title':TITLE,'done':0,'total':1,'step':'updating','pass_done':0,'pass_total':1,'pacing':False}]);self.assertIsNone(backfill.status())
         from web_server import activities
         rows=activities({'series_update':{'title':TITLE,'done':3,'total':38,'step':'updating'}},None,None,None,{},now_ms=1)
         self.assertEqual([(r['kind'],r['subject'],r['done'],r['total'],r['unit']) for r in rows],[('series',TITLE,3,38,'books')])

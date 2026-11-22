@@ -482,6 +482,10 @@ class PublicClient:
     def _fetch_reserved(self,url,host,delay,stop,budget):
         # 0.22.1: the pacing wait and the fetch (up to 15 s) run outside the lock; the reservation above already paces the
         # site. A cached answer another thread (research) needs no longer waits behind a background pass's request.
+        # 0.31.0 (Judy's spec 2.2): a caller that shows a running row (series back-fill) is told when the client only waits
+        # for a site's pacing, so the row is not drawn as work that makes no progress. budget['pacing'](seconds); 0 when done.
+        pacing=budget.get('pacing') if isinstance(budget,dict) and callable(budget.get('pacing')) else None
+        if pacing and delay:pacing(delay)
         if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
         family='wikimedia' if host in WIKIMEDIA_HOSTS else host
         with self.lock:dispatch=self._dispatch_locks.setdefault(family,threading.Lock())
@@ -492,8 +496,10 @@ class PublicClient:
             # delays can compress actual starts, so also pace dispatch at the host.
             spacing=6.1 if host in WIKIMEDIA_HOSTS else host_policy(host)[1]
             remaining=self._last_dispatch.get(family,float('-inf'))+spacing-self.clock()
+            if pacing and remaining>0:pacing(remaining)
             if remaining>0 and (stop.wait(remaining) if stop else time.sleep(remaining)):
                 raise InterruptedError('Automatic processing paused')
+            if pacing:pacing(0)
             if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
             # A different URL may have reserved before the preceding request
             # received a pause. Keep that pause visible before handing off dispatch.
