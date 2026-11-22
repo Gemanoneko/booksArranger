@@ -214,6 +214,9 @@ const TIP='List the books that would get this name: sets Status to All and searc
   assert.equal(place('tags'),"Series: Sprawl Trilogy · No. 2 · from the file's tags");
   assert.equal(place('folders'),'Series: Sprawl Trilogy · No. 2 · from the folder names');
   assert.equal(place('entered'),'Series: Sprawl Trilogy · No. 2 · entered by you');
+  // R15 (amended with Sergei's answers): by where the series was really read.
+  assert.equal(place('title_tag',{number:'1'}),'Series: Sprawl Trilogy · No. 1 · from the title tag');
+  assert.equal(place('file_name'),'Series: Sprawl Trilogy · No. 2 · from the file name');
   assert.equal(place('unknown'),'Series: Sprawl Trilogy · No. 2','unknown: no suffix');assert.equal(place(undefined),'Series: Sprawl Trilogy · No. 2');
   for(const [provider,name] of [['wikidata','Wikidata'],['fantlab','FantLab'],['goodreads','Goodreads'],['litres','Litres'],['publisher',"the publisher's site"]])
     assert.equal(place('source',{provider}),'Series: Sprawl Trilogy · No. 2 · found on '+name,provider);
@@ -235,6 +238,18 @@ const TIP='List the books that would get this name: sets Status to All and searc
   assert.equal(run('scopeBasisText(fixture.view,{...fixture.row,title_from_title_tag:false,place:{...fixture.row.place,origin:"source",provider:"fantlab"}})'),'Kept as a separate book: each file carries its own title. Album «Sprawl Trilogy». If these files are one book, select them and use Join into one book.','neither is true: neither is said');
   assert.equal(run('scopeBasisText(fixture.view)'),'Kept as a separate book: each file carries its own title. Album «Sprawl Trilogy». If these files are one book, select them and use Join into one book.','0.30.0 line unchanged without the facts');
   assert.equal(run('scopeBasisText({kind:"album",album:"Sprawl Trilogy"},fixture.row)'),'Grouped by album «Sprawl Trilogy».','only a volume gains them');
+  // R15 (check 25): a file whose only clue is its title tag, "Sprawl Trilogy 01 - Neuromancer". Its row has no question, the
+  // Place line says the title tag, and the details line says so after the sentence its kind already has.
+  const neuromancer={...filed,id:'cand-n1',path:'cand-n1',review:{title:'Neuromancer',series:'Sprawl Trilogy',number:'1'},place:{universe:'',series:'Sprawl Trilogy',number:'1',collection:false,origin:'title_tag'},scope_view:{kind:'standalone',folders:['Z:\\Audiobooks\\William Gibson']}};
+  context.fixture=[neuromancer];run('rows=fixture.map(row=>({...row}));totalRows=rows.length;renderRows(true);controls()');
+  assert.equal(walk(statusCell(trOf('cand-n1'))).find(e=>String(e.className || '').split(' ').includes('book-place')).textContent,'Series: Sprawl Trilogy · No. 1 · from the title tag');
+  context.fixture={row:neuromancer};
+  assert.equal(run('scopeBasisText(fixture.row.scope_view,fixture.row)'),"One file with no album or numbering. Title, series and number from this file's title tag.");
+  assert.equal(run('scopeBasisText({kind:"single_file",album:"Neuromancer"},fixture.row)'),"One audiobook file. Title, series and number from this file's title tag. Album «Neuromancer».",'after the sentence its kind already has');
+  assert.equal(run('scopeBasisText({kind:"volume",basis:"each file carries its own title"},fixture.row)'),"Kept as a separate book: each file carries its own title. Title, series and number from this file's title tag. If these files are one book, select them and use Join into one book.",'a volume says it once, in its own place');
+  assert.equal(run('scopeBasisText({kind:"other"},fixture.row)'),"Title, series and number from this file's title tag.",'a kind with no sentence of its own');
+  assert.equal(run('scopeBasisText(fixture.row.scope_view,{...fixture.row,place:{...fixture.row.place,origin:"tags"}})'),'One file with no album or numbering.','only the title tag alone says it');
+  assert.equal(run('scopeBasisText(fixture.row.scope_view,{...fixture.row,place:{...fixture.row.place,series:"",number:""}})'),'One file with no album or numbering.');
 
   // Overlap (spec section 8): everything new is in normal flow, so it can only wrap or push. No new rule positions an
   // element out of flow, and the three additions reuse existing classes (the taken label, the block line, a row button).

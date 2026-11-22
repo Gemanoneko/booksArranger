@@ -745,7 +745,9 @@ function scopeFolderLine(view){
 function scopeBasisText(view,row=null){
   if(!view || typeof view!=='object')return '';
   // 0.31.0 (Judy's 0.31.0 spec 4.3): a volume named from its own tags says so after "Kept as a separate book".
-  const own=[row?.title_from_title_tag===true?"Title from this file's own title tag.":'',row?.place?.origin==='tags' && row.place.series && row.place.number?'Series and number from its tags.':''];
+  // R15: a file whose title tag alone reads "Series NN - Title" says so after the sentence its kind already has.
+  const series=row?.place?.series && row.place.number?row.place.origin:'',titleTag=series==='title_tag'?"Title, series and number from this file's title tag.":'';
+  const own=titleTag?[titleTag]:[row?.title_from_title_tag===true?"Title from this file's own title tag.":'',series==='tags'?'Series and number from its tags.':''];
   const has=value=>typeof value==='string' && value.trim()!=='',quote=value=>`«${value}»`,count=value=>Number.isInteger(value) && value>0;
   const by=(what,value)=>`Grouped by ${what} ${quote(value)}${has(view.artist)?` and artist ${quote(view.artist)}`:''}.`;
   const album=()=>has(view.album)?`Album ${quote(view.album)}${count(view.track)?`, track ${view.track}${count(view.track_total)?` of ${view.track_total}`:''}`:''}.`:'';
@@ -766,7 +768,8 @@ function scopeBasisText(view,row=null){
     default:parts.push(album());tags=has(view.album);
   }
   if(tags && view.repaired===true)parts.push('The tag text was repaired from an old encoding.');
-  return parts.filter(Boolean).join(' ');
+  const said=parts.filter(Boolean);if(titleTag && view.kind!=='volume')said.splice(Math.min(1,said.length),0,titleTag);  // a volume carries it in its own place
+  return said.join(' ');
 }
 function showSource(row,candidate){
   const view=candidate?row.scope_view:null,path=candidate?scopeFolderLine(view):row.path || '',basis=candidate?scopeBasisText(view,row):'';
@@ -4487,6 +4490,10 @@ const SERIES_SOURCES={...NUMBER_SOURCES,publisher:"the publisher's site"};
 function seriesOriginText(place){
   if(!place || typeof place!=='object' || !(place.series && place.number))return '';
   if(place.origin==='tags')return " · from the file's tags";
+  // R15 (amended with Sergei's answers): by where the series was really read. The series tags are the file's tags; the
+  // text of the title tag alone is the title tag; a series before the number in the file name is the file name.
+  if(place.origin==='title_tag')return ' · from the title tag';
+  if(place.origin==='file_name')return ' · from the file name';
   if(place.origin==='folders')return ' · from the folder names';
   if(place.origin==='entered')return ' · entered by you';
   if(place.origin==='source'){const name=SERIES_SOURCES[String(place.provider || '').toLowerCase()];return name?` · found on ${name}`:' · found online';}

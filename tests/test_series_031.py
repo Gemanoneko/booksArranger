@@ -86,6 +86,13 @@ class SeparatedVolumeTests(Fixture):
         self.assertEqual(MergeService.series_origin(entered)['origin'], 'entered')
         self.assertEqual(MergeService.series_origin(online), {'origin': 'source', 'title_from_title_tag': False, 'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work3650'})
         self.assertEqual(MergeService.series_origin({})['origin'], 'unknown')
+        # Judy 4.3 as amended with his answers: by where the series was really read; never a place it was not read from.
+        named = lambda kind, **extra: {'local_agreement': {'series': {'state': 'green', 'value': 'Sprawl Trilogy', 'sources': [dict({'kind': kind, 'value': 'x'}, **extra)]}}}
+        self.assertEqual(MergeService.series_origin(named('the title (tag)', field='title'))['origin'], 'title_tag')
+        self.assertEqual(MergeService.series_origin(named('the title (tag)'))['origin'], 'tags', 'an album tag, or an older record: one of the file\'s tags')
+        self.assertEqual(MergeService.series_origin(named('the title (file_name)'))['origin'], 'file_name')
+        self.assertEqual(MergeService.series_origin(named('the title (folder_name)'))['origin'], 'folders')
+        self.assertEqual(MergeService.series_origin(named('the title (number_rule)'))['origin'], 'unknown')
 
     def test_the_list_row_carries_the_origin_its_place_line_prints(self):
         # Judy's 0.31.0 spec 4.3 as amended: a book filed without a question says where its series came from on the Place
@@ -147,10 +154,51 @@ class SeparatedVolumeTests(Fixture):
         self.assertEqual(separated, read(self.volumes(kept=True)))
         self.assertEqual(separated[0], ('Count Zero', {'name': 'Sprawl Trilogy', 'number': '2'}, True, '', False))
 
-    def test_a_title_tag_alone_still_asks_about_its_series(self):
-        # Ruling 52 stands for a name nothing confirms: the first file has no album tag and is no volume of a set.
+    def test_a_title_tag_alone_shaped_series_nn_title_files_the_book_without_asking_r15(self):
+        # R15 (Sergei 2026-11-22; it narrows ruling 52): the first Sprawl file has no album tag and is no volume of a set.
+        # Its only clue is its own title tag, "Sprawl Trilogy 01 - Neuromancer": R4 covers it, so it is filed, not asked.
+        from merge_service import MergeService
         row = self.shelf(sprawl_rows())[ROOT + '\\' + SPRAWL['neuromancer']]
-        self.split_asked(row, 'Sprawl Trilogy', '1', 'Neuromancer')
+        result = self.lookup(row)
+        self.assertEqual((result['reasons'], result.get('ask')), ([], None), 'no question')
+        review = result['review']
+        self.assertEqual((review['title'], review['series'], review['number']), ('Neuromancer', 'Sprawl Trilogy', '1'), 'the title part only, never the whole tag')
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Gibson William\\Sprawl Trilogy\\Sprawl Trilogy - 1 - Neuromancer - Gibson William.m4b')
+        # The row says where the series was really read (Judy 4.3 as amended): the title tag's own text, not "its tags".
+        self.assertEqual(MergeService.series_origin(result), {'origin': 'title_tag', 'title_from_title_tag': True})
+        # The two volumes beside it keep "from the file's tags": their album tag names the set too (R4, step 1a).
+        self.assertEqual({MergeService.series_origin(self.lookup(volume))['origin'] for volume in self.volumes()}, {'tags'})
+
+    def test_every_other_name_nothing_confirms_still_asks_r15_keeps_ruling_52(self):
+        # The ruled shape only: one file, the title read from its own title tag, the number followed by a dash.
+        import local_identity
+        asked = {
+            'a dot after the number': file_row(GIBSON + 'a.m4b', title='Sprawl Trilogy 1. Neuromancer', artist='William Gibson'),
+            'a colon after the number': file_row(GIBSON + 'b.m4b', title='Sprawl Trilogy 1: Neuromancer', artist='William Gibson'),
+            'a "#" before the number': file_row(GIBSON + 'c.m4b', title='Sprawl Trilogy #1 - Neuromancer', artist='William Gibson'),
+            'the album tag, not the title tag': file_row(GIBSON + 'd.m4b', album='Sprawl Trilogy 01 - Neuromancer', title='01', artist='William Gibson'),
+        }
+        for why, row in asked.items():
+            book = next(iter(self.shelf([row]).values()))
+            ask = self.lookup(book).get('ask') or {}
+            self.assertEqual((ask.get('why'), ask.get('split')), ('title_series', {'series': 'Sprawl Trilogy', 'number': '1', 'title': 'Neuromancer'}), why)
+        # Positive control on the same fixture: the ruled shape files.
+        filed = self.lookup(next(iter(self.shelf([file_row(GIBSON + 'e.m4b', title='Sprawl Trilogy 01 - Neuromancer', artist='William Gibson')]).values())))
+        self.assertEqual((filed['reasons'], filed['review']['series']), ([], 'Sprawl Trilogy'))
+        # The rule itself, on the shapes a fixture row cannot isolate.
+        tag = lambda value: {'state': 'one', 'value': value, 'basis': 'tag', 'sources': [{'kind': 'embedded', 'field': 'title', 'value': value}]}
+        one = [{'path': 'x.m4b'}]
+        parts = lambda value, author='': local_identity.series_title_parts(value, author)
+        whole = 'Sprawl Trilogy 01 - Neuromancer'
+        self.assertTrue(local_identity.title_tag_series(tag(whole), one, parts(whole), 'William Gibson'))
+        self.assertTrue(local_identity.title_tag_series(tag('Колесо Времени 03 — Возрождённый Дракон'), one, parts('Колесо Времени 03 — Возрождённый Дракон')), 'a long dash is a dash')
+        self.assertFalse(local_identity.title_tag_series(tag(whole), one + one, parts(whole)), 'a book of several files: their title tags name chapters')
+        self.assertFalse(local_identity.title_tag_series(dict(tag(whole), basis='file_name'), one, parts(whole)), 'a title from the file name')
+        self.assertFalse(local_identity.title_tag_series(dict(tag(whole), sources=[{'kind': 'embedded', 'field': 'album', 'value': whole}]), one, parts(whole)), 'a title from the album tag')
+        self.assertFalse(local_identity.title_tag_series(tag(whole), one, None), 'no split: nothing to confirm')
+        heller = 'Catch 22 - Joseph Heller'
+        self.assertFalse(local_identity.title_tag_series(tag(heller), one, {'series': 'Catch', 'number': '22', 'title': 'Joseph Heller'}, 'Joseph Heller'),
+                         "the part after the dash is the author's name: a title and its author, not a series and a title")
 
     def test_a_volume_with_no_title_of_its_own_keeps_its_set_name_and_number(self):
         # Торадора! (ruling 13): the title tag only repeats the set and a volume number; named "Торадора! 1" as before.

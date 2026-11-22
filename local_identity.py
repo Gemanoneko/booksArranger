@@ -2935,12 +2935,19 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         # names that set ("Sprawl Trilogy 02 - Count Zero", album "Sprawl Trilogy"): the files' own tags name the series, so
         # it files without the ruling-52 question.
         album_series = bool(volume and series_key(text(_tags(members[0]).get('album'))) == series_key(found['series']))
-        unconfirmed = not (named or filed or album_series
+        # R15 (Sergei 2026-11-22; R4 covers it): a file whose only clue is its own title tag shaped "Series NN - Title"
+        # ("Sprawl Trilogy 01 - Neuromancer", no album tag) is filed without the ruling-52 question: the file's own tag
+        # names the series. Only that shape (title_tag_series); every other name nothing confirms is asked as before.
+        own_tag = bool(not named and title_tag_series(fields['title'], members, found, author['name'] if author else ''))
+        unconfirmed = not (named or filed or album_series or own_tag
                            or confirmed_omen(found['series'], found['number'], found['title'], author['name'] if author else '')
                            or (fields['series']['state'] == 'green' and series_key(fields['series']['value']) == series_key(found['series'])))
         whole = fields['title']['value']
         if not named:
-            source = [{'kind': 'the title (%s)' % (fields['title'].get('basis') or 'name'), 'value': whole}]
+            # 'field' (0.31.0, Judy 4.3) is set only for R15: the series the title tag's own text alone names, so its row
+            # says "from the title tag" and no other row does (summary() keeps kind, field and value). A volume whose
+            # album tag names the set too reads "from the file's tags" (two of its tags name it).
+            source = [dict({'kind': 'the title (%s)' % (fields['title'].get('basis') or 'name'), 'value': whole}, **({'field': 'title'} if own_tag and not album_series else {}))]
             fields['series'] = {'state': 'green', 'value': found['series'], 'how': 'the series before the number in "%s" (ruling 41)' % whole, 'sources': source}
             fields['number'] = {'state': 'green', 'value': found['number'], 'how': 'the number in "%s" (ruling 41)' % whole, 'sources': source}
         if not named or (norm(fields['series']['value']) == norm(found['series']) and _same_number(fields['number']['value'], found['number'])):
@@ -3228,6 +3235,24 @@ def series_title_parts(title, author=''):
     folder structure writes it ("01" is "1", "1,5" is "1.5")."""
     parts, verdict = _series_split(title, author)
     return parts if verdict == 'split' else None
+
+
+def title_tag_series(title, members, parts, author=''):
+    """R15 (Sergei 2026-11-22): True when one file's own title tag, and nothing else, reads "Series NN - Title" and so
+    names its series itself ("Sprawl Trilogy 01 - Neuromancer"). title: the identity's title field before the split
+    (its value is the whole tag); parts: series_title_parts() of it. The ruled shape only: one file, the title read
+    from its embedded title tag, the number followed by a dash. A name that reads another way is not this rule's and is
+    asked as before (ruling 52): "Series N. Title" or "Series N: Title", a title from the album tag, the file name or
+    the folder, a book of several files, and a title part that is the author's own name ("Catch 22 - Joseph Heller")."""
+    if not parts or len(members or []) != 1 or not isinstance(title, dict) or title.get('basis') != 'tag':
+        return False
+    whole = text(title.get('value'))
+    if not any(isinstance(s, dict) and s.get('kind') == 'embedded' and s.get('field') == 'title' and text(s.get('value')) == whole for s in title.get('sources') or []):
+        return False
+    found = _SERIES_PARTS.match(whole)
+    if not found or found['separator'] not in '-–—' or found['hash']:
+        return False
+    return not (author and compare_names(parts.get('title') or '', author))
 
 
 def _series_split(title, author=''):
