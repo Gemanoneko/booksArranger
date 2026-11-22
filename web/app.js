@@ -3634,6 +3634,11 @@ function askDestination(row){const d=askDrafts.get(row.id);return d?.preview || 
 // books while shared is set in its latest answer (class Q). A name already on disk wins over both (class D, unchanged).
 const SAME_NAME_STATUS='Same name as another book',SAME_NAME_FIX=' Change a title, author, series or number so they differ.';
 const SAME_NAME_BLOCK='Another book would get this name. Change the title, author, series or number.';
+// R17 (Sergei 2026-11-22; Judy 4.2a, Question 9): where the pieces of one book would all get one name, joining them is the
+// answer and renaming is not, so the reason of the blocked press names both ways out. Only on that blocked press, on a
+// Part of a bigger book row and on the folder question; no Join hint anywhere else (his answer 10 of 2026-11-18 stands).
+const SAME_NAME_BLOCK_JOIN='Another book would get this name. Join them into one book, or change this title.';
+function sameNameBlock(row){const ask=askOf(row);return holdKind(ask)==='part_of_book' || folderQuestion(ask)?SAME_NAME_BLOCK_JOIN:SAME_NAME_BLOCK;}
 const SAME_NAME_SHOW_TIP='List the books that would get this name: sets Status to All and searches for this title.';
 function sharedValue(value){return value && typeof value==='object' && Number(value.count)>0?value:null;}
 function sameNameRow(ask){return ask?.kind==='name_taken' && ask.hold?.kind==='same_destination';}
@@ -3662,7 +3667,7 @@ function askInert(row){
   if(names?.number && !names.series)return 'Type the series name, or clear the number.';
   if(askDestination(row)?.taken===true && row.leaving!=='name_free')return chosenCopy(row,'That name is already in Audiobooks Sorted. Change the title or author.');
   // 0.31.0 (4.2, 4.2a): the engine refuses this press while another book plans the name (same_name), so it is prevented.
-  if(sharedOf(row))return SAME_NAME_BLOCK;
+  if(sharedOf(row))return sameNameBlock(row);
   return askPanelEdits(row);
 }
 // Unsaved metadata, order or file edits in the panel for this book (Judy 2026-10-24, 0.22.0 review A5: trackDirty too). The
@@ -4838,7 +4843,7 @@ function approveBlock(row){
   if(names?.series && !names.number)return {text:'Type the number in the series, or clear the series.',fix:'series'};
   if(names?.number && !names.series)return {text:'Type the series name, or clear the number.',fix:'number'};
   if(askDestination(row)?.taken===true && row.leaving!=='name_free')return {text:'That name is already in Audiobooks Sorted. Change the title or author.',fix:null};
-  if(sharedOf(row))return {text:SAME_NAME_BLOCK,fix:null};  // 0.31.0 (4.2, 4.2a): the reason on the line under the buttons
+  if(sharedOf(row))return {text:sameNameBlock(row),fix:null};  // 0.31.0 (4.2, 4.2a): the reason on the line under the buttons
   if(askPanelEdits(row))return {text:panelEditsLine(),fix:'panel'};
   return {text:'',fix:null};
 }

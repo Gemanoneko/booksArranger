@@ -52,6 +52,8 @@ const showBoth=tr=>buttonsOf(tr).find(b=>/^Show (both|all \d+) books$/.test(b.te
 const press={stopPropagation(){}};
 function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row,ask:{...row.ask,destination:{...row.ask.destination}}}));totalRows=rows.length;askDrafts.clear();askResults.clear();renderRows(true);controls()');}
 const BLOCK='Another book would get this name. Change the title, author, series or number.';
+// R17 (Sergei 2026-11-22): only on the blocked press of a Part of a bigger book row and of the folder question.
+const JOIN='Another book would get this name. Join them into one book, or change this title.';
 const TIP='List the books that would get this name: sets Status to All and searches for this title.';
 (async()=>{
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";attentionGroup="all";viewControls();controls()');
@@ -127,7 +129,9 @@ const TIP='List the books that would get this name: sets Status to All and searc
   assert.equal(statusCell(tr).textContent,'Part of a bigger book');assert.equal(hint(tr),"The chapters don't show whether these files make one book.");
   assert.equal(hint(trOf('cand-q2')),'Part 2 of 3 of "Sprawl Trilogy".');
   assert.deepEqual(faces(tr).slice(0,3),['Approve as one book','Keep as separate books','Scan again'],'its own buttons, faces unchanged');
-  assert.equal(buttonsOf(tr)[0].title,BLOCK);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(reason(tr),BLOCK);
+  // R17: for real pieces of one book joining is the answer, so the blocked press names both ways out.
+  assert.equal(buttonsOf(tr)[0].title,JOIN);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(reason(tr),JOIN);
+  assert.equal(reason(trOf('cand-q2')),JOIN);assert.equal(reason(trOf('cand-s6')),BLOCK,'never on a class S row: it was held for the name alone');
   assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),null,'Keep as separate books stays enabled');assert.equal(buttonsOf(tr)[2].getAttribute('aria-disabled'),null,'Scan again too');
   assert.equal(goesTo(tr),'All 3 go to Audiobooks Sorted\\'+SHARED,'in place of As one book');assert.equal(warned(tr),true);
   assert.equal(faces(tr).at(-1),'Show all 3 books','the last button of the row');assert.equal(showBoth(tr).title,TIP);
@@ -156,7 +160,8 @@ const TIP='List the books that would get this name: sets Status to All and searc
   for(const [row,status,sentence,face] of groups){
     tr=trOf(row.id);assert.equal(statusCell(tr).textContent,status,row.id);assert.equal(hint(tr),sentence,row.id);
     if(face)assert.equal(faces(tr)[0],face,row.id);else assert.equal(faces(tr)[0],run('FOLDER_QUESTION.approve[0]'),'the folder question keeps its own face');
-    assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true',row.id);assert.equal(reason(tr),BLOCK,row.id);
+    const said=['cand-g5','cand-g7'].includes(row.id)?JOIN:BLOCK;  // R17: the folder question and a Part of a bigger book row only
+    assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true',row.id);assert.equal(reason(tr),said,row.id);assert.equal(buttonsOf(tr)[0].title,said,row.id);
     assert.equal(goesTo(tr),'Both go to Audiobooks Sorted\\'+SHARED,row.id);assert.equal(warned(tr),true,row.id);
     assert.equal(faces(tr).at(-1),'Show both books',row.id);
   }
@@ -177,6 +182,9 @@ const TIP='List the books that would get this name: sets Status to All and searc
   paint([holdRow('q4','part_of_book','set_unclear',null)]);tr=trOf('cand-q4');
   assert.match(goesTo(tr),/^As one book /);assert.equal(warned(tr),false);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.equal(reason(tr),'');assert.equal(showBoth(tr).hidden,true);
   assert.ok(!faces(tr).some(face=>/^Show (both|all)/.test(face)));
+  // R17 is only the reason of a blocked press: with the press free no row carries a Join hint (his answer 10 stands).
+  assert.ok(!walk(tr).some(e=>!e.hidden && /Join them into one book/.test(e.textContent)),'no Join hint on a row whose press is free');
+  assert.equal(source.split('Join them into one book, or change this title.').length-1,1,'the sentence has one home: the blocked-press reason');
 
   // 4. The clash appears only at the press (the engine's same_name refusal, on a row of any class): Approve answers with
   // the sentence, and the row's Goes to line is read again, so its label, reason and Show both books follow.
