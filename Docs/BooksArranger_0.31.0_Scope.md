@@ -53,6 +53,11 @@ What "could be wrong" means in engine terms, and how the engine tells a book tha
 | R21 | **A series found by FantLab alone, where the app counts the book's number from the cycle order, is good enough to file.** Only a result that local facts contradict (and the other doubtful shapes Ender listed: more than one series on a book, a "universe" in place of a series, a number mismatch) counts as doubtful. | Ender's proposed stricter rule |
 | R22 | **Books not yet converted stop asking about a doubtful series too:** `Number unclear`, `Title unclear` (when the title only looks like a series name and number) and `Sources disagree — which is correct?` no longer ask; the doubtful series is treated as not found and the book goes on without it. | Those three questions |
 
+| R23 | **An author name the app cannot put in order is filed as the source wrote it, and the app says nothing** — no question on the row. | — |
+| R24 | **Books the app could not rename or move are listed, read-only, each with its reason**, under the record of automatic renames and moves (UX spec 3.4a). | — |
+| R25 | **Two more stops follow R22:** `Series and standalone evidence conflicts` and `Series membership has conflicting author credits…` no longer stop the book; it gets no series and goes on. | Those two holds |
+| R26 | **No Cancel on a move the app queued by its rules.** To override, `Choose folder…` after the book has moved; that choice is kept. | — |
+
 **0.31.0 = steps 1, 2, 3 and 4, plus the automatic rename and move of finished books under R18, R21 and R22.** Step 5 (R6, a separate job from the studio) is replaced by that automatic pass inside the app. The first entry check (on `2f385e4`, one test failure, fixed in `4484f8f`) is superseded; the one entry check runs on the final build.
 
 Left as they work today (Sergei did not change them): no "Try again" count for look-ups that gave up; no "Convert now" button on a book waiting for the online answer; a book already queued to convert is not stopped by a later same-name clash; the 22 older jobs planned without the series their tags name wait for R6's job.
