@@ -114,6 +114,21 @@ class ClashTests(unittest.TestCase):
         self.job('job-real', 'other-e')
         self.assertEqual([o['book_id'] for o in self.shared(self.count_zero)['others']], ['other-e'], 'positive control: a plain waiting book is found')
 
+    def test_a_set_approved_as_one_book_is_never_blocked_by_its_own_pieces(self):
+        # Judy's question (0.31.0 spec, G9): the two volumes as one row (the set "Approve as one book" is offered on), and an
+        # older stopped job of one of its own files from before they were grouped. That job is a piece of this row.
+        whole = {'id': 'the-set', 'revision': 1, 'fingerprint': 'fp-the-set', 'members': [{'path': COUNT_ZERO}, {'path': MONA_LISA}]}
+        self.current(whole)
+        self.job('job-own-piece', 'old-piece', state='needs attention')  # its source is MONA_LISA, a member of the set
+        self.assertIsNone(self.shared(whole), 'its own piece never refuses the set')
+        self.assertEqual(self.shared(self.count_zero)['others'][0]['job_id'], 'job-own-piece', 'positive control: for another row the same job holds the name')
+        # A job that also converts a file outside the set is another book, and so is another row planning the name.
+        self.job('job-other', 'other-book', sources=[{'path': MONA_LISA}, {'path': GIBSON + 'Elsewhere.m4b'}])
+        self.assertEqual([o['job_id'] for o in self.shared(whole)['others']], ['job-other'])
+        self.service._planned_note(book('stranger', GIBSON + 'copy\\Sprawl.m4b'), SHARED)
+        self.current(book('stranger', GIBSON + 'copy\\Sprawl.m4b'))
+        self.assertEqual(sorted(o['book_id'] for o in self.shared(whole)['others']), ['other-book', 'stranger'])
+
     def test_several_others_are_counted_and_the_waiting_book_comes_first(self):
         self.job('job-mona', 'mona-lisa')
         for n in range(12):

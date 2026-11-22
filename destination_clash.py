@@ -52,12 +52,15 @@ def _table(db, name):
     return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
 
-def queued(db, destination, own):
+def queued(db, destination, own, own_paths=()):
     """The books waiting to convert that have this destination: jobs not completed and not set aside, of another book.
+    own_paths: this row's own files. A job that converts only files of this row is one of its own pieces (an older job of a
+    part that has since become part of this set), never another book: approving a set as one book is not blocked by it.
     A cleanup task of an extra source, a replacement and a retry of the same book share a name by design and never count."""
     if not _table(db, 'audio_jobs'):
         return []
     wanted = key(destination)
+    mine = {key(path) for path in own_paths or () if path}
     aside = ' AND job_id NOT IN (SELECT job_id FROM audio_job_set_aside)' if _table(db, 'audio_job_set_aside') else ''
     found = []
     for job_id, state, target, candidate, title, author, task, replacement, source in db.execute(
@@ -73,6 +76,8 @@ def queued(db, destination, own):
             paths = [s.get('path') for s in json.loads(source or '[]') if isinstance(s, dict)]
         except (TypeError, ValueError):
             paths = []
+        if mine and paths and all(key(path) in mine for path in paths):
+            continue  # its own piece
         found.append({'book_id': candidate, 'kind': 'queued', 'job_id': job_id, 'name': name_of(paths), 'title': title or '', 'author': author or ''})
     return found
 

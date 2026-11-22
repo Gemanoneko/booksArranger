@@ -3614,7 +3614,8 @@ class MergeService:
         import destination_clash
         try:
             with connect(self.inventory.database) as db:
-                others=destination_clash.queued(db,path,row['id'])+destination_clash.rows(db,path,row['id'],self.__dict__.get('_planned'))
+                # Only a different book clashes: a job that converts nothing but this row's own files is one of its pieces.
+                others=destination_clash.queued(db,path,row['id'],[m.get('path') for m in row.get('members') or []])+destination_clash.rows(db,path,row['id'],self.__dict__.get('_planned'))
         except (sqlite3.Error,OSError,ValueError,TypeError):return None
         return destination_clash.hold(path,relative,others)
 
