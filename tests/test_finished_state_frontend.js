@@ -52,11 +52,11 @@ reset();
 view=show({state:'waiting_for_you',waits_for_you:['attention','moves'],pending:pending({attention:329,moves:55,lookups:lookups(200,12)})},{attention_counts:{other:329},converted_total:1181});
 assert.equal(view.badge.textContent,'Waiting for you');assert.equal(view.badge.className,'state-you');
 assert.equal(view.badge.title,'No conversion, cleanup or other job is running or queued. The items under Waiting for you need your answer.');
-assert.equal(view.line,' · 329 need attention · 55 series moves to approve · 1181 converted out of 1510 approved books · 212 background look-ups left');
+assert.equal(view.line,' · 329 need attention · 55 series changes to approve · 1181 converted out of 1510 approved books · 212 background look-ups left');
 assert.equal(view.idle.textContent,'Nothing is running right now.','look-ups are left: never "queued or waiting" nothing');
 // The Waiting-for-you block (1.4): one line per kind with a count; the old "can't do more" sentence is gone.
 assert.equal(get('jobs-you').hidden,false);assert.equal(get('jobs-you-line').textContent,'329 books need attention.');assert.equal(get('jobs-review').hidden,false);
-assert.equal(get('jobs-you-moves').hidden,false);assert.equal(get('jobs-you-moves').textContent,'55 series moves wait for your approval.');
+assert.equal(get('jobs-you-moves').hidden,false);assert.equal(get('jobs-you-moves').textContent,'55 series changes wait for your approval.');
 for(const id of ['jobs-you-line','jobs-you-moves'])assert.doesNotMatch(get(id).textContent,/can't do more/);
 
 reset();
@@ -71,17 +71,22 @@ for(const [state,work,jobs,first] of [
   ['working',{rows:[conversion]},{state:'Running'},'Converting: Dune'],
   ['paused',{},{state:'Paused'},'Paused'],
   ['continues',{counts:{queued_conversions:3}},{},'Continues by itself'],
-  ['unknown',{},{},'Nothing running that could be read'],
-  ['',{},{},null]]){  // an engine that sends no state (older, or a stand-in): no badge and no first part
+  ['unknown',{},{},'Checking what is left'],  // G1: still counting is no failed read
+  ['',{},{},'Checking what is left']]){  // G2: an engine that sends no state: no badge, and never the bare counts
   reset();
   view=show({state,...work},jobs);
   assert.equal(view.badge.hidden,true,state+': no badge');assert.equal(view.badge.textContent,'');
-  if(first===null)assert.match(view.line,/^0 need attention · /);else assert.ok(view.line.startsWith(first+' · '),state+': '+view.line);
+  assert.ok(view.line.startsWith(first+' · '),state+': '+view.line);assert.doesNotMatch(view.line,/^\d/,'never the counts first');
   assert.doesNotMatch(view.line,/Nothing running( ·|$)/,state);
 }
 reset();view=show({state:'continues',counts:{queued_conversions:3}});assert.equal(view.line,'Continues by itself · 3 books waiting to convert · 0 need attention · 1510 converted out of 1510 approved books');
 assert.equal(view.idle.textContent,'Nothing is running right now.');
-reset();view=show({state:'unknown'});assert.equal(view.idle.textContent,'Nothing running that could be read.');
+reset();view=show({state:'unknown'});assert.equal(view.idle.textContent,'Nothing is running right now.');assert.equal(get('jobs-you').hidden,true);
+// G1 and check 17: only a source really unread for 3 s reads "could be read"; one failed poll never does.
+reset();run('unreadSince.clear()');view=show({state:'unknown',unread:['workers']});assert.match(view.line,/^Checking what is left · /);
+run('unreadSince.set("workers",'+(NOW-4000)+')');view=show({state:'unknown',unread:['workers']});
+assert.match(view.line,/^Nothing running that could be read · /);assert.equal(view.idle.textContent,'Nothing running that could be read.');assert.equal(get('jobs-you').hidden,true);
+view=show({state:'unknown',unread:[]});run('unreadSince.clear()');
 
 // 3. "N on hold" is its own part after the badge (it was glued to "Nothing running").
 reset();view=show({state:'waiting_for_you',waits_for_you:['hold'],pending:pending({hold:1})},{state:'Needs attention',current_title:'Long book',current_book_id:'b9',progress:{phase:'encoding',reason:'x'}});
@@ -90,16 +95,16 @@ assert.equal(get('jobs-you').hidden,true,'a book on hold keeps its own home: the
 
 // 4. Singular forms, and a drive as the only reason.
 reset();view=show({state:'waiting_for_you',waits_for_you:['moves'],pending:pending({moves:1,lookups:lookups(1)})});
-assert.match(view.line,/ · 1 series move to approve · .* · 1 background look-up left$/);
+assert.match(view.line,/ · 1 series change to approve · .* · 1 background look-up left$/);
 assert.equal(get('jobs-you').hidden,false);assert.equal(get('jobs-you-line').hidden,true);assert.equal(get('jobs-review').hidden,true);
-assert.equal(get('jobs-you-moves').textContent,'1 series move waits for your approval.');
+assert.equal(get('jobs-you-moves').textContent,'1 series change waits for your approval.');
 reset();view=show({state:'waiting_for_you',waits_for_you:['drive'],pending:pending({drives:1}),waiting:[{id:'drive:Z',kind:'drive',subject:'Z:\\Audiobooks'}]});
 assert.equal(view.badge.textContent,'Waiting for you');assert.equal(get('jobs-you').hidden,true);
 
 // 5. No flicker (1.2, check 4): 3 s of the same state before the badge shows; another state for 1 s before it goes.
 reset();
 view=show({state:'all_done',pending:pending({any:false})},{},false);
-assert.equal(view.badge.hidden,true,'first poll: not yet');assert.match(view.line,/^0 need attention · /,'and no bare "Nothing running" while it waits');
+assert.equal(view.badge.hidden,true,'first poll: not yet');assert.match(view.line,/^Checking what is left · 0 need attention · /,'G2: the 3 s before a badge comes up');
 run('badgeSeen.since-=2900;renderJobs()');assert.equal(get('jobs-state').hidden,true,'2.9 s: not yet');
 run('badgeSeen.since-=200;renderJobs()');assert.equal(get('jobs-state').hidden,false,'3 s: shown');
 view=show({state:'working',rows:[]},{state:'Running'},false);

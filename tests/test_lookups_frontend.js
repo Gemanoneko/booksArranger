@@ -46,7 +46,7 @@ let rows=show({rows:[series(),details()]});
 let row=parts(rows[0]);
 assert.equal(row.label+row.subject,'Finding series for finished audiobooks: Тёмный лес');assert.equal(row.step,'Asking online sources. No file is changed.');
 assert.equal(row.detail,'691 of 903 books','done and total are the whole look-up, as the engine sends them');
-assert.equal(row.tip,'Finished audiobooks without a series are looked up online, one by one. A book moves into a series folder only after you approve it.');
+assert.equal(row.tip,'Finished audiobooks without a series are looked up online, one by one. A series that is found changes a book only after you approve it.');
 assert.equal(row.bar.value,Math.floor(691/903*100),'determinate');
 row=parts(rows[1]);
 assert.equal(row.label+row.subject,'Finding original titles and author names: Дюна');assert.equal(row.step,'For books you already approved. Recorded only, no file is changed.');
@@ -77,10 +77,16 @@ show({lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:212,at},{i
 let listed=waits();
 assert.equal(get('jobs-wait-block').hidden,false);assert.equal(listed.length,2);
 assert.equal(listed[0].line1,'Finding series for finished audiobooks: 212 books');assert.equal(listed[0].line2,`Waiting for online sources. Next try ${clock}. No file is changed.`);
-assert.equal(listed[0].tip,'A book that gets no answer after 3 tries is left as it is. The app stops asking about it.',"the engine's number");
+assert.equal(listed[0].tip,'Each source is asked up to 3 times for a book, 6 hours apart. With no answer after that, the book is left as it is and the app stops asking.',"the engine's numbers (G8)");
 assert.equal(listed[0].button.hidden,true,'no button');
 assert.equal(listed[1].line1,'Finding original titles and author names: 31 books');assert.equal(listed[1].line2,`Waiting for online sources. Next try ${clock}. No file is changed.`);
-assert.equal(listed[1].tip,'','the detail look-up has no tries limit in the engine: no number is invented');
+assert.equal(listed[1].tip,'A book waits here until its sources answer. The app asks again by itself.','no limit sent for it: the no-limit sentence (G6)');
+// G8 and 6.1: the tooltip follows the engine's numbers; no hours sent leaves that part out; one try and one hour read as one.
+const tip=limit=>{show({background:{series:{tries:limit},gap_fill:{tries:limit}},lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:2,at},{id:'detail_lookup',kind:'detail_lookup',count:2,at}]});return waits().map(item=>item.tip);};
+assert.deepEqual(tip({per_source:5,spacing_seconds:7200}),Array(2).fill('Each source is asked up to 5 times for a book, 2 hours apart. With no answer after that, the book is left as it is and the app stops asking.'),'a limit for the detail look-up gives it the same sentence');
+assert.equal(tip({per_source:4,spacing_seconds:3600})[0],'Each source is asked up to 4 times for a book, 1 hour apart. With no answer after that, the book is left as it is and the app stops asking.');
+assert.equal(tip({per_source:3})[0],'Each source is asked up to 3 times for a book. With no answer after that, the book is left as it is and the app stops asking.');
+assert.equal(tip({per_source:1,spacing_seconds:21600})[0],'Each source is asked once for a book. With no answer, the book is left as it is and the app stops asking.');
 assert.equal(get('jobs-rows').children.length,0,'between tries there is no running row');
 // The next try time is left out when the engine has none; one book reads as one.
 show({lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:1,at:null}]});
@@ -104,4 +110,9 @@ run('badgeSeen={state:null,since:0};badgeShown=null');
 show({lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:212,at}]});run('badgeSeen.since-=3000;renderJobs()');
 assert.equal(get('jobs-state').textContent,'Background look-ups only');assert.equal(get('jobs-idle').textContent,'Nothing is running right now.');
 assert.match(get('jobs-status-text').textContent,/ · 243 background look-ups left$/);
+// 6. G7 (check 18): a paused queue names the look-up that still runs; two or more read as tasks.
+run('badgeSeen={state:null,since:0};badgeShown=null');
+show({state:'paused',rows:[series()]},{state:'Paused'});assert.match(get('jobs-status-text').textContent,/^Paused · Finding series for finished audiobooks: Тёмный лес · /);
+show({state:'paused',rows:[series(),details()]},{state:'Paused'});assert.match(get('jobs-status-text').textContent,/^Paused · 2 tasks running · /);
+show({state:'paused',rows:[]},{state:'Paused'});assert.match(get('jobs-status-text').textContent,/^Paused · /);assert.doesNotMatch(get('jobs-status-text').textContent,/Finding series/);
 console.log('PASS 0.31.0 look-ups: plain names and steps, whole-look-up bar, no stall line or estimate, grouped Waiting items with next try and tries, held write, order');

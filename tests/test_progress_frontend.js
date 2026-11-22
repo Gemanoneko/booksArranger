@@ -33,7 +33,7 @@ const conversion=(extra={})=>({id:'conversion:j1',kind:'conversion',subject:'Lon
 const ids=rows=>rows.map(item=>item.dataset.id);
 
 // Status line is unchanged.
-render();assert.match(get('jobs-status-text').textContent,/^0 need attention · 1 converted out of 2 approved books/);  // 0.29.0: the worker's "Running" is not work; 0.31.0: no bare "Nothing running" either
+render();assert.match(get('jobs-status-text').textContent,/^Checking what is left · 0 need attention · 1 converted out of 2 approved books/);  // 0.29.0: the worker's "Running" is not work; 0.31.0 (G2): never the bare counts
 render({approved_total:undefined});assert.match(get('jobs-status-text').textContent,/Approved book progress unavailable/);
 
 // One measured conversion row: label, subject, audio-time detail, bar, Step N of 4, elapsed.
@@ -69,7 +69,7 @@ const research={id:'research',kind:'research',subject:'Дюна',step:'researchi
 const series={id:'series',kind:'series',subject:'Мухи',step:'looking_up',done:0,total:292,unit:'books',state:'running',started:NOW-2000};
 const oldHeld={title:'Похититель детей',book_id:'b0',cause:'other',held_total:1};
 let mixed=render({state:'Paused',queued:418,attention_counts:{other:65},approved_total:1200,converted_total:778,pause:{origin:'interrupted'},attention_row:oldHeld},[series],{queued_conversions:418});
-assert.match(get('jobs-status-text').textContent,/^Paused · 418 books waiting to convert · 65 need attention · 778 converted out of 1200 approved books/,'0.31.0 (2.1): a look-up row alone never leads the status line; it shows as its row below');
+assert.match(get('jobs-status-text').textContent,/^Paused · Finding series for finished audiobooks: Мухи · 418 books waiting to convert · 65 need attention · 778 converted out of 1200 approved books/,'0.31.0 (G7): a paused queue names the look-up that still runs');
 assert.match(get('jobs-help').textContent,/has not identified which book stopped them/);assert.doesNotMatch(get('jobs-help').textContent,/Похититель|Возрожденный/);
 assert.equal(parts(mixed.find(item=>item.dataset.id==='series')).label,'Finding series for finished audiobooks: ');
 assert.equal(parts(mixed.find(item=>item.dataset.id==='series')).detail,'0 of 292 books');
@@ -113,7 +113,7 @@ rows=render({state:'Needs attention',current_title:'Long book title',current_boo
 assert.equal(rows.length,0,'a held row is not a running row');assert.equal(get('jobs-hold-block').hidden,false);
 let hold=get('jobs-hold').children[0];assert.equal(hold.children[0].children[0].textContent,'On hold: Long book title');
 assert.equal(hold.children[0].children[1].textContent,'Stopped. See Needs attention.');assert.equal(hold.children[1].textContent,'Show in list');
-assert.match(get('jobs-status-text').textContent,/^1 on hold · /);
+assert.match(get('jobs-status-text').textContent,/^Checking what is left · 1 on hold · /);
 rows=render({state:'Needs attention',attention_row:{title:'Похититель детей',phase:'originals',reason:'Cannot refresh protected file identity',cause:'identity_read',book_id:'b1',held_total:1}},[]);
 hold=get('jobs-hold').children[0];assert.equal(hold.children[0].children[0].textContent,'On hold: Похититель детей');
 assert.equal(hold.children[0].children[1].textContent,"Cleanup stopped. The app couldn't read one file's information.");

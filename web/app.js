@@ -1330,13 +1330,15 @@ function renderJobs(){
 function statusParts(jobs,work,shown,counts,asOf,badge=null){
   const c=work.counts,n=key=>Number.isInteger(c?.[key]) && c[key]>0?c[key]:0,paused=n('cleanups_paused'),waiting=n('cleanups_waiting');
   const cleanup=paused && waiting?`Cleanup paused for ${plural(paused,'book','books')}, waiting for ${waiting.toLocaleString()}`:paused?`Cleanup paused for ${plural(paused,'book','books')}`:waiting?`Cleanup waiting for ${plural(waiting,'book','books')}`:'';
-  // 0.31.0 (1.3): the badge or the first part; "N on hold" its own part after it when nothing runs; the series moves to
+  // 0.31.0 (1.3): the badge or the first part; "N on hold" its own part after it when nothing runs; the series changes to
   // approve after "need attention"; the background look-ups left last. Zero counts are left out.
   const first=admissionLine(jobs) || (badge?'':jobsFirstPart(jobs,shown,work)),moves=pendingCount(work,'moves'),lookups=pendingCount(work,'lookups'),held=heldTotal(jobs);
-  const onHold=held && !runningActs(mainRows(shown)).length && !['Paused','Pausing audiobook jobs…'].includes(first)?`${held} on hold`:'';
+  // "N on hold" stays where it was glued to "Nothing running": beside a badge or a first part that says nothing runs,
+  // never beside Paused or a named job (a paused queue that names a look-up included, G7).
+  const onHold=held && ['','Continues by itself','Checking what is left','Nothing running that could be read'].includes(first)?`${held} on hold`:'';
   return [first,onHold,n('queued_conversions')?plural(n('queued_conversions'),'book','books')+' waiting to convert':'',cleanup,
     n('actions_waiting')?plural(n('actions_waiting'),'action','actions')+' waiting':'',`${attentionTotal(jobs)} need attention`,
-    moves?`${plural(moves,'series move','series moves')} to approve`:'',
+    moves?`${plural(moves,'series change','series changes')} to approve`:'',
     counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books${badge?'':asOf}`:'Approved book progress unavailable',
     n('retry_checks_waiting')?`${n('retry_checks_waiting')} waiting for retry checks`:'',
     lookups?`${plural(lookups,'background look-up','background look-ups')} left`:''].filter(Boolean);
@@ -1348,22 +1350,23 @@ function runningActs(shown){return shown.filter(row=>row && ['running','pausing'
 function rowName(row){const subject=rowSubject(row);return workLabel(row)+(subject?': '+subject:'');}
 function jobsFirstPart(jobs,shown,work={}){
   // 0.31.0 (2.1): a look-up row counts in "N tasks running" only beside main work; alone, the badge leads the line.
-  const all=runningActs(shown),running=runningActs(mainRows(shown)).length?all:[],queuePaused=['Paused','paused'].includes(jobs?.state),paused=queuePaused || shown.some(row=>row.state==='paused');
+  // Amended (G7): that rule is not for Paused. A paused queue names the work Pause does not stop, a look-up included.
+  const all=runningActs(shown),queuePaused=['Paused','paused'].includes(jobs?.state),running=runningActs(mainRows(shown)).length || queuePaused?all:[],paused=queuePaused || shown.some(row=>row.state==='paused');
   if(!running.length && paused)return 'Paused';
   if(!running.length && jobs?.state==='Pausing')return 'Pausing audiobook jobs…';
   const named=running.length===1?rowName(running[0]):running.length>1?`${running.length.toLocaleString()} tasks running`:'';
   if(named)return (queuePaused?'Paused · ':'')+named;  // the queue paused while other work (a series update, a check) runs
   // 0.31.0 (1.1, 1.3): bare "Nothing running" is gone from the status line. Main work that waits reads "Continues by
   // itself"; an unread source keeps its 0.30.0 words; a finished state has no first part (its badge leads the line).
-  if(notReadable(work))return 'Nothing running that could be read';
-  return work.state==='continues'?'Continues by itself':'';
+  // Amended (G1, G2): the line never starts with the counts. A source unread for 3 s keeps the 0.30.0 words; in every other
+  // case with nothing to name (the engine still counting, a finished state whose badge is not up yet) the page is
+  // confirming what is left, and says so.
+  if(unreadShown(work,Date.now()).length)return 'Nothing running that could be read';
+  return work.state==='continues'?'Continues by itself':'Checking what is left';
 }
-// "Not known" (1.1): a source has been unread for 3 s or more (the 0.30.0 rule: one failed poll never flashes), or the
-// engine cannot say for another reason (a look-up that has not counted its books yet).
-function notReadable(work){
-  if(work.state!=='unknown')return false;
-  return !work.unread.length || unreadShown(work,Date.now()).length>0;
-}
+// A failed read (1.1, amended G1): a source has been unread for 3 s or more (one failed poll never flashes). "Not known"
+// with no unread source is the engine still counting, never a failed read.
+function notReadable(work){return work.state==='unknown' && unreadShown(work,Date.now()).length>0;}
 // On hold (Judy section 7, unchanged): the held cleanup (jobs.attention_row) leaves the Running list. Line 2 is the plain
 // cause, never the engine's text.
 const HOLD_CAUSES={identity_read:"Cleanup stopped. The app couldn't read one file's information."};
@@ -1509,7 +1512,7 @@ globalThis.addEventListener?.('focus',()=>{if(ended || loadingActive || Date.now
 // Item 8 (Judy section 8): only Sergei's review can move things on. The engine decides (needs_you_only); the count is the
 // Needs attention shortcut's own number. 0.30.0 (section 3): from 30 s old it says when it was counted.
 // 0.31.0 (1.4): a short list under the heading "Waiting for you": one line per kind that has a count, need attention first,
-// then series moves. A drive that is not answering and a book on hold keep their own homes and add no line; when they are the
+// then series changes (amended G5: moves and in-place renames, one count). A drive that is not answering and a book on hold keep their own homes and add no line; when they are the
 // only reason the block is hidden. The Review moves button belongs to the Series moves dialog (section 3), not built yet.
 function renderWaitingForYou(shown,jobs,asOf='',work={}){
   const block=$('jobs-you');if(!block)return;
@@ -1517,7 +1520,7 @@ function renderWaitingForYou(shown,jobs,asOf='',work={}){
   block.hidden=!shown;if(!shown)return;
   const review=$('jobs-review');writeText(review,'Review them');review.title='Show every book that needs you.';review.hidden=!n;
   const line=$('jobs-you-line');line.hidden=!n;writeText(line,n?`${plural(n,'book needs','books need')} attention${asOf}.`:'');
-  const second=$('jobs-you-moves');if(second){second.hidden=!moves;writeText(second,moves?(moves===1?'1 series move waits for your approval.':`${moves.toLocaleString()} series moves wait for your approval.`):'');}
+  const second=$('jobs-you-moves');if(second){second.hidden=!moves;writeText(second,moves?(moves===1?'1 series change waits for your approval.':`${moves.toLocaleString()} series changes wait for your approval.`):'');}
 }
 // 0.30.0 (Judy's BooksArranger_0.30.0_UX.md, section 1): every running, pausing or paused job is a row, in the engine's order
 // (work.rows), keyed by its id, updated in place; no cap and no "+N more". A row shows once it has run 1 s, except one a waiting
@@ -1675,7 +1678,7 @@ function workDetail(row,finishing){
   return '';
 }
 // 0.30.0 (Judy 9): a damaged part's repair names its file in the step's tooltip; the manual window's stop and end lines.
-const LOOKUP_TIPS={series:'Finished audiobooks without a series are looked up online, one by one. A book moves into a series folder only after you approve it.',
+const LOOKUP_TIPS={series:'Finished audiobooks without a series are looked up online, one by one. A series that is found changes a book only after you approve it.',
   gap_fill:'Books approved without an original title or a full author name are looked up online, one by one. The answers are recorded. No audiobook is renamed.'};
 function repairTip(row){return row?.kind==='conversion' && row.step==='repairing' && typeof row.step_text==='string' && row.step_text?'Repairing '+row.step_text:'';}
 function partRepairLine(draft){
@@ -1774,10 +1777,13 @@ function waitingLines(item,work){
     case 'decisions':return [decisionLabel(item.label_key,true),subject,'Your answers are recorded. They apply one at a time.'];
     case 'metadata_sources':return ['Metadata sources','',[n?`${plural(n,'book waits','books wait')} for a source to answer.`:'',Number.isFinite(item.at)?`Next try ${waitingClock(item.at)}.`:''].filter(Boolean).join(' ')];
     case 'series_lookup':case 'detail_lookup':{
-      const tries=item.kind==='series_lookup'?work.background?.series?.tries?.per_source:work.background?.gap_fill?.tries?.per_source;
+      const limit=(item.kind==='series_lookup'?work.background?.series:work.background?.gap_fill)?.tries,tries=limit?.per_source,hours=Number.isFinite(limit?.spacing_seconds) && limit.spacing_seconds>0?Math.round(limit.spacing_seconds/3600):0;
+      const apart=hours?`, ${hours===1?'1 hour':hours.toLocaleString()+' hours'} apart`:'';
       return [item.kind==='series_lookup'?WORK_LABELS.series:WORK_LABELS.gap_fill,plural(n,'book','books'),
         ['Waiting for online sources.',Number.isFinite(item.at)?`Next try ${waitingClock(item.at)}.`:'','No file is changed.'].filter(Boolean).join(' '),
-        Number.isInteger(tries) && tries>0?`A book that gets no answer after ${tries} tries is left as it is. The app stops asking about it.`:''];}
+        !(Number.isInteger(tries) && tries>0)?'A book waits here until its sources answer. The app asks again by itself.'
+          :tries===1?'Each source is asked once for a book. With no answer, the book is left as it is and the app stops asking.'
+          :`Each source is asked up to ${tries} times for a book${apart}. With no answer after that, the book is left as it is and the app stops asking.`];}
     case 'series_write':{const said=blockerSentence(item.blocker,work);return ['Write series into audiobook',subject,said.text,said.tip];}
     case 'drive':return ['Drive not answering',subject,'Its books stay on the list. Check that the drive is connected, then press Check again in Library scan controls.'];
     case 'resume':return ['Resume audiobook jobs','','It starts when the pause finishes.'];
