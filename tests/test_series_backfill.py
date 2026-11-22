@@ -19,6 +19,15 @@ from scanner import connect
 AREA=ROOT/'scratch'/'series-backfill-tests';AREA.mkdir(parents=True,exist_ok=True)
 TITLE,AUTHOR='Призраки белых ночей','Обухова Лена'
 
+# 0.31.0: these cases are about the write itself (the retag, its proofs, the rename, every restart point), on a book whose
+# series name stays in its own folder. The guard that holds such a write for Sergei's approval by default
+# (series_backfill.WRITE_WITHOUT_APPROVAL) has its own module, test_series_write_guard_031; here it is opened.
+def setUpModule():
+    global _GUARD
+    _GUARD=series_backfill.WRITE_WITHOUT_APPROVAL;series_backfill.WRITE_WITHOUT_APPROVAL='allow'
+def tearDownModule():
+    series_backfill.WRITE_WITHOUT_APPROVAL=_GUARD
+
 def make_book(path,faststart=False):
     """A small published-style audiobook: AAC audio, one attached cover, two chapters, title/artist tags."""
     folder=path.parent;cover=folder/'cover.png';chapters=folder/'chapters.txt'

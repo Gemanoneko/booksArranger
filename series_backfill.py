@@ -55,6 +55,18 @@ TEMP_PREFIX = '.books-arranger-series-'
 # folder as before (retag, proofs, no-replace rename, catalog), then the app's usual verified move (book_move) takes it into
 # its series folder (MergeService.sorting_follow_up).
 MOVE_WAITS = 'Series found. Moving it into its series folder waits for your approval.'
+# THE GUARD (0.31.0, Jane for Sergei 2026-11-22): may the look-up write a series into a finished audiobook and rename it
+# WITHOUT his approval? It could, whenever the name with the series stays in the book's own folder (books published
+# under the flat naming: 296 of the 798 finished books without a series on a copy of the live catalog, 282 of them still
+# to look up; all 87 writes before 0.31.0 were of this kind). Making the look-up end (step 4a) lets it reach those books
+# again, and the series it would write is in whatever language the source gives, before ruling R1 is built.
+#   'hold'   (the default, until Sergei rules) nothing is written or renamed without approval. The look-up still runs and
+#            ends; a series found is kept and the book is held with WRITE_WAITS, counted with the moves that wait for
+#            him (summary()['moves_waiting'], and on its own as 'writes_held') and listed for approval (sorting_moves).
+#   'allow'  the 0.16.12 behaviour: such a book is written and renamed in its own folder at once.
+# One setting, read at each write (SeriesBackfill.apply). A series folder that is another folder always needed approval.
+WRITE_WITHOUT_APPROVAL = 'hold'
+WRITE_WAITS = 'Series found. Writing it into the file and renaming it waits for your approval.'
 # The reason the 81 books were held by that bug. Such a book is looked up once more (a lookup only: its file is never touched
 # without approval), so its series is found again under 0.30.0's rules (item 6: the original-language name) and it then
 # waits for approval with MOVE_WAITS.
@@ -226,6 +238,11 @@ class SeriesBackfill:
         with connect(self.database) as db:
             prior = db.execute('SELECT record FROM series_backfill WHERE job_id=?', (job_id,)).fetchone()
             value = record if record is not None else (json.loads(prior[0]) if prior else {})
+            if state == 'held' and isinstance(value, dict) and value.get('move_approved') and reason not in (MOVE_WAITS, WRITE_WAITS) \
+                    and not value.get('approved_failed'):
+                # Judy's 0.31.0 spec, 3.3: whatever held a book after he approved it (its file or its place changed, a
+                # name taken, a failed proof), the list shows it again with why (sorting_moves). One place for every hold.
+                value = dict(value, approved_failed={'reason': str(reason)[:300], 'at': _stamp()})
             db.execute('INSERT OR REPLACE INTO series_backfill VALUES(?,?,?,?,?)',
                        (job_id, state, reason, json.dumps(value, ensure_ascii=False), _stamp()))
         self._changed()
@@ -257,11 +274,12 @@ class SeriesBackfill:
             rows = db.execute("SELECT job_id,state,reason,json_extract(record,'$.next_attempt'),json_extract(record,'$.found') IS NOT NULL,"
                               "json_extract(record,'$.unreached') IS NOT NULL,json_extract(record,'$.approved_failed') IS NOT NULL FROM series_backfill").fetchall()
         counts = dict.fromkeys(('between_tries', 'due', 'write_waiting', 'writing', 'moves_waiting', 'blocked', 'with_series', 'without', 'gave_up', 'left_alone'), 0)
-        writes, nexts = [], []
+        writes, nexts, writes_held = [], [], 0
         for job_id, state, reason, next_attempt, found, unreached, failed in rows:
             later = isinstance(next_attempt, (int, float)) and next_attempt > now
-            if state == 'held' and (reason in (MOVE_WAITS, OLD_FOLDER_REASON) or failed):
+            if state == 'held' and (reason in (MOVE_WAITS, WRITE_WAITS, OLD_FOLDER_REASON) or failed):
                 counts['moves_waiting' if reason != OLD_FOLDER_REASON else 'due'] += 1
+                writes_held += reason == WRITE_WAITS
             elif state in ACTIVE or state == 'pending':
                 counts['writing'] += 1
             elif state in WAITING_ON:
@@ -289,7 +307,8 @@ class SeriesBackfill:
         left = None if to_look_up is None else to_look_up + counts['between_tries']
         value = {'known': unvisited is not None, 'left': left, 'to_look_up': to_look_up, 'between_tries': counts['between_tries'],
                  'next_at': min(nexts) if nexts else None, 'write_waiting': counts['write_waiting'], 'writes': writes[:100], 'writing': counts['writing'],
-                 'moves_waiting': counts['moves_waiting'], 'blocked': counts['blocked'], 'settled': settled, 'with_series': counts['with_series'],
+                 'moves_waiting': counts['moves_waiting'], 'writes_held': writes_held, 'write_without_approval': WRITE_WITHOUT_APPROVAL,
+                 'blocked': counts['blocked'], 'settled': settled, 'with_series': counts['with_series'],
                  'without': counts['without'], 'gave_up': counts['gave_up'], 'left_alone': counts['left_alone'], 'done': settled,
                  'total': None if left is None else settled + left + counts['write_waiting'] + counts['writing'] + counts['moves_waiting'],
                  'tries': {'per_source': SOURCE_TRIES, 'spacing_seconds': TRY_SPACING, 'failures': FAILURE_TRIES}}
@@ -330,6 +349,10 @@ class SeriesBackfill:
             return
         record = entry['record']
         if not record.get('move_approved') or record.get('follow_up'):
+            return
+        if not record.get('series_folder'):
+            # An approved write in the book's own folder (the guard): it is where it belongs; there is no move to make.
+            self._set(job_id, 'done', '', dict(record, follow_up={'state': 'none', 'reason': 'Written in its own folder', 'at': _stamp()}))
             return
         hook = getattr(self.merge, 'sorting_follow_up', None)
         if not callable(hook):
@@ -687,6 +710,10 @@ class SeriesBackfill:
                   'old_path': str(old), 'old_sha256': output['sha256'], 'old_size': output['size'],
                   'research_receipts': found.get('receipts', []), 'deferred_sources': found.get('deferred_sources', []),
                   'series_proof': {key:copy.deepcopy(found[key]) for key in ('work_id','series_id','statement_id','work_revision','series_revision','references','numbering_scheme','isbn','series_url','local_identity') if key in found}}
+        # His approval travels with the record from the start, so a hold at any step below still says it was approved.
+        approved = self.entry(job_id)
+        record.update({key: approved['record'][key] for key in ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc')
+                       if approved and key in approved['record']})
         try:
             # Rulings 69 and 71h: a book Sergei moved to a folder he chose lives where its move says, not at its receipt;
             # its file is left as it is (never renamed from a stale path), fail closed.
@@ -726,6 +753,23 @@ class SeriesBackfill:
                 new = old.parent / new.name
                 if new == old:
                     raise Held('The series name is not a valid audiobook name')
+            elif WRITE_WITHOUT_APPROVAL != 'allow':
+                # The guard (WRITE_WITHOUT_APPROVAL, top of this file): the name with the series stays in the book's own
+                # folder, so 0.16.12 wrote it and renamed the file with no approval. Held instead, with the series found
+                # kept in the record; it is listed and approved like a series move (sorting_moves), and only then written.
+                entry = self.entry(job_id)
+                prior = entry['record'] if entry else {}
+                if not prior.get('move_approved'):
+                    raise Held(WRITE_WAITS)
+                # What he approved is the plan's path (sorting_moves: it may also name his one author folder); as for a
+                # series folder, the series is written here and the verified move follows when that is another folder.
+                planned = getattr(self.merge, 'sorting_target', None)
+                expected = str(planned(job_id, found) or '') if callable(planned) else str(new)
+                if os.path.normcase(expected) != os.path.normcase(str(prior.get('approved_target') or '')):
+                    raise Held('The planned place changed since you approved it; look at the list again. Nothing was changed')
+                record.update({key: prior[key] for key in ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc') if key in prior})
+                if os.path.normcase(os.path.dirname(expected)) != os.path.normcase(str(old.parent)):
+                    record['series_folder'] = os.path.dirname(expected)
             temp = old.parent / (TEMP_PREFIX + job_id + '.m4b')
             record.update(new_path=str(new), temp=str(temp), review=review)
             record.update(root=str(root), parent_identity=output['parent_identity'])

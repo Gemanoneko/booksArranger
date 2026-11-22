@@ -189,7 +189,8 @@ def _held_series(db):
     if not _table(db, 'series_backfill'):
         return {}
     found = {}
-    reasons = SERIES_FOLDER_REASONS + (series_backfill.MOVE_WAITS,)
+    # WRITE_WAITS: the guard holds a write in the book's own folder for the same approval (series_backfill).
+    reasons = SERIES_FOLDER_REASONS + (series_backfill.MOVE_WAITS, series_backfill.WRITE_WAITS)
     for job_id, reason, record in db.execute("SELECT job_id,reason,record FROM series_backfill WHERE state='held'"):
         try:
             record = json.loads(record)
