@@ -87,6 +87,23 @@ STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.go
 # lookup for unknown first names, Wikidata person names and local Latin spellings, and edition volume titles
 # («Хранители. Летопись первая») looked up by their book title.
 RESEARCH_VERSION='standing-24-v1'
+# 0.31.0 step 1d (Sergei 2026-11-22): the two local rules of step 1 (a separated volume named from its own title tag; the
+# series read from the sort-album and grouping tags, R4) change what the files alone decide for a held book of two
+# shapes: one held as a part of a bigger book beside files that carry its title, and one asked about the series its
+# name carries. Each such book is read once more under them, from its files only: a held book makes no online request
+# (_lookup returns before any), and a book the rules now settle goes on as any new book does. Not a new RESEARCH_VERSION:
+# that would read every held and waiting book again and re-open the ruling-71f check of queued jobs. Measured on a copy
+# of the live catalog (2026-11-22): 58 of 276 held books have these shapes.
+LOCAL_RECHECK='local-031-v1'
+RECHECK_PIECES=('siblings','part_title','numbered_part','part_set')
+
+def needs_local_recheck(result):
+    """True for a recorded held result of the step 1d shapes that was read before the 0.31.0 local rules."""
+    if not isinstance(result,dict) or result.get('local_recheck')==LOCAL_RECHECK:return False
+    hold=result.get('identity_hold') if isinstance(result.get('identity_hold'),dict) else {}
+    piece=hold.get('piece') if isinstance(hold.get('piece'),dict) else {}
+    ask=result.get('ask') if isinstance(result.get('ask'),dict) else {}
+    return bool(hold.get('kind')=='piece' and piece.get('piece') in RECHECK_PIECES or ask.get('why')=='title_series')
 
 class ChallengeDetected(ValueError):pass
 
@@ -887,6 +904,7 @@ class PublicResearch:
         self.light_novel(result,row,root)
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
+        result['local_recheck']=LOCAL_RECHECK  # 0.31.0 step 1d: read under the current local rules
         result=attach_shared_routing(result)
         if not entered:return result
         # Human values guide discovery and remain attributed evidence. They never count

@@ -230,7 +230,7 @@ class AutomaticProcessing:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
         return {'state':r['state'],'duplicate_cleanup_policy':result.get('duplicate_cleanup_policy'),'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
                 'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
-                'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0),'series_waits':result.get('series_waits',0)}
+                'local_source_gate_version':result.get('local_source_gate_version'),'local_recheck':result.get('local_recheck'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0),'series_waits':result.get('series_waits',0)}
     def _rules_generation(self):
         """The current author-rules generation ('' with none): a held book is researched again when it changes."""
         value=self._rules()
@@ -255,6 +255,12 @@ class AutomaticProcessing:
             # saved drafts, source revalidation and all metadata/media admission gates.
             return dict(previous,retry_at=None)
         if previous and previous['state']=='Held' and previous.get('research_version')!=RESEARCH_VERSION:return dict(previous,retry_at=None)
+        from public_research import needs_local_recheck
+        if previous and previous['state']=='Held' and needs_local_recheck(previous):
+            # 0.31.0 step 1d: a book held as one part beside files carrying its title, or asked about the series its name
+            # carries, is read once more from its files under the step 1 rules (its new record carries LOCAL_RECHECK, so
+            # once); a book that stays held makes no online request.
+            return dict(previous,until_change=False,retry_at=None)
         if previous and previous['state']=='Held' and (((previous.get('identity_hold') or {}).get('piece') or {}).get('cause'))=='long':
             # 0.30.0 item 8 (Sergei 2026-11-18: remove the 30-hour limit): a set held only by that limit is researched again
             # at the next visit and decided by its other clues (part_sets.decide); nothing else about it has to change.

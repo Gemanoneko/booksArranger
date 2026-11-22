@@ -2939,7 +2939,7 @@ class MergeService:
             # marks its files missing (Senua S-M2), and stays off after that scan changes its fingerprint (Futaba M-3).
             source_gone=__import__('source_presence').still_gone(db,have)
         import todo_causes,local_identity
-        from public_research import RESEARCH_VERSION
+        from public_research import RESEARCH_VERSION,needs_local_recheck
         found={};coverage=dict(self.NO_COVERAGE)
         for identity,(revision,fingerprint) in current.items():
             if identity in jobs:coverage['with_job']+=1;continue  # queued, converting, converted or a stopped job (listed as Stopped)
@@ -2979,6 +2979,9 @@ class MergeService:
             # only the books whose credits or folders the rule names; every other row stays listed).
             version=result.get('research_version')
             if version and version!=RESEARCH_VERSION:coverage['still_checking']+=1;continue
+            # 0.31.0 step 1d: a held book of the two shapes the step 1 local rules change is read once more from its files
+            # before it is asked about again (its old question may no longer hold): Still checking until then.
+            if needs_local_recheck(result):coverage['still_checking']+=1;continue
             if 'rules_generation' in result and (result.get('rules_generation') or '')!=generation and (rules is None or not hasattr(rules,'changed_for') or rules.changed_for(result)):
                 coverage['still_checking']+=1;continue
             if result.get('ask'):

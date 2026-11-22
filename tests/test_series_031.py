@@ -106,6 +106,50 @@ class SeparatedVolumeTests(Fixture):
         self.assertEqual(titles, ['Торадора! 1', 'Торадора! 2'])
 
 
+class RecheckTests(SeparatedVolumeTests):
+    """1d: existing held rows of these shapes are read once more from their files, with no online request."""
+
+    # The held record of «02-Граф Ноль» as the live catalog stored it on 2026-11-01 (its fields that decide).
+    HELD = {'state': 'Held', 'until_change': True, 'retry_at': None, 'research_version': 'standing-24-v1', 'reasons': ['One part of a bigger book'], 'ask': None,
+            'identity_hold': {'kind': 'piece', 'detail': '1 other file(s) beside it carry this title; this may be only part of the book',
+                              'piece': {'piece': 'siblings', 'count': 1}}}
+
+    def test_which_recorded_holds_are_read_again(self):
+        import public_research
+        self.assertEqual(self.HELD['research_version'], public_research.RESEARCH_VERSION, 'no new research version: nothing else is read again')
+        asked = dict(self.HELD, reasons=['Title or author missing'], identity_hold={'kind': 'title_author', 'detail': ''},
+                     ask={'kind': 'title_author', 'why': 'title_series', 'split': {'series': 'Вымирание', 'number': '1', 'title': 'Код'}})
+        for record in (self.HELD, asked):
+            self.assertTrue(public_research.needs_local_recheck(record))
+            self.assertFalse(public_research.needs_local_recheck(dict(record, local_recheck=public_research.LOCAL_RECHECK)), 'once')
+        # Тёмный лес (a set its chapters do not settle), an author question and a book with no hold keep their record.
+        others = (dict(self.HELD, identity_hold={'kind': 'piece', 'detail': '', 'piece': {'piece': 'set', 'cause': 'seasons', 'parts': 2}}),
+                  dict(self.HELD, identity_hold={'kind': 'author_unclear', 'detail': ''}, ask={'kind': 'author_unclear', 'why': 'english_spelling'}),
+                  dict(self.HELD, identity_hold=None), {}, None)
+        for record in others:
+            self.assertFalse(public_research.needs_local_recheck(record), record)
+
+    def test_the_automatic_pass_reads_such_a_book_again_once(self):
+        import public_research
+        from automatic_processing import AutomaticProcessing
+        again = AutomaticProcessing._refresh_wait(None, {'id': 'count-zero'}, dict(self.HELD))
+        self.assertEqual((again['until_change'], again['retry_at']), (False, None), 'researched at the next visit although nothing about it changed')
+        read = dict(self.HELD, local_recheck=public_research.LOCAL_RECHECK)
+        self.assertTrue(AutomaticProcessing._refresh_wait(None, {'id': 'count-zero'}, read)['until_change'], 'a record read under the new rules waits for a change, as before')
+
+    def test_the_new_reading_is_stamped_and_asks_no_online_source(self):
+        import public_research
+        for row in self.volumes():
+            result = self.lookup(row)
+            self.assertEqual((result['reasons'], result['local_recheck']), ([], public_research.LOCAL_RECHECK), 'the two Sprawl rows fix themselves')
+            self.assertEqual(self.research.client.calls, [], 'read from the files only')
+        # A book that stays held is stamped too (never read twice) and asks nothing either.
+        row = {key: value for key, value in self.volumes()[0].items() if key != 'volume_of_set'}
+        result = self.lookup(row)
+        self.assertEqual((result['reasons'], result['local_recheck']), (['One part of a bigger book'], public_research.LOCAL_RECHECK))
+        self.assertEqual(self.research.client.calls, [])
+
+
 class TagSeriesTests(Fixture):
     """1b: the sort-album and grouping tags name the series and the number (R4: filed without asking)."""
 
