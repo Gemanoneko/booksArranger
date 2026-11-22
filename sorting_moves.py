@@ -47,7 +47,30 @@ def _entered(facts, field):
     return field in (names.get('fields') or [])
 
 
-def canonical(db, manifest, rules, series=None):
+# 0.31.0 step 3 (rulings R1 and R3): the English title of a translated book, by the one title rule
+# (canonical_names.book_title) from the title the detail look-up recorded for the finished book (gap_fill's ledger: 92
+# books on a copy of the live catalog have one that was never applied). Planned only when plan() is asked for it
+# (titles=True): renaming a finished book is milestone B's, and nothing here applies it.
+TITLE_ITEM = 'title'
+
+
+def recorded_titles(db):
+    """{job_id: catalog} of the finished books whose detail look-up found the work's catalog record (gap_fill, state
+    'found'): {'language', 'original_title', 'english_title'?, 'title_native', ...}."""
+    if not _table(db, 'gap_fill'):
+        return {}
+    found = {}
+    for job_id, record in db.execute("SELECT job_id,record FROM gap_fill WHERE state='found'"):
+        try:
+            catalog = ((json.loads(record).get('found') or {}).get('catalog'))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if isinstance(catalog, dict) and catalog.get('language'):
+            found[job_id] = catalog
+    return found
+
+
+def canonical(db, manifest, rules, series=None, catalog=None):
     """(review, facts, reasons, notes) for a finished book as the app files it now: its manifest's names with item 5 (the
     author's folder) and item 6 (the series' language) applied, and series (item 2: {'name','number','provider',
     'source_url'}) added when given. reasons: the items that changed something; notes: why, in words."""
@@ -61,6 +84,14 @@ def canonical(db, manifest, rules, series=None):
             facts['series_state'] = 'verified'
         reasons.append('series')
         notes.append('series %s %s (%s)' % (series['name'], series['number'], series.get('provider') or 'source'))
+    if catalog and not _entered(facts, 'title'):
+        local = (facts or {}).get('local_agreement') if isinstance((facts or {}).get('local_agreement'), dict) else {}
+        his = (local.get('title') or {}).get('state') in ('entered', 'approved') if isinstance(local.get('title'), dict) else False
+        titled, rule = canonical_names.book_title(review.get('title') or '', catalog, his=his)
+        if rule == 'english' and titled and titled != review.get('title'):
+            notes.append('title "%s" (the English title of "%s"; %s)' % (titled, review.get('title'), catalog.get('english_source') or catalog.get('source_url') or 'recorded by the detail look-up'))
+            review['title'] = titled
+            reasons.append(TITLE_ITEM)
     credit = review.get('author') or review.get('canonical_author') or ''
     if credit and not _entered(facts, 'author') and not review.get('anthology') and not review.get('multi_author'):
         # Senua's 0.30.0 review, m2: a rule scoped to a folder counts in the book's own (source) folder.
@@ -91,7 +122,7 @@ def canonical(db, manifest, rules, series=None):
     return review, facts, reasons, notes
 
 
-def target(db, row, rules, output_root, series=None, placed=None, effective=None):
+def target(db, row, rules, output_root, series=None, placed=None, effective=None, catalog=None):
     """{'job_id', 'from', 'to', 'items', 'why'} for one completed job (an audio_jobs row), or {'refused': reason} with
     'from', or None when the book is where the app files it. placed: series backfill wrote this approved book's series
     under its new name in its own folder (item 2); the book is expected exactly there and goes on to its series folder.
@@ -104,7 +135,7 @@ def target(db, row, rules, output_root, series=None, placed=None, effective=None
     current = output.get('final_path') or ''
     found = {'job_id': row['job_id'], 'from': current}
     root = str(published_root(manifest, output))
-    review, facts, reasons, notes = canonical(db, manifest, rules, series)
+    review, facts, reasons, notes = canonical(db, manifest, rules, series, catalog)
     if placed and not reasons:
         reasons, notes = ['series'], ['its series folder']
     if not reasons:
@@ -229,7 +260,7 @@ RETAINED = 'Kept as published while the data folder move is unfinished; left as 
 SAME_TARGET = 'Another listed book would get the same name; left as it is'
 
 
-def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset()):
+def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset(), titles=False):
     """Every finished book in Audiobooks Sorted that the app now files elsewhere: {'schema', 'output_root', 'items': [...],
     'refused': [...], 'counts', 'digest'}. An item: {'job_id', 'from', 'to', 'items', 'why'}; a refusal: {'job_id', 'from',
     'refused', 'items'}. Read only (the catalog; exists() on the listed paths). retained: the retained jobs of a catalog in
@@ -250,6 +281,8 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
     # series folder then failed for good (a stranger file at the target) read as "where the app files it" and got no line:
     # stuck in silence. It is planned from where series backfill put it: listed again, or refused with the reason.
     placed = _placed_series(db)
+    # titles=True (0.31.0 step 3, a dry run for milestone B): also plan the English title of a translated book.
+    recorded = recorded_titles(db) if titles else {}
     rows = db.execute("SELECT job_id,manifest,output FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY job_id").fetchall()
     for row in rows:
         row = {'job_id': row[0], 'manifest': row[1], 'output': row[2]}
@@ -271,7 +304,8 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
             continue
         try:
             # A moved book: the receipt keeps the published place, the move chain the new one (book_move).
-            found = target(db, row, rules, output_root, series.get(row['job_id']), placed=placed.get(row['job_id']), effective=_moved(db, row['job_id']))
+            found = target(db, row, rules, output_root, series.get(row['job_id']), placed=placed.get(row['job_id']), effective=_moved(db, row['job_id']),
+                           catalog=recorded.get(row['job_id']))
         except Exception as error:  # one malformed record never hides the others
             refused.append({'job_id': row['job_id'], 'from': current, 'refused': 'Could not be planned: ' + (str(error) or type(error).__name__)[:200], 'items': []})
             continue
@@ -320,9 +354,10 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
 def _answer(output_root, items, refused):
     items = sorted(items, key=lambda i: (i['from'].casefold(), i['job_id']))
     refused = sorted(refused, key=lambda i: (str(i.get('from') or '').casefold(), i['job_id']))
-    counts = {name: sum(1 for i in items if name in i['items']) for name in ITEMS}
+    names = list(ITEMS) + ([TITLE_ITEM] if any(TITLE_ITEM in (i.get('items') or []) for i in items + refused) else [])
+    counts = {name: sum(1 for i in items if name in i['items']) for name in names}
     counts.update(moves=len(items), refused=len(refused))
-    refused_counts = {name: sum(1 for i in refused if name in (i.get('items') or [])) for name in ITEMS}
+    refused_counts = {name: sum(1 for i in refused if name in (i.get('items') or [])) for name in names}
     signed = [[i['job_id'], i['from'], i['to'], i['items']] for i in items]
     digest = hashlib.sha256(json.dumps([SCHEMA, str(output_root or ''), signed], ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
     return {'schema': SCHEMA, 'output_root': str(output_root or ''), 'items': items, 'refused': refused, 'counts': counts,
@@ -345,7 +380,7 @@ def markdown(answer, title='Books Arranger 0.30.0: sorting moves (dry run)', not
         lines.append('None.')
     for n, item in enumerate(answer['items'], 1):
         lines += ['%d. `%s`' % (n, item['from']), '   -> `%s`' % item['to'],
-                  '   Items: %s. %s' % (', '.join({'series': '2', 'author': '5', 'series_language': '6'}[i] for i in item['items']), item.get('why') or '')]
+                  '   Items: %s. %s' % (', '.join({'series': '2', 'author': '5', 'series_language': '6'}.get(i, i) for i in item['items']), item.get('why') or '')]
     lines += ['', '## Left as it is', '']
     if not answer['refused']:
         lines.append('None.')

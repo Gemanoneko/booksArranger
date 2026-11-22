@@ -400,8 +400,23 @@ class CandidateReviewService:
                 if place['series']:
                     if 'series' in saved or 'number' in saved:origin={'origin':'entered'}
                     place['origin']=origin.get('origin') or 'unknown'
-                    if place['origin']=='source':place['provider']=str(origin.get('provider') or '')
+                    if place['origin']=='source':
+                        place['provider']=str(origin.get('provider') or '')
+                        # 0.31.0 (A6), additive: where the number came from and which naming rule named the series.
+                        for key in ('number_from','name_rule'):
+                            if origin.get(key):place[key]=str(origin[key])
+                    if origin.get('name_from') and place['origin']!='entered':place['name_from']=str(origin['name_from'])  # the English name's own source
                 row['place']=place
+                # 0.31.0 (A6), additive, stored facts only: where the title came from, a doubtful series that was dropped
+                # (treated as not found, never asked: R22), and the record of the book's look-up before review.
+                automatic=row.get('automatic') if isinstance(row.get('automatic'),dict) else {}
+                if self.jobs and hasattr(self.jobs,'title_origin') and isinstance(found,dict):
+                    try:
+                        row['title_origin']=self.jobs.title_origin({'metadata_facts':found})
+                        row['series_dropped']=self.jobs.series_dropped({'metadata_facts':found,'lookup':automatic.get('lookup')})
+                    except (AttributeError,TypeError,ValueError):pass
+                if isinstance(automatic.get('lookup'),dict):
+                    row['lookup']={key:automatic['lookup'].get(key) for key in ('asked','fields','tries','limit','next_at','waiting','ended','visits','until','nothing')}
                 row['entered']=entered_names.entered(saved)
         except (sqlite3.Error,OSError,KeyError,TypeError):
             for row in rows:row.pop('place',None);row.pop('entered',None)

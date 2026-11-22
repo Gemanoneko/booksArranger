@@ -48,6 +48,54 @@ def _stamp():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
+def settled(state):
+    """True for a source that has answered about a book, or was given up after its tries: never asked about it again."""
+    return bool(state.get('answered') or state.get('gave_up'))
+
+
+def remember(memory, found, now, wait=None, floor=None, ceiling=None, tries=None, candidate_wait=None):
+    """The bounded-tries rule (R16), in one place for this pass and for the look-up before review
+    (public_research._bounded_lookup, 0.31.0 step 2): write into memory what each source did in one look-up.
+      memory  {source: {'answered'} | {'tries', 'next', 'reason'} | {'gave_up'}}, kept with the book between its visits
+      found   the look-up's answer (public_research._gap_fill): 'asked', 'closed', 'closures'
+      wait    the look-up's one wait, for a research that names no closure
+    A source that answered is settled. The app's own bound and a busy catalog (NO_TRY_KINDS) are no try: the source is due
+    again when the bound reopens. Any other closure is a try: after `tries` of them the source is given up; before that it
+    is due when it says it reopens, never sooner than `floor` seconds from now (default TRY_SPACING) and, with `ceiling`,
+    never later than that. candidate_wait: seconds until the next visit when only this visit's own request budget ran out
+    (default: the closure's own time)."""
+    floor = TRY_SPACING if floor is None else floor
+    tries = SOURCE_TRIES if tries is None else tries  # read at the call: the module's number, never a copy of it
+    closed = [name for name in found.get('closed') or [] if isinstance(name, str)]
+    closures = [item for item in found.get('closures') or [] if isinstance(item, dict) and item.get('source') in closed]
+    if not closures and wait and closed:
+        closures = [dict(wait, source=name) for name in closed]  # a research that names no closure: its one wait stands for each
+    counted = set()
+    for item in closures:
+        name = item['source']
+        if name in counted:
+            continue  # one try per source and pass (an edition's title and its book title ask the same source twice)
+        counted.add(name)
+        state = memory.setdefault(name, {})
+        state.pop('answered', None)
+        retry = item['retry_at'] if isinstance(item.get('retry_at'), (int, float)) else now + PASS_WAIT
+        if item.get('kind') in NO_TRY_KINDS:
+            # the app's own bound: no try; it goes on from here
+            state['next'] = now + candidate_wait if candidate_wait is not None and item.get('scope') == 'candidate' else max(now + MIN_WAIT, retry)
+        else:
+            state['tries'] = int(state.get('tries') or 0) + 1
+            state['reason'] = str(item.get('reason') or '')[:200]
+            if state['tries'] >= tries:
+                state['gave_up'] = True
+                state.pop('next', None)
+            else:
+                state['next'] = max(retry, now + floor) if ceiling is None else min(max(retry, now + floor), now + ceiling)
+    for name in found.get('asked') or []:
+        if isinstance(name, str) and not any(item.get('source') == name for item in found.get('closures') or [] if isinstance(item, dict)):
+            memory[name] = {'answered': True, 'at': now}  # it answered: never asked about this book again
+    return memory
+
+
 def background(manifest):
     """(gaps, ask) a job's approval left for this pass, or ((), None)."""
     facts = manifest.get('metadata_facts') if isinstance(manifest, dict) else None
@@ -113,11 +161,113 @@ class GapFill:
         due = [json.loads(row['record']).get('next_attempt') for row in
                self._rows("SELECT record FROM gap_fill WHERE state='deferred'")]
         due = [value for value in due if isinstance(value, (int, float))]
+        try:
+            held = self._held_counts(force=True).get('next_at')
+        except Exception:
+            held = None
+        if isinstance(held, (int, float)):
+            due.append(held)  # a review-list row's next try (0.31.0 step 2)
         return max(MIN_WAIT, min(PASS_WAIT, min(due) - self.clock())) if due else PASS_WAIT
 
     def status(self):
         value = self.progress
         return dict(value) if value else None
+
+    # ------------------------------------------------------------------ review-list rows (0.31.0 step 2, rulings R2 and R5)
+    # A book held for Sergei is looked up before he reviews it: research asks the sources once when it holds the book
+    # (public_research._held_lookup), and this pass goes on with it, in the same 'gap' lane and under the same bounded
+    # tries, until every source has answered or is given up: the rows that were already held when 0.31.0 first starts,
+    # and any row whose source was closed. The record is kept with the book's own research result (automatic_candidates
+    # 'lookup'); the row's preview and Approve read the answers from it and from the research cache. Nothing is filed or
+    # changed here, and a row research has taken up again meanwhile is left to it (the write is compare-and-swap).
+    HELD_SQL = ("SELECT c.id AS id,c.revision AS revision,c.fingerprint AS fingerprint,json_extract(c.result,'$.lookup.policy') AS policy,"
+                "json_extract(c.result,'$.lookup.waiting') AS waiting,json_extract(c.result,'$.lookup.next_at') AS next_at,"
+                "json_extract(c.result,'$.lookup.nothing') AS none_to_ask FROM automatic_candidates c JOIN book_groups g "
+                "ON g.id=c.id AND g.revision=c.revision AND g.fingerprint=c.fingerprint WHERE c.state='Held' AND g.superseded=0 ORDER BY c.attempted,c.id")
+    HELD_RECOUNT = 30  # seconds: the counts for the page are read again at most this often while research results change
+
+    def _held_rows(self):
+        from public_research import LOOKUP_POLICY
+        with connect(self.database) as db:
+            have = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('automatic_candidates','book_groups')")}
+            if len(have) != 2:
+                return []
+            rows = [dict(row) for row in db.execute(self.HELD_SQL)]
+        for row in rows:
+            row['current'] = row.pop('policy') == LOOKUP_POLICY
+            row['nothing'] = row.pop('none_to_ask')
+        return rows
+
+    def _held_counts(self, force=False):
+        """{'left', 'to_look_up', 'between_tries', 'next_at', 'done', 'total'} of the review-list rows' look-up. Counted from
+        the catalog when a research result changed (at most every HELD_RECOUNT seconds for a poll), else kept."""
+        now = self.clock()
+        kept = self.__dict__.get('_held')
+        with connect(self.database) as db:
+            have = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='automatic_result_revision'").fetchone()
+            revision = (db.execute('SELECT revision FROM automatic_result_revision WHERE id=1').fetchone() or (None,))[0] if have else None
+        if kept and kept['revision'] == revision and (kept['counts']['next_at'] is None or kept['counts']['next_at'] > now):
+            return dict(kept['counts'])
+        if kept and not force and time.monotonic() - kept['at'] < self.HELD_RECOUNT:
+            return dict(kept['counts'])
+        rows = self._held_rows()
+        later = [row['next_at'] for row in rows if row['current'] and row['waiting'] and isinstance(row['next_at'], (int, float)) and row['next_at'] > now]
+        due = sum(1 for row in rows if not row['current'] or row['waiting']) - len(later)
+        done = sum(1 for row in rows if row['current'] and not row['waiting'] and not row['nothing'])
+        counts = {'left': due + len(later), 'to_look_up': due, 'between_tries': len(later), 'next_at': min(later) if later else None,
+                  'done': done, 'total': done + due + len(later), 'nothing_to_ask': sum(1 for row in rows if row['current'] and row['nothing'])}
+        self.__dict__['_held'] = {'revision': revision, 'at': time.monotonic(), 'counts': counts}
+        return dict(counts)
+
+    def _held_title(self, book_id):
+        try:
+            with connect(self.database) as db:
+                row = db.execute("SELECT json_extract(evidence,'$.title_clue') FROM book_groups WHERE id=?", (book_id,)).fetchone()
+            return (row[0] if row else '') or ''
+        except Exception:
+            return ''
+
+    def held_candidates(self):
+        """The review-list rows whose look-up is due: not looked up under this policy yet, or waiting and at its next try."""
+        now = self.clock()
+        return [row for row in self._held_rows() if not row['current'] or row['waiting'] and not (isinstance(row['next_at'], (int, float)) and row['next_at'] > now)]
+
+    def look_up_held(self, entry):
+        """One review-list row: ask the sources (research.held_lookup) and keep the record with the row's research result,
+        only while that result is still the one read here. Returns 'saved', 'changed' (research took the row up
+        meanwhile, or it is no longer held: nothing written) or 'gone'."""
+        automatic = getattr(self.merge, 'automatic', None)
+        reviews = getattr(self.merge, 'reviews', None)
+        if automatic is None or reviews is None or not hasattr(self.research, 'held_lookup'):
+            return 'gone'
+        with connect(self.database) as db:
+            saved = db.execute("SELECT result FROM automatic_candidates WHERE id=? AND revision=? AND fingerprint=? AND state='Held'",
+                               (entry['id'], entry['revision'], entry['fingerprint'])).fetchone()
+        if not saved:
+            return 'changed'
+        try:
+            result = json.loads(saved[0] or '{}')
+            row = reviews._row('Audiobooks', entry['id'])
+        except ValueError:
+            return 'gone'
+        if row.get('revision') != entry['revision'] or row.get('fingerprint') != entry['fingerprint'] or row.get('manual_conversion'):
+            return 'changed'
+        from public_research import LOOKUP_POLICY
+        prior = result.get('lookup') if isinstance(result.get('lookup'), dict) and result['lookup'].get('policy') == LOOKUP_POLICY else None
+        try:
+            record = self.research.held_lookup(row, automatic._candidate_root(row), prior, self.stop)
+        except InterruptedError:
+            raise
+        except Exception as error:
+            # A row that cannot be looked up is not tried again at every pass: recorded as nothing to ask, with why.
+            record = {'policy': LOOKUP_POLICY, 'nothing': True, 'fields': {}, 'waiting': False, 'next_at': None, 'sources': {}, 'tries': 0,
+                      'doubtful': [], 'found': {}, 'error': (str(error) or type(error).__name__)[:200]}
+        result['lookup'] = record
+        with connect(self.database) as db:
+            changed = db.execute("UPDATE automatic_candidates SET result=? WHERE id=? AND revision=? AND fingerprint=? AND state='Held' AND result=?",
+                                 (json.dumps(result, ensure_ascii=False), entry['id'], entry['revision'], entry['fingerprint'], saved[0])).rowcount
+        self.__dict__['_held'] = None
+        return 'saved' if changed else 'changed'
 
     def summary(self):
         """0.31.0 step 4b: plain counts of the whole detail look-up for /api/state (background_work), from the ledger and
@@ -137,10 +287,27 @@ class GapFill:
         unvisited = len(backlog['unvisited'] - {row['job_id'] for row in rows}) if backlog and backlog['jobs'] == jobs else None
         to_look_up = None if unvisited is None else due + unvisited
         left = None if to_look_up is None else to_look_up + len(later)
-        return {'known': unvisited is not None, 'left': left, 'to_look_up': to_look_up, 'between_tries': len(later), 'next_at': min(later) if later else None,
-                'done': done, 'total': None if left is None else done + left, 'found': sum(1 for row in rows if row['state'] == 'found'),
+        # 0.31.0 step 2: the review-list rows this pass also looks up (books held for Sergei, before he reviews them). Their
+        # numbers are in 'review', and inside the totals too, so the finished state never says "all done" while one of
+        # them is still to be asked about; 'approved' keeps the numbers of the books already approved alone.
+        try:
+            review = self._held_counts()
+        except Exception:
+            review = None
+        approved = {'left': left, 'to_look_up': to_look_up, 'between_tries': len(later), 'next_at': min(later) if later else None,
+                    'done': done, 'total': None if left is None else done + left}
+        nexts = later + ([review['next_at']] if review and isinstance(review.get('next_at'), (int, float)) else [])
+        extra = review or {'left': 0, 'to_look_up': 0, 'between_tries': 0, 'done': 0, 'total': 0}
+        from public_research import LOOKUP_MAX_WAIT, LOOKUP_RETRY_MIN, LOOKUP_SOURCES
+        return {'known': unvisited is not None, 'left': None if left is None else left + extra['left'],
+                'to_look_up': None if to_look_up is None else to_look_up + extra['to_look_up'], 'between_tries': len(later) + extra['between_tries'],
+                'next_at': min(nexts) if nexts else None, 'done': done + extra['done'], 'total': None if left is None else done + left + extra['total'],
+                'found': sum(1 for row in rows if row['state'] == 'found'),
                 'none': sum(1 for row in rows if row['state'] == 'none'), 'gave_up': sum(1 for row in rows if row['state'] == 'none' and row['gave_up']),
-                'tries': {'per_source': SOURCE_TRIES, 'spacing_seconds': TRY_SPACING, 'failures': FAILURE_TRIES}}
+                'tries': {'per_source': SOURCE_TRIES, 'spacing_seconds': TRY_SPACING, 'failures': FAILURE_TRIES},
+                'approved': approved, 'review': review,
+                'review_tries': {'per_source': SOURCE_TRIES, 'min_spacing_seconds': LOOKUP_RETRY_MIN, 'max_spacing_seconds': TRY_SPACING,
+                                 'max_wait_seconds': LOOKUP_MAX_WAIT, 'sources': list(LOOKUP_SOURCES)}}
 
     # ------------------------------------------------------------------ ledger
     def _rows(self, sql, params=()):
@@ -186,10 +353,18 @@ class GapFill:
         if self.research is None or not hasattr(self.research, 'fill_gaps'):
             return
         books = self.candidates()
+        # 0.31.0 step 2: the review-list rows first (they wait for Sergei's eyes), then the books already approved. Both
+        # use the 'gap' lane's share of each site's hourly bound, so a row that finds the share used waits for it: no try.
+        held = self.held_candidates() if hasattr(self.research, 'held_lookup') else []
+        for index, entry in enumerate(held):
+            if self.stop.is_set():
+                return
+            self.progress = {'title': self._held_title(entry['id']), 'done': index, 'total': len(held) + len(books), 'about': 'review'}
+            self.look_up_held(entry)
         for index, (job_id, manifest) in enumerate(books):
             if self.stop.is_set():
                 return
-            self.progress = {'title': (manifest.get('metadata') or {}).get('title', ''), 'done': index, 'total': len(books)}
+            self.progress = {'title': (manifest.get('metadata') or {}).get('title', ''), 'done': len(held) + index, 'total': len(held) + len(books), 'about': 'approved'}
             self.fill(job_id, manifest)
 
     def fill(self, job_id, manifest):
@@ -228,32 +403,7 @@ class GapFill:
         record = {'lookup_policy': LOOKUP_POLICY, 'gaps': list(gaps), 'ask': ask, 'found': values, 'unfilled': list(found.get('unfilled') or []),
                   'receipts': [dict(source) for source in result.get('sources', [])[:40]], 'last_attempt': now}
         wait = found.get('wait')
-        closed = [name for name in found.get('closed') or [] if isinstance(name, str)]
-        closures = [item for item in found.get('closures') or [] if isinstance(item, dict) and item.get('source') in closed]
-        if not closures and wait and closed:
-            closures = [dict(wait, source=name) for name in closed]  # a research that names no closure: its one wait stands for each
-        counted = set()
-        for item in closures:
-            name = item['source']
-            if name in counted:
-                continue  # one try per source and pass (an edition's title and its book title ask the same source twice)
-            counted.add(name)
-            state = memory.setdefault(name, {})
-            state.pop('answered', None)
-            retry = item['retry_at'] if isinstance(item.get('retry_at'), (int, float)) else now + PASS_WAIT
-            if item.get('kind') in NO_TRY_KINDS:
-                state['next'] = max(now + MIN_WAIT, retry)  # the app's own bound: no try; it goes on from here
-            else:
-                state['tries'] = int(state.get('tries') or 0) + 1
-                state['reason'] = str(item.get('reason') or '')[:200]
-                if state['tries'] >= SOURCE_TRIES:
-                    state['gave_up'] = True
-                    state.pop('next', None)
-                else:
-                    state['next'] = max(retry, now + TRY_SPACING)
-        for name in found.get('asked') or []:
-            if isinstance(name, str) and not any(item.get('source') == name for item in found.get('closures') or [] if isinstance(item, dict)):
-                memory[name] = {'answered': True, 'at': now}  # it answered: never asked about this book again
+        remember(memory, found, now, wait)
         if memory:
             record['sources'] = memory
         waiting = sorted(name for name, state in memory.items() if not settled(state))

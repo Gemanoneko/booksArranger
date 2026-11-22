@@ -3601,7 +3601,45 @@ class MergeService:
         elif series.get('value') and 'the title (folder_name)' in kinds:found['origin']='folders'
         elif source.get('provider') and source['provider'] not in ('local','entered'):
             found.update(origin='source',provider=str(source['provider']),source_url=str(source.get('url') or source.get('source_url') or ''))
+            # 0.31.0 (A6), additive: where the number came from ('source'; 'counted' by the app from FantLab's cycle order;
+            # 'names' or 'tags': the book's own) and which naming rule named the series ('english', 'russian_original',
+            # 'no_english_name', 'unknown_language': canonical_names.series_name).
+            for key in ('number_from','name_rule'):
+                if source.get(key):found[key]=str(source[key])
+        # 0.31.0 (A6, Judy 4.5): the source of the series' English name, only where it is another source than the origin
+        # above (the files' own series named in English from Wikidata; FantLab's series with Wikidata's English name).
+        if source.get('name_provider') and found['origin']!='entered' and source['name_provider']!=found.get('provider'):
+            found['name_from']=str(source['name_provider'])
         return found
+
+    @staticmethod
+    def title_origin(result):
+        """0.31.0 (A6): where a result's title came from, as keys the page words: {'origin': 'entered' (by him) | 'source'
+        (an online source named it, with 'provider' and 'source_url') | 'files' (the title the files give) | 'unknown',
+        'rule': the title rule's own answer (canonical_names.TITLE_RULES: 'english', 'russian_original',
+        'no_english_title' = a translation no source names in English, 'unknown_language', 'his'), 'split': the title is
+        the part after the series and number of the files' name, which a source confirmed}. A result made before
+        0.31.0 has no such record: 'unknown'."""
+        facts=(result.get('metadata_facts') or {}) if isinstance(result,dict) else {}
+        source=facts.get('title_source') if isinstance(facts.get('title_source'),dict) else None
+        agreed=(result.get('local_agreement') or facts.get('local_agreement') or {}) if isinstance(result,dict) else {}
+        title=agreed.get('title') if isinstance(agreed.get('title'),dict) else {}
+        if title.get('state') in ('entered','approved'):return {'origin':'entered','rule':'his','split':False}
+        if source is None:return {'origin':'unknown','rule':'','split':False}
+        found={'origin':'source' if source.get('rule') in ('english','russian_original') and source.get('provider') else 'files','rule':str(source.get('rule') or ''),'split':bool(source.get('split'))}
+        if found['origin']=='source':found.update(provider=str(source['provider']),source_url=str(source.get('url') or ''))
+        return found
+
+    @staticmethod
+    def series_dropped(result):
+        """0.31.0 (A6, rulings R18, R21 and R22): the doubtful series that were dropped for this book, [{'provider', 'name',
+        'number', 'why', 'source_url'}] ('why' is one of series_certainty.WHY), [] for none. A dropped series is treated
+        as not found: the book has no series because of it, and nobody is asked."""
+        facts=(result.get('metadata_facts') or {}) if isinstance(result,dict) else {}
+        search=facts.get('gap_search') if isinstance(facts.get('gap_search'),dict) else {}
+        found=[dict(item) for item in search.get('series_doubt') or [] if isinstance(item,dict)]
+        lookup=result.get('lookup') if isinstance(result,dict) and isinstance(result.get('lookup'),dict) else {}
+        return found or [dict(item) for item in lookup.get('doubtful') or [] if isinstance(item,dict)]
 
     # --- 0.31.0 step 1c (Sergei 2026-11-22): two books never share one destination (destination_clash).
     def _planned_note(self,row,path,names=None):
@@ -3674,6 +3712,11 @@ class MergeService:
         if str(review.get('series') or '').strip() and str(review.get('number') or '').strip():
             answer['series']={'name':str(review['series']).strip(),'number':str(review['number']).strip()}
             answer['series'].update(self.series_origin(result))  # 0.31.0 (Judy 4.3): where the series and number came from
+        # 0.31.0 (A6), additive: where the title came from, a doubtful series that was dropped, and the record of the
+        # book's look-up before review (what is asked, the tries and their limit, the next try, how each field ended).
+        answer['title_origin']=self.title_origin(result)
+        answer['series_dropped']=self.series_dropped(result)
+        if isinstance(result.get('lookup'),dict):answer['lookup']={key:result['lookup'].get(key) for key in ('asked','fields','tries','limit','next_at','waiting','ended','visits','until','nothing')}
         from tolkien_trilogy import author_world,DECISION
         if author_world(review,result.get('metadata_facts')):answer['names_decision']=DECISION
         if names is not None:

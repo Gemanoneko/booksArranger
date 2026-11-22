@@ -2912,6 +2912,7 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     # same way keeps its source; one that names another series leaves the title as it is (its own names disagree).
     found = series_title_parts(fields['title']['value'], author['name'] if author else '') if fields['title']['value'] and not part else None
     unconfirmed = False
+    hint = None
     if found:
         # Ruling 45 (Sergei 2026-10-27): the series its sibling book folders carry decides it when the name only repeats
         # its own title as the series («Мертвый ноль 7. Мертвый ноль» beside «Сновидения Ехо 5. Сундук мертвеца»). A name
@@ -2948,14 +2949,22 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                            or confirmed_omen(found['series'], found['number'], found['title'], author['name'] if author else '')
                            or (fields['series']['state'] == 'green' and series_key(fields['series']['value']) == series_key(found['series'])))
         whole = fields['title']['value']
-        if not named:
+        if unconfirmed:
+            # R22 (Sergei 2026-11-22; it replaces ruling 52's question, "Title unclear"): a series the name only looks
+            # like, which nothing confirms, is doubtful, and a doubtful series is treated as not found: no question. The
+            # title stays as the files give it and the book has no series of its own; the split is kept as a hint
+            # (series_hint), and the look-up before review asks the sources about the part after the number: a source that
+            # names that series with that number confirms it (public_research._gap_fill, series_certainty).
+            hint = {'series': series_spelling(found['series']), 'number': found['number'], 'title': found['title'], 'whole': whole, 'from': 'name'}
+            unconfirmed = False
+        elif not named:
             # 'field' (0.31.0, Judy 4.3) is set only for R15: the series the title tag's own text alone names, so its row
             # says "from the title tag" and no other row does (summary() keeps kind, field and value). A volume whose
             # album tag names the set too reads "from the file's tags" (two of its tags name it).
             source = [dict({'kind': 'the title (%s)' % (fields['title'].get('basis') or 'name'), 'value': whole}, **({'field': 'title'} if own_tag and not album_series else {}))]
             fields['series'] = {'state': 'green', 'value': found['series'], 'how': 'the series before the number in "%s" (ruling 41)' % whole, 'sources': source}
             fields['number'] = {'state': 'green', 'value': found['number'], 'how': 'the number in "%s" (ruling 41)' % whole, 'sources': source}
-        if not named or (norm(fields['series']['value']) == norm(found['series']) and _same_number(fields['number']['value'], found['number'])):
+        if not hint and (not named or (norm(fields['series']['value']) == norm(found['series']) and _same_number(fields['number']['value'], found['number']))):
             fields['title'] = dict(fields['title'], value=found['title'], how=fields['title'].get('how', '') + '; the title after the series and number (ruling 41)',
                                    aliases=list(fields['title'].get('aliases') or []) + [whole])
     if not found and fields['series']['state'] != 'green' and not part:
@@ -2966,10 +2975,9 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         for value in texts:
             mention = re.search(r'\(\s*([^()#№]{3,80}?)\s*(?:#|№)\s*0*(\d{1,3})\s*\)', value or '')
             if mention and re.search(r'[^\W\d_]{3}', mention[1]):
-                source = [{'kind': 'brackets in the name', 'value': value}]
-                fields['series'] = {'state': 'green', 'value': text(mention[1]), 'how': 'the series the name mentions in brackets', 'sources': source}
-                fields['number'] = {'state': 'green', 'value': mention[2], 'how': 'the number the name gives it in brackets', 'sources': source}
-                unconfirmed = True
+                # R22: nothing confirms the series a name mentions in brackets, so it is doubtful: not found, not asked.
+                # Kept as a hint for the look-up before review (the book's title is asked about as it is).
+                hint = {'series': series_spelling(text(mention[1])), 'number': series_number(mention[2]), 'title': fields['title']['value'], 'whole': fields['title']['value'], 'from': 'brackets'}
                 break
     if fields['series']['state'] == 'green' and series_spelling(fields['series']['value']) != fields['series']['value']:
         # Ruling 46: one series, one spelling, whichever name its files use.
@@ -3024,8 +3032,11 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                  'requires_own_chapters': True} if part and not part['blocked'] else None
     return {'version': IDENTITY_VERSION, 'accepted': accepted, 'route': route if accepted else None, 'part_book': part_book, 'fields': fields,
             'series': series, 'gaps': gaps, 'ignored': ignored, 'conflicts': conflicts, 'ask': ask,
-            # Ruling 52: the series and number came from the name's split and nothing confirms the series.
+            # Ruling 52's mark: the series and number came from the name's split and nothing confirms the series. Since R22
+            # (0.31.0) such a series is not set at all, so this is always False; the key stays for what reads it.
             'series_unconfirmed': bool(unconfirmed and series),
+            # R22: the series and number a name only looks like ({'series', 'number', 'title', 'whole', 'from'}), or None.
+            'series_hint': hint if hint and not series else None,
             # Rulings 30 and 37: the universe the book's folders name («Вселенная Дозоров»), else ''.
             'universe': (structure or {}).get('universe') or book_universe(row, root),
             'held': piece['detail'] if piece and not ask else '',
@@ -3420,15 +3431,17 @@ def _same_number(left, right):
     return series_number(left) == series_number(right)
 
 
-def odd_identity(title, author, local_author='', no_author='', ruled=False, folders=()):
+def odd_identity(title, author, local_author='', no_author='', ruled=False, folders=(), series=True):
     """{'kind', 'why', 'proposal'?, 'candidates'?} when the title or author the app would file needs Sergei's answer,
     else None. kind is an existing question row: 'title_author' or 'author_unclear'. ruled: a rule chose the author (his
     answer, or the library's own folder for that name), so only the title is checked. folders: the names of the book's
-    own folders and their parents, which may name the title without its series."""
+    own folders and their parents, which may name the title without its series. series=False (research, since R22,
+    Sergei 2026-11-22): a title that only looks like a series name and number is not asked about (why 'title_series');
+    the doubtful series is treated as not found and the title is filed as it is."""
     title, author = text(title), text(author)
     if title and re.search(r'[^\W\d_]', _BITRATE_TAIL.sub('', title)) and _BITRATE_TAIL.search(title):
         return {'kind': 'title_author', 'why': 'title_bitrate'}
-    if title and (_series_in_title(title, folders) or _series_split(title, author)[1] == 'ask'):
+    if series and title and (_series_in_title(title, folders) or _series_split(title, author)[1] == 'ask'):
         return {'kind': 'title_author', 'why': 'title_series'}
     if author and author != no_author and not ruled:
         if '_' in author:

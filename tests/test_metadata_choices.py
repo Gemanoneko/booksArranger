@@ -59,18 +59,23 @@ class MetadataChoicesTests(unittest.TestCase):
 
     def test_shared_authoritative_work_id_allows_field_questions_only(self):
         a=dict(self.a,work_id='work:1');b=dict(a,id='b',provider='Catalog B',series='Other series')
-        snapshot=self.present([a,b]);self.assertEqual([(q['type'],q['field']) for q in snapshot['questions']],[('field','series')])
-        self.assertEqual(set(self.answer(snapshot)['patch']),{'series'})
+        # R22 (Sergei 2026-11-22): sources that agree on the book and differ only in its series make that series doubtful;
+        # it is treated as not found and never asked. The field question itself is shown here on another field (genre).
+        dropped=self.present([a,b]);self.assertEqual((dropped['questions'],dropped['unresolved_count'],dropped['dropped_as_doubtful']),([],0,['series']))
+        self.assertEqual([(q['type'],q['field']) for q in m.questions(self.row,[a,b],[],[])['questions']],[('field','series')],'positive control: they do differ in the series alone')
+        a=dict(self.a,work_id='work:1',genre='Fantasy');b=dict(a,id='b',provider='Catalog B',genre='Science fiction')
+        snapshot=self.present([a,b]);self.assertEqual([(q['type'],q['field']) for q in snapshot['questions']],[('field','genre')])
+        self.assertEqual(set(self.answer(snapshot)['patch']),{'genre'})
 
     def test_identity_disagreement_remains_whole_work_even_with_claimed_same_id(self):
         snapshot=self.present([dict(self.a,work_id='work:1'),dict(self.b,work_id='work:1')])
         self.assertEqual(snapshot['questions'][0]['type'],'work_profile')
 
     def test_missing_value_is_not_fabricated_conflict_or_empty_override(self):
-        b=dict(self.a,id='b',provider='Catalog B',series='')
-        self.assertEqual(self.present([self.a,b])['unresolved_count'],0)
-        c=dict(self.a,id='c',provider='Catalog C',series='Other')
-        sources=[dict(value,work_id='work:1') for value in (self.a,b,c)]
+        b=dict(self.a,id='b',provider='Catalog B',genre='')
+        self.assertEqual(self.present([dict(self.a,genre='Fantasy'),b])['unresolved_count'],0)
+        c=dict(self.a,id='c',provider='Catalog C',genre='Other')
+        sources=[dict(value,work_id='work:1') for value in (dict(self.a,genre='Fantasy'),b,c)]
         question=self.present(sources)['questions'][0];self.assertEqual(len(question['options']),2);self.assertEqual(question['not_supplied'][0]['provider'],'Catalog B')
 
     def test_saved_decision_survives_restart_and_identical_timestamp_refresh(self):
@@ -91,7 +96,10 @@ class MetadataChoicesTests(unittest.TestCase):
 
     def test_same_work_unrelated_field_change_does_not_renew_series_choice(self):
         a=dict(self.a,work_id='work:1');b=dict(a,id='b',provider='Catalog B',series='Other series')
-        snap=self.present([a,b]);m.append(self.db,self.answer(snap)['record'])
+        # A series question he already answered keeps working after R22: it stays, with his answer. (Built from the
+        # unfiltered questions, as a catalog that held it before 0.31.0 has it.)
+        snap=m.questions(self.row,[a,b],[],[]);m.append(self.db,self.answer(snap)['record'])
+        self.assertEqual([(q['field'],q['resolved']) for q in self.present([a,b])['questions']],[('series',True)],'his saved answer keeps its question')
         self.assertEqual(self.present([a,dict(b,genre='new unrelated genre')])['questions'][0]['evidence_signature'],snap['questions'][0]['evidence_signature'])
 
     def test_keep_unresolved_never_dismisses_or_approves(self):

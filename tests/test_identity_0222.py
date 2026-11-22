@@ -184,6 +184,21 @@ class LatinGivenSurnameTests(Base):
         self.assertFalse(result['reasons'], result.get('ask'))
         self.assertEqual(self.goes_to(row, result), SORTED + '\\Matheson Richard\\I Am Legend - Matheson Richard.m4b')
 
+# 0.31.0 step 2 (rulings R2 and R5): these fixtures predate the look-up before review, and their sources are closed or
+# cannot be reached. Under R2 such a book now waits a few tries for them, which is not what this suite tests; the
+# look-up has its own tests (test_lookup_before_review_031). tests/original_title_fixture.py.
+_no_lookup_before_review = None
+
+
+def setUpModule():
+    global _no_lookup_before_review
+    from original_title_fixture import no_lookup
+    _no_lookup_before_review = no_lookup()
+
+
+def tearDownModule():
+    _no_lookup_before_review.stop()
+
 
 if __name__ == '__main__':
     unittest.main()
@@ -216,7 +231,8 @@ class TranslationNoWaitTests(Base):
             result = self.lookup(row)
         self.assertEqual(result['reasons'], [])
         self.assertEqual(self.goes_to(row, result), SORTED + '\\Zelazny Roger\\Jack of Shadows - Zelazny Roger.m4b')
-        self.assertEqual(result['metadata_facts']['original_title_lookup'], {'state': 'found', 'title': 'Jack of Shadows'})
+        fact = result['metadata_facts']['original_title_lookup']  # 0.31.0: the fact also names its source ('provider', 'url')
+        self.assertEqual((fact['state'], fact['title']), ('found', 'Jack of Shadows'))
 
     def test_series_only_approval_retains_cached_english_title_but_explicit_title_wins(self):
         row=next(iter(self.catalog(self.JACK).values()))
@@ -286,14 +302,17 @@ class ForeignCyrillicAuthorTests(Base):
             result = self.lookup(goliath)
         self.assertEqual(result['reasons'], [])
         self.assertEqual(self.goes_to(goliath, result), SORTED + '\\Westerfeld Scott\\Goliath - Westerfeld Scott.m4b', 'the English name and title the record gives')
-        self.assertEqual(result['metadata_facts']['original_title_lookup'], {'state': 'found', 'title': 'Goliath'})
+        fact = result['metadata_facts']['original_title_lookup']  # 0.31.0: the fact also names its source ('provider', 'url')
+        self.assertEqual((fact['state'], fact['title']), ('found', 'Goliath'))
         self.assertEqual(self.rules(), [('same_as', author_rules.key('Скотт Вестерфельд'), 'Westerfeld Scott', 'assistant')], 'learned once, for the credit')
         online, asked = self.online({})
         with online, patch.object(self.research, '_author_latin', side_effect=AssertionError('the author was looked up again')):
             result = self.lookup(leviathan)
         # The author's next book needs no author lookup (the rule); Futaba's 0.24.0 QA, B1: its own original title is asked
         # once, by its own title (rulings 38 and 49: «Две твердыни» had filed under the Russian title with no request).
-        self.assertEqual(asked, ['Левиафан'], 'only the book\'s own title')
+        # 0.31.0: that request is the look-up before review now, which this suite switches off (its sources are closed);
+        # test_lookup_before_review_031 covers it. Here: no author lookup, and nothing else asked.
+        self.assertEqual(asked, [], 'the look-up before review is off in this suite')
         self.assertEqual(result['reasons'], [])
         self.assertEqual(self.goes_to(leviathan, result), SORTED + '\\Westerfeld Scott\\Левиафан - Westerfeld Scott.m4b', 'no English title for it: its own')
 

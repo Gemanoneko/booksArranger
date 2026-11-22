@@ -113,6 +113,7 @@ patterns.push('test_sorting_030_review.py');  // Senua's 0.30.0 review M2, M3, m
 patterns.push('test_scope_view.py');  // 0.30.0 item E: the Book metadata line from scope_view (repaired text), never the grouping key
 patterns.push('test_series_031.py','test_destination_clash.py');  // 0.31.0 step 1: volumes named from their own tags, series from the series tags, R15's title tag, the same-name hold and what the to-do row says of it
 patterns.push('test_series_lookup_ends_031.py','test_series_write_guard_031.py','test_series_moves_031.py','test_finished_state_031.py');  // 0.31.0 step 4: the bounded series look-up, the write guard, the plan's fields, the finished state (R14, R18, R19)
+patterns.push('test_lookup_before_review_031.py');  // 0.31.0 steps 2 and 3: the look-up before review, Wikidata, the certain-or-doubtful rule, the title rule, name order (R1-R5, R18, R21-R23, R25)
 patterns.push('test_damaged_part_repair.py');  // 0.30.0 item C: a damaged M4B part is repaired on a working copy before its join (manual and automatic)
 patterns.push('test_damage_ruling.py');  // Sergei's ruling 2026-11-19: container-only damage with proven intact audio converts normally; unrepairable damage says re-acquire
 patterns.push('test_minor_damage.py');  // Sergei's ruling 2026-11-20: audio that plays through with only a short glitch publishes with a minor-damage note

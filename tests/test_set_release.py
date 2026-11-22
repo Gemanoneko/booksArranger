@@ -35,23 +35,22 @@ class SetReleaseTests(ApproveFixture):
         return (self.service.automatic.candidate(current) or {}).get('ask') or {}
 
     def test_ruling_57_approve_one_does_not_release_the_other_even_after_start(self):
+        # Ruling 57 was about a set that only confirms itself («Курс истории. Лекция 1/2»), each book asked and approved
+        # separately. R22 (Sergei 2026-11-22) withdrew that question: the series such a name only looks like is doubtful,
+        # treated as not found, and nothing is asked. Each book of the set is filed by itself under the name its files
+        # give, with no series, and neither waits for the other. (The test keeps its name.)
         rows=self.books()
         self.service.automatic.start();self.finish_run()
-        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],['title_series']*2)
-        with mock.patch.object(self.service.automatic,'request_start') as start:
-            self.service.approve_book(rows['1']['id'],rows['1']['revision'])
-        start.assert_not_called()
-        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending','Approve waits for conversion Start')
+        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],[None,None],'R22: no series question')
         self.start_and_wait()
-        self.assertEqual(len(self.service.jobs.status()['jobs']),1)
-        self.assertEqual(self.ask(rows['2']).get('why'),'title_series')
-        self.service.automatic.start();self.finish_run()
-        self.assertEqual(len(self.service.jobs.status()['jobs']),1,'Start must not answer an already-held sibling')
-        self.service.approve_book(rows['2']['id'],rows['2']['revision']);self.start_and_wait()
-        self.assertEqual([j['state'] for j in self.service.jobs.status()['jobs']],['completed']*2)
+        jobs=self.service.jobs.status()['jobs']
+        self.assertEqual(sorted((j['manifest']['metadata']['title'],j['manifest']['metadata']['series'],j['state']) for j in jobs),
+                         [('Курс истории. Лекция 1. Греция','','completed'),('Курс истории. Лекция 2. Рим','','completed')])
 
     def test_ruling_56_a_paused_run_stays_paused(self):
-        rows=self.books();self.service.automatic.start();self.finish_run()
+        # The books are held for a question that is still asked (no author in the files), since R22 withdrew the set's.
+        rows=self.books('');self.service.automatic.start();self.finish_run()
+        self.assertTrue(self.ask(rows['1']).get('kind'),'positive control: the book is held for a question')
         run=self.service.automatic._run_row()
         with connect(self.inv.database) as db:
             db.execute("UPDATE automatic_runs SET state='Paused',phase='research',checkpoint=? WHERE id=?",(json.dumps({'pending':[],'done':[r['id'] for r in rows.values()]}),run['id']))
@@ -63,7 +62,7 @@ class SetReleaseTests(ApproveFixture):
         self.start_and_wait()
         self.assertEqual(self.service.automatic.status()['state'],'Paused')
         self.assertEqual(len(self.service.jobs.status()['jobs']),1)
-        self.assertEqual(self.ask(rows['2']).get('why'),'title_series')
+        self.assertTrue(self.ask(rows['2']).get('kind'),'the other book is still held for its own question')
 
     def test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start(self):
         rows=self.books();self.held(rows)
@@ -81,13 +80,13 @@ class SetReleaseTests(ApproveFixture):
     def test_m12_discworld_correction_does_not_rename_other_folders(self):
         rows=self.books('Terry Pratchett',[('set/19','Discworld 19. Feet of Clay'),('elsewhere/20','Discworld 20. Hogfather'),('elsewhere/21','Discworld 21. Jingo')])
         self.held(rows)
-        self.assertEqual([self.ask(rows[k]).get('why') for k in ('19','20','21')],['title_series']*3)
+        self.assertEqual([self.ask(rows[k]).get('why') for k in ('19','20','21')],[None]*3,'R22: the series the names look like is not asked about')
         self.service.approve_book(rows['19']['id'],rows['19']['revision'],names={'series':'City Watch','number':'19'});self.start_and_wait()
-        self.assertEqual(self.service.jobs.status()['jobs'][0]['manifest']['metadata']['series'],'City Watch','positive control: book19 actually changed')
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['manifest']['metadata']['series'],'City Watch','positive control: book19 actually changed (a series he types is his answer)')
         for k,title in [('20','Hogfather'),('21','Jingo')]:
-            result=self.research(rows[k])
-            self.assertEqual(result['ask']['split'],{'series':'Discworld','number':k,'title':title})
-            self.assertEqual(self.service.automatic.research.approved(rows[k],str(self.audio))['review']['series'],'Discworld')
+            hint=self.service.automatic.research.identity(rows[k],str(self.audio))[0]['series_hint']
+            self.assertEqual({key:hint[key] for key in ('series','number','title')},{'series':'Discworld','number':k,'title':title},'the other books keep what their own names say')
+            self.assertEqual(self.service.automatic.research.approved(rows[k],str(self.audio))['review']['series'],'','and are never put in his City Watch, nor in a series nothing confirms')
         self.assertEqual(len(self.service.jobs.status()['jobs']),1)
 
     def answer_author_as_shown(self,artist):
@@ -96,20 +95,17 @@ class SetReleaseTests(ApproveFixture):
         self.assertTrue(self.service.automatic.candidate(row).get('until_change'),'positive control: actual automatic hold')
         first=self.ask(row)
         sibling_question=(self.ask(rows['2']).get('kind'),self.ask(rows['2']).get('why'))
-        self.assertNotEqual(first.get('why'),'title_series','author question comes first')
+        self.assertTrue(first.get('kind'),'positive control: the author is asked')
+        self.assertNotEqual(first.get('why'),'title_series','the author question, never the series')
         with mock.patch.object(self.service.automatic,'request_start') as start:
-            with self.assertRaisesRegex(self.service.SeriesAsked,'Answer saved'):
-                self.service.approve_book(row['id'],row['revision'])
+            # R22: no series question follows his author answer (it raised SeriesAsked, "Answer saved", until 0.31.0).
+            approved=self.service.approve_book(row['id'],row['revision'])
         start.assert_not_called()
-        self.assertEqual(self.service.jobs.status()['jobs'],[])
-        self.service.automatic.start();self.finish_run()
-        fresh=self.service.reviews._row('Audiobooks',row['id'])
-        self.assertEqual(self.ask(fresh).get('why'),'title_series','the author answer must not loop')
-        self.assertEqual((self.ask(rows['2']).get('kind'),self.ask(rows['2']).get('why')),sibling_question,'only the clicked book was invalidated')
-        self.assertEqual(self.service.jobs.status()['jobs'],[],'the saved author answer released no sibling book')
-        self.service.approve_book(fresh['id'],fresh['revision']);self.start_and_wait()
-        self.assertEqual(len(self.service.jobs.status()['jobs']),1)
-        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'completed')
+        self.assertEqual([(j['job_id'],j['state'],j['manifest']['metadata']['series']) for j in self.service.jobs.status()['jobs']],[(approved['job_id'],'pending','')],
+                         'queued without the doubtful series; Approve waits for conversion Start')
+        self.assertEqual((self.ask(rows['2']).get('kind'),self.ask(rows['2']).get('why')),sibling_question,'only the clicked book was answered')
+        self.start_and_wait()
+        self.assertEqual([j['state'] for j in self.service.jobs.status()['jobs']],['completed'],'the saved author answer released no sibling book')
 
     def test_m11_ruling_33_approve_as_shown(self):
         self.answer_author_as_shown('Ilya Marchenko')
@@ -135,11 +131,14 @@ class SetReleaseTests(ApproveFixture):
                 self.service.approve_book(row['id'],row['revision'],author=author)
         self.assertEqual(self.service.jobs.status()['jobs'],[])
         self.assertEqual(self.ask(row)['why'],'english_spelling')
-        with self.assertRaisesRegex(self.service.SeriesAsked,'Answer saved'):
-            self.service.approve_book(row['id'],row['revision'],author='James Rollins')
+        approved=self.service.approve_book(row['id'],row['revision'],author='James Rollins')  # R22: no series question follows
         self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'),'Rollins James')
+        job=next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==approved['job_id'])
+        self.assertEqual((job['state'],job['manifest']['metadata']['canonical_author'],job['manifest']['metadata']['series']),('pending','Rollins James',''))
 
     def test_m10_same_author_answer_waits_for_start_then_asks_series(self):
+        # Senua's M10 under R22 (the test keeps its name): his "same author" answer is saved as his rule and the book is
+        # queued; no automatic run starts, and no series question comes next for it or for the other book.
         import author_rules
         rows=self.books('Dean Koonts')
         with connect(self.inv.database) as db:
@@ -147,13 +146,12 @@ class SetReleaseTests(ApproveFixture):
         self.held(rows);row=rows['1']
         self.assertEqual(self.ask(row)['kind'],'same_author')
         with mock.patch.object(self.service.automatic,'request_start') as start:
-            with self.assertRaisesRegex(self.service.SeriesAsked,'Answer saved'):
-                self.service.approve_book(row['id'],row['revision'],choice='same')
+            approved=self.service.approve_book(row['id'],row['revision'],choice='same')
         start.assert_not_called()
         self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'),'Koontz Dean')
-        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        self.assertEqual([(j['job_id'],j['state']) for j in self.service.jobs.status()['jobs']],[(approved['job_id'],'pending')],'Approve waits for conversion Start')
         self.service.automatic.start();self.finish_run()
-        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],['title_series']*2)
+        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],[None,None],'no series question for either book')
 
     def test_m10_english_spelling_answer_waits_for_start(self):
         import author_rules
@@ -161,32 +159,33 @@ class SetReleaseTests(ApproveFixture):
         with mock.patch.object(self.service.automatic.research,'_author_latin',return_value=None):self.held(rows)
         row=rows['1'];self.assertEqual(self.ask(row)['why'],'english_spelling')
         with mock.patch.object(self.service.automatic,'request_start') as start:
-            with self.assertRaisesRegex(self.service.SeriesAsked,'Answer saved'):
-                self.service.approve_book(row['id'],row['revision'],author='James Rollins')
+            approved=self.service.approve_book(row['id'],row['revision'],author='James Rollins')  # R22: no series question follows
         start.assert_not_called()
         self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'),'Rollins James')
-        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        self.assertEqual([(j['job_id'],j['state']) for j in self.service.jobs.status()['jobs']],[(approved['job_id'],'pending')],'Approve waits for conversion Start')
         self.service.automatic.start();self.finish_run()
-        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],['title_series']*2)
+        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],[None,None],'no series question for either book')
 
 
 
 class SavedSeriesReceiptTests(ApproveFixture):
     def test_saved_answer_then_same_press_title_series_queues_only_until_explicit_start(self):
+        # R22 withdrew the series question that followed his answer (it answered SeriesAsked, code series_needed, and
+        # queued nothing). What stays: a Series and Number he types are his answer, never a doubt; his Approve with them
+        # queues the book exactly where the preview said and starts nothing. (The test keeps its name.)
         from unittest.mock import patch
         for index in (1,2):tone(self.audio/'Unsorted'/'one'/('%02d.mp3'%index),self.cover,album='Оттенки магии01. Темный оттенок магии',title='Глава %d'%index,track='%d/2'%index)
         row=self.start()[0];self.service.automatic.start();SetReleaseTests.finish_run(self)
-        with patch.object(self.service.automatic,'request_start') as auto,patch.object(self.service,'resume') as resume:
-            with self.assertRaises(self.service.SeriesAsked) as caught:self.service.approve_book(row['id'],row['revision'],title='Темный оттенок магии',author='Schwab Victoria')
-            self.assertEqual(caught.exception.payload(),{'saved':True,'code':'series_needed','message':self.service.SERIES_ASKED});auto.assert_not_called();resume.assert_not_called()
-        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        research=self.service.automatic.research.approved(self.service.reviews._row('Audiobooks',row['id']),str(self.audio),title='Темный оттенок магии',author='Schwab Victoria')
+        self.assertEqual((research['approval']['series_question'],research['review']['series']),(False,''),'no series question, and no series nothing confirms')
         current=self.service.reviews._row('Audiobooks',row['id']);names={'series':'Оттенки магии','number':'1'}
-        preview=self.service.approval_preview(current['id'],current['revision'],title='Темный оттенок магии',names=names);self.assertTrue(preview['path'],ascii(preview))
+        preview=self.service.approval_preview(current['id'],current['revision'],title='Темный оттенок магии',author='Schwab Victoria',names=names);self.assertTrue(preview['path'],ascii(preview))
         with patch.object(self.service.automatic,'request_start') as auto,patch.object(self.service,'resume') as resume:
-            self.service.approve_book(current['id'],current['revision'],title='Темный оттенок магии',names=names,path=preview['path']);auto.assert_not_called();resume.assert_not_called()
+            self.service.approve_book(current['id'],current['revision'],title='Темный оттенок магии',author='Schwab Victoria',names=names,path=preview['path']);auto.assert_not_called();resume.assert_not_called()
         self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending');self.start_and_wait();job=self.service.jobs.status()['jobs'][0]
         self.assertEqual(job['state'],'completed',ascii(job));self.assertEqual(Path(job['output']['final_path']),self.sorted/preview['path'])
         self.assertEqual(job['manifest']['metadata']['title'],'Темный оттенок магии');self.assertEqual(job['manifest']['metadata']['canonical_author'],'Schwab Victoria')
+        self.assertEqual((job['manifest']['metadata']['series'],job['manifest']['metadata']['number']),('Оттенки магии','1'))
 
 class SavedSeriesTransportTests(unittest.TestCase):
     def test_direct_and_queued_saved_outcomes_are_typed_while_other_failures_stay_failures(self):
@@ -204,5 +203,21 @@ class SavedSeriesTransportTests(unittest.TestCase):
         handler.response.reset_mock();handler.merge_request('/api/candidate/approve',{'library':'Audiobooks','id':'one','revision':1});self.assertEqual(handler.response.call_args.args[0],409)
         merge.approve_book.side_effect=RuntimeError('Unexpected fixture failure')
         with self.assertRaisesRegex(RuntimeError,'Unexpected fixture failure'):BrowserServer.run_queued(server,item)
+
+# 0.31.0 step 2 (rulings R2 and R5): these fixtures predate the look-up before review, and their sources are closed or
+# cannot be reached. Under R2 such a book now waits a few tries for them, which is not what this suite tests; the
+# look-up has its own tests (test_lookup_before_review_031). tests/original_title_fixture.py.
+_no_lookup_before_review = None
+
+
+def setUpModule():
+    global _no_lookup_before_review
+    from original_title_fixture import no_lookup
+    _no_lookup_before_review = no_lookup()
+
+
+def tearDownModule():
+    _no_lookup_before_review.stop()
+
 
 if __name__=='__main__':unittest.main()

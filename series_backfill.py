@@ -93,6 +93,12 @@ SOURCES = ('goodreads', 'fantlab', 'wikidata', 'publisher', 'litres')
 NO_SERIES = 'No verified narrative series found in the supported sources'
 UNREACHED = 'No series found. Sources that could not be reached are no longer asked: '
 BLOCKED = 'Its source cleanup is on hold; the series look-up waits for it'
+# 0.31.0 (rulings R18, R21 and R22; series_certainty): a series a source names is certain or doubtful by one rule, and a
+# doubtful one is treated as not found: the source counts as having answered "none" for that book (with why, record
+# 'sources' -> 'doubt') and the look-up goes on to the next source. A source that contradicts itself used to hold the
+# book with this reason (six books on a copy of the live catalog, all from a qualifier on a Wikidata author statement);
+# such a book is looked up once more under the rule.
+REVIEW_REASON = 'Series sources need review'
 WAITING_ON = ('blocked',)
 # The hosts a deferral recorded before 0.31.0 named, as the sources that ask them.
 HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
@@ -283,8 +289,8 @@ class SeriesBackfill:
         writes, nexts, writes_held = [], [], 0
         for job_id, state, reason, next_attempt, found, unreached, failed in rows:
             later = isinstance(next_attempt, (int, float)) and next_attempt > now
-            if state == 'held' and (reason in (MOVE_WAITS, WRITE_WAITS, OLD_FOLDER_REASON) or failed):
-                counts['moves_waiting' if reason != OLD_FOLDER_REASON else 'due'] += 1
+            if state == 'held' and (reason in (MOVE_WAITS, WRITE_WAITS, OLD_FOLDER_REASON) or failed or str(reason).startswith(REVIEW_REASON)):
+                counts['due' if reason == OLD_FOLDER_REASON or str(reason).startswith(REVIEW_REASON) and not failed else 'moves_waiting'] += 1
                 writes_held += reason == WRITE_WAITS
             elif state in ACTIVE or state == 'pending':
                 counts['writing'] += 1
@@ -381,8 +387,10 @@ class SeriesBackfill:
         from storage_relocation_native import retained_job
         entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,reason,record FROM series_backfill')}
         for entry in entries.values():
-            if entry['state'] == 'held' and entry['reason'] == OLD_FOLDER_REASON:
-                entry['state'] = 'deferred'  # 0.30.0 item 2: held by the old bug; looked up once more (see OLD_FOLDER_REASON)
+            if entry['state'] == 'held' and (entry['reason'] == OLD_FOLDER_REASON or str(entry['reason']).startswith(REVIEW_REASON)):
+                # 0.30.0 item 2: held by the old bug; looked up once more (see OLD_FOLDER_REASON). 0.31.0: so is a book held
+                # because a source contradicted itself (REVIEW_REASON): that is a doubtful answer now, not a hold.
+                entry['state'] = 'deferred'
         generation = self._local_generation()
         newest = {}
         for row in self._rows("SELECT job_id,json_extract(manifest,'$.candidate_id') AS candidate FROM audio_jobs ORDER BY created,job_id"):
@@ -631,7 +639,8 @@ class SeriesBackfill:
         """The series a source names for this book, or None when every source is settled without one; Later while a source
         can still answer. memory (step 4a, kept in the ledger by the caller): a source that answered is not asked again, the
         app's own limits are no try, and a source that could not be reached is given up after SOURCE_TRIES tries."""
-        from public_research import ResearchWait
+        import series_certainty
+        from public_research import ResearchWait, edition_volume
         from public_work_identity import EvidenceConflict
         review = manifest['metadata']
         result = {'sources': []}
@@ -671,14 +680,19 @@ class SeriesBackfill:
                 continue  # not due yet; the book waits for it (below)
             try:
                 found = getattr(self.research, provider)(*args)
-                if found:
-                    return dict(found, receipts=result['sources'], deferred_sources=waits)
+                # The one rule: certain, or doubtful and so treated as not found (the source has answered for this book).
+                verdict = series_certainty.judge(found, {'volume': edition_volume(review['title'])[1]}) if found else None
+                if verdict and verdict['verdict'] == series_certainty.CERTAIN:
+                    return dict(verdict['series'], receipts=result['sources'], deferred_sources=waits)
                 memory[name] = {'answer': 'none', 'at': now}
+                if verdict:
+                    memory[name].update(doubt=verdict['why'], dropped=series_certainty.dropped(verdict))
             except ResearchWait as wait:
                 closed(name, {'source': wait.source, 'reason': wait.reason, 'retry_at': wait.retry_at, 'kind': wait.kind, 'scope': wait.scope},
                        wait.kind == 'app_limit')
             except EvidenceConflict as error:
-                raise Held('Series sources need review: ' + str(error)) from None
+                # A source that contradicts itself: doubtful, treated as not found (it held the book for review before).
+                memory[name] = {'answer': 'none', 'at': now, 'doubt': 'source_conflict', 'reason': str(error)[:200]}
             except (ValueError, TypeError, KeyError, AttributeError) as error:
                 closed(name, {'source': name, 'reason': str(error) or type(error).__name__, 'retry_at': now + TRY_SPACING,
                               'kind': 'unverified_response', 'scope': 'candidate'}, False)

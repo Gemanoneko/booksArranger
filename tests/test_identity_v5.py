@@ -101,9 +101,11 @@ class ReaderIsNeverAnAuthor(unittest.TestCase):
         row=book(member('Brandon Sanderson/Stormlight/Брендон Сандерсон - Архив Буресвета 4 - Ритм войны (Дружинин Степан).m4b',
                         album='Архив Буресвета 4 - Ритм войны',artist='Степан Дружинин'))
         catalog=Catalog(self,[row]);result=catalog.lookup(row)
-        # Ruling 52: «Архив Буресвета 4 - …» is a series split nothing confirms, so the row asks with it filled in.
-        self.assertEqual((result['ask']['why'],result['ask']['split']['series']),('title_series','Архив Буресвета'),result.get('reasons'))
-        self.assertNotIn('Дружинин',result['ask']['fields']['author']['proposal'])
+        # Ruling 52's question is withdrawn (R22, Sergei 2026-11-22): «Архив Буресвета 4 - …» is a series split nothing
+        # confirms, so it is the identity's hint and nothing is asked about it; the reader is still never the author.
+        self.assertNotEqual((result.get('ask') or {}).get('why'),'title_series',result.get('reasons'))
+        self.assertEqual(PublicResearch(Offline(str(catalog.database)),leads=[]).identity(row,ROOT)[0]['series_hint']['series'],'Архив Буресвета')
+        self.assertNotIn('Дружинин',(result.get('review') or {}).get('canonical_author') or ((result.get('ask') or {}).get('fields') or {}).get('author',{}).get('proposal',''))
         # Ruling 3 (2026-10-13): the folder's English spelling is the canonical one.
         review=catalog.approved(row)['review']
         self.assertNotIn('Дружинин',review['canonical_author']);self.assertEqual(review['canonical_author'],'Sanderson Brandon')
@@ -218,8 +220,8 @@ class QuestionsForSergei(unittest.TestCase):
     def test_a_series_name_in_the_author_slot_never_contradicts_the_tags_wheel_of_time(self):
         row=book(member('Wheel of Time/Колесо времени - 01. Око мира/Око мира.m4b',album='Колесо времени - 01. Око мира',album_artist='Джордан Роберт'))
         catalog=Catalog(self,[row]);result=catalog.lookup(row)
-        # Ruling 52: the series split is asked, filled in (nothing confirms «Колесо времени»); the author is the tags'.
-        self.assertEqual((result['ask']['why'],result['ask']['fields']['author']['proposal']),('title_series','Джордан Роберт'),result.get('reasons'))
+        # Ruling 52's question is withdrawn (R22): nothing confirms «Колесо времени», so it is not asked; the author is the tags'.
+        self.assertEqual((result.get('ask'),result['review']['canonical_author'],result['review']['series']),(None,'Джордан Роберт',''),result.get('reasons'))
         self.assertEqual(catalog.approved(row)['review']['canonical_author'],'Джордан Роберт')
 
     def test_the_same_surname_written_with_initials_is_not_a_contradiction_tolkien(self):

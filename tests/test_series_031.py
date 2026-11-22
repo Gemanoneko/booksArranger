@@ -182,8 +182,14 @@ class SeparatedVolumeTests(Fixture):
         }
         for why, row in asked.items():
             book = next(iter(self.shelf([row]).values()))
-            ask = self.lookup(book).get('ask') or {}
-            self.assertEqual((ask.get('why'), ask.get('split')), ('title_series', {'series': 'Sprawl Trilogy', 'number': '1', 'title': 'Neuromancer'}), why)
+            # R22 (Sergei 2026-11-22) withdrew ruling 52's question (the test keeps its name): every other name nothing
+            # confirms is no longer asked. It is not filed in the series either: the split is only the identity's hint.
+            result = self.lookup(book)
+            self.assertNotEqual((result.get('ask') or {}).get('why'), 'title_series', why)
+            identity = self.research.identity(book, ROOT)[0]
+            self.assertEqual(({key: identity['series_hint'][key] for key in ('series', 'number', 'title')}, identity['series']),
+                             ({'series': 'Sprawl Trilogy', 'number': '1', 'title': 'Neuromancer'}, {}), why)
+            self.assertEqual((result['reasons'], result['review']['series']), ([], ''), why)
         # Positive control on the same fixture: the ruled shape files.
         filed = self.lookup(next(iter(self.shelf([file_row(GIBSON + 'e.m4b', title='Sprawl Trilogy 01 - Neuromancer', artist='William Gibson')]).values())))
         self.assertEqual((filed['reasons'], filed['review']['series']), ([], 'Sprawl Trilogy'))
@@ -245,11 +251,19 @@ class BracketsOriginTests(Fixture):
                   'the title tag': [file_row(self.WOLFE + 'Солнце и Замок.m4b', title=self.BOOK, artist='Джин Вулф')]}
         for place, rows in places.items():
             with self.subTest(place=place):
-                result = self.read(rows)
-                series = result['local_agreement']['series']
-                self.assertEqual((series['value'], result['local_agreement']['number']['value']), ('Книга Нового Солнца', '3'))
-                self.assertEqual(series['sources'], [{'kind': 'brackets in the name', 'value': self.BOOK}], 'the record keeps the text, not which place carried it')
-                self.assertEqual(MergeService.series_origin(result)['origin'], 'brackets')
+                # R22 (Sergei 2026-11-22): a series the name mentions in brackets is doubtful (nothing confirms it), so it
+                # is treated as not found: it is no longer the book's series, nothing asks about it, and the row has no
+                # origin to print for it. It is kept as the identity's hint for the look-up before review.
+                book = next(iter(self.shelf(rows).values()))
+                result = self.lookup(book)
+                self.assertEqual((result['local_agreement']['series']['value'], result['local_agreement']['number']['value']), ('', ''))
+                hint = self.research.identity(book, ROOT)[0]['series_hint']
+                self.assertEqual((hint['series'], hint['number'], hint['from']), ('Книга Нового Солнца', '3', 'brackets'))
+                self.assertEqual(MergeService.series_origin(result)['origin'], 'unknown')
+                self.assertNotEqual((result.get('ask') or {}).get('why'), 'title_series', 'never asked about the series (the author\'s English spelling may be)')
+        # A record stored with the brackets series (made before R22) still reads as 'brackets', never 'tags'.
+        stored = {'local_agreement': {'series': {'state': 'green', 'value': 'Книга Нового Солнца', 'sources': [{'kind': 'brackets in the name', 'value': self.BOOK}]}}}
+        self.assertEqual(MergeService.series_origin(stored)['origin'], 'brackets')
         # Positive control: the same book with no brackets anywhere has no series and no origin to print.
         plain = self.read(self.parts('Солнце и Замок', 'Солнце и Замок'))
         self.assertEqual((plain['local_agreement']['series']['value'], MergeService.series_origin(plain)['origin']), ('', 'unknown'))
@@ -263,7 +277,10 @@ class BracketsOriginTests(Fixture):
         result = self.lookup(book)
         service = CandidateReviewService.__new__(CandidateReviewService)
         service.inventory = SimpleNamespace(database=self.research.client.database); service.jobs = MergeService
-        row = dict(book, review={'title': 'Солнце и Замок', 'series': 'Книга Нового Солнца', 'number': '3'}, metadata_facts={'local_agreement': result['local_agreement']})
+        # The stored facts of a book approved with that series before R22 (its row keeps saying where it came from).
+        agreed = dict(result['local_agreement'], series={'state': 'green', 'value': 'Книга Нового Солнца', 'how': 'the series the name mentions in brackets',
+                                                         'sources': [{'kind': 'brackets in the name', 'value': self.BOOK}]})
+        row = dict(book, review={'title': 'Солнце и Замок', 'series': 'Книга Нового Солнца', 'number': '3'}, metadata_facts={'local_agreement': agreed})
         service._names_lines([row])
         self.assertEqual((row['place']['series'], row['place']['number'], row['place']['origin']), ('Книга Нового Солнца', '3', 'brackets'))
         self.assertNotIn('provider', row['place'])
@@ -421,6 +438,21 @@ class TagSeriesTests(Fixture):
                 identity, _ = self.research.identity(row, ROOT)
                 self.assertEqual((identity['ask']['kind'], identity['ask']['why']), ('author_unclear', 'two_people'))
                 self.assertEqual(sorted(c['name'] for c in identity['ask']['candidates']), ['Иван Петров', 'Сергей Сидоров'])
+
+# 0.31.0 step 2 (rulings R2 and R5): this suite is about what the files alone decide (step 1); its sources are closed.
+# Under R2 a book with a gap now waits a few tries for them, which is not what it tests; the look-up before review has
+# its own tests (test_lookup_before_review_031). tests/original_title_fixture.py.
+_no_lookup_before_review = None
+
+
+def setUpModule():
+    global _no_lookup_before_review
+    from original_title_fixture import no_lookup
+    _no_lookup_before_review = no_lookup()
+
+
+def tearDownModule():
+    _no_lookup_before_review.stop()
 
 
 if __name__ == '__main__':

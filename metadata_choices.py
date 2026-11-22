@@ -16,6 +16,7 @@ PROFILE=IDENTITY+('series','number','universe')
 FIELDS=PROFILE+('genre','topic','narrator')
 VOLATILE={'retrieved_utc','retrieved_at','saved_utc','fetched_at','checked_at','attempted_utc','timestamp'}
 STALE='Sources changed. Compare the updated results before saving.'
+DOUBTFUL_FIELDS=('series','number')  # R22: a disagreement on these alone is a doubtful series, never a question
 
 
 class ChoiceChanged(ValueError):
@@ -150,6 +151,14 @@ def present(db,row,providers,manual,conflicts):
             if choice['evidence_signature']==question['evidence_signature']:
                 question['decision']=copy.deepcopy(choice);question['resolved']=choice['mode']!='unresolved';question['chosen_by']='you'
             else:question['renewed']=True
+    # R22 (Sergei 2026-11-22): "Sources disagree" is no longer asked about a doubtful series. Sources that agree on the
+    # book and differ only in its series or its number make that series doubtful, and a doubtful series is treated as
+    # not found: the book goes on without it. A question he has already answered stays, with his answer (DOUBTFUL_FIELDS).
+    kept=[question for question in result['questions'] if not (question['type']=='field' and question['field'] in DOUBTFUL_FIELDS and 'previous_decision' not in question)]
+    if len(kept)!=len(result['questions']):
+        result['dropped_as_doubtful']=[question['field'] for question in result['questions'] if question not in kept]
+        result['questions']=kept
+        result['signature']=signature({'candidate_id':row['id'],'fingerprint':row['fingerprint'],'questions':[(q['id'],q['evidence_signature']) for q in kept]})
     result['unresolved_count']=sum(not question['resolved'] for question in result['questions'])
     result['decision_history']=history
     result['manual_source_ids']=[record['source_id'] for record in manual if record.get('status','current')=='current' and record.get('source_id')]

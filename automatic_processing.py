@@ -71,6 +71,19 @@ def candidate_job_exists(db,identity):
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return False
     return bool(db.execute("SELECT 1 FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? LIMIT 1",(identity,)).fetchone())
 
+def waits_for(state,result):
+    """What a book in "Waiting for source" waits for, one of 'online_answer', 'library', 'catalog', 'cover', 'source'; None
+    for a book in any other state."""
+    if state!='Waiting for source' or not isinstance(result,dict):return None
+    wait=result.get('wait') if isinstance(result.get('wait'),dict) else {}
+    lookup=result.get('lookup') if isinstance(result.get('lookup'),dict) else {}
+    if lookup.get('waiting'):return 'online_answer'
+    if wait.get('kind')=='media_slow':return 'library'
+    if wait.get('source')=='catalog':return 'catalog'
+    if (result.get('reasons') or [None])[0]=='Cover source unavailable':return 'cover'
+    return 'source'
+
+
 def research_retry(run):
     if not run or run['state']!='Needs attention' or run['phase']!='research':return False
     try:
@@ -230,7 +243,14 @@ class AutomaticProcessing:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
         return {'state':r['state'],'duplicate_cleanup_policy':result.get('duplicate_cleanup_policy'),'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
                 'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
-                'local_source_gate_version':result.get('local_source_gate_version'),'local_recheck':result.get('local_recheck'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0),'series_waits':result.get('series_waits',0)}
+                'local_source_gate_version':result.get('local_source_gate_version'),'local_recheck':result.get('local_recheck'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0),'series_waits':result.get('series_waits',0),
+                # 0.31.0 step 2 (A6): the record of the book's look-up before review (public_research._bounded_lookup):
+                # what is asked, the tries made and their limit, the next try, and how the wait ended per field.
+                'lookup':result.get('lookup'),
+                # What a book in "Waiting for source" waits for (Judy's section 5: only an online answer gets the new words):
+                # 'online_answer' (the look-up before review), 'library' (the library drive answered slowly), 'catalog' (the
+                # app's own catalog was busy for a minute), 'cover' (the cover's source), 'source' (any other source wait).
+                'waits_for':waits_for(r['state'],result)}
     def _rules_generation(self):
         """The current author-rules generation ('' with none): a held book is researched again when it changes."""
         value=self._rules()
@@ -861,6 +881,8 @@ class AutomaticProcessing:
                       row['_research_attempt']=previous.get('research_attempt',0) if previous else 0
                       # 0.30.0 item 3: how many times in a row this book has waited for its series (the wait is bounded).
                       row['_series_waits']=previous.get('series_waits',0) if previous and previous.get('state')=='Waiting for source' else 0
+                      # 0.31.0 step 2: the record of this book's look-up before review so far (bounded tries per source).
+                      row['_lookup']=previous.get('lookup') if previous and isinstance(previous.get('lookup'),dict) else None
                       import manual_metadata
                       with connect(self.inventory.database) as db:row['_manual_metadata_sources']=manual_metadata.records(db,row)
                       result=self.research.lookup(row,self._candidate_root(row),self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))

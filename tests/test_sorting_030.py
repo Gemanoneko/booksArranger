@@ -27,6 +27,11 @@ def hp_rows(folder, album, artist='Джоан Роулинг', count=2):
 class RootSeriesFolderTests(Base):
     """Item 4: a root-level <Series>\\NN. Книга N - <Title> (<Reader>) folder is a series and number clue, never the author."""
 
+    def setUp(self):
+        # 0.31.0 step 2: these fixtures predate the look-up before review and their sources are closed (it has its own tests).
+        from original_title_fixture import no_lookup
+        self.addCleanup(no_lookup().stop)
+
     def test_harry_potter_3_takes_its_series_and_number_from_the_root_series_folder(self):
         row = self.catalog(hp_rows(HP3, 'Гарри Поттер и узник Азкабана'))[ROOT + '\\' + HP3.rstrip('\\')]
         result = self.lookup(row)
@@ -89,9 +94,16 @@ class SeriesWaitTests(Base):
         return row
 
     def test_a_source_that_cannot_be_reached_publishes_as_now(self):
+        # R2 (Sergei 2026-11-22) replaced this part of item 3: a source that cannot be reached is a try of the look-up
+        # before review, and the book waits for the next one (a few tries, then it converts as before; the test keeps
+        # its name). Until 0.31.0 it was published at once without its series.
+        import public_research
         result = self.lookup(self.book(client=None))  # the Offline client: unreachable, not rate-limited
-        self.assertEqual(result['reasons'], [])
-        self.assertIsNone(result['wait'])
+        self.assertEqual(result['reasons'], [public_research.SERIES_WAIT_REASON])
+        self.assertEqual((result['lookup']['tries'], result['lookup']['next_try'], result['lookup']['limit']), (1, 2, 3))
+        # The waits are bounded: a book that already waited the limit of times is published without one, as before.
+        done = self.lookup(dict(self.book(client=None), _series_waits=public_research.SERIES_WAIT_LIMIT))
+        self.assertEqual((done['reasons'], done['wait']), ([], None))
 
     def test_every_series_source_only_rate_limited_waits_for_the_series(self):
         import public_research

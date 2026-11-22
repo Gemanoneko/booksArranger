@@ -69,6 +69,17 @@ WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_re
 # work['kinds']: KIND_FACTS, for every row and waiting kind: 'background' (one of the two background look-ups, never "main"
 #                work), 'about' ('new' books not converted yet, 'finished' audiobooks, 'approved' books whatever their state,
 #                'any'), 'writes_finished_files' (it can change a finished audiobook's file, name or place)
+# 0.31.0 step 2 (rulings R2 and R5; A6), additive again to books-work-v1:
+# work['lookup_before_review']: {'waiting': [book], 'limits': {...}}: the books not converted yet that wait for the online
+#   look-up before review (state "Waiting for source" with a look-up record), one entry each, at most LIST_LIMIT:
+#   book = {'book_id', 'title', 'asked': {'title', 'author', 'gaps'}, 'tries', 'limit', 'next_at' (epoch ms), 'until'
+#           (epoch ms: it converts as before no later than this), 'fields': {gap: 'answered' | 'nothing_found' |
+#           'no_answer' | 'waiting'}, 'sources': {source: 'answered' | 'waiting' | 'gave_up'}}
+#   limits = {'per_source', 'min_spacing_seconds', 'max_spacing_seconds', 'max_wait_seconds', 'sources'}
+#   The same record is on every list row (row 'lookup') and in a row's preview, so a row that no longer waits still
+#   says how its look-up ended per field. Books held for him are looked up by the detail look-up's pass: its summary
+#   (work['background']['gap_fill']) carries 'review' (the review-list rows' own numbers) and 'approved' beside the totals,
+#   and the gap_fill row carries 'about': 'review' or 'approved'.
 STATES = ('unknown', 'working', 'paused', 'continues', 'waiting_for_you', 'background_only', 'all_done')
 BACKGROUND_KINDS = ('series', 'gap_fill', 'series_lookup', 'detail_lookup')
 WAITS_FOR_YOU = ('attention', 'hold', 'drive')
@@ -319,6 +330,8 @@ class Reader:
         progress = gap.status() if gap is not None and hasattr(gap, 'status') else None
         if progress and alive(getattr(gap, 'thread', None)):
             self.rows.append(_row(id='gap_fill', kind='gap_fill', subject=progress.get('title') or '', **_amount(progress.get('done'), progress.get('total'), 'books')))
+            # 0.31.0 step 2: which books the pass is on: 'review' (held for him, not converted) or 'approved'.
+            self.rows[-1]['about'] = progress.get('about') if progress.get('about') in ('review', 'approved') else None
         reviews = self.attr('reviews')
         matching = {key: value for key, value in list((getattr(reviews, 'matching', None) or {}).items()) if isinstance(value, dict) and value.get('state') == 'finding'}
         chapters = dict(getattr(reviews, '__dict__', {}).get('_chapter_activity') or {})
@@ -365,6 +378,10 @@ class Reader:
         try), and a series found whose write waits for the queue, a cleanup or a scan, one item per book with the 0.30.0
         blocker. Their summaries are kept for work['background']. Instance attributes only: a stand-in engine adds nothing."""
         self.background, self.lookup_items = {}, []
+        self.before_review = dict(waiting_lookups(self.merge))
+        # Whether the tries go on by themselves: only while automatic processing runs (it owns the books that wait);
+        # stopped, a waiting book is tried again when it is started. 'count' and 'next_at' are for the Waiting item.
+        self.before_review['tries_continue'] = self.automatic.get('state') in ('Running', 'Stopping')
         for name, attribute, kind in (('series', 'series_backfill', 'series_lookup'), ('gap_fill', 'gap_fill', 'detail_lookup')):
             worker = self.attr(attribute)
             if worker is None or not callable(getattr(worker, 'summary', None)):
@@ -434,6 +451,51 @@ class Reader:
         for root in self.roots:
             if isinstance(root, dict) and (not root.get('available') or root.get('empty')):
                 self.waiting.append(_item(id='drive:' + str(root.get('path')), kind='drive', label_key='drive_empty' if root.get('available') else 'drive', subject=root.get('path')))
+
+
+_WAITING_LOOKUPS = {}
+
+
+def waiting_lookups(merge):
+    """work['lookup_before_review']: the current books that wait for their look-up before review, from their research
+    results. Read again only when a research result changed (automatic_result_revision); a stand-in engine has none."""
+    import json
+    from scanner import connect
+    empty = {'count': 0, 'next_at': None, 'waiting': [], 'limits': None}
+    database = getattr(getattr(merge, 'inventory', None), 'database', None)
+    if not database or getattr(merge, '__dict__', {}).get('automatic') is None:
+        return empty
+    with connect(database) as db:
+        have = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('automatic_candidates','book_groups','automatic_result_revision')")}
+        if len(have) != 3:
+            return empty
+        revision = (db.execute('SELECT revision FROM automatic_result_revision WHERE id=1').fetchone() or (None,))[0]
+        kept = _WAITING_LOOKUPS.get(str(database))
+        if kept and kept[0] == revision:
+            return kept[1]
+        rows = db.execute("SELECT c.id,json_extract(g.evidence,'$.title_clue'),json_extract(c.result,'$.lookup') FROM automatic_candidates c JOIN book_groups g "
+                          "ON g.id=c.id AND g.revision=c.revision AND g.fingerprint=c.fingerprint WHERE c.state='Waiting for source' AND g.superseded=0 "
+                          "AND json_extract(c.result,'$.lookup.waiting') ORDER BY c.retry_at,c.id LIMIT ?", (LIST_LIMIT,)).fetchall()
+    from public_research import LOOKUP_MAX_WAIT, LOOKUP_RETRY_MIN, LOOKUP_SOURCES
+    from series_backfill import SOURCE_TRIES, TRY_SPACING
+    ms = lambda value: int(value * 1000) if type(value) in (int, float) and value > 0 else None
+    waiting = []
+    for book_id, title, record in rows:
+        try:
+            lookup = json.loads(record)
+        except (TypeError, ValueError):
+            continue
+        sources = {name: 'answered' if state.get('answered') else 'gave_up' if state.get('gave_up') else 'waiting'
+                   for name, state in (lookup.get('sources') or {}).items() if isinstance(state, dict)}
+        waiting.append({'book_id': book_id, 'title': title or '', 'asked': lookup.get('asked'), 'tries': lookup.get('tries'), 'limit': lookup.get('limit'),
+                        'next_try': lookup.get('next_try'), 'asking': lookup.get('asking') or [], 'waiting_for': lookup.get('waiting_for') or [],
+                        'next_at': ms(lookup.get('next_at')), 'until': ms(lookup.get('until')), 'fields': lookup.get('fields') or {}, 'sources': sources})
+    times = [book['next_at'] for book in waiting if book['next_at']]
+    value = {'count': len(waiting), 'next_at': min(times) if times else None, 'waiting': waiting, 'limits': {'per_source': SOURCE_TRIES, 'min_spacing_seconds': LOOKUP_RETRY_MIN, 'max_spacing_seconds': TRY_SPACING,
+                                           'max_wait_seconds': LOOKUP_MAX_WAIT, 'sources': list(LOOKUP_SOURCES)}}
+    _WAITING_LOOKUPS.clear()
+    _WAITING_LOOKUPS[str(database)] = (revision, value)
+    return value
 
 
 def explain(kind, item, jobs, queue_running=None):
@@ -601,7 +663,7 @@ def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo
     reader.attempt('actions', reader.actions)
     reader.attempt('workers', reader.workers)
     reader.attempt('automatic', reader.scan_and_automatic)
-    reader.background, reader.lookup_items = {}, []
+    reader.background, reader.lookup_items, reader.before_review = {}, [], {'count': 0, 'next_at': None, 'waiting': [], 'limits': None, 'tries_continue': False}
     reader.attempt('lookups', reader.lookups)
     memo = memo if memo is not None else {}
     seen = set()
@@ -633,6 +695,7 @@ def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo
             # 'waiting' so the 0.30.0 page, which has no words for them, draws its list exactly as before; the 0.31.0 page
             # puts them into the Waiting list after metadata_sources and before drive (WAITING_KINDS).
             'lookups_waiting': list(reader.lookup_items),
+            'lookup_before_review': reader.before_review,  # 0.31.0 step 2 (A6): the books that wait for their look-up before review
             'rows': rows, 'waiting': [item for _n, item in waiting],
             'counts': {'tasks_running': sum(row['state'] in ('running', 'pausing') for row in rows), 'queued_conversions': count('queued_conversions'),
                        'cleanups_waiting': count('cleanups_waiting'), 'cleanups_paused': count('cleanups_paused'),

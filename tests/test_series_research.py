@@ -135,7 +135,9 @@ class SeriesTests(Base):
     def test_goodreads_is_the_series_source_and_wins_over_fantlab(self):
         self.goodreads();fantlab_cycle(self.sources)
         found=self.gap()
-        self.assertEqual(found['series'],{'provider':'goodreads','name':'Нормальное аномальное','number':'10','source_url':'https://www.goodreads.com/book/show/55108791'})
+        # 0.31.0: the series also says where its number came from and which rule named it (additive keys).
+        self.assertEqual({key:found['series'][key] for key in ('provider','name','number','source_url','number_from')},
+                         {'provider':'goodreads','name':'Нормальное аномальное','number':'10','source_url':'https://www.goodreads.com/book/show/55108791','number_from':'source'})
         self.assertNotIn('/work/1006801/extended',[urllib.parse.urlsplit(u).path for u in self.sources.calls],'FantLab is not asked when Goodreads answers')
         self.assertEqual(self.sources.hosts().count('www.goodreads.com'),2,'one search and one book page')
         # Cached: the same book again asks nobody.
@@ -146,7 +148,8 @@ class SeriesTests(Base):
         fantlab_cycle(self.sources)
         found=self.gap()
         # Numbered: work 1 and this one; the extra (plus), a story (another kind) and a nested work are not counted.
-        self.assertEqual(found['series'],{'provider':'fantlab','name':'Секретное досье. Мистические романы','number':'2','source_url':'https://fantlab.ru/work1006801'})
+        self.assertEqual({key:found['series'][key] for key in ('provider','name','number','source_url','number_from')},
+                         {'provider':'fantlab','name':'Секретное досье. Мистические романы','number':'2','source_url':'https://fantlab.ru/work1006801','number_from':'counted'})
         self.assertNotIn('/book/show/220837262',[urllib.parse.urlsplit(u).path for u in self.sources.calls],'no book page without a series lead')
 
     def test_unclear_goodreads_positions_and_other_people_are_not_used(self):
@@ -192,7 +195,7 @@ class LookupTests(Base):
         self.assertEqual(result['reasons'],[],result)
         self.assertEqual((result['review']['series'],result['review']['number']),('Отряд Сигма','8'))
         facts=result['metadata_facts'];self.assertEqual(facts['series_state'],'verified')
-        self.assertEqual(facts['series_source'],{'provider':'goodreads','url':'https://www.goodreads.com/book/show/42'})
+        self.assertEqual({key:facts['series_source'][key] for key in ('provider','url','number_from')},{'provider':'goodreads','url':'https://www.goodreads.com/book/show/42','number_from':'source'})
         cited=[e for e in result['evidence'] if e['field'] in ('series','number')]
         self.assertEqual({e['source_url'] for e in cited},{'https://www.goodreads.com/book/show/42'});self.assertIn('Goodreads',cited[0]['basis'])
         validate_policy(row,result['review'],facts)

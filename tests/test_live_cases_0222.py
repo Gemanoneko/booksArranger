@@ -216,6 +216,21 @@ class BromTests(Base):
         loop = author_rules.Rules([row(1, 'A Bee', 'C Dee'), row(2, 'C Dee', 'A Bee')])
         self.assertIn(loop.same_as('A Bee'), ('A Bee', 'C Dee'))
 
+# 0.31.0 step 2 (rulings R2 and R5): these fixtures predate the look-up before review, and their sources are closed or
+# cannot be reached. Under R2 such a book now waits a few tries for them, which is not what this suite tests; the
+# look-up has its own tests (test_lookup_before_review_031). tests/original_title_fixture.py.
+_no_lookup_before_review = None
+
+
+def setUpModule():
+    global _no_lookup_before_review
+    from original_title_fixture import no_lookup
+    _no_lookup_before_review = no_lookup()
+
+
+def tearDownModule():
+    _no_lookup_before_review.stop()
+
 
 if __name__ == '__main__':
     unittest.main()
