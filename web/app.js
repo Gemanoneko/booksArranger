@@ -1309,8 +1309,8 @@ function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),se
     filters[view]==='restarted' && view==='candidates'?`${selected.length} selected · ${releasable} can be handled by the app`+(selected.length-releasable>0?` · ${selected.length-releasable} left out`:''):
     `${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`+(releaseSelection() && releasable>0?` · ${releasable} can be handled by the app`:'');const takes=pageSelectable(),all=takes.length>0 && takes.every(row=>selectedBooks.has(row.id));$('select-page').checked=all;$('select-page').indeterminate=selected.length>0 && !all;controls();}
 function renderJobs(){
-  if(loadingActive && !(state && partReady('jobs')))return loadPlaceholders();  // m-7: its placeholders until the part comes (3.5)
-  const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
+  if(loadingActive && !(state && partReady('jobs'))){renderWindowTitle('');return loadPlaceholders();}  // m-7: its placeholders until the part comes (3.5)
+  const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return renderWindowTitle('');
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   // 0.30.0 (Judy's 0.30.0 spec): the panel draws /api/state work. Only the counts are as old as the last full status
   // computation (work.snapshot_age_ms); from 30 s they say when they were computed (section 3).
@@ -1321,7 +1321,7 @@ function renderJobs(){
   // 0.31.0 (1.2, 1.3): the badge is the first thing in #jobs-status, the parts follow it. No badge while the last answer is
   // only "last confirmed" (the engine is not answering now). From 30 s the as-of time follows the badge as plain text.
   const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge);
-  renderBadge(badge);
+  renderBadge(badge);renderWindowTitle(windowTitleState(jobs,work,shown,badge,stale));
   text('jobs-status-text',(stale?'Last confirmed — ':'')+(badge?(asOf?asOf:'')+(parts.length?' · ':''):'')+parts.join(' · '));
   renderActivities(shown,jobs,unread,asOf);renderWaitingList(work);renderHold(heldRows(jobs));renderSeriesFound(work);renderFreshness(now);renderUnread(unread);renderSourceCheck();
   const cleanup=jobs.cleanup_active===true;
@@ -1572,6 +1572,26 @@ function badgeState(work,shown,now){
   if(reported && held>=3000)badgeShown=reported;
   else if(badgeShown && reported!==badgeShown && held>=1000)badgeShown=null;
   return badgeShown;
+}
+// 0.31.0 (Judy 1.5; Sergei's R13, 2026-11-22): the main window's title ends with the state, in the status line's own
+// words in lower case, so the taskbar and Alt+Tab answer without opening the window. It follows what the status line
+// shows, the badge's wait included (never a finished state the badge has not confirmed), and is written only when it
+// changes: no flashing, no focus, no sound. While working it says only "working" (a title that changed with every book
+// would flicker in the taskbar). Not known with a source unread, the engine not answering, and before the jobs part has
+// loaded: the plain name. The shell needs nothing for it: an Electron window takes its page's title unless a
+// page-title-updated handler prevents it, and desktop/main.js has none.
+const WINDOW_TITLE='Books Arranger';
+function windowTitleState(jobs,work,shown,badge,stale){
+  if(stale || !jobs)return '';
+  if(badge)return BADGES[badge][0].toLowerCase();
+  const first=jobsFirstPart(jobs,shown,work);
+  if(first==='Nothing running that could be read')return '';
+  if(first==='Continues by itself' || first==='Checking what is left')return first.toLowerCase();
+  return first==='Paused' || first.startsWith('Paused · ') || first==='Pausing audiobook jobs…'?'paused':'working';
+}
+function renderWindowTitle(words){
+  const title=words?`${WINDOW_TITLE}: ${words}`:WINDOW_TITLE,page=globalThis.document;
+  if(page && page.title!==title)page.title=title;
 }
 function renderBadge(key){
   const badge=$('jobs-state');if(!badge)return;
