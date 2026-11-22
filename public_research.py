@@ -1682,13 +1682,16 @@ class PublicResearch:
                 facts['gap_search']['series_wait']={'sources':list(filled.get('series_closed') or []),'tries':waited,'published_without':True}
         return result
 
-    def fill_gaps(self,ask,gaps,stop,budget,progress=lambda *_:None):
+    def fill_gaps(self,ask,gaps,stop,budget,progress=lambda *_:None,skip=()):
         """The background gap fill's request (gap_fill.GapFill, 0.22.1): ask the sources about these missing fields of a
         book identified locally as ask['title'] by ask['author'] ('partial': a surname only). budget carries the lane.
         Returns (found, result): found as _gap_fill (catalog, author_full, series, unfilled, closed) plus 'wait', when
-        a closed source could still answer an unfilled field; result['sources'] holds the fetched receipts."""
+        a closed source could still answer an unfilled field; result['sources'] holds the fetched receipts.
+        0.31.0 (R16): skip names the sources the look-up has settled for this book or that are not due yet (not asked);
+        found['asked'] lists the sources asked this time and found['closures'] each one that was closed, with the wait's
+        kind, so the look-up can count its tries per source."""
         result={'sources':[],'evidence':[]};waits=[]
-        local={'gaps':list(gaps),'fields':{'author':{'partial':bool(ask.get('partial'))}}}
+        local={'gaps':list(gaps),'fields':{'author':{'partial':bool(ask.get('partial'))}},'skip':tuple(skip or ())}
         found=self._gap_fill(local,ask['title'],ask['author'],stop,budget,waits,progress,result)
         found['wait']=_wait(waits,budget.get('answered')) if found.get('closed') else None
         return found,result
@@ -1714,21 +1717,31 @@ class PublicResearch:
                                           'provider':text(series.get('provider')),'source_url':text(series.get('source_url'))}
         for key in ('catalog','series','author_full'):
             if again.get(key) and not found.get(key):found[key]=again[key]
+        for key in ('asked','closures'):found[key]=list(found.get(key) or [])+list(again.get(key) or [])  # 0.31.0 (R16)
         found['closed']=list(dict.fromkeys(list(found.get('closed') or [])+list(again.get('closed') or [])))
         found['unfilled']=[field for field in found['unfilled'] if not (field=='original_title' and found.get('catalog') or field=='series' and found.get('series') or field=='author_full' and (found.get('author_full') or found.get('catalog')))]
         found['closed']=[source for source in found['closed'] if found['unfilled']]
         return found
 
     def _gap_fill_once(self,local,title,author,stop,budget,waits,progress,result):
-        gaps=set(local['gaps']);found={'closed':[]}
+        gaps=set(local['gaps']);found={'closed':[],'asked':[],'closures':[]}
         partial=bool(local['fields']['author'].get('partial'))
+        # 0.31.0 (R16, the detail look-up's bounded tries): a source it has settled for this book, or that is not due yet,
+        # is not asked; each source asked is named, and each closure keeps why (the app's own limit and a busy catalog are
+        # no try of the source).
+        skip=set(local.get('skip') or ())
+        def closure(source,wait,kind=None):
+            found['closures'].append({'source':source,'reason':wait.reason,'retry_at':wait.retry_at,'kind':kind or wait.kind,'scope':wait.scope})
         def attempt(source,function):
+            if source in skip:return None
+            found['asked'].append(source)
             try:return function()
-            except ResearchWait as wait:waits.append(wait);found['closed'].append(source)
+            except ResearchWait as wait:waits.append(wait);found['closed'].append(source);closure(source,wait)
             except sqlite3.OperationalError as error:
                 # 0.22.2: a busy catalog is a closed source for now, never the end of the run (the live stop at _expire).
                 if not catalog_busy(error):raise
-                waits.append(ResearchWait(source,CATALOG_BUSY_REASON,getattr(self.client,'clock',time.time)()+CATALOG_BUSY_WAIT,'source_unavailable','host'));found['closed'].append(source)
+                busy=ResearchWait(source,CATALOG_BUSY_REASON,getattr(self.client,'clock',time.time)()+CATALOG_BUSY_WAIT,'source_unavailable','host')
+                waits.append(busy);found['closed'].append(source);closure(source,busy,'catalog_busy')
             except (ValueError,TypeError,KeyError,AttributeError):pass
             return None
         if gaps&{'original_title','author_full'}:

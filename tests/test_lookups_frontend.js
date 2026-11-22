@@ -90,7 +90,15 @@ assert.equal(listed[0].line1,'Finding series for finished audiobooks: 212 books'
 assert.equal(listed[0].tip,'Each source is asked up to 3 times for a book, 6 hours apart. With no answer after that, the book is left as it is and the app stops asking.',"the engine's numbers (G8)");
 assert.equal(listed[0].button.hidden,true,'no button');
 assert.equal(listed[1].line1,'Finding original titles and author names: 31 books');assert.equal(listed[1].line2,`Waiting for online sources. Next try ${clock}. No file is changed.`);
-assert.equal(listed[1].tip,'A book waits here until its sources answer. The app asks again by itself.','no limit sent for it: the no-limit sentence (G6)');
+// R16 (check 19): the detail look-up has the same limit, so its item says the same sentence with its own numbers. The
+// no-limit sentence of the earlier round appears nowhere; an engine that sends no limit gets no tooltip, never a guess.
+assert.equal(listed[1].tip,'','no limit sent for it: no tooltip');
+show({background:{series:{tries},gap_fill:{tries:{per_source:3,spacing_seconds:21600,failures:3}}},lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:212,at},{id:'detail_lookup',kind:'detail_lookup',count:31,at}]});
+assert.equal(waits()[1].tip,'Each source is asked up to 3 times for a book, 6 hours apart. With no answer after that, the book is left as it is and the app stops asking.');
+show({background:{series:{tries},gap_fill:{tries:{per_source:2,spacing_seconds:3600}}},lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:212,at},{id:'detail_lookup',kind:'detail_lookup',count:31,at}]});
+assert.deepEqual(waits().map(item=>item.tip),['Each source is asked up to 3 times for a book, 6 hours apart. With no answer after that, the book is left as it is and the app stops asking.',
+  'Each source is asked up to 2 times for a book, 1 hour apart. With no answer after that, the book is left as it is and the app stops asking.'],'each look-up its own numbers');
+for(const gone of ['A book waits here until its sources answer','The app asks again by itself'])assert.ok(!fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8').includes(gone),gone);
 // G8 and 6.1: the tooltip follows the engine's numbers; no hours sent leaves that part out; one try and one hour read as one.
 const tip=limit=>{show({background:{series:{tries:limit},gap_fill:{tries:limit}},lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:2,at},{id:'detail_lookup',kind:'detail_lookup',count:2,at}]});return waits().map(item=>item.tip);};
 assert.deepEqual(tip({per_source:5,spacing_seconds:7200}),Array(2).fill('Each source is asked up to 5 times for a book, 2 hours apart. With no answer after that, the book is left as it is and the app stops asking.'),'a limit for the detail look-up gives it the same sentence');

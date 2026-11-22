@@ -1807,7 +1807,9 @@ function waitingLines(item,work){
       const apart=hours?`, ${hours===1?'1 hour':hours.toLocaleString()+' hours'} apart`:'';
       return [item.kind==='series_lookup'?WORK_LABELS.series:WORK_LABELS.gap_fill,plural(n,'book','books'),
         ['Waiting for online sources.',Number.isFinite(item.at)?`Next try ${waitingClock(item.at)}.`:'','No file is changed.'].filter(Boolean).join(' '),
-        !(Number.isInteger(tries) && tries>0)?'A book waits here until its sources answer. The app asks again by itself.'
+        // R16 (Sergei 2026-11-22): the detail look-up has the series look-up's limit, so both items say one sentence, each
+        // with its own numbers from the engine. The no-limit sentence is withdrawn; with no limit sent there is no tooltip.
+        !(Number.isInteger(tries) && tries>0)?''
           :tries===1?'Each source is asked once for a book. With no answer, the book is left as it is and the app stops asking.'
           :`Each source is asked up to ${tries} times for a book${apart}. With no answer after that, the book is left as it is and the app stops asking.`];}
     case 'series_write':{const said=blockerSentence(item.blocker,work);return ['Write series into audiobook',subject,said.text,said.tip];}
