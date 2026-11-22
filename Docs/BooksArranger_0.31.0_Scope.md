@@ -45,6 +45,16 @@ Scope and rulings, 2026-11-22 (Jane, from Sergei's answers that day). Diagnosis:
 
 What "could be wrong" means in engine terms, and how the engine tells a book that is stable under step 3 from one that is not, are Ender's to propose and Sergei's to approve before any automatic move of a finished book is switched on. Until then the write guard stays at `hold`.
 
+### Fourth round — Sergei, 2026-11-22 (evening, after the first entry check)
+
+| # | Ruling | Replaces |
+| --- | --- | --- |
+| R20 | **One release, not two: steps 2 and 3 and the automatic renames and moves of finished books are folded into 0.31.0.** Sergei: "Fold it into 0.31.0 - why do we need 2 releases?" Since English names ship in the same version, every finished book moves once (R19 is met inside 0.31.0). | R7 ("start with steps 1 and 4"); "0.31.0 = steps 1 and 4" below; every "next version" mark in the UX spec |
+| R21 | **A series found by FantLab alone, where the app counts the book's number from the cycle order, is good enough to file.** Only a result that local facts contradict (and the other doubtful shapes Ender listed: more than one series on a book, a "universe" in place of a series, a number mismatch) counts as doubtful. | Ender's proposed stricter rule |
+| R22 | **Books not yet converted stop asking about a doubtful series too:** `Number unclear`, `Title unclear` (when the title only looks like a series name and number) and `Sources disagree — which is correct?` no longer ask; the doubtful series is treated as not found and the book goes on without it. | Those three questions |
+
+**0.31.0 = steps 1, 2, 3 and 4, plus the automatic rename and move of finished books under R18, R21 and R22.** Step 5 (R6, a separate job from the studio) is replaced by that automatic pass inside the app. The first entry check (on `2f385e4`, one test failure, fixed in `4484f8f`) is superseded; the one entry check runs on the final build.
+
 Left as they work today (Sergei did not change them): no "Try again" count for look-ups that gave up; no "Convert now" button on a book waiting for the online answer; a book already queued to convert is not stopped by a later same-name clash; the 22 older jobs planned without the series their tags name wait for R6's job.
 
 Not ruled yet (ask before building on them): which source wins a disagreement; whether a parent folder named after the series counts as confirmation (ruling 55 says no); what to do with author names the app cannot order beyond the Liu Cixin fix; whether the series back-fill of old books keeps running once R6's job has been done.
