@@ -17,6 +17,7 @@ from scan_wait import finish_scan
 class MigrationPlanningTests(unittest.TestCase):
     def test_real_series_retag_enrolls_relocates_and_revalidates_original_history(self):
         import json
+        import series_backfill
         from series_backfill import SeriesBackfill,encoded
         from types import SimpleNamespace
         from migration_operation import MigrationOperation
@@ -39,8 +40,13 @@ class MigrationPlanningTests(unittest.TestCase):
             db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=? WHERE job_id=?',(text,sha,job_id))
             db.execute('UPDATE book_groups SET review=? WHERE id=?',(json.dumps(manifest['metadata']),book['id']));db.commit()
         backfill=SeriesBackfill(f.service,research=SimpleNamespace(),stage=f.base/'backfill-proof')
-        backfill.apply(job_id,{'name':'Added Series','number':'3','provider':'goodreads','source_url':'https://www.goodreads.com/book/show/private-fixture'})
+        # 0.31.0: this case is about the write itself and the relocation that follows it (a series name that stays in the
+        # book's own folder). The guard that holds such a write by default (series_backfill.WRITE_WITHOUT_APPROVAL; its own
+        # module is test_series_write_guard_031) is opened for this one call, as test_series_backfill opens it for its module.
+        with patch.object(series_backfill,'WRITE_WITHOUT_APPROVAL','allow'):
+            backfill.apply(job_id,{'name':'Added Series','number':'3','provider':'goodreads','source_url':'https://www.goodreads.com/book/show/private-fixture'})
         self.assertEqual(backfill.entry(job_id)['state'],'done',backfill.entry(job_id))
+        self.assertEqual(series_backfill.WRITE_WITHOUT_APPROVAL,'hold','the guard itself is untouched: closed again after the call')
         target=f.base/'sorted';target.mkdir()
         with catalog_lock(f.inv.database,f.inv.roots):
             plan=prepare(f.inv.database,f.inv.roots,[f.inv.roots['Audiobooks']],str(target))
