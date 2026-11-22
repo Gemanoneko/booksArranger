@@ -36,6 +36,15 @@ Scope and rulings, 2026-11-22 (Jane, from Sergei's answers that day). Diagnosis:
 | R16 | **The look-up for original titles and author names gets the same limit** as the series look-up (3 tries per source). |
 | R17 | **Where pieces of one book would all get one name and Approve is blocked, the reason may say "Join them into one book, or change this title."** Only on a blocked press; the 2026-11-18 "no Join hint on rows" otherwise stands. |
 
+### Third round — Sergei, 2026-11-22 (same day, after Judy's "Renames and moves" spec)
+
+| # | Ruling | Replaces |
+| --- | --- | --- |
+| R18 | **Finished books are renamed and moved by the rules automatically, with no approval step, when author and series are found.** Sergei: "If the author and series are found, then put it in the folder according to our rules." **If a result could be wrong, treat it as if nothing was found** — no question, no move. | The 0.30.0 ruling "existing books in Audiobooks Sorted move only after Sergei approves the exact listed plan"; R10 and R11 (the approval list and "Leave as it is" are not built); the "without approval" half of R8 |
+| R19 | **Do not move a book now if the next version will move it again.** Books whose name or folder will change under step 3 (English names for translated works, the author name-order fix) wait for that version and then move once. | Generalises R8 and R12 |
+
+What "could be wrong" means in engine terms, and how the engine tells a book that is stable under step 3 from one that is not, are Ender's to propose and Sergei's to approve before any automatic move of a finished book is switched on. Until then the write guard stays at `hold`.
+
 Left as they work today (Sergei did not change them): no "Try again" count for look-ups that gave up; no "Convert now" button on a book waiting for the online answer; a book already queued to convert is not stopped by a later same-name clash; the 22 older jobs planned without the series their tags name wait for R6's job.
 
 Not ruled yet (ask before building on them): which source wins a disagreement; whether a parent folder named after the series counts as confirmation (ruling 55 says no); what to do with author names the app cannot order beyond the Liu Cixin fix; whether the series back-fill of old books keeps running once R6's job has been done.
