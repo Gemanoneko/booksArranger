@@ -873,7 +873,10 @@ class MergeService:
             'approved_total':totals['approved'],'converted_total':totals['converted'],'candidate_total':totals.get('candidate_total'),'not_approved_total':totals.get('not_approved_total'),'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
             'current_media_failure':copy.deepcopy(current_media),
             'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
-            'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable}
+            'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable,
+            # 0.31.0 step 1c: the to-do rows held because another book would get their name (counted under name_taken
+            # above; this is how many of that chip's books are of this kind).
+            'same_name_total':sum(1 for entry in needs.values() if (entry.get('hold') or {}).get('kind')=='same_destination')}
 
     # The fields of state() that say what runs now. The live read (live_jobs) gives exactly these, fresh on every poll.
     LIVE_FIELDS=('state','queued','failed','pause','start_admission','queue_work','current_job_origin','current_title','current_task_kind',

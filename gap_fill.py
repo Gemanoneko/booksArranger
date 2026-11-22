@@ -103,6 +103,26 @@ class GapFill:
         value = self.progress
         return dict(value) if value else None
 
+    def summary(self):
+        """0.31.0 step 4b: plain counts of the whole detail look-up for /api/state (background_work), from the ledger and
+        the last pass's count of books not visited yet: 'left' (to_look_up + between_tries; None until a pass has counted),
+        'between_tries' and its earliest 'next_at' (epoch seconds), 'done' (found + none) and 'total'. 'tries' is None: this
+        look-up has no limit of tries (a closed source defers the book again; see the 0.31.0 report)."""
+        now = self.clock()
+        rows = self._rows("SELECT job_id,state,json_extract(record,'$.next_attempt') AS next FROM gap_fill")
+        done = sum(1 for row in rows if row['state'] in FINAL)
+        later = [row['next'] for row in rows if row['state'] == 'deferred' and isinstance(row['next'], (int, float)) and row['next'] > now]
+        due = sum(1 for row in rows if row['state'] == 'deferred') - len(later)
+        with connect(self.database) as db:
+            jobs = db.execute('SELECT count(*) FROM audio_jobs').fetchone()[0]
+        backlog = self.__dict__.get('_backlog')
+        unvisited = len(backlog['unvisited'] - {row['job_id'] for row in rows}) if backlog and backlog['jobs'] == jobs else None
+        to_look_up = None if unvisited is None else due + unvisited
+        left = None if to_look_up is None else to_look_up + len(later)
+        return {'known': unvisited is not None, 'left': left, 'to_look_up': to_look_up, 'between_tries': len(later), 'next_at': min(later) if later else None,
+                'done': done, 'total': None if left is None else done + left, 'found': sum(1 for row in rows if row['state'] == 'found'),
+                'none': sum(1 for row in rows if row['state'] == 'none'), 'tries': None}
+
     # ------------------------------------------------------------------ ledger
     def _rows(self, sql, params=()):
         with connect(self.database) as db:
@@ -138,6 +158,9 @@ class GapFill:
             if entry and (entry['state'] in FINAL or json.loads(entry['record']).get('next_attempt', 0) > self.clock()):
                 continue
             result.append((row['job_id'], manifest))
+        # 0.31.0 step 4b: the books with no ledger row yet, for summary() (with the job count it was taken at).
+        self.__dict__['_backlog'] = {'unvisited': {job_id for job_id, _ in result if job_id not in entries},
+                                     'jobs': self._rows('SELECT count(*) AS n FROM audio_jobs')[0]['n']}
         return result
 
     def run_pass(self):
