@@ -217,7 +217,8 @@ class RecordColumnTests(unittest.TestCase):
     build made; 0.30.1 has no rule_filings table at all, so a rollback ignores it."""
 
     def test_the_record_column_is_added_once_to_a_table_made_before_it(self):
-        base = Path(tempfile.mkdtemp(dir=SHORT if SHORT.exists() else None, prefix='rf'))
+        SHORT.mkdir(parents=True, exist_ok=True)
+        base = Path(tempfile.mkdtemp(dir=SHORT, prefix=''))
         self.addCleanup(shutil.rmtree, base, True)
         database = str(base / 'c.sqlite3')
         old = rule_filing.TABLE.replace(', written TEXT)', ')')

@@ -78,6 +78,7 @@ export const PYTHON_WORKERS=13;
 // test_book_delete alone (one test class, so it cannot be split). Applied only to the complete production inventory; a
 // module added later is placed by the weights, and a removed one returns every module to them.
 const GATE_PLACEMENT={
+  'test_name_write_031.py':0,  // 0.31.0 R27 (80 s weighted): placed by the weights it would join test_rule_filing_031 on worker 12 (388 s projected); worker 0 is the lightest (223 s)
   'test_attempt_working_lifecycle.py':0,'test_automatic_record_retry.py':0,'test_candidate_source_refresh.py':0,'test_publication_locations.py':0,'test_publication_binding.py':0,'test_relocated_chapter_repair.py':0,'test_quicktime_chapters.py':0,'test_retry_start_fence.py':0,'test_todo_holds.py':0,'test_entered_names.py':0,
   'test_book_delete.py':1,
   'test_failed_m4b_retry.py':2,'test_progress_rows.py':2,'test_library_settings.py':2,'test_status_under_load.py':2,'test_backup_rule.py':2,'test_collection_identity.py':2,'test_set_release.py':2,

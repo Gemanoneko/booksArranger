@@ -71,7 +71,7 @@ def media_hash(path):
 
 def probe(path):
     from audio_pipeline import probe as run
-    stage = Path(tempfile.mkdtemp(dir=SHORT, prefix='p'))
+    stage = Path(tempfile.mkdtemp(dir=SHORT, prefix=''))
     try:
         return run(Path(path), stage, threading.Event())
     finally:
@@ -219,7 +219,7 @@ class NameWriteTests(Unchanged, unittest.TestCase):
         self.assertEqual(media_hash(new), media_before, 'the media atoms are byte-identical')
         quicktime_chapters.media_unchanged(keep, new, threading.Event())
         from audio_pipeline import audio_packet_hash
-        stage = Path(tempfile.mkdtemp(dir=SHORT, prefix='h'))
+        stage = Path(tempfile.mkdtemp(dir=SHORT, prefix=''))
         self.addCleanup(shutil.rmtree, stage, True)
         self.assertEqual(audio_packet_hash(keep, stage, threading.Event(), 2.0), audio_packet_hash(new, stage, threading.Event(), 2.0))
         # The tags: the new title as a book converted under it carries it; everything else read back as before.
