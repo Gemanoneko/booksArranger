@@ -3080,6 +3080,11 @@ class MergeService:
                                         # 0.31.0 step 1c: the other books that would get this name (destination_clash hold), else None.
                                         'shared':preview.get('shared')}
                 shown_series=preview.get('series')
+                # 0.31.0 (Judy 4.5; R1): where the title Approve files this book under came from, on the question itself.
+                # A row that asks something else has no record of its own yet, so its Title line ("English title found
+                # on …") had no fact to read: 'rule' 'english' with 'origin' 'source' says the English title a source
+                # gave replaced the files' own (title_origin()). Absent when the preview does not say.
+                if isinstance(preview.get('title_origin'),dict):payload['title_origin']=dict(preview['title_origin'])
                 # The proposals are the values Approve uses (local_identity.shown): a suspected reader is never proposed
                 # as the author (ruling 14), and an empty author files the book under Без автора.
                 from organization import NO_AUTHOR

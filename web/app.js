@@ -4869,11 +4869,20 @@ function titleTyped(row){
   const draft=namesState.get(row.id);
   return !!(draft?.open && draft.draft && Object.hasOwn(draft.draft,'title') && String(draft.draft.title ?? '').trim()!==namesProposal(row.id,'title').trim());
 }
+// A row that asks something else has no record of its own yet (no original_title_lookup): its question carries the
+// engine's fact instead (ask.title_origin: origin 'source' with rule 'english' = the English title a source gave replaced
+// the files' own). A row with its own record is read from that record alone, as before.
 function englishTitleLine(row){
-  if(row?.kind!=='candidate')return '';
-  const lookup=row.metadata_facts?.original_title_lookup;
-  if(!lookup || lookup.state!=='found' || !lookup.title || originalTitleFact(row)!==lookup.title || titleTyped(row))return '';
-  const name=SERIES_SOURCES[String(lookup.provider || row.title_origin?.provider || '').toLowerCase()];
+  if(row?.kind!=='candidate' || titleTyped(row))return '';
+  const lookup=row.metadata_facts?.original_title_lookup,asked=askOf(row)?.title_origin;let provider='';
+  if(lookup && typeof lookup==='object'){
+    if(lookup.state!=='found' || !lookup.title || originalTitleFact(row)!==lookup.title)return '';
+    provider=lookup.provider || row.title_origin?.provider;
+  }else{
+    if(!asked || typeof asked!=='object' || asked.origin!=='source' || asked.rule!=='english')return '';
+    provider=asked.provider;
+  }
+  const name=SERIES_SOURCES[String(provider || '').toLowerCase()];
   return name?`English title found on ${name}.`:'English title found online.';
 }
 // Its element is made the first time the row has the line (so a row without one keeps the cell it had), directly above

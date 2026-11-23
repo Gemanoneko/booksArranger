@@ -259,6 +259,22 @@ const AT=new Date(2026,10,22,14,5).toISOString();  // 22 Nov, 14:05 in the machi
   assert.ok(!texts(trOf('cand-drop')).some(line=>String(line).includes('The title mentions a series')),'a dropped series is treated as not found: the row does not name it');
   assert.ok(texts(trOf('cand-kept')).includes(mention),'positive control: no series dropped, the line stays');assert.ok(texts(trOf('cand-none')).includes(mention),'an engine that sends no such fact: the line stays');
 
+  // 8. The Title line of a row that asks another question (Judy 4.5; R1): the engine's fact on the question itself
+  // (ask.title_origin), since such a row has no record of its own. It follows the draft, as on any row (gap 6).
+  const english={origin:'source',rule:'english',split:false,provider:'wikidata',source_url:'https://www.wikidata.org/wiki/Q1'};
+  const titleLine=tr=>walk(statusCell(tr)).find(e=>e.className==='field-help book-english-title' && shown(e))?.textContent || '';
+  paint([bookRow('eng',{ask:{...ask,series_clue:undefined,title_origin:english}}),bookRow('fan',{ask:{...ask,series_clue:undefined,title_origin:{...english,provider:'fantlab'}}}),
+    bookRow('unk',{ask:{...ask,series_clue:undefined,title_origin:{...english,provider:'somewhere'}}}),bookRow('files',{ask:{...ask,series_clue:undefined,title_origin:{origin:'files',rule:'no_english_title',split:false}}}),
+    bookRow('rus',{ask:{...ask,series_clue:undefined,title_origin:{origin:'source',rule:'russian_original',split:false,provider:'fantlab'}}}),bookRow('his',{ask:{...ask,series_clue:undefined,title_origin:{origin:'entered',rule:'his',split:false}}}),
+    bookRow('not',{ask:{...ask,series_clue:undefined}}),bookRow('own',{ask:{...ask,series_clue:undefined,title_origin:english},metadata_facts:{original_title_lookup:{state:'none',title:''}}})]);
+  assert.equal(titleLine(trOf('cand-eng')),'English title found on Wikidata.');assert.equal(titleLine(trOf('cand-fan')),'English title found on FantLab.');
+  assert.equal(titleLine(trOf('cand-unk')),'English title found online.','a source the page has no name for');
+  for(const [id,why] of [['files','the files\' own title'],['rus','a Russian original named by a source'],['his','a title he typed'],['not','no fact sent'],['own','the row\'s own record decides when it has one']])
+    assert.equal(titleLine(trOf('cand-'+id)),'',why);
+  // Typing another title removes the line at once; restoring the app's title brings it back.
+  const titleField=walk(statusCell(trOf('cand-eng'))).find(e=>e.dataset?.name==='title');
+  if(titleField){titleField.value='My own title';titleField.handlers.input?.({target:titleField});assert.equal(titleLine(trOf('cand-eng')),'','typed: the line goes');}
+
   console.log('PASS 0.31.0 rule filing page: the quiet line gone, the notice above 5 until zero, grouped Waiting items with the engine\'s whole numbers, no Cancel on the app\'s own move, the record with Find book and Escape, the could-not list with a reason per key, the title\'s mention hidden for a dropped series');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

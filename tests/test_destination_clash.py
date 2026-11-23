@@ -150,6 +150,31 @@ class ClashTests(unittest.TestCase):
         self.assertEqual(approve_code('An audiobook already exists at this path; nothing was overwritten'), 'name_taken', 'the disk check keeps its code')
         self.assertTrue(str(error).endswith('Nothing was changed.'))
 
+    def test_a_row_that_asks_another_question_says_where_its_title_came_from(self):
+        # 0.31.0 (Judy 4.5; R1): the Title line of a row that asks something else. The question carries the preview's own
+        # title_origin, so the page knows the English title a source gave replaced the files' own title.
+        english = {'origin': 'source', 'rule': 'english', 'split': False, 'provider': 'wikidata', 'source_url': 'https://www.wikidata.org/wiki/Q607112'}
+        live = {'path': 'Gibson William\Count Zero - Gibson William.m4b', 'absolute': SHARED, 'taken': False, 'reason': '', 'title': 'Count Zero',
+                'author': 'Gibson William', 'shared': None, 'title_origin': english}
+        self.service.approval_preview = lambda *_, **__: dict(live)
+        self.service._identity_lines = self.service._membership_lines = self.service._hold_payload = lambda *_: None
+        asked = lambda entry: self.service.ask_payload(self.count_zero, dict({'reasons': ['x'], 'ask': None}, **entry))
+        for entry in ({'group': 'author_unclear', 'ask': {'kind': 'author_unclear', 'why': ''}}, {'group': 'title_author', 'ask': {'kind': 'title_author', 'why': ''}},
+                      {'group': 'part_of_book', 'hold': {'kind': 'piece', 'detail': 'x', 'piece': {'piece': 'siblings', 'count': 1}}}):
+            payload = asked(entry)
+            self.assertEqual(payload['title_origin'], english, entry['group'])
+            self.assertEqual(payload['fields']['title']['proposal'], 'Count Zero', 'the title Approve files it under is the one the fact is about')
+        payload['title_origin']['rule'] = 'changed'
+        self.assertEqual(live['title_origin']['rule'], 'english', 'a copy: the preview is not changed through the row')
+        # The files' own title: the fact says so, and the page shows no Title line for it.
+        live['title_origin'] = {'origin': 'files', 'rule': 'no_english_title', 'split': False}
+        self.assertEqual(asked({'group': 'title_author', 'ask': {'kind': 'title_author', 'why': ''}})['title_origin']['origin'], 'files')
+        # Negative controls: a preview that says nothing adds nothing; a row with no preview (every file missing) has none.
+        del live['title_origin']
+        self.assertNotIn('title_origin', asked({'group': 'title_author', 'ask': {'kind': 'title_author', 'why': ''}}))
+        live['title_origin'] = 'english'
+        self.assertNotIn('title_origin', asked({'group': 'title_author', 'ask': {'kind': 'title_author', 'why': ''}}), 'never a value of another shape')
+
     def test_the_to_do_row_says_why_the_engine_itself_holds_it(self):
         # Judy's 0.31.0 spec 4.1 as amended (G9): destination.shared comes on every row whose name another book also has
         # (its kind reads same_destination on all of them), so the page needs the row's own hold to tell a row held for the
