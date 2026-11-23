@@ -332,6 +332,8 @@ class MergeService:
         self.automatic.on_change=self.invalidate_status  # a pending start that fires, changes kind or ends shows on the next poll
         from series_backfill import SeriesBackfill
         self.series_backfill=SeriesBackfill(self,research=self.automatic.research)  # v0.16.12; started with the retention sweep
+        from name_write import NameWrite
+        self.name_write=NameWrite(self)  # 0.31.0 R27: an English title or author name written into a finished file (rule_filing approves); started with series backfill
         from gap_fill import GapFill
         self.gap_fill=GapFill(self)  # 0.22.1: optional fields after approval (research: the automatic pass's); started with series backfill
         from rule_filing import RuleFiling
@@ -1623,7 +1625,7 @@ class MergeService:
                 self._retention_wake.wait(2 if self._manual_queue() else 60);self._retention_wake.clear()
         self._purge_tried=set()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
-        for name in ('series_backfill','gap_fill','rule_filing'):
+        for name in ('series_backfill','name_write','gap_fill','rule_filing'):
             background=self.__dict__.get(name)
             if background is not None:background.start()
 
@@ -5929,7 +5931,7 @@ class MergeService:
         for name in ('_retention_stop','_retention_wake'):
             flag=self.__dict__.get(name)
             if isinstance(flag,threading.Event):flag.set()
-        for name in ('decisions','series_backfill','gap_fill','rule_filing'):
+        for name in ('decisions','series_backfill','name_write','gap_fill','rule_filing'):
             worker=self.__dict__.get(name)
             for flag in (getattr(worker,'stop',None),getattr(worker,'wake',None)):
                 if isinstance(flag,threading.Event):flag.set()
@@ -5983,7 +5985,7 @@ class MergeService:
             snapshots=[self.__dict__.get('_status_shared'),*self.__dict__.get('_page_shared',{}).values()]
         for snapshot in snapshots:
             if snapshot is not None:snapshot.close(reads)
-        for name in ('rule_filing','series_backfill','gap_fill'):  # the rules' pass first: it queues nothing more
+        for name in ('rule_filing','series_backfill','name_write','gap_fill'):  # the rules' pass first: it queues nothing more
             background=self.__dict__.get(name)
             if background is not None:self._close_lookups(background,reads)
         for name in ('_repair_stop','_retry_all_stop'):
@@ -6483,9 +6485,13 @@ class MergeService:
             if not target or os.path.normcase(target)!=os.path.normcase(str(approved)):
                 return {'state':'refused','reason':'The planned place changed since you approved it; the book stays where it is.'}
             # 0.31.0 milestone B: a write the app's rules approved is followed by the app's own move (no Cancel, R26).
-            backfill=self.__dict__.get('series_backfill')
-            entry=backfill.entry(job_id) if callable(getattr(backfill,'entry',None)) else None
-            ruled=bool(entry and isinstance(entry.get('record'),dict) and entry['record'].get('approved_by')=='rules')
+            # 0.31.0 R27: so is the move after a write of names (name_write), the other kind of write the rules approve.
+            ruled=False
+            for name in ('series_backfill','name_write'):
+                ledger=self.__dict__.get(name)
+                entry=ledger.entry(job_id) if callable(getattr(ledger,'entry',None)) else None
+                ruled=ruled or bool(entry and isinstance(entry.get('record'),dict) and entry['record'].get('approved_by')=='rules'
+                                    and (placed is None or os.path.normcase(str(entry['record'].get('new_path') or ''))==os.path.normcase(str(placed))))
             return self._sorting_move(job_id,target,**({'origin':'rules'} if ruled else {}))
         except sqlite3.Error as error:
             return {'state':'later','reason':str(error)[:300] or 'The catalog was busy'}

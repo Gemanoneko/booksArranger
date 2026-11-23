@@ -53,8 +53,12 @@ def _entered(facts, field):
 # 0.31.0 step 3 (rulings R1 and R3): the English title of a translated book, by the one title rule
 # (canonical_names.book_title) from the title the detail look-up recorded for the finished book (gap_fill's ledger: 92
 # books on a copy of the live catalog have one that was never applied). Planned by default since milestone B (plan()'s
-# titles; a dry run can leave it out). The file gets its English name with its move (the app's verified move renames the
-# exact file: its bytes, tags included, are not changed).
+# titles; a dry run can leave it out). Milestone B gave the file its English name with its move only (the verified move
+# renames the exact file: its bytes, tags included, are not changed). 0.31.0 ruling R27 (Sergei 2026-11-23): the English
+# title and an author credit put in order are written inside the file's tags and into the app's list too (name_write):
+# a listed item carries 'names', {'title', 'author', 'canonical_author'} that differ from the book's manifest, when the
+# change rewrites the file (name_write.needed) and the book has not been moved before (its location is then a chain on top
+# of its receipt, book_move, which a rewrite would break: such a book keeps the move alone).
 TITLE_ITEM = 'title'
 # 0.31.0 milestone B (Judy's spec 3.4): each reason a listed book has, as fields the record of renames and moves keeps
 # (canonical()'s details): {'kind': 'series', 'name', 'number', 'provider', 'source_url'}, {'kind': 'title', 'title',
@@ -161,7 +165,7 @@ def canonical(db, manifest, rules, series=None, catalog=None, details=None):
     return review, facts, reasons, notes
 
 
-def target(db, row, rules, output_root, series=None, placed=None, effective=None, catalog=None, ruled=False):
+def target(db, row, rules, output_root, series=None, placed=None, effective=None, catalog=None, ruled=False, placed_kinds=None):
     """{'job_id', 'from', 'to', 'items', 'why'} for one completed job (an audio_jobs row), or {'refused': reason} with
     'from', or None when the book is where the app files it. placed: series backfill wrote this approved book's series
     under its new name in its own folder (item 2); the book is expected exactly there and goes on to its series folder.
@@ -169,7 +173,10 @@ def target(db, row, rules, output_root, series=None, placed=None, effective=None
     is where the app files it now (an approved move took it there), else left where it was moved to.
     ruled (0.31.0 milestone B): that last move was not to a folder Sergei chose (the app's rules, his approval of a listed
     move, or Use computed folder took the book there), so the rules still file the book: it is planned from where it is
-    now. A folder he chose with Choose folder… is his and is never planned on (ruling R26)."""
+    now. A folder he chose with Choose folder… is his and is never planned on (ruling R26).
+    placed_kinds (0.31.0 R27): the kinds of change of a book whose new names were written in its own folder (name_write),
+    which now only moves; a placed book without them is a written series."""
+    import name_write
     from metadata import propose
     from series_backfill import published_root
     manifest = json.loads(row['manifest'])
@@ -180,7 +187,7 @@ def target(db, row, rules, output_root, series=None, placed=None, effective=None
     details = []
     review, facts, reasons, notes = canonical(db, manifest, rules, series, catalog, details)
     if placed and not reasons:
-        reasons, notes = ['series'], ['its series folder']
+        reasons, notes = (list(placed_kinds), ['its folder']) if placed_kinds else (['series'], ['its series folder'])
     if not reasons:
         return None
     found['reasons'] = details
@@ -215,7 +222,8 @@ def target(db, row, rules, output_root, series=None, placed=None, effective=None
         return dict(found, refused='No name for it: ' + (wanted.get('reason') or 'unknown'), items=reasons)
     if key(wanted['path']) == key(current):
         return None
-    return dict(found, to=wanted['path'], items=reasons, why='; '.join(notes))
+    names = name_write.needed(manifest.get('metadata'), review) if effective is None and not placed else {}
+    return dict(found, to=wanted['path'], items=reasons, why='; '.join(notes), **({'names': names} if names else {}))
 
 
 def _moved(db, job_id):
@@ -266,8 +274,13 @@ REFUSAL_KEYS = (('name_exists', ('A file with the new name is already there',)),
                 ('newer_version', ('Part of a replacement or a newer version',)), ('kept_files', ('Files kept at your choice',)),
                 ('data_move', ('Kept as published while the data folder move is unfinished',)), ('sources_disagree', ('Series sources need review',)),
                 ('no_name', ('No name for it', 'Could not be planned')))
-NOT_MOVED_KEYS = (('file_changed', ('The book changed since you approved', 'The published audiobook changed', 'no longer matches')),
-                  ('place_changed', ('The planned place changed',)), ('name_exists', ('A file with the series name already exists',)))
+NOT_MOVED_KEYS = (('file_changed', ('The book changed since you approved', 'The published audiobook changed', 'no longer matches',
+                                    'The book changed since its new names were approved')),
+                  ('place_changed', ('The planned place changed',)), ('name_exists', ('A file with the series name already exists',)),
+                  # 0.31.0 R27: the rewrite of the file's tags did not prove out (a tag that did not read back, any other
+                  # change found by the proofs, a file that cannot be retagged); the book is left as it was.
+                  ('tags_not_written', ('did not read back', 'changed while retagging', 'cannot be retagged safely',
+                                        'could not be written', 'Series update failed', "does not fit the book's recorded author credit")))
 
 
 def reason_key(text, table=REFUSAL_KEYS):
@@ -351,6 +364,12 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
     # series folder then failed for good (a stranger file at the target) read as "where the app files it" and got no line:
     # stuck in silence. It is planned from where series backfill put it: listed again, or refused with the reason.
     placed = _placed_series(db)
+    # 0.31.0 R27: so is a book whose new names were written in its own folder (name_write) and whose move did not run yet.
+    import name_write
+    placed_kinds = {}
+    for job_id, (path, kinds) in name_write.placed(db).items():
+        if job_id not in placed:
+            placed[job_id], placed_kinds[job_id] = path, kinds
     # titles (0.31.0 step 3, rulings R1 and R3): the English title of a translated book is planned too.
     recorded = recorded_titles(db) if titles else {}
     rows = db.execute("SELECT job_id,manifest,output FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY job_id").fetchall()
@@ -379,7 +398,7 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
             # A moved book: the receipt keeps the published place, the move chain the new one (book_move).
             effective, ruled = _last_move(db, row['job_id'])
             found = target(db, row, rules, output_root, held, placed=placed.get(row['job_id']), effective=effective,
-                           catalog=recorded.get(row['job_id']), ruled=ruled)
+                           catalog=recorded.get(row['job_id']), ruled=ruled, placed_kinds=placed_kinds.get(row['job_id']))
         except Exception as error:  # one malformed record never hides the others
             refused.append({'job_id': row['job_id'], 'from': current, 'refused': 'Could not be planned: ' + (str(error) or type(error).__name__)[:200], 'items': []})
             continue
@@ -389,8 +408,9 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
         if failed:
             found['approved_not_moved'] = {'key': reason_key(failed, NOT_MOVED_KEYS), 'reason': failed}
         if row['job_id'] in placed and 'to' in found:
-            found['placed'] = True  # its series is in the file already: an approval only moves it (sorting_moves_apply)
-            found['approved_not_moved'] = {'key': 'other', 'reason': 'Its series was written; the move into its series folder did not run'}
+            found['placed'] = True  # its series (or its names) is in the file already: an approval only moves it (sorting_moves_apply)
+            found['approved_not_moved'] = {'key': 'other', 'reason': 'Its names were written; the move into its folder did not run' if row['job_id'] in placed_kinds
+                                           else 'Its series was written; the move into its series folder did not run'}
         if 'refused' not in found:
             why = (RETAINED if row['job_id'] in retained else
                    'Part of a replacement or a newer version; left as it is' if row['job_id'] in replaced else

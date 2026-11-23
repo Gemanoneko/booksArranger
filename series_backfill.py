@@ -71,7 +71,7 @@ MOVE_WAITS = 'Series found. Moving it into its series folder waits for your appr
 # refusal of that list still applies) and the same approve() below, with record 'approved_by': 'rules'. So a series is
 # written only for a book the list lets through, bound to its manifest and to the exact path the list names.
 WRITE_WITHOUT_APPROVAL = 'hold'
-APPROVAL_KEYS = ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc', 'approved_by')
+APPROVAL_KEYS = ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc', 'approved_by', 'approved_names', 'approved_name_reasons')
 WRITE_WAITS = 'Series found. Writing it into the file and renaming it waits for your approval.'
 # The reason the 81 books were held by that bug. Such a book is looked up once more (a lookup only: its file is never touched
 # without approval), so its series is found again under 0.30.0's rules (item 6: the original-language name) and it then
@@ -337,17 +337,31 @@ class SeriesBackfill:
         self.__dict__['_summary'] = (finished, min(nexts) if nexts else None, value)
         return dict(value)
 
-    def approve(self, job_id, found, target, by=None):
+    def approve(self, job_id, found, target, by=None, names=None, reasons=None):
         """0.30.0 item 2: Sergei approved this book's listed move (sorting_moves). found: the series it is filed under
         ({'name','number','provider','source_url'}, the original-language name, item 6); target: the path he saw. The held
         book is looked at again by the next pass with exactly this series (no new lookup), only while the book's manifest is
         the one he approved. Raises ValueError when the book is not held for this reason.
-        by (0.31.0 milestone B): 'rules' when the app's rules approved it (rule_filing), kept as record 'approved_by'."""
+        by (0.31.0 milestone B): 'rules' when the app's rules approved it (rule_filing), kept as record 'approved_by'.
+        names (0.31.0 ruling R27): {'title', 'author', 'canonical_author'} the rules also file the book under (the list's
+        item 'names'); they are written into the file in the same rewrite (one rewrite per book). Only the rules approve
+        names (ValueError otherwise). reasons: the list's reasons for them, kept with the record (the title's source)."""
         entry = self.entry(job_id)
         rows = self._rows('SELECT manifest FROM audio_jobs WHERE job_id=?', (job_id,))
         if not entry or entry['state'] != 'held' or not rows:
             raise ValueError('This book is not waiting for a series move; nothing was changed.')
+        import name_write
+        names = {field: str(names[field]) for field in name_write.FIELDS if field in (names or {}) and str(names[field]).strip()}
+        if names and by != name_write.BY:
+            raise ValueError(name_write.NOT_BY_RULES)
+        if names and self._names_in_hand(job_id):
+            raise ValueError(name_write.BEING_WRITTEN)
         record = dict(entry['record'])
+        record.pop('approved_names', None)
+        record.pop('approved_name_reasons', None)
+        if names:
+            record['approved_names'] = names
+            record['approved_name_reasons'] = [dict(reason) for reason in reasons or [] if isinstance(reason, dict) and reason.get('kind') in ('title', 'author')]
         approved = {key: found[key] for key in ('name', 'number', 'provider', 'source_url') if key in found}
         approved['receipts'] = record.get('research_receipts') or []
         approved['deferred_sources'] = record.get('deferred_sources') or []
@@ -786,6 +800,16 @@ class SeriesBackfill:
         manifest = json.loads(rows[0]['manifest'])
         output = json.loads(rows[0]['output'])
         review = dict(manifest['metadata'], series=found['name'], number=found['number'])
+        # 0.31.0 ruling R27: the names the rules approved with this write (an English title, the author's name in order) go
+        # into the file in the same rewrite, so the book is rewritten once. Only an approval by the rules carries them.
+        approved = self.entry(job_id)
+        given = approved['record'] if approved else {}
+        names, reasons = {}, []
+        if given.get('move_approved') and given.get('approved_by') == 'rules' and isinstance(given.get('approved_names'), dict):
+            import name_write
+            names = {field: str(value) for field, value in given['approved_names'].items() if field in name_write.FIELDS and str(value).strip()}
+            reasons = [dict(reason) for reason in given.get('approved_name_reasons') or [] if isinstance(reason, dict)]
+            review = name_write.renamed(review, names)
         facts = copy.deepcopy(manifest.get('metadata_facts'))
         old = ordinary(output['final_path'])
         # Senua 0.21.3 F5 / ruling 17 (Sergei 2026-10-24, series backfill on in Sorted): a book is named relative to the
@@ -796,11 +820,14 @@ class SeriesBackfill:
                   'old_path': str(old), 'old_sha256': output['sha256'], 'old_size': output['size'],
                   'research_receipts': found.get('receipts', []), 'deferred_sources': found.get('deferred_sources', []),
                   'series_proof': {key:copy.deepcopy(found[key]) for key in ('work_id','series_id','statement_id','work_revision','series_revision','references','numbering_scheme','isbn','series_url','local_identity') if key in found}}
+        if names:
+            record.update(names=names, was={field: manifest['metadata'].get(field) for field in names}, name_reasons=reasons)
         # His approval travels with the record from the start, so a hold at any step below still says it was approved.
-        approved = self.entry(job_id)
         record.update({key: approved['record'][key] for key in APPROVAL_KEYS
                        if approved and key in approved['record']})
         try:
+            if self._names_in_hand(job_id):
+                raise Later('This audiobook is being renamed now', self.clock() + 60)  # one writer per file (name_write)
             # Rulings 69 and 71h: a book Sergei moved to a folder he chose lives where its move says, not at its receipt;
             # its file is left as it is (never renamed from a stale path), fail closed.
             import book_move
@@ -818,6 +845,12 @@ class SeriesBackfill:
                 raise Held("The audiobook's name does not follow the app's naming; left as it is")
             if facts:
                 facts['series_state'] = 'verified'
+            if names and isinstance(facts, dict):
+                import name_write
+                facts = name_write.facts_named(facts, manifest['metadata'], review, reasons)  # as the list names it (sorting_moves.canonical)
+                contradiction = name_write.fits(facts, review)
+                if contradiction:
+                    raise Held(contradiction)
             target = propose('', str(root), 'audiobook', {}, review, automatic_facts=facts)
             if not target.get('path'):
                 raise Held('No name for the series: ' + (target.get('reason') or 'unknown'))
@@ -882,12 +915,37 @@ class SeriesBackfill:
             self._clear_stage(job_id)
         self.resume(job_id)
 
+    def _tags(self, was, review, record):
+        """The Apple metadata items this write puts into the file: the series items, and (0.31.0 ruling R27) the names the
+        rules approved with it, in the one rewrite (name_write.tags). was: the book's review before the write."""
+        tags = series_tags(review)
+        if record.get('names'):
+            import name_write
+            tags.update(name_write.tags(was, review))
+        return tags
+
+    def _read_back(self, before, after, was, review, record):
+        """Step 2's tag proof: the series as a converted book carries it, and the approved names with it (R27)."""
+        if record.get('names'):
+            import name_write
+            self.check_tags(before, after, review, name_write.wanted(was, review))
+        else:
+            self.check_tags(before, after, review)
+
+    def _names_in_hand(self, job_id):
+        """0.31.0 R27: a write of names (name_write) is open or approved for this book: one writer per file."""
+        with connect(self.database) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='name_writes'").fetchone():
+                return False
+            row = db.execute('SELECT state FROM name_writes WHERE job_id=?', (job_id,)).fetchone()
+        return bool(row and (row[0] in ACTIVE or row[0] in ('pending', 'deferred', 'blocked')))
+
     def _write(self, job_id, manifest, output, old, temp, review, record):
         """Steps 1-2: the new metadata in a new file next to the old one, then the proofs."""
         from quicktime_chapters import retag, media_unchanged, ChapterFormatError
         from audio_pipeline import audio_packet_hash, copied_audio_evidence, probe
         try:
-            receipt = retag(old, temp, self.stop, series_tags(review))
+            receipt = retag(old, temp, self.stop, self._tags(manifest['metadata'], review, record))
             if receipt['input_sha256'] != output['sha256'] or receipt['input_size'] != output['size']:
                 raise Held('The published audiobook changed since it was verified; left as it is')
             media_unchanged(old, temp, self.stop)
@@ -902,7 +960,7 @@ class SeriesBackfill:
             raise Held('The audio decoder configuration or timing changed while retagging; left as it is')
         before = probe(old, stage, self.stop)
         after = probe(temp, stage, self.stop)
-        self.check_tags(before, after, review)
+        self._read_back(before, after, manifest['metadata'], review, record)
         stat = temp.stat()
         record.update(new_sha256=sha256(temp, self.stop), new_size=stat.st_size, new_mtime=stat.st_mtime_ns)
         with VerifiedFile(temp) as written:
@@ -912,14 +970,17 @@ class SeriesBackfill:
         self._set(job_id, 'written', '', record)
 
     @staticmethod
-    def check_tags(before, after, review):
-        """The new file carries the series as a converted book would; everything else read back is unchanged."""
+    def check_tags(before, after, review, names=None):
+        """The new file carries the series as a converted book would; everything else read back is unchanged. names (0.31.0
+        R27): what the approved names must read back as too, by ffprobe's tag names (name_write.wanted; None: the item must
+        be gone)."""
         def tags(raw):
             return {k.lower(): str(v) for k, v in raw.get('format', {}).get('tags', {}).items()}
         old, new = tags(before), tags(after)
         wanted = {'album': album(review), 'grouping': review['series'], 'sort_album': album(review)}
         if str(review.get('number', '')).isdigit() and 0 < int(review['number']) < 65536:
             wanted['track'] = str(int(review['number']))
+        wanted.update(names or {})
         for key, value in wanted.items():
             if new.get(key) != value:
                 raise Held('Series tags did not read back: ' + key)
@@ -1068,13 +1129,22 @@ class SeriesBackfill:
                       'evidence': record.get('research_receipts', []), 'deferred_sources': record.get('deferred_sources', [])}
             if isinstance(manifest.get('metadata_facts'), dict):
                 manifest['metadata_facts'] = dict(manifest['metadata_facts'], series_state='verified', series_source=source)
-            text, digest = encoded(manifest)
             validation = dict(output['validation'], sha256=record['new_sha256'], size=record['new_size'])
             validation['tags'] = dict(validation.get('tags') or {}, album=album(review), grouping=review['series'])
+            named = None
+            if record.get('names'):
+                # 0.31.0 R27: the names written with the series, recorded as name_write records its own (one transaction).
+                import name_write
+                named = name_write.catalog_names(manifest, validation, record['names'], record.get('name_reasons'))
+            text, digest = encoded(manifest)
             updated = dict(output, final_path=str(new), sha256=record['new_sha256'], size=record['new_size'], parent_identity=ancestry, validation=validation)
+            journal = row['journal']
+            if named:
+                import name_write
+                journal = name_write.journal_named(row['journal'], updated)
             db.execute('BEGIN IMMEDIATE')
-            changed = db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=?,output=?,updated=? WHERE job_id=? AND output=?',
-                                 (text, digest, json.dumps(updated), _stamp(), job_id, row['output'])).rowcount
+            changed = db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=?,output=?,journal=?,updated=? WHERE job_id=? AND output=?',
+                                 (text, digest, json.dumps(updated), journal, _stamp(), job_id, row['output'])).rowcount
             if changed != 1:
                 raise Held('The book changed meanwhile')
             identity = merge._identity_key(new, record['new_sha256'])
@@ -1100,6 +1170,8 @@ class SeriesBackfill:
                                                                     'reviewer_identity': 'Books Arranger series backfill', 'basis': why})
                 db.execute('UPDATE candidate_context SET data=? WHERE id=? AND revision=?',
                            (json.dumps(data, ensure_ascii=False), manifest['candidate_id'], context[0]))
+            if named:
+                name_write.catalog_list(db, manifest, *named, record.get('name_reasons'))
             db.execute("UPDATE series_backfill SET state='cataloged',updated=? WHERE job_id=?", (_stamp(), job_id))
         merge.__dict__.get('_validated_outputs', {}).pop(job_id, None)
         if hasattr(merge, 'invalidate_status'):

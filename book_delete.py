@@ -856,7 +856,7 @@ _BY_CANDIDATE = (('book_groups', 'id'), ('candidate_context', 'id'), ('automatic
                  ('metadata_choices', 'candidate_id'), ('reacquire_markers', 'candidate_id'))
 _BY_JOB = (('audio_jobs', 'job_id'), ('audio_destination_holds', 'job_id'), ('audio_failure_history', 'job_id'), ('audio_job_set_aside', 'job_id'),
            ('audio_repair_admissions', 'parent_job_id'), ('audio_retry_intents', 'parent_job_id'), ('m4b_readmissions', 'parent_job_id'),
-           ('inplace_edits', 'job_id'), ('kept_files', 'job_id'), ('recovery_retention', 'job_id'), ('series_backfill', 'job_id'),
+           ('inplace_edits', 'job_id'), ('kept_files', 'job_id'), ('name_writes', 'job_id'), ('recovery_retention', 'job_id'), ('series_backfill', 'job_id'),
            ('source_folder_cleanup_jobs', 'job_id'), ('source_folder_cleanup_directories', 'job_id'), ('working_attempts', 'job_id'),
            ('working_diagnostics', 'job_id'), ('working_files', 'job_id'))
 _BY_PATH = ('files', 'part_volumes', 'part_chapters', 'source_retirements', 'scan_outcomes', 'book_joins')
