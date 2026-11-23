@@ -56,6 +56,10 @@ What "could be wrong" means in engine terms, and how the engine tells a book tha
 | R24 | **Books the app could not rename or move are listed, read-only, each with its reason**, under the record of automatic renames and moves (UX spec 3.4a). | — |
 | R25 | **Two more stops follow R22:** `Series and standalone evidence conflicts` and `Series membership has conflicting author credits…` no longer stop the book; it gets no series and goes on. | Those two holds |
 | R26 | **No Cancel on a move the app queued by its rules.** To override, `Choose folder…` after the book has moved; that choice is kept. | — |
+| R27 | **(2026-11-23) An English rename of a finished book also changes the title inside the file's tags and in the app's list**, not only the file name and folder. | Milestone B's "file name and folder only" |
+| R28 | **(2026-11-23) Pacing of automatic filing approved as built:** two books in hand at a time; three tries, an hour apart, for a move that did not finish. | — |
+
+Also on 2026-11-23: no model fallback (Fable only, work waits if the limit is hit); Futaba may launch a packaged 0.31.0 build with visible windows in its own data folder, never the installed copy; the nine leftover `.git` pointer copies in the worktree's scratch were deleted on Sergei's approval.
 
 **0.31.0 = steps 1, 2, 3 and 4, plus the automatic rename and move of finished books under R18, R21 and R22.** Step 5 (R6, a separate job from the studio) is replaced by that automatic pass inside the app. The first entry check (on `2f385e4`, one test failure, fixed in `4484f8f`) is superseded; the one entry check runs on the final build.
 
