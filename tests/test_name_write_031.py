@@ -334,6 +334,38 @@ class FailureTests(Unchanged, unittest.TestCase):
         self.assert_unchanged(book)
         self.assertEqual(sorting_moves.reason_key(book.state()[1], sorting_moves.NOT_MOVED_KEYS), 'name_exists')
 
+    def test_a_move_begun_during_the_write_keeps_the_catalog_and_both_copies(self):
+        book = Book(self)
+        book.approve()
+        with mock.patch.object(NameWrite, 'catalog', side_effect=sqlite3.OperationalError('database is locked')):
+            book.writer.run_pass()
+        self.assertEqual(book.state()[0], 'renamed', 'a busy catalog waits: renamed, not yet recorded')
+        new = Path(book.writer.entry(book.lib.job_id)['record']['new_path'])
+        with connect(book.lib.db) as db:  # Choose folder… on the book: its move starts from the receipt as it is
+            move = book_move.plan(db, job_id=book.lib.job_id, kind='base', candidate_id=book.lib.candidate, start=book_move.location(book.resolve()),
+                                  folder=str(book.lib.root / 'Mine'), root=str(book.lib.root), origin='user', override_id='his')
+            db.execute("UPDATE book_moves SET state='rename_intent' WHERE move_id=?", (move['move_id'],))
+        book.writer.clock = lambda: 2_000_000_000.0
+        book.writer.run_pass()
+        state, reason = book.state()
+        self.assertEqual(state, 'held')
+        self.assertIn('moved meanwhile', reason)
+        output = book.output()
+        self.assertEqual((output['final_path'], sha(book.path), book.manifest()['metadata']['title']), (str(book.path), book.original, book.title), 'the receipt the move starts from')
+        self.assertEqual(sha(new), book.writer.entry(book.lib.job_id)['record']['new_sha256'], 'the proven copy is kept, never half written')
+        with connect(book.lib.db) as db:
+            db.execute("UPDATE book_moves SET state='cancelled' WHERE move_id=?", (move['move_id'],))
+        control = Book(self)
+        control.approve()
+        with mock.patch.object(NameWrite, 'catalog', side_effect=sqlite3.OperationalError('database is locked')):
+            control.writer.run_pass()
+        with connect(control.lib.db) as db:  # control: a move only queued has not begun; the write is recorded
+            book_move.plan(db, job_id=control.lib.job_id, kind='base', candidate_id=control.lib.candidate, start=book_move.location(control.resolve()),
+                           folder=str(control.lib.root / 'Mine'), root=str(control.lib.root), origin='user', override_id='his')
+        control.writer.clock = lambda: 2_000_000_000.0
+        control.writer.run_pass()
+        self.assertEqual(control.state(), ('done', ''))
+
     def test_the_write_touches_only_the_books_own_file_and_its_own_temporary_in_its_folder(self):
         book = Book(self)
         neighbour = book.path.parent / 'Another book - Someone.m4b'
