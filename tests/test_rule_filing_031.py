@@ -938,6 +938,33 @@ class WorkViewTests(unittest.TestCase):
         self.assertEqual((shelf.filing.summary()['known'], shelf.filing.summary()['left']), (True, 0))
 
 
+class PageFactTests(unittest.TestCase):
+    """Small facts the 0.31.0 page asked for beside milestone B (additive; the page words them)."""
+
+    def test_the_books_that_wait_for_something_else_than_an_online_answer_are_counted_apart(self):
+        server = SimpleNamespace(merge=SimpleNamespace(), active_library='')
+        work = background_work.view(server, {}, {'state': 'Running', 'research': {'waiting': 7}}, {}, False, None)
+        before = work['lookup_before_review']
+        self.assertEqual((before['total'], before['other_waits'], before['count']), (0, 7, 0), 'the Metadata sources number without the online waits')
+        unknown = background_work.view(server, {}, {'state': 'Running', 'research': {}}, {}, False, None)['lookup_before_review']
+        self.assertIsNone(unknown['other_waits'], 'not known is never a number')
+
+    def test_the_wait_reason_names_the_english_title_and_a_kept_result_is_still_understood(self):
+        import public_research
+        self.assertIn('English title', public_research.LOOKUP_WAIT_REASON)
+        self.assertNotIn('original title', public_research.LOOKUP_WAIT_REASON)
+        self.assertIn('original title', public_research.LOOKUP_WAIT_REASON_BEFORE, 'the wording kept results carry, dropped with the current one')
+
+    def test_a_book_stopped_by_a_withdrawn_hold_is_read_once_more(self):
+        import public_research
+        held = {'state': 'Held', 'reasons': ['Series and standalone evidence conflicts']}
+        credits = {'state': 'Held', 'reasons': ['Series membership has conflicting author credits. Confirm this book in Edit names.']}
+        self.assertTrue(public_research.needs_local_recheck(held))
+        self.assertTrue(public_research.needs_local_recheck(credits))
+        self.assertFalse(public_research.needs_local_recheck(dict(held, local_recheck=public_research.LOCAL_RECHECK)), 'once')
+        self.assertFalse(public_research.needs_local_recheck({'state': 'Held', 'reasons': ['Sources disagree on the title or author']}), 'a question that still stands is not re-read for this')
+
+
 class JournalColumnTests(unittest.TestCase):
     """The one schema change: book_moves.origin. Added to a table made before 0.31.0, and that version still runs on it."""
     OLD = ('CREATE TABLE book_moves(move_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, kind TEXT NOT NULL, candidate_id TEXT NOT NULL,'

@@ -153,8 +153,11 @@ def present(db,row,providers,manual,conflicts):
             else:question['renewed']=True
     # R22 (Sergei 2026-11-22): "Sources disagree" is no longer asked about a doubtful series. Sources that agree on the
     # book and differ only in its series or its number make that series doubtful, and a doubtful series is treated as
-    # not found: the book goes on without it. A question he has already answered stays, with his answer (DOUBTFUL_FIELDS).
-    kept=[question for question in result['questions'] if not (question['type']=='field' and question['field'] in DOUBTFUL_FIELDS and 'previous_decision' not in question)]
+    # not found: the book goes on without it. An answer he has already given stays in force (DOUBTFUL_FIELDS): a question
+    # he resolved, on the evidence he saw. A question he answered that would be asked again (the evidence changed since, or
+    # he left it unresolved) is dropped like any other: no series or number question is ever listed again.
+    kept=[question for question in result['questions'] if not (question['type']=='field' and question['field'] in DOUBTFUL_FIELDS
+                                                             and not (question.get('resolved') and question.get('chosen_by')=='you'))]
     if len(kept)!=len(result['questions']):
         result['dropped_as_doubtful']=[question['field'] for question in result['questions'] if question not in kept]
         result['questions']=kept

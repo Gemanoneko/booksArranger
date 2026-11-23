@@ -3730,7 +3730,9 @@ class MergeService:
             answer['place']=self._place(result.get('review') or {})
             # 0.31.0 (Judy 4.3): the Place line says where the series and number came from; the open editor's line too.
             if answer.get('series') and answer['place'].get('series'):
-                answer['place'].update({key:answer['series'][key] for key in ('origin','provider') if key in answer['series']})
+                # 'name_from' (0.31.0, Judy 4.5): the source of the series' English name where it is not the origin's own,
+                # on the preview's place and so on the Edit names editor's place too (it is the preview's).
+                answer['place'].update({key:answer['series'][key] for key in ('origin','provider','name_from') if key in answer['series']})
             values=dict(names)
             if title is not None:values['title']=title
             if author is not None:values['author']=author

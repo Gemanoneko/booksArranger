@@ -96,6 +96,7 @@ RESEARCH_VERSION='standing-24-v1'
 # of the live catalog (2026-11-22): 58 of 276 held books have these shapes.
 LOCAL_RECHECK='local-031-v1'
 RECHECK_PIECES=('siblings','part_title','numbered_part','part_set')
+WITHDRAWN_HOLDS=('Series and standalone evidence conflicts','Series membership has conflicting author credits')
 
 def needs_local_recheck(result):
     """True for a recorded held result of the step 1d shapes that was read before the 0.31.0 local rules."""
@@ -104,7 +105,10 @@ def needs_local_recheck(result):
     piece=hold.get('piece') if isinstance(hold.get('piece'),dict) else {}
     ask=result.get('ask') if isinstance(result.get('ask'),dict) else {}
     # R22 (Sergei 2026-11-22): a book asked "Number unclear" is read once more too; neither question is asked any more.
-    return bool(hold.get('kind')=='piece' and piece.get('piece') in RECHECK_PIECES or ask.get('why') in ('title_series','number_unclear'))
+    # R25: nor is a book stopped by one of the two holds that ruling withdrew (WITHDRAWN_HOLDS): read once more, it goes on
+    # without the doubtful series instead of keeping a stop nothing words any more.
+    withdrawn=any(isinstance(reason,str) and reason.startswith(WITHDRAWN_HOLDS) for reason in result.get('reasons') or [])
+    return bool(hold.get('kind')=='piece' and piece.get('piece') in RECHECK_PIECES or ask.get('why') in ('title_series','number_unclear') or withdrawn)
 
 class ChallengeDetected(ValueError):pass
 
@@ -139,7 +143,10 @@ LOOKUP_SERVES={'original_title':('fantlab','wikidata'),'series':('goodreads','fa
 LOOKUP_BUDGET=12
 LOOKUP_RETRY_MIN=600
 LOOKUP_MAX_WAIT=12*3600
-LOOKUP_WAIT_REASON='Waiting for the original title: its sources are busy. The app tries again by itself.'
+LOOKUP_WAIT_REASON='Waiting for the English title: its sources are busy. The app tries again by itself.'
+# The same reason as results kept before milestone B word it (R1: the app looks for the English title, which for a Chinese
+# book is not the original one). A kept result may still carry it; it is dropped with the current one, never matched alone.
+LOOKUP_WAIT_REASON_BEFORE='Waiting for the original title: its sources are busy. The app tries again by itself.'
 LOOKUP_OUTCOMES=('answered','nothing_found','no_answer','waiting')
 
 
@@ -940,7 +947,7 @@ class PublicResearch:
                 import local_identity
                 # 0.31.0 step 2: a wait for the look-up before review is no reason of a book held for him. The look-up's record
                 # stays with the row, and gap_fill's pass goes on with it (GapFill.look_up_held).
-                result['reasons']=list(dict.fromkeys([reason for reason in result.get('reasons') or [] if reason not in (SERIES_WAIT_REASON,LOOKUP_WAIT_REASON)]+[local_identity.PIECE_REASON]))
+                result['reasons']=list(dict.fromkeys([reason for reason in result.get('reasons') or [] if reason not in (SERIES_WAIT_REASON,LOOKUP_WAIT_REASON,LOOKUP_WAIT_REASON_BEFORE)]+[local_identity.PIECE_REASON]))
                 result.pop('series_waits',None)
                 hold=dict(result.get('identity_hold') or {'kind':'piece','detail':''})
                 if hold.get('kind')=='piece':hold['piece']={'piece':'set','cause':decision['basis'],'parts':len(row.get('members') or []),

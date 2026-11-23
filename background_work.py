@@ -76,6 +76,8 @@ WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_re
 #           (epoch ms: it converts as before no later than this), 'fields': {gap: 'answered' | 'nothing_found' |
 #           'no_answer' | 'waiting'}, 'sources': {source: 'answered' | 'waiting' | 'gave_up'}}
 #   limits = {'per_source', 'min_spacing_seconds', 'max_spacing_seconds', 'max_wait_seconds', 'sources'}
+#   'count' is the listed books (at most LIST_LIMIT); 'total' the whole number of books that wait for an online answer;
+#   'other_waits' the books that wait for something else (the Metadata sources item's count less 'total'; None if unknown).
 #   The same record is on every list row (row 'lookup') and in a row's preview, so a row that no longer waits still
 #   says how its look-up ended per field. Books held for him are looked up by the detail look-up's pass: its summary
 #   (work['background']['gap_fill']) carries 'review' (the review-list rows' own numbers) and 'approved' beside the totals,
@@ -397,6 +399,11 @@ class Reader:
         # Whether the tries go on by themselves: only while automatic processing runs (it owns the books that wait);
         # stopped, a waiting book is tried again when it is started. 'count' and 'next_at' are for the Waiting item.
         self.before_review['tries_continue'] = self.automatic.get('state') in ('Running', 'Stopping')
+        # The books that wait for something else than an online answer (the library drive, the catalog): the Metadata
+        # sources item's number without the online waits, so the page subtracts nothing. None when the count is not known.
+        research = self.automatic.get('research') if isinstance(self.automatic.get('research'), dict) else {}
+        every = research.get('waiting')
+        self.before_review['other_waits'] = max(0, every - (self.before_review.get('total') or 0)) if type(every) is int else None
         for name, attribute, kind in (('series', 'series_backfill', 'series_lookup'), ('gap_fill', 'gap_fill', 'detail_lookup')):
             worker = self.attr(attribute)
             if worker is None or not callable(getattr(worker, 'summary', None)):
@@ -496,7 +503,7 @@ def waiting_lookups(merge):
     results. Read again only when a research result changed (automatic_result_revision); a stand-in engine has none."""
     import json
     from scanner import connect
-    empty = {'count': 0, 'next_at': None, 'waiting': [], 'limits': None}
+    empty = {'count': 0, 'total': 0, 'next_at': None, 'waiting': [], 'limits': None}
     database = getattr(getattr(merge, 'inventory', None), 'database', None)
     if not database or getattr(merge, '__dict__', {}).get('automatic') is None:
         return empty
@@ -511,6 +518,9 @@ def waiting_lookups(merge):
         rows = db.execute("SELECT c.id,json_extract(g.evidence,'$.title_clue'),json_extract(c.result,'$.lookup') FROM automatic_candidates c JOIN book_groups g "
                           "ON g.id=c.id AND g.revision=c.revision AND g.fingerprint=c.fingerprint WHERE c.state='Waiting for source' AND g.superseded=0 "
                           "AND json_extract(c.result,'$.lookup.waiting') ORDER BY c.retry_at,c.id LIMIT ?", (LIST_LIMIT,)).fetchall()
+        # The whole number of such books ('count' is the listed ones, at most LIST_LIMIT): the Waiting item's number.
+        total = db.execute("SELECT count(*) FROM automatic_candidates c JOIN book_groups g ON g.id=c.id AND g.revision=c.revision AND g.fingerprint=c.fingerprint "
+                           "WHERE c.state='Waiting for source' AND g.superseded=0 AND json_extract(c.result,'$.lookup.waiting')").fetchone()[0]
     from public_research import LOOKUP_MAX_WAIT, LOOKUP_RETRY_MIN, LOOKUP_SOURCES
     from series_backfill import SOURCE_TRIES, TRY_SPACING
     ms = lambda value: int(value * 1000) if type(value) in (int, float) and value > 0 else None
@@ -526,7 +536,7 @@ def waiting_lookups(merge):
                         'next_try': lookup.get('next_try'), 'asking': lookup.get('asking') or [], 'waiting_for': lookup.get('waiting_for') or [],
                         'next_at': ms(lookup.get('next_at')), 'until': ms(lookup.get('until')), 'fields': lookup.get('fields') or {}, 'sources': sources})
     times = [book['next_at'] for book in waiting if book['next_at']]
-    value = {'count': len(waiting), 'next_at': min(times) if times else None, 'waiting': waiting, 'limits': {'per_source': SOURCE_TRIES, 'min_spacing_seconds': LOOKUP_RETRY_MIN, 'max_spacing_seconds': TRY_SPACING,
+    value = {'count': len(waiting), 'total': total, 'next_at': min(times) if times else None, 'waiting': waiting, 'limits': {'per_source': SOURCE_TRIES, 'min_spacing_seconds': LOOKUP_RETRY_MIN, 'max_spacing_seconds': TRY_SPACING,
                                            'max_wait_seconds': LOOKUP_MAX_WAIT, 'sources': list(LOOKUP_SOURCES)}}
     _WAITING_LOOKUPS.clear()
     _WAITING_LOOKUPS[str(database)] = (revision, value)
@@ -703,7 +713,7 @@ def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo
     reader.attempt('actions', reader.actions)
     reader.attempt('workers', reader.workers)
     reader.attempt('automatic', reader.scan_and_automatic)
-    reader.background, reader.lookup_items, reader.before_review = {}, [], {'count': 0, 'next_at': None, 'waiting': [], 'limits': None, 'tries_continue': False}
+    reader.background, reader.lookup_items, reader.before_review = {}, [], {'count': 0, 'total': 0, 'other_waits': None, 'next_at': None, 'waiting': [], 'limits': None, 'tries_continue': False}
     reader.attempt('lookups', reader.lookups)
     reader.filing = None
     reader.attempt('filing', reader.filed)
