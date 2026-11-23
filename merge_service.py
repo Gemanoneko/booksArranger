@@ -6402,7 +6402,8 @@ class MergeService:
                 with connect(self.inventory.database) as db:book_move.cancel(db,move['move_id'])
                 raise destination_overrides.Refused('changed','Move was not accepted. Nothing was moved.') from None
             return self._destination_answer(row['id'],'move_queued',dict(book_move.view(move),queue=queued))
-        done=self.run_move(move['move_id'])
+        try:done=self.run_move(move['move_id'])
+        except book_move.WaitsForWrite:done=book_move.view(move)  # R33: queued; the write of its book comes first
         return self._destination_answer(row['id'],'move_queued',done)
 
     # --- 0.30.0 sorting moves (Sergei 2026-11-18, items 2, 5 and 6): books in Sorted the app now files elsewhere. Planned
@@ -6600,16 +6601,39 @@ class MergeService:
                                output_root=getattr(self.inventory,'output_root',None),same_volume=self.move_same_volume or book_move.default_same_volume,
                                fault=self.move_fault,progress=report,remove_folder=book_delete._remove_folder,protected_roots=lambda:configured)
 
+    def rewriting(self,move_id):
+        """0.31.0 ruling R33 (Sergei 2026-11-23): whether the app is writing the book this move is of (its series or its
+        names): being written, renamed or recorded, or done with its follow-up (choice_after_write, the rules' move) still to
+        come. A move of that book waits for the write (the action queue's blocker 'book', and run_move): it never meets the
+        write's held file ("in use") nor runs beside it, and the follow-up re-points it to the rewritten file (R30)."""
+        import book_move,series_backfill
+        with connect(self.inventory.database) as db:
+            if not book_move.have(db):return False
+            row=db.execute('SELECT job_id FROM book_moves WHERE move_id=?',(move_id,)).fetchone()
+            if row is None:return False
+            for table in ('series_backfill','name_writes'):
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone():continue
+                found=db.execute("SELECT state,json_extract(record,'$.move_approved'),json_extract(record,'$.follow_up') IS NOT NULL FROM "+table+" WHERE job_id=?",(row[0],)).fetchone()
+                if found and (found[0] in series_backfill.ACTIVE or found[0]=='done' and found[1] and not found[2]):return True
+        return False
+
     @operation
     def run_move(self,move_id):
         """Run one queued move now (the action queue's runner). Returns the row's move line: 'unfinished' (ruling 73k) when
-        its retries ran out, the move journaled with both files kept for recovery at the next start."""
+        its retries ran out, the move journaled with both files kept for recovery at the next start. R33: raises
+        book_move.WaitsForWrite, nothing run, while the app writes the move's book (rewriting()); the action waits again."""
         import book_move
         if self.draining or self.__dict__.get('_closing'):
             with connect(self.inventory.database) as db:book_move.cancel(db,move_id)
             raise ValueError('Books Arranger is closing. Nothing was moved.')
         running=self.__dict__.setdefault('_moves_running',set());running.add(move_id)
-        try:move=self._mover().run(move_id)
+        try:
+            # R33: asked after the move is registered as running. A write that starts after this point sees the registration
+            # and gives way (SeriesBackfill._give_way); one that started before it is seen here, and the move waits.
+            try:waits=self.rewriting(move_id)
+            except sqlite3.Error:waits=True  # not known: it waits rather than meet a write
+            if waits:raise book_move.WaitsForWrite('The app is writing this audiobook; the move waits for it')
+            move=self._mover().run(move_id)
         except book_move.Unfinished as ran_out:
             why=self.__dict__.setdefault('_move_unfinished',{})[move_id]={'cause':ran_out.cause,'detail':ran_out.detail}
             self.__dict__.get('_move_progress',{}).pop(move_id,None);self._destination_changed()

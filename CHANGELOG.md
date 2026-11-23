@@ -25,12 +25,13 @@
 
 ### Fixed
 
-- Choose folder… while a book's new names are written into its file no longer leaves two copies and a book the app cannot find. Whichever began first finishes; the other stops, and no file is lost.
+- Choose folder… while a book's new names are written into its file no longer leaves a book the app cannot find. No file is lost.
 - The same holds while a book's series is written into its file.
 - A series found before 0.31.0 is looked up again before the app renames or moves a book by it. Until then the book stays as it is.
-- Choose folder… pressed while the app rewrites a book now wins: after the rewrite, the book moves to the folder you chose. The app's own move no longer cancels it.
+- Choose folder… pressed after the app has recorded a book's rewrite now wins: the book moves to the folder you chose. The app's own move no longer cancels it.
 - After Stop automatic processing, the status line and the window title say Paused at once.
 - A source that only answers with a human check (through DuckDuckGo) counts as nothing found at once, so it no longer holds back All done for 12 hours.
+- Choose folder… pressed at any moment while the app rewrites a book waits until the rewrite ends, then moves the rewritten file to the folder you chose. It never fails as "in use" and never leaves a second copy.
 
 ## [v0.30.1] - 2026-11-20
 

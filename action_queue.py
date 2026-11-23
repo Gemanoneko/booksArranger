@@ -207,12 +207,13 @@ class ActionQueue:
         self.restored = False
 
     # ------------------------------------------------------------------ what an action waits for
-    def blocker(self, action, book_id, held=0, job_id=None, parts=None):
+    def blocker(self, action, book_id, held=0, job_id=None, parts=None, move_id=None):
         """The kind that keeps this action from running now, or None. Reads only: the loading flag, a thread probe, the scan
         flag, the Retry all run and, for Delete, the book's own jobs and research row. held: the control admissions the
         caller holds itself (the worker holds one while it runs an action: run_queued passes 1). job_id: the audiobook job
         the action is for (its args' job_id); a cleanup action's own source cleanup never blocks it. parts: a join's books
-        (0.30.0 item D): it waits ('book') while one of them converts or its retry check runs, never aborting it."""
+        (0.30.0 item D): it waits ('book') while one of them converts or its retry check runs, never aborting it. move_id: a
+        move action's own move (0.31.0 R33: it waits, 'book', while the app writes that book, MergeService.rewriting)."""
         server = self.server
         loading = getattr(server, 'loading', None)
         if loading is not None and not loading.finished or getattr(server, 'merge', None) is None:
@@ -273,6 +274,15 @@ class ActionQueue:
             import book_delete
             if book_delete.processing(merge, book_id):
                 return 'book'
+            # R33 (Sergei 2026-11-23): a move of a book the app is writing (its series or its names) runs after that write,
+            # never beside it; run_move checks the same once more as it starts.
+            rewriting = getattr(merge, 'rewriting', None)
+            if move_id and callable(rewriting):
+                try:
+                    if rewriting(move_id):
+                        return 'book'
+                except Exception:
+                    return 'book'  # not known: it waits rather than meet a write
             cleanup = getattr(merge, 'cleanup', None)
             alive = lambda thread: thread is not None and thread.is_alive()
             if cleanup is not None and (alive(getattr(cleanup, 'thread', None)) or getattr(cleanup, 'current', None)):
@@ -325,7 +335,8 @@ class ActionQueue:
         if action not in ACTIONS:
             raise ValueError('Only Retry, Repair and Delete book are queued')
         pressed = {'action': action, 'book_id': book_id, 'args': args}
-        kind = self.blocker(action, book_id, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(pressed))
+        kind = self.blocker(action, book_id, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(pressed),
+                            move_id=args.get('move_id') if isinstance(args, dict) else None)
         with self.lock:
             if self.closed or self.server.closing:
                 raise ValueError('Server is shutting down')
@@ -708,7 +719,8 @@ class ActionQueue:
         """blocker() for a queued action, with the job its args name; a restored press that changes files or queues
         audiobook work also waits for Start while a saved jobs Pause is in force ('paused', WAITS_FOR_START)."""
         args = item.get('args')
-        kind = self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item))
+        kind = self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item),
+                            move_id=args.get('move_id') if isinstance(args, dict) else None)
         if kind != 'loading' and held_by_pause(item) and self._paused_for_start():
             return 'paused'
         return kind

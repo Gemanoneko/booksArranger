@@ -676,7 +676,12 @@ class BrowserServer(ThreadingHTTPServer):
                     return {'result': 'refused', 'code': refusal.cause, 'cause': refusal.cause, 'error': str(refusal)}
                 return {'result': 'done', 'answer': answer}
             if action == 'move':
-                move = merge.run_move(args['move_id'])
+                import book_move
+                try:
+                    move = merge.run_move(args['move_id'])
+                except book_move.WaitsForWrite:
+                    return None  # R33: the app is writing this book; the move waits for it (its blocker says so) and runs after
+
                 if isinstance(move, dict) and move.get('state') == 'unfinished':
                     # Ruling 73k: its retries ran out and it waits for a restart, both files kept. The page words it from the
                     # cause and folder (the queue adds the title); the raw error is on the move line, for Technical details.

@@ -518,6 +518,7 @@ class NameWrite(SeriesBackfill):
                 record['series_folder'] = os.path.dirname(expected)  # the key the inherited follow-up reads: the folder it then moves to
             temp = old.parent / (TEMP_PREFIX + job_id + '.m4b')
             record.update(new_path=str(new), temp=str(temp), review=review, root=str(root), parent_identity=output['parent_identity'])
+            self._give_way(job_id, record, 'The audiobook was moved already; its names stay in the file name and folder')
             with self._boundary(record), VerifiedFile(old) as original:
                 if original.facts()['size'] != output['size'] or original.sha256() != output['sha256']:
                     raise Held('The published audiobook changed since it was verified; left as it is')

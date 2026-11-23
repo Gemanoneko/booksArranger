@@ -107,8 +107,9 @@ BLOCKED = 'Its source cleanup is on hold; the series look-up waits for it'
 REVIEW_REASON = 'Series sources need review'
 WAITING_ON = ('blocked',)
 # Senua's 0.31.0 review, M1 and M2: a move of the book began during a write (Choose folder… while it was written); the
-# write's catalog step leaves the receipt the move started from as it is (SeriesBackfill._no_move_begun).
-MOVED_MEANWHILE = 'The audiobook was moved meanwhile; the catalog is unchanged and both copies are kept'
+# write's catalog step leaves the receipt the move started from as it is (SeriesBackfill._no_move_begun), and (R33, the
+# delta review's M5) the write's own rewritten copy, which the catalog never named, goes (SeriesBackfill._withdraw).
+MOVED_MEANWHILE = 'The audiobook was moved meanwhile; the catalog is unchanged'
 # The hosts a deferral recorded before 0.31.0 named, as the sources that ask them.
 HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
                 'html.duckduckgo.com': ('publisher', 'litres'), 'en.wikipedia.org': ('publisher',), 'ru.wikipedia.org': ('publisher',),
@@ -950,6 +951,7 @@ class SeriesBackfill:
             temp = old.parent / (TEMP_PREFIX + job_id + '.m4b')
             record.update(new_path=str(new), temp=str(temp), review=review)
             record.update(root=str(root), parent_identity=output['parent_identity'])
+            self._give_way(job_id, record, 'The audiobook was moved to a folder you chose; left as it is')
             with self._boundary(record), VerifiedFile(old) as original:
                 if original.facts()['size'] != output['size'] or original.sha256() != output['sha256']:
                     raise Held('The published audiobook changed since it was verified; left as it is')
@@ -1130,6 +1132,7 @@ class SeriesBackfill:
             return
         # Every recovery entry point proves and protects the replacement through
         # catalog commit and exact-handle old-file disposal. No pathname unlink.
+        withdrawn = False
         with self._protected(new, record, 'new'):
             if state == 'renamed':
                 try:
@@ -1137,24 +1140,47 @@ class SeriesBackfill:
                 except sqlite3.Error as error:
                     raise Later('The catalog is busy: ' + str(error)) from None
                 except Exception as error:
-                    # Preserve both copies on a catalog refusal: no rollback may
-                    # remove the only playable copy if the original changed.
-                    self._set(job_id, 'held', 'The catalog could not record the series; copies kept: ' + (str(error) or type(error).__name__), record)
-                    return
-            if old.exists():
-                with self._protected(old, record, 'old', delete=True) as former:
-                    if record['old_identity'] == record['new_identity']:
-                        raise Held('The old and new names identify the same file')
-                    boundary.revalidate()
-                    record['removal_intended'] = True
-                    self._set(job_id, 'cataloged', '', record)
-                    former.dispose()
+                    if str(error) != MOVED_MEANWHILE:
+                        # Preserve both copies on a catalog refusal: no rollback may
+                        # remove the only playable copy if the original changed.
+                        self._set(job_id, 'held', 'The catalog could not record the series; copies kept: ' + (str(error) or type(error).__name__), record)
+                        return
+                    withdrawn = True  # its own copy goes once this handle is closed (_withdraw)
+            if not withdrawn:
                 if old.exists():
-                    raise Held('Former-file disposition has not completed; copies kept')
-            elif not record.get('removal_intended'):
-                raise Held('The former file is missing without a removal receipt')
+                    with self._protected(old, record, 'old', delete=True) as former:
+                        if record['old_identity'] == record['new_identity']:
+                            raise Held('The old and new names identify the same file')
+                        boundary.revalidate()
+                        record['removal_intended'] = True
+                        self._set(job_id, 'cataloged', '', record)
+                        former.dispose()
+                    if old.exists():
+                        raise Held('Former-file disposition has not completed; copies kept')
+                elif not record.get('removal_intended'):
+                    raise Held('The former file is missing without a removal receipt')
+                self._forget_temporary(job_id, temp)
+                self._set(job_id, 'done', '', record)
+        if withdrawn:
+            self._withdraw(job_id, record, new, temp, boundary)
+
+    def _withdraw(self, job_id, record, new, temp, boundary):
+        """0.31.0 ruling R33 (Senua's 0.31.0 delta review, M5): a move of the book began before the write's catalog step (a
+        move that did not wait for the write; Choose folder… waits for it, MergeService.rewriting), so the catalog keeps the
+        receipt the move started from (_no_move_begun). The write's own proven new file was never named by the catalog: it
+        goes, through its held, hash-checked single-link handle in its held folder, never by a pathname delete, so no second
+        copy stays in Sorted. If it cannot go, it is kept and said so, as before."""
+        try:
+            with self._protected(new, record, 'new', delete=True) as handle:
+                boundary.revalidate()
+                handle.dispose()
+            if os.path.lexists(new):
+                raise Held('The rewritten copy could not be removed')
             self._forget_temporary(job_id, temp)
-            self._set(job_id, 'done', '', record)
+        except (BoundaryError, OSError, Held, KeyError) as error:
+            self._set(job_id, 'held', 'The catalog could not record the series; copies kept: ' + MOVED_MEANWHILE + ' (' + (str(error) or type(error).__name__) + ')', record)
+            return
+        self._set(job_id, 'held', MOVED_MEANWHILE + '; the rewritten copy was removed', record)
 
     def _proven(self, path, record):
         """The proven new file: its exact native identity and complete held hash."""
@@ -1246,6 +1272,19 @@ class SeriesBackfill:
         import book_move
         if book_move.begun(db, job_id, getattr(self.merge, '_move_running', None)):
             raise Held(MOVED_MEANWHILE)
+
+    def _give_way(self, job_id, record, reason):
+        """0.31.0 ruling R33 (Sergei 2026-11-23; Senua's delta review, M4 and M5): the write says it is in hand (ledger
+        'writing') before it opens the book's file, then gives way to a move of the book that has begun, or that run_move
+        registered before this point (book_move.begun with MergeService._move_running): Held with reason, nothing written.
+        From the announcement on, a move of this book waits for the write (MergeService.rewriting: the action queue's blocker,
+        and run_move, which asks after it registers), so no move meets the file the write holds ("in use") or runs beside
+        it, and the write's follow-up re-points it to the rewritten file (R30). A stop here resumes as 'writing' does."""
+        import book_move
+        self._set(job_id, 'writing', '', record)
+        with connect(self.database) as db:
+            if book_move.begun(db, job_id, getattr(self.merge, '_move_running', None)):
+                raise Held(reason)
 
     def _clear_stage(self, job_id):
         """The proof tools' own output files for this book (never anything else)."""

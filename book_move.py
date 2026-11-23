@@ -81,6 +81,11 @@ class Refused(ValueError):
         self.code = cause
 
 
+class WaitsForWrite(Exception):
+    """0.31.0 ruling R33: the app is writing this move's book (its series or its names): the move waits until that write
+    has ended, and nothing ran (MergeService.run_move; the action queue keeps the action and runs it then)."""
+
+
 class Unsettled(Exception):
     """The OS accepted a rename whose postcondition could not be proven: recovery decides from what is on disk."""
 

@@ -334,7 +334,7 @@ class FailureTests(Unchanged, unittest.TestCase):
         self.assert_unchanged(book)
         self.assertEqual(sorting_moves.reason_key(book.state()[1], sorting_moves.NOT_MOVED_KEYS), 'name_exists')
 
-    def test_a_move_begun_during_the_write_keeps_the_catalog_and_both_copies(self):
+    def test_a_move_begun_during_the_write_keeps_the_catalog_and_removes_the_rewritten_copy(self):
         book = Book(self)
         book.approve()
         with mock.patch.object(NameWrite, 'catalog', side_effect=sqlite3.OperationalError('database is locked')):
@@ -352,7 +352,9 @@ class FailureTests(Unchanged, unittest.TestCase):
         self.assertIn('moved meanwhile', reason)
         output = book.output()
         self.assertEqual((output['final_path'], sha(book.path), book.manifest()['metadata']['title']), (str(book.path), book.original, book.title), 'the receipt the move starts from')
-        self.assertEqual(sha(new), book.writer.entry(book.lib.job_id)['record']['new_sha256'], 'the proven copy is kept, never half written')
+        # R33 (Senua's 0.31.0 delta review, M5): the rewritten copy the catalog never named is removed, never left in Sorted.
+        self.assertFalse(new.exists(), 'no second copy')
+        self.assertEqual(sorted(p.name for p in book.lib.root.rglob('*.m4b')), [book.path.name], 'one copy: the one the move starts from')
         with connect(book.lib.db) as db:
             db.execute("UPDATE book_moves SET state='cancelled' WHERE move_id=?", (move['move_id'],))
         control = Book(self)
@@ -783,7 +785,10 @@ class MoveWindowTests(MoveWindow, unittest.TestCase):
         output = book.output()
         self.assertEqual((output['final_path'], output['sha256']), (str(book.path), book.original), 'the receipt is the one his move started from')
         self.assertEqual(sha(moved), book.original, 'every byte moved')
-        self.assertEqual(sha(new), ledger.entry(book.lib.job_id)['record']['new_sha256'], 'the proven new copy is kept, never half written')
+        # R33 (Senua's 0.31.0 delta review, M5; this test asserted the opposite): the write's rewritten copy, which the
+        # catalog never named, is removed through its held handle; no second copy stays in Sorted.
+        self.assertFalse(new.exists(), 'no second copy')
+        self.assertEqual(sorted(book.lib.root.rglob('*.m4b')), [moved], 'one copy, in his folder')
 
     def test_m1_a_move_the_mover_runs_while_its_journal_reads_queued_stops_the_write_of_names(self):
         book = Book(self)
@@ -996,6 +1001,200 @@ class ChoiceDuringWriteTests(MoveWindow, unittest.TestCase):
         result['thread'].join(60)
         self.assertEqual(result['move']['state'], 'complete', 'it ran as re-pointed, never "changed"')
         self.assertEqual(book.resolve()['final_path'], str(book.lib.root / 'Mine' / new.name))
+
+
+class PressDuringWriteTests(MoveWindow, unittest.TestCase):
+    """0.31.0 ruling R33 (Sergei 2026-11-23; Senua's 0.31.0 delta review, M4 and M5, her probes P1 and P2): a Choose folder…
+    pressed while the app writes a book, at any moment of the write, waits until the write ends, then moves the rewritten
+    file to his folder: never "in use", never a second copy. Pressed at each stage of both writes (during the retag, the
+    write holding the book's file; after the retag, before the catalog step; after the catalog step) and run as the action
+    queue runs it: its blocker, then MergeService.run_move (which raises WaitsForWrite, so the queue keeps the action)."""
+
+    def engine(self, book):
+        merge = book.merge
+        merge.publication_bindings = PublicationBindings(str(book.lib.db))  # what MergeService._publication_location reads
+        merge.inventory.roots = {'Audiobooks': str(book.lib.source_root)}  # the source library (the Mover's sources)
+        merge.operation_lock = threading.RLock()
+        return book
+
+    def queue_blocker(self, book, his):
+        """The action queue's own blocker for his move action (ActionQueue.blocker, as item_blocker asks it)."""
+        import action_queue
+        queue = action_queue.ActionQueue.__new__(action_queue.ActionQueue)
+        queue.server = SimpleNamespace(merge=book.merge, loading=None)
+        with mock.patch.object(book_delete, 'processing', lambda merge, book_id: False):  # no conversion of this book
+            return queue.blocker('move', book.lib.candidate, move_id=his['move_id'])
+
+    def press(self, book, seen, his=None):
+        """Choose folder… (destination_choose's _queue_move): his move, queued; the queue's blocker; the queue running it
+        (run_move, and the server's runner the queue calls: None keeps the action waiting). his: a move pressed before."""
+        from web_server import BrowserServer
+        his = his or self.choose_folder(book)
+        blocker = self.queue_blocker(book, his)
+        try:
+            ran = book.merge.run_move(his['move_id'])
+        except book_move.WaitsForWrite:
+            ran = 'waits'
+        runner = BrowserServer.run_queued(SimpleNamespace(merge=book.merge), {'action': 'move', 'book_id': book.lib.candidate, 'args': {'move_id': his['move_id']}})
+        with connect(book.lib.db) as db:
+            state = db.execute('SELECT state FROM book_moves WHERE move_id=?', (his['move_id'],)).fetchone()[0]
+        seen.append((blocker, ran, runner, state))
+        return his
+
+    def series_approved(self, book):
+        """A series write (no names) approved by the rules, not started yet (MoveWindow.series_renamed stops it later)."""
+        from test_sorting_030 import cycle
+        with connect(book.lib.db) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS public_research_cache(url TEXT PRIMARY KEY, raw TEXT, sha256 TEXT, fetched REAL)')
+            cycle(db, 777, 'Нормальное аномальное', 'Normal Abnormal', 'en')
+            db.execute('DELETE FROM series_backfill')
+        research = SimpleNamespace(_series_goodreads=lambda *a: None, _series_wikidata=lambda *a: None, _series_publisher=lambda *a: None,
+                                   _series_litres=lambda *a: None,
+                                   _series_fantlab=lambda *a: {'provider': 'fantlab', 'name': 'Нормальное аномальное', 'number': '10', 'number_from': 'counted',
+                                                               'source_url': 'https://fantlab.ru/work777'})
+        backfill = book.merge.series_backfill = SeriesBackfill(book.merge, research=research, stage=book.lib.base / 'proof-stage')
+        backfill.run_pass()
+        book.filing.tick()
+        self.assertEqual(backfill.entry(book.lib.job_id)['state'], 'pending')
+        return backfill
+
+    def assert_one_copy_in_his_folder(self, book, his, seen, ledger):
+        self.assertTrue(seen)
+        self.assertEqual(set(seen), {('book', 'waits', None, 'queued')},
+                         'it waits: the blocker says so, run_move runs nothing, the queue keeps the action, the move stays queued')
+        entry = ledger.entry(book.lib.job_id)
+        self.assertEqual(entry['state'], 'done', 'the write finished')
+        written = Path(entry['record']['new_path'])
+        self.assertFalse(book.merge.rewriting(his['move_id']), 'the write has ended: nothing holds his move')
+        self.assertIsNone(self.queue_blocker(book, his))
+        done = book.merge.run_move(his['move_id'])  # the queue runs it once its blocker clears
+        mine = book.lib.root / 'Mine' / written.name
+        self.assertEqual((done['state'], book.resolve()['final_path']), ('moved', str(mine)), 'the catalog resolves it in his folder')
+        self.assertEqual(sorted(book.lib.root.rglob('*.m4b')), [mine], 'one copy: the rewritten file, in his folder')
+        self.assertEqual(sha(mine), entry['record']['new_sha256'], 'the rewritten bytes')
+        with connect(book.lib.db) as db:
+            moves = [tuple(row) for row in db.execute('SELECT move_id,state,cause FROM book_moves')]
+        self.assertEqual(moves, [(his['move_id'], 'complete', None)], 'his one move, never failed ("in use" or any), and no move of the rules')
+
+    def test_r33_series_write_pressed_during_the_retag(self):
+        book = self.engine(Book(self, english=None))
+        backfill, seen, real = self.series_approved(book), [], SeriesBackfill._write
+
+        def retag(writer, *args):
+            self.press(book, seen)  # the write holds the book's file now (Senua's P1: "in use")
+            return real(writer, *args)
+        with mock.patch.object(SeriesBackfill, '_write', retag):
+            backfill.run_pass()
+        self.assert_one_copy_in_his_folder(book, self.moves_his(book), seen, backfill)
+
+    def test_r33_series_write_pressed_as_it_begins(self):
+        # The write has said it is in hand and is about to open the book's file: a press now waits too.
+        book = self.engine(Book(self, english=None))
+        backfill, seen, real = self.series_approved(book), [], SeriesBackfill._give_way
+
+        def begins(writer, *args):
+            real(writer, *args)
+            if not seen:
+                self.press(book, seen)
+        with mock.patch.object(SeriesBackfill, '_give_way', begins):
+            backfill.run_pass()
+        self.assert_one_copy_in_his_folder(book, self.moves_his(book), seen, backfill)
+
+    def test_r33_his_move_dispatched_between_the_write_and_its_follow_up_still_waits(self):
+        # The write is done and its follow-up has not re-pointed his move yet: the queue reaching it then still waits.
+        book = self.engine(Book(self, english=None))
+        backfill, _ = self.series_renamed(book)
+        seen = []
+        his = self.press(book, seen)
+        real = SeriesBackfill._follow_up
+
+        def follow_up(writer, job_id):
+            if len(seen) == 1:
+                self.assertEqual(writer.entry(job_id)['state'], 'done')
+                self.press(book, seen, his)
+            return real(writer, job_id)
+        with mock.patch.object(SeriesBackfill, '_follow_up', follow_up):
+            backfill.run_pass()
+        self.assertEqual(len(seen), 2)
+        self.assert_one_copy_in_his_folder(book, his, seen, backfill)
+
+    def test_r33_series_write_pressed_after_the_retag_before_the_catalog_step(self):
+        book = self.engine(Book(self, english=None))
+        backfill, _ = self.series_renamed(book)
+        seen = []
+        his = self.press(book, seen)  # Senua's P2: the rewritten file is in place, not yet recorded
+        backfill.run_pass()
+        self.assert_one_copy_in_his_folder(book, his, seen, backfill)
+
+    def test_r33_series_write_pressed_after_the_catalog_step(self):
+        book = self.engine(Book(self, english=None))
+        backfill, seen, real = self.series_approved(book), [], SeriesBackfill.catalog
+
+        def recorded(writer, *args):
+            real(writer, *args)
+            self.press(book, seen)  # the receipt names the rewritten file; the old one is still to go
+        with mock.patch.object(SeriesBackfill, 'catalog', recorded):
+            backfill.run_pass()
+        self.assert_one_copy_in_his_folder(book, self.moves_his(book), seen, backfill)
+
+    def test_r33_write_of_names_pressed_during_the_retag(self):
+        book = self.engine(Book(self, english=None, author_rule=ORDERED))  # the author's name in order: another author folder
+        book.approve()
+        seen, real = [], NameWrite._write
+
+        def retag(writer, *args):
+            self.press(book, seen)
+            return real(writer, *args)
+        with mock.patch.object(NameWrite, '_write', retag):
+            book.writer.run_pass()
+        self.assert_one_copy_in_his_folder(book, self.moves_his(book), seen, book.writer)
+
+    def test_r33_write_of_names_pressed_after_the_retag_before_the_catalog_step(self):
+        book = self.engine(Book(self, english=None, author_rule=ORDERED))
+        self.names_renamed(book)
+        seen = []
+        his = self.press(book, seen)
+        book.writer.run_pass()
+        self.assert_one_copy_in_his_folder(book, his, seen, book.writer)
+
+    def test_r33_write_of_names_pressed_after_the_catalog_step(self):
+        book = self.engine(Book(self, english=None, author_rule=ORDERED))
+        book.approve()
+        seen, real = [], NameWrite.catalog
+
+        def recorded(writer, *args):
+            real(writer, *args)
+            self.press(book, seen)
+        with mock.patch.object(NameWrite, 'catalog', recorded):
+            book.writer.run_pass()
+        self.assert_one_copy_in_his_folder(book, self.moves_his(book), seen, book.writer)
+
+    def test_r33_a_move_registered_before_the_write_begins_is_given_way_to(self):
+        # Pressed after the write's first look at the book's moves (apply), and run_move registered it and found no write
+        # yet; the write then says it is in hand before the Mover holds the file: it sees the registration and gives way
+        # (nothing written), so the move never meets the write's held file ("in use").
+        book = self.engine(Book(self, english=None))
+        backfill, real, his = self.series_approved(book), SeriesBackfill._give_way, {}
+        running = book.merge.__dict__.setdefault('_moves_running', set())
+
+        def registered_first(writer, *args):
+            his.update(self.choose_folder(book))
+            running.add(his['move_id'])
+            return real(writer, *args)
+        with mock.patch.object(SeriesBackfill, '_give_way', registered_first):
+            backfill.run_pass()
+        entry = backfill.entry(book.lib.job_id)
+        self.assertEqual((entry['state'], entry['reason']), ('held', 'The audiobook was moved to a folder you chose; left as it is'))
+        self.assertEqual(sorted(book.lib.root.rglob('*.m4b')), [book.path], 'nothing was written: no temporary, no copy')
+        running.discard(his['move_id'])
+        done = book.merge.run_move(his['move_id'])
+        mine = book.lib.root / 'Mine' / book.path.name
+        self.assertEqual((done['state'], book.resolve()['final_path'], sorted(book.lib.root.rglob('*.m4b'))), ('moved', str(mine), [mine]))
+
+    def moves_his(self, book):
+        with connect(book.lib.db) as db:
+            row = db.execute("SELECT move_id FROM book_moves WHERE override_id='his'").fetchone()
+        return {'move_id': row[0]}
 
 
 if __name__ == '__main__':
