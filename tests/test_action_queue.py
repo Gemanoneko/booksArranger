@@ -731,6 +731,29 @@ class PersistentQueueTests(unittest.TestCase):
         queue = ActionQueue(server, poll=.02); self.addCleanup(queue.close)
         return server, queue
 
+    def crash(self, queue):
+        """The session behind this queue ends without closing, as a crashed or ended process does: nothing of it saves or runs
+        from here on, and the saved queue stays as its last press left it, with no clean-close stamp.
+
+        A stand-in left alive is not a crashed session. Its worker looks every 20 ms; when it looked while the press's own
+        save was still under way it began a save of the same press (the retry of an unfinished save), and on a loaded machine
+        that save could land after the next launch had dropped the saved queue. The test then read back a press the launch
+        under test had not saved (1 gate run in several; 8 of 240 runs of this module under load on 0.30.1). In the app the
+        session that saved the queue is another process and is gone; within one queue an older save never lands over a
+        newer one (_persist's versions under its save lock)."""
+        class Gone:  # what a dead session still writes: nothing
+            def save(self, *_args, **_kwargs):
+                pass
+        with queue._save_lock:  # a save under way has landed, and none begins before the store is gone
+            queue.store = Gone()
+        with queue.lock:
+            queue.closed = True  # its worker ends at its next look; nothing waiting is run
+            queue.changed.notify_all()
+            thread = queue.thread
+        if thread is not None:
+            thread.join(5)
+            self.assertFalse(thread.is_alive(), 'the stand-in for the crashed session is dead before the next launch')
+
     def test_a_queue_saved_before_another_versions_session_crashed_is_dropped_with_an_outcome(self):
         # m6: the stale check read only the shutdown record, which a session that crashed or was ended never writes. The
         # ownership record it left behind (retired at the next start) names it.
@@ -743,7 +766,9 @@ class PersistentQueueTests(unittest.TestCase):
                 server, queue = self.launch(mine, '0.30.0')
                 queue.restore()
                 server.scanning = True
-                self.press(queue, 0)  # saved; no clean close: the session crashes
+                self.press(queue, 0)  # saved
+                self.crash(queue)  # no clean close: the session is gone
+                self.assertEqual((self.saved(), self.closed_at()), ([('retry', self.book[0])], None), 'what it left behind: its press, and no clean-close stamp')
                 later, again = self.launch('c' * 32, '0.30.0', previous)
                 later.scanning = True
                 self.assertEqual(again.restore(), kept)
