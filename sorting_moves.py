@@ -8,8 +8,11 @@ already in Audiobooks Sorted that are not where the app files them now.
           research cited).
 
 Nothing here moves a book by itself. plan() lists every book that would move (current path -> new path, the items, or
-why it is left as it is) and a digest of that list; a book moves only after Sergei's explicit approval of that exact list
-(MergeService.sorting_moves_apply with the digest he saw). New books simply get the right path when they are converted.
+why it is left as it is) and a digest of that list. Until 0.31.0 a book moved only after Sergei's explicit approval of that
+exact list (MergeService.sorting_moves_apply with the digest he saw). 0.31.0 (ruling R18, Sergei 2026-11-22: "If the author
+and series are found, then put it in the folder according to our rules"): the app applies the list itself, item by item
+(rule_filing.RuleFiling), so every refusal below still decides; a book whose listed change cannot be made stays where it is
+and is listed with its reason. New books simply get the right path when they are converted.
 A move is the app's usual verified move (book_move: the exact held file hashed, a no-replace rename or a verified copy,
 journaled; the old folder removed only when empty). A book that needs its series written into the file first goes
 through series backfill (retag in its folder, verified), and only then moves into its series folder (series_backfill
@@ -49,9 +52,35 @@ def _entered(facts, field):
 
 # 0.31.0 step 3 (rulings R1 and R3): the English title of a translated book, by the one title rule
 # (canonical_names.book_title) from the title the detail look-up recorded for the finished book (gap_fill's ledger: 92
-# books on a copy of the live catalog have one that was never applied). Planned only when plan() is asked for it
-# (titles=True): renaming a finished book is milestone B's, and nothing here applies it.
+# books on a copy of the live catalog have one that was never applied). Planned by default since milestone B (plan()'s
+# titles; a dry run can leave it out). The file gets its English name with its move (the app's verified move renames the
+# exact file: its bytes, tags included, are not changed).
 TITLE_ITEM = 'title'
+# 0.31.0 milestone B (Judy's spec 3.4): each reason a listed book has, as fields the record of renames and moves keeps
+# (canonical()'s details): {'kind': 'series', 'name', 'number', 'provider', 'source_url'}, {'kind': 'title', 'title',
+# 'provider', 'source_url'}, {'kind': 'author', 'name'}, {'kind': 'series_name', 'name', 'provider', 'source_url'}.
+REASON_KINDS = ('series', 'title', 'author', 'series_name')
+# The refusals that are a lasting obstacle only Sergei could clear (Judy 3.2: counted in the quiet line and listed in 3.4a).
+# Every other refusal is his own decision, a book the rules do not manage, or work in progress: never counted.
+LASTING_KEYS = ('name_exists', 'same_target', 'not_app_name', 'not_where_recorded', 'no_name')
+
+
+def _provider(url):
+    """The source a citation is from, as the page names sources ('fantlab', 'wikidata', 'goodreads'), '' when unknown."""
+    host = str(url or '').split('://', 1)[-1].split('/', 1)[0].casefold()
+    return next((name for name in ('fantlab', 'wikidata', 'goodreads', 'wikipedia', 'litres') if name in host), '')
+
+
+def recorded_title(db, job_id):
+    """recorded_titles() for one book, or None."""
+    if not _table(db, 'gap_fill'):
+        return None
+    row = db.execute("SELECT record FROM gap_fill WHERE job_id=? AND state='found'", (job_id,)).fetchone()
+    try:
+        catalog = ((json.loads(row[0]).get('found') or {}).get('catalog')) if row else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return catalog if isinstance(catalog, dict) and catalog.get('language') else None
 
 
 def recorded_titles(db):
@@ -70,20 +99,24 @@ def recorded_titles(db):
     return found
 
 
-def canonical(db, manifest, rules, series=None, catalog=None):
+def canonical(db, manifest, rules, series=None, catalog=None, details=None):
     """(review, facts, reasons, notes) for a finished book as the app files it now: its manifest's names with item 5 (the
     author's folder) and item 6 (the series' language) applied, and series (item 2: {'name','number','provider',
-    'source_url'}) added when given. reasons: the items that changed something; notes: why, in words."""
+    'source_url'}) added when given. reasons: the items that changed something; notes: why, in words. details: a list
+    that takes each reason as fields (REASON_KINDS), for the record of renames and moves."""
     import canonical_names
     review = dict(manifest.get('metadata') or {})
     facts = copy.deepcopy(manifest.get('metadata_facts')) if isinstance(manifest.get('metadata_facts'), dict) else None
     reasons, notes = [], []
+    details = [] if details is None else details
     if series:
         review.update(series=series['name'], number=str(series['number']))
         if facts is not None:
             facts['series_state'] = 'verified'
         reasons.append('series')
         notes.append('series %s %s (%s)' % (series['name'], series['number'], series.get('provider') or 'source'))
+        details.append({'kind': 'series', 'name': series['name'], 'number': str(series['number']), 'provider': series.get('provider') or '',
+                        'source_url': series.get('source_url') or ''})
     if catalog and not _entered(facts, 'title'):
         local = (facts or {}).get('local_agreement') if isinstance((facts or {}).get('local_agreement'), dict) else {}
         his = (local.get('title') or {}).get('state') in ('entered', 'approved') if isinstance(local.get('title'), dict) else False
@@ -92,6 +125,8 @@ def canonical(db, manifest, rules, series=None, catalog=None):
             notes.append('title "%s" (the English title of "%s"; %s)' % (titled, review.get('title'), catalog.get('english_source') or catalog.get('source_url') or 'recorded by the detail look-up'))
             review['title'] = titled
             reasons.append(TITLE_ITEM)
+            cited = catalog.get('english_source') or catalog.get('source_url') or ''
+            details.append({'kind': 'title', 'title': titled, 'provider': str(catalog.get('english_provider') or '') or _provider(cited), 'source_url': cited})
     credit = review.get('author') or review.get('canonical_author') or ''
     if credit and not _entered(facts, 'author') and not review.get('anthology') and not review.get('multi_author'):
         # Senua's 0.30.0 review, m2: a rule scoped to a folder counts in the book's own (source) folder.
@@ -106,6 +141,7 @@ def canonical(db, manifest, rules, series=None, catalog=None):
                 facts['authors'] = [filed]
             reasons.append('author')
             notes.append('author folder "%s" (%s)' % (filed, why))
+            details.append({'kind': 'author', 'name': filed})
     # Futaba's 0.30.0 QA, C1: a book whose language is Unknown (HP 1) was looked at only when 'Other', so the plan showed
     # «Гарри Поттер» until a re-lookup. FantLab's own cycle decides (its language and original name, series_in_original);
     # only a book recorded as a Russian original keeps its name without asking.
@@ -118,16 +154,22 @@ def canonical(db, manifest, rules, series=None, catalog=None):
             review['series'] = named
             if 'series' not in reasons:
                 reasons.append('series_language')
+                details.append({'kind': 'series_name', 'name': named, 'provider': provider or '', 'source_url': url or ''})
+            else:
+                next(entry for entry in details if entry['kind'] == 'series')['name'] = named
             notes.append('series "%s" (%s)' % (named, why))
     return review, facts, reasons, notes
 
 
-def target(db, row, rules, output_root, series=None, placed=None, effective=None, catalog=None):
+def target(db, row, rules, output_root, series=None, placed=None, effective=None, catalog=None, ruled=False):
     """{'job_id', 'from', 'to', 'items', 'why'} for one completed job (an audio_jobs row), or {'refused': reason} with
     'from', or None when the book is where the app files it. placed: series backfill wrote this approved book's series
     under its new name in its own folder (item 2); the book is expected exactly there and goes on to its series folder.
     effective: where the book's last move took it (None: never moved); a moved book is planned no further: None when it
-    is where the app files it now (an approved move took it there), else left where it was moved to."""
+    is where the app files it now (an approved move took it there), else left where it was moved to.
+    ruled (0.31.0 milestone B): that last move was not to a folder Sergei chose (the app's rules, his approval of a listed
+    move, or Use computed folder took the book there), so the rules still file the book: it is planned from where it is
+    now. A folder he chose with Choose folder… is his and is never planned on (ruling R26)."""
     from metadata import propose
     from series_backfill import published_root
     manifest = json.loads(row['manifest'])
@@ -135,14 +177,20 @@ def target(db, row, rules, output_root, series=None, placed=None, effective=None
     current = output.get('final_path') or ''
     found = {'job_id': row['job_id'], 'from': current}
     root = str(published_root(manifest, output))
-    review, facts, reasons, notes = canonical(db, manifest, rules, series, catalog)
+    details = []
+    review, facts, reasons, notes = canonical(db, manifest, rules, series, catalog, details)
     if placed and not reasons:
         reasons, notes = ['series'], ['its series folder']
     if not reasons:
         return None
+    found['reasons'] = details
+    found['filed'] = {'title': str(review.get('title') or ''), 'author': str(review.get('author') or review.get('canonical_author') or '')}
     if series:
         found['series'] = {'name': review['series'], 'number': review['number'], 'provider': series.get('provider') or '',
                            'source_url': series.get('source_url') or ''}
+    by_rules = bool(ruled and effective)
+    if by_rules:
+        found['from'] = current = effective  # the catalog's own record of where the last move put it
     if not _inside(current, output_root) or not _inside(root, output_root) and key(root) != key(output_root):
         return dict(found, refused='Not in Audiobooks Sorted; left as it is', items=reasons)
     if (facts or {}).get('destination_override'):
@@ -152,11 +200,13 @@ def target(db, row, rules, output_root, series=None, placed=None, effective=None
         wanted = propose('', root, 'audiobook', {}, review, automatic_facts=facts)
     except (ValueError, KeyError, TypeError) as error:
         return dict(found, refused='No name for it: ' + (str(error) or type(error).__name__), items=reasons)
-    if effective is not None:
+    if effective is not None and not by_rules:
         if effective and wanted.get('path') and key(effective) == key(wanted['path']):
             return None
         return dict(found, refused='Already moved to a folder you chose; left as it is', items=reasons)
-    if placed:
+    if by_rules:
+        pass  # where the move chain says it is (plan() checks the file is there; the move itself proves its bytes)
+    elif placed:
         if key(placed) != key(current):
             return dict(found, refused='The audiobook is not where its series update put it; left as it is', items=reasons)
     elif not now.get('path') or key(now['path']) != key(current):
@@ -170,17 +220,37 @@ def target(db, row, rules, output_root, series=None, placed=None, effective=None
 
 def _moved(db, job_id):
     """None when the book was never moved; else the final path of its last effective move ('' while one is unfinished)."""
+    return _last_move(db, job_id)[0]
+
+
+def _last_move(db, job_id):
+    """(_moved()'s answer, ruled). ruled: the last move carries no folder Sergei chose (no override), so the rules still
+    file the book (target())."""
     import book_move
     if not book_move.have(db):
-        return None
-    rows = db.execute("SELECT state,final_json FROM book_moves WHERE job_id=? AND state NOT IN ('failed','cancelled') ORDER BY generation", (job_id,)).fetchall()
+        return None, False
+    rows = db.execute("SELECT state,final_json,override_id FROM book_moves WHERE job_id=? AND state NOT IN ('failed','cancelled') ORDER BY generation", (job_id,)).fetchall()
     if not rows:
-        return None
-    state, final = rows[-1]
+        return None, False
+    state, final, override = rows[-1]
     try:
-        return (json.loads(final) or {}).get('final_path') or '' if state in book_move.EFFECTIVE and final else ''
+        return ((json.loads(final) or {}).get('final_path') or '' if state in book_move.EFFECTIVE and final else ''), not override
     except (TypeError, ValueError):
-        return ''
+        return '', False
+
+
+def certain(found, manifest):
+    """0.31.0 (rulings R18 and R21): a series the look-up kept for a finished book, judged by the one rule
+    (series_certainty). A record kept before that rule existed never passed it; a doubtful one counts as not found, so the
+    book is planned without it and nothing says so. Any failure to judge is doubtful."""
+    try:
+        import series_certainty
+        from public_research import edition_volume
+        title = str((manifest.get('metadata') or {}).get('title') or '')
+        candidate = {name: found.get(name) for name in ('name', 'number', 'provider', 'source_url')}
+        return series_certainty.judge(candidate, {'volume': edition_volume(title)[1]})['verdict'] == series_certainty.CERTAIN
+    except Exception:
+        return False
 
 
 # 0.31.0 step 4d (Judy's BooksArranger_0.31.0_UX.md, section 3 and Notes for Ender): what a page control needs beside the
@@ -260,7 +330,7 @@ RETAINED = 'Kept as published while the data folder move is unfinished; left as 
 SAME_TARGET = 'Another listed book would get the same name; left as it is'
 
 
-def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset(), titles=False):
+def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset(), titles=True):
     """Every finished book in Audiobooks Sorted that the app now files elsewhere: {'schema', 'output_root', 'items': [...],
     'refused': [...], 'counts', 'digest'}. An item: {'job_id', 'from', 'to', 'items', 'why'}; a refusal: {'job_id', 'from',
     'refused', 'items'}. Read only (the catalog; exists() on the listed paths). retained: the retained jobs of a catalog in
@@ -281,7 +351,7 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
     # series folder then failed for good (a stranger file at the target) read as "where the app files it" and got no line:
     # stuck in silence. It is planned from where series backfill put it: listed again, or refused with the reason.
     placed = _placed_series(db)
-    # titles=True (0.31.0 step 3, a dry run for milestone B): also plan the English title of a translated book.
+    # titles (0.31.0 step 3, rulings R1 and R3): the English title of a translated book is planned too.
     recorded = recorded_titles(db) if titles else {}
     rows = db.execute("SELECT job_id,manifest,output FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY job_id").fetchall()
     for row in rows:
@@ -296,7 +366,10 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
         if __import__('publication_reuse').task(manifest):
             continue
         current = output.get('final_path') or ''
-        if not _inside(current, output_root) and row['job_id'] not in series:
+        held = series.get(row['job_id'])
+        if held and not certain(held, manifest):
+            held = None  # doubtful by the one rule: as if no series was found (R18), and nothing says so
+        if not _inside(current, output_root) and not held:
             # Outside Sorted (a book published into its library before 0.13.0): listed only when it would change.
             found = target(db, row, rules, output_root)
             if found:
@@ -304,14 +377,15 @@ def plan(db, output_root, rules=None, exists=os.path.lexists, retained=frozenset
             continue
         try:
             # A moved book: the receipt keeps the published place, the move chain the new one (book_move).
-            found = target(db, row, rules, output_root, series.get(row['job_id']), placed=placed.get(row['job_id']), effective=_moved(db, row['job_id']),
-                           catalog=recorded.get(row['job_id']))
+            effective, ruled = _last_move(db, row['job_id'])
+            found = target(db, row, rules, output_root, held, placed=placed.get(row['job_id']), effective=effective,
+                           catalog=recorded.get(row['job_id']), ruled=ruled)
         except Exception as error:  # one malformed record never hides the others
             refused.append({'job_id': row['job_id'], 'from': current, 'refused': 'Could not be planned: ' + (str(error) or type(error).__name__)[:200], 'items': []})
             continue
         if not found:
             continue
-        failed = (series.get(row['job_id']) or {}).get('failed')
+        failed = (held or {}).get('failed')
         if failed:
             found['approved_not_moved'] = {'key': reason_key(failed, NOT_MOVED_KEYS), 'reason': failed}
         if row['job_id'] in placed and 'to' in found:

@@ -345,9 +345,12 @@ class SortingPlanTests(SortedCatalog):
         chosen = self.book('Роулинг Джоан\\Chosen - Роулинг Джоан.m4b', 'Роулинг Джоан', 'Chosen', language='Unknown')
         with contextlib.closing(sqlite3.connect(self.database)) as db:
             book_move.setup(db)
-            for n, (job, final) in enumerate(((done, self.sorted / 'Rowling J. K' / 'Done - Rowling J. K.m4b'), (chosen, self.base / 'Mine' / 'Chosen - Роулинг Джоан.m4b'))):
-                db.execute("INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,target_folder,target_root,target_path,from_json,final_json,created_utc,updated_utc)"
-                           " VALUES(?,?,'base','c',1,'complete','f','r',?,'{}',?,'t','t')", ('m%d' % n, job, str(final), json.dumps({'final_path': str(final)})))
+            # 0.31.0 milestone B: a folder he chose is a move that carries his choice (override_id), as Choose folder… records
+            # it; a move without one (his approval of a listed move) leaves the book to the rules.
+            for n, (job, final, override) in enumerate(((done, self.sorted / 'Rowling J. K' / 'Done - Rowling J. K.m4b', None),
+                                                        (chosen, self.base / 'Mine' / 'Chosen - Роулинг Джоан.m4b', 'his-choice'))):
+                db.execute("INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,target_folder,target_root,target_path,from_json,final_json,override_id,created_utc,updated_utc)"
+                           " VALUES(?,?,'base','c',1,'complete','f','r',?,'{}',?,?,'t','t')", ('m%d' % n, job, str(final), json.dumps({'final_path': str(final)}), override))
             db.commit()
         found = self.plan()
         self.assertEqual(found['items'], [])

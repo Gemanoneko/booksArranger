@@ -55,7 +55,13 @@ ENVELOPE = 'books-book-move-envelope-v1'
 TABLE = ('CREATE TABLE IF NOT EXISTS book_moves(move_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, kind TEXT NOT NULL, candidate_id TEXT NOT NULL,'
          ' generation INTEGER NOT NULL, state TEXT NOT NULL, strategy TEXT, target_folder TEXT NOT NULL, target_root TEXT NOT NULL,'
          ' target_path TEXT NOT NULL, from_json TEXT NOT NULL, final_json TEXT, temp_path TEXT, cause TEXT, detail TEXT, progress INTEGER,'
-         ' override_id TEXT, created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL, UNIQUE(job_id,kind,generation))')
+         ' override_id TEXT, created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL, origin TEXT, UNIQUE(job_id,kind,generation))')
+# 0.31.0 milestone B (rulings R18 and R26; Judy's spec 3.3 and 3.4): who made a move. 'rules': the app queued it by its rules
+# (MergeService.rule_filing: no Cancel on the row, listed in the record of renames and moves); 'user': Sergei did (Choose
+# folder…, Use computed folder, the folder chosen before the book was published, or his approval of a listed move). NULL:
+# a move made before 0.31.0. One nullable column, added to an existing table by setup() (migrate): a version before
+# 0.31.0 names its columns when it writes a move and reads a move by name, so it runs on the migrated table unchanged.
+ORIGINS = ('rules', 'user')
 EVENTS = ('CREATE TABLE IF NOT EXISTS book_move_events(event_id INTEGER PRIMARY KEY AUTOINCREMENT, move_id TEXT NOT NULL,'
           ' from_state TEXT, to_state TEXT NOT NULL, proof_json TEXT, created_utc TEXT NOT NULL)')
 INDEXES = ('CREATE INDEX IF NOT EXISTS book_moves_by_job ON book_moves(job_id,kind,generation)',
@@ -157,8 +163,17 @@ def stamp():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def migrate(db):
+    """The 0.31.0 column on a table made before it (see ORIGINS). True when it added the column."""
+    if not have(db) or any(row[1] == 'origin' for row in db.execute('PRAGMA table_info(book_moves)')):
+        return False
+    db.execute('ALTER TABLE book_moves ADD COLUMN origin TEXT')
+    return True
+
+
 def setup(db):
     db.execute(TABLE)
+    migrate(db)
     db.execute(EVENTS)
     for statement in INDEXES:
         db.execute(statement)
@@ -294,13 +309,16 @@ def current(db, job_id, kind):
     return {'move_id': record[0], 'generation': record[1]} if record else None
 
 
-def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None, name=None):
+def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None, name=None, origin=None):
     """Queue one move of the book from its current location (start) into folder. None when it is already there (no-op).
     A queued move of the same book is superseded; a move already running is refused. running(move_id): whether that
     journaled move is running now (None: assume it is); one that is not waits for a restart (ruling 73k: 'unfinished').
     name: the file name in folder (0.30.0, the sorting moves Sergei approves: the author or series name changes with the
-    folder); None keeps the book's own name. The same verified move either way (only the target path differs)."""
+    folder); None keeps the book's own name. The same verified move either way (only the target path differs).
+    origin: who made the move, one of ORIGINS (None: not said)."""
     setup(db)
+    if origin is not None and origin not in ORIGINS:
+        raise ValueError('Unknown move origin')
     if kind not in KINDS:
         raise Refused('changed', 'This audiobook cannot be moved: it is a chapter update of another file.')
     start = location(start)
@@ -322,11 +340,11 @@ def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=Non
     generation = (db.execute('SELECT coalesce(max(generation),0) FROM book_moves WHERE job_id=? AND kind=?', (job_id, kind)).fetchone()[0] or 0) + 1
     move_id = str(uuid.uuid4())
     now = stamp()
-    db.execute('INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,strategy,target_folder,target_root,target_path,from_json,final_json,temp_path,cause,detail,progress,override_id,created_utc,updated_utc)'
-               ' VALUES(?,?,?,?,?,?,NULL,?,?,?,?,NULL,NULL,NULL,NULL,NULL,?,?,?)',
+    db.execute('INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,strategy,target_folder,target_root,target_path,from_json,final_json,temp_path,cause,detail,progress,override_id,created_utc,updated_utc,origin)'
+               ' VALUES(?,?,?,?,?,?,NULL,?,?,?,?,NULL,NULL,NULL,NULL,NULL,?,?,?,?)',
                (move_id, job_id, kind, candidate_id, generation, 'queued', os.path.normpath(folder), str(root), target,
-                json.dumps(start, ensure_ascii=False, sort_keys=True), override_id, now, now))
-    _event(db, move_id, None, 'queued', {'start': start, 'target': target})
+                json.dumps(start, ensure_ascii=False, sort_keys=True), override_id, now, now, origin))
+    _event(db, move_id, None, 'queued', {'start': start, 'target': target} | ({'origin': origin} if origin else {}))
     return load(db, move_id)
 
 
@@ -384,7 +402,10 @@ def view(move, unfinished=None):
     line = {'state': state, 'target': move['target_path'], 'folder': move['target_folder'], 'name': ntpath.basename(move['target_path']),
             'old_folder': ntpath.dirname(start.get('final_path') or ''), 'progress': move.get('progress') if state == 'moving' else None,
             'cause': cause, 'message': str(detail.get('reason') or '') if cause == 'unsafe' else '',
-            'move_id': move['move_id']}
+            'move_id': move['move_id'],
+            # 0.31.0 (R26): 'rules' for a move the app queued by its rules (the page shows no Cancel for it), else 'user'
+            # or None (made before 0.31.0).
+            'origin': move.get('origin') if move.get('origin') in ORIGINS else None}
     if state == 'unfinished':
         line['detail'] = str(unfinished.get('detail') or '')[:500]
     return line
