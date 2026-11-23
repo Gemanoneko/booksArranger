@@ -30,6 +30,7 @@ let retryPending=null,retryResult=null,retryEpoch=0;
 const pressed=new Map(),PRESS_MEMORY=10*60*1000;let heldRow=null,retrySelectedConfirm=null,retrySelectedRun=false;
 let listTicket=0,listPending='',paintedContext='',attentionGroup='all',retryAllRun=null,retryAllConfirm=null,stripNote='',listGeneration=0;
 const rowRetries=new Map();
+const lookupNotes=new Map();  // 0.31.0 (Judy 5): the hint of a book that waits for its online answer, by book id
 const pendingFolders=new Set(),folderMessages=new Map(),folderAttempts=new Map();
 // Start over, "Let the app handle it" and Clear working files (RefusedRetry follow-ups 2-4, Sergei 2026-10-19).
 // restartResult: the panel note for a book whose press left it with no control (it now shows its Started over state).
@@ -639,7 +640,7 @@ function controls() {
     startWaitTip($('resume-jobs'),waiting);
   }
   renderJobControlState();
-  renderMetaSave();updateNamesRows();updateFolderRows();updateDestinations();renderLaterButtons();renderJoinSelected();updateJoinRows();if(choiceSave)updateMetadataChoiceControls();if(trackSave)trackSaveLine();renderNamesFacts();
+  renderMetaSave();updateNamesRows();updateFolderRows();updateDestinations();updateLookupNotes();renderLaterButtons();renderJoinSelected();updateJoinRows();if(choiceSave)updateMetadataChoiceControls();if(trackSave)trackSaveLine();renderNamesFacts();
   gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
   drainLater();
 }
@@ -855,14 +856,14 @@ function renderRows(force=false) {
     // refresh unless it holds focus.
     for(const entry of askRows.values()){const fresh=rows.find(row=>row.id===entry.row.id);if(fresh)entry.row=fresh;}
     // The folder list, the identity lines and the destination block take fresh data in place too (0.23.1).
-    for(const map of [folderRows,bookCells,destRows,joinRows])for(const entry of map.values()){const fresh=rows.find(row=>row.id===entry.row?.id);if(fresh)entry.row=fresh;}
-    updateFolderRows();updateDestinations();
+    for(const map of [folderRows,bookCells,destRows,joinRows,lookupNotes])for(const entry of map.values()){const fresh=rows.find(row=>row.id===entry.row?.id);if(fresh)entry.row=fresh;}
+    updateFolderRows();updateDestinations();updateLookupNotes();
     updateNamesRows();  // Edit names takes fresh data in place too (its draft stays)
     for(const tr of [...($('inventory').children || [])]){const id=tr.dataset?.path;if(askDone.has(id) && !rows.some(row=>row.path===id) && (!tr.contains?.(focused) || deletedBooks.has(id))){$('inventory').removeChild?.(tr);askRows.delete(id);askDone.delete(id);}}
     updateAskRows();
     const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
   const listFocus=!!document.activeElement && !!$('inventory').contains?.(document.activeElement);  // m-10: focus the rebuild drops
-  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();namesRows.clear();folderRows.clear();bookCells.clear();destRows.clear();joinRows.clear();
+  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();namesRows.clear();folderRows.clear();bookCells.clear();destRows.clear();joinRows.clear();lookupNotes.clear();
   for(const outcomes of [askDone,askResults,askChecked])for(const id of [...outcomes.keys()])if(!rows.some(row=>row.id===id))outcomes.delete(id);
   const attentionList=view==='candidates' && filters[view]==='output_attention';
   // In this filter the list window grows with the viewport: rows with fields are 150-230 px tall (section 9).
@@ -895,6 +896,7 @@ function renderRows(force=false) {
         if(shown){const hint=node('p','','field-help attention-hint');setHint(hint,shown.hint,shown.clause,shown.warn);td.append(hint);if(attentionOf(row))td.title=cellTip(row);rowRetries.set(row.path,{row,hint,button:null,clear:null,cell:td});}
         else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
+        else buildLookupNote(row,td);  // 0.31.0 (Judy 5): a book that waits for its online answer, or got none within the limit
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
         // Where the files are, then where the book goes or is (Judy 0.23.1 sections 3.4, 15 and 16): every candidate row.
         buildSourceLine(row,td);
@@ -1160,7 +1162,7 @@ function listContext(){return JSON.stringify([$('library').value,view,filters[vi
 // While a different list is on its way, the old rows are not shown as the new filter's result.
 function showListLoading(){
   const label=filterOptions[view].find(item=>item[0]===filters[view])?.[1] || '';
-  $('inventory').replaceChildren();rowRetries.clear();askRows.clear();deleteButtons.clear();joinRows.clear();$('inventory').setAttribute?.('aria-busy','true');
+  $('inventory').replaceChildren();rowRetries.clear();askRows.clear();deleteButtons.clear();joinRows.clear();lookupNotes.clear();$('inventory').setAttribute?.('aria-busy','true');
   const text=`Loading ${label}${filters[view]==='output_attention' && attentionGroup!=='all'?' · '+attentionLabels[attentionGroup]:''}…`;
   $('empty').textContent=text;$('empty').hidden=false;$('page').textContent=text;$('previous').disabled=true;$('next').disabled=true;
   listLoadingText=text;  // ruling 75a, S6: renderListStale says why when it lasts
@@ -1548,7 +1550,9 @@ function workOf(){
   // state out from rows; an engine that does not send one (older, or still loading) gives no badge.
   return {rows:list(work?.rows,item),waiting:list(work?.waiting,item),
     counts:work?.counts && typeof work.counts==='object'?work.counts:{},unread:Array.isArray(work?.unread)?work.unread:[],
-    state:typeof work?.state==='string'?work.state:'',pending:object(work?.pending),background:object(work?.background),lookups:list(work?.lookups_waiting,item)};
+    state:typeof work?.state==='string'?work.state:'',pending:object(work?.pending),background:object(work?.background),lookups:list(work?.lookups_waiting,item),
+    // 0.31.0 (Judy 5): the books not converted yet that wait for their online answer (work.lookup_before_review).
+    before:object(work?.lookup_before_review)};
 }
 // The two background look-ups (2.1): their rows keep the look-up's own bar (no time estimate, never "No progress").
 const LOOKUP_KINDS=['series','gap_fill','series_lookup','detail_lookup'];
@@ -1802,6 +1806,15 @@ const waitingItems=new Map();
 function waitingList(work){
   // QA D1 (0.30.0): a queued action nothing blocks (blocker null) is about to run: no Waiting item (its row comes when it runs).
   const listed=work.waiting.filter(item=>!(item.kind==='action' && !item.blocker)),after=['drive','resume','automatic_start','automatic'];
+  // 0.31.0 (5.1): the books that wait for an online answer are one item of their own, in the place of 0.30.0's "Metadata
+  // sources" item. That item stays only for the books that wait for something else (the library drive, the catalog): its
+  // count is the engine's count of every waiting book less the online waits, so no book is counted twice.
+  const online=onlineAnswerItem(work);
+  if(online){
+    const place=listed.findIndex(item=>item.kind==='metadata_sources'),sources=listed[place],others=Number.isInteger(sources?.count)?sources.count-online.count:0;
+    if(place>=0)listed.splice(place,1,online,...(others>0?[{...sources,count:others}]:[]));
+    else{const first=listed.findIndex(item=>after.includes(item.kind));listed.splice(first<0?listed.length:first,0,online);}
+  }
   // 0.31.0 (2.2): the engine sends the look-ups' items on their own (work.lookups_waiting); their place is the engine's order.
   const at=listed.findIndex(item=>after.includes(item.kind)),waiting=at<0?[...listed,...work.lookups]:[...listed.slice(0,at),...work.lookups,...listed.slice(at)];
   const cleanups=waiting.filter(item=>item.kind==='cleanup');if(cleanups.length<=5)return waiting;
@@ -1809,6 +1822,18 @@ function waitingList(work){
   const out=[];let placed=false;for(const item of waiting){if(item.kind!=='cleanup'){out.push(item);continue;}if(!placed){out.push(grouped);placed=true;}}
   return out;
 }
+// 0.31.0 (Judy 5.1): the Waiting item of the books that wait for an online answer before they convert, from the engine's
+// work.lookup_before_review: how many wait (online waits only), the earliest next try, the tries limit, and with one book
+// its id and title (Show in list). null while none waits, and while automatic processing is stopped (the engine's
+// tries_continue): nothing is waiting to run by itself then, and the row's hint names the button that starts the tries.
+function onlineAnswerItem(work){
+  const before=work.before,n=Number.isInteger(before.count) && before.count>0?before.count:0;
+  if(!n || before.tries_continue!==true)return null;
+  const only=n===1 && Array.isArray(before.waiting)?before.waiting[0]:null,title=typeof only?.title==='string'?only.title.trim():'';
+  return {id:'online_answer',kind:'online_answer',count:n,at:Number.isFinite(before.next_at) && before.next_at>0?before.next_at:null,limit:before.limits?.per_source,
+    subject:title,book_id:title && typeof only?.book_id==='string' && only.book_id?only.book_id:null};
+}
+function triesWord(n){return n===1?'1 try':`${n.toLocaleString()} tries`;}
 function waitingClock(at){const d=new Date(at<1e12?at*1000:at);return Number.isFinite(d.getTime())?`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`:'';}
 const CLEANUP_RETRY_LABELS={cleanup_retry:'Retry cleanup',cleanup_retry_working:'Retry cleanup of working files',cleanup_retry_temporary:'Retry cleanup of temporary files',cleanup_retry_folder:'Retry cleanup of the source folder'};
 function waitingLines(item,work){
@@ -1822,6 +1847,9 @@ function waitingLines(item,work){
     case 'recovery_delete':return ['Delete recovery copies',subject,RECOVERY_WAITS.deletion];
     case 'decisions':return [decisionLabel(item.label_key,true),subject,'Your answers are recorded. They apply one at a time.'];
     case 'metadata_sources':return ['Metadata sources','',[n?`${plural(n,'book waits','books wait')} for a source to answer.`:'',Number.isFinite(item.at)?`Next try ${waitingClock(item.at)}.`:''].filter(Boolean).join(' ')];
+    // 0.31.0 (5.1): one book is named (and has Show in list), several are counted; the limit is the engine's number.
+    case 'online_answer':return ['Waiting for an online answer',subject || plural(n,'book','books'),[Number.isFinite(item.at)?`Next try ${waitingClock(item.at)}.`:'',
+      Number.isInteger(item.limit) && item.limit>0?`After ${triesWord(item.limit)} a book converts with the names from its files.`:''].filter(Boolean).join(' ')];
     case 'series_lookup':case 'detail_lookup':{
       const limit=(item.kind==='series_lookup'?work.background?.series:work.background?.gap_fill)?.tries,tries=limit?.per_source,hours=Number.isFinite(limit?.spacing_seconds) && limit.spacing_seconds>0?Math.round(limit.spacing_seconds/3600):0;
       const apart=hours?`, ${hours===1?'1 hour':hours.toLocaleString()+' hours'} apart`:'';
@@ -3042,8 +3070,14 @@ function renderAutomatic(){
     const left=workOf().state;
     detail+=['working','paused','continues'].includes(left)?' Other jobs are still running or waiting.':left==='background_only'?' Background look-ups continue.':'';
   }else if(automatic?.state==='Running' && automatic.phase==='waiting' && automatic.automatic_retry_enabled===true){
-    detail='Waiting for metadata sources; saved research retries automatically.';
-    const retry=retryDate(automatic.next_retry_at);detail+=retry?' Next automatic retry check: '+retry:' Automatic retry time unavailable';
+    // 0.31.0 (Judy 5.1): while books wait for an online source the line says so, with the time of the next try when the
+    // engine has one. Books that wait for something else only (the library drive, the catalog) keep the 0.30.0 line.
+    const before=workOf().before,online=Number.isInteger(before.count) && before.count>0;
+    if(online)detail='Waiting for an online answer.'+(Number.isFinite(before.next_at) && before.next_at>0?` Next try ${waitingClock(before.next_at)}.`:'');
+    else{
+      detail='Waiting for metadata sources; saved research retries automatically.';
+      const retry=retryDate(automatic.next_retry_at);detail+=retry?' Next automatic retry check: '+retry:' Automatic retry time unavailable';
+    }
   }else if(automatic?.state==='Needs attention')detail=(automatic.reason || 'Automatic processing stopped. The app did not report a specific reason.')+
     (automatic.can_start===true?' Start automatic processing to continue.':automatic.start_block_reason?'':' No action is available here yet.');
   else if(automatic?.reason)detail=automatic.reason;
@@ -3440,18 +3474,76 @@ function candidateStatus(row){
   if(/paused|pausing/i.test(facts))return 'Paused';
   if(/queued/i.test(creation) || /queued/i.test(status))return 'Queued';
   if(/creating|converting|encoding|checking|publishing|verifying/i.test(facts) || ['checking','preparing','removing','deleting'].includes(cleanup.state) || automatic?.state==='Researching')return 'Processing';
-  if(automatic?.state==='Waiting for source')return 'Waiting for source';
+  // 0.31.0 (Judy 5.1): only a wait for an online source gets the new words; a book that waits for the library drive or
+  // for the catalog keeps "Waiting for source" (the engine's waits_for says which).
+  if(automatic?.state==='Waiting for source')return automatic.waits_for==='online_answer'?ONLINE_WAIT_STATUS:'Waiting for source';
   if(automatic?.state==='Held')return 'Held'+(reason?' — '+reason:'');
   if(row.audiobook_ready===undefined && /created|completed|converted/i.test(creation+' '+status))return 'Ready status unavailable';
   return 'Pending';
 }
-// Judy 0.22.2 section 4: the details panel's "Original title" fact (ruling 38: no wait, so no "Waiting" line).
+// ---- 0.31.0 (Judy's 0.31.0 spec, section 5; R2): a book may wait a few tries for its online answer before it converts.
+// The row says so in its hint's place, in its look: not a question, no control. Every number and time is the engine's.
+const ONLINE_WAIT_STATUS='Waiting for an online answer';
+// What is asked, in the spec's three phrases, from the engine's gap keys (the English title; the series, or the English
+// name of a series the files name). An engine that does not say what is asked: "this book".
+const LOOKUP_ASKED={original_title:'title',series:'series',series_name:'series'};
+function lookupAsked(gaps){
+  const asked=new Set((Array.isArray(gaps)?gaps:[]).map(gap=>LOOKUP_ASKED[gap]).filter(Boolean));
+  return asked.has('title') && asked.has('series')?'its English title and series':asked.has('title')?'its English title':asked.has('series')?'its series':'this book';
+}
+// "Try 2 of 3 at 14:05.": the number of the next try, the tries in all and the time of the next one, as sent. With no time:
+// "Try 2 of 3 is next." With no numbers, or numbers that cannot both be true, the sentence is left out.
+function lookupTries(lookup){
+  const next=lookup?.next_try,limit=lookup?.limit;
+  if(!Number.isInteger(next) || !Number.isInteger(limit) || next<1 || next>limit)return '';
+  const at=Number.isFinite(lookup.next_at) && lookup.next_at>0?waitingClock(lookup.next_at):'';
+  return at?`Try ${next} of ${limit} at ${at}.`:`Try ${next} of ${limit} is next.`;
+}
+function lookupRecord(row){const own=row?.automatic?.lookup,listed=row?.lookup;return own && typeof own==='object'?own:listed && typeof listed==='object'?listed:null;}
+function lookupFields(record,outcome){const fields=record?.fields && typeof record.fields==='object'?record.fields:{};return Object.keys(fields).filter(gap=>fields[gap]===outcome);}
+// The tries a look-up had when it ended with no answer: the tries made, else the limit; 0 when the engine sent neither.
+function lookupTriesMade(record){for(const value of [record?.tries,record?.limit])if(Number.isInteger(value) && value>0)return value;return 0;}
+// The hint of a waiting book (5.1) and the one note of a book that got no answer within the limit (5.2), '' for any other
+// row. While the tries go on by themselves: what is asked, the next try, "Nothing to do." With automatic processing stopped
+// they do not go on, so the hint names the button that starts them (its face is Resume while it is paused); an engine
+// that does not say which is the case gets neither ending. The note shows only while the row is Queued or Processing.
+function lookupNote(row){
+  if(row?.kind!=='candidate')return '';
+  const status=candidateStatus(row),record=lookupRecord(row) || {};
+  if(status===ONLINE_WAIT_STATUS){
+    const head=`No online answer yet about ${lookupAsked(Array.isArray(record.asking)?record.asking:lookupFields(record,'waiting'))}.`,goes=workOf().before.tries_continue;
+    if(goes===false)return `${head} Press ${automaticStartWord()} automatic processing to try again.`;
+    return goes===true?[head,lookupTries(record),'Nothing to do.'].filter(Boolean).join(' '):head;
+  }
+  if(status!=='Queued' && status!=='Processing')return '';
+  const unanswered=lookupFields(record,'no_answer'),tries=lookupTriesMade(record);
+  return unanswered.length && tries?`No online answer about ${lookupAsked(unanswered)} after ${triesWord(tries)}.`:'';
+}
+// The note's element on a row that asks nothing and has no hint of its own; it follows the row in place afterwards.
+function buildLookupNote(row,td){
+  const text=lookupNote(row);if(!text)return;
+  const hint=node('p',text,'field-help attention-hint lookup-note');td.append(hint);lookupNotes.set(row.id,{row,hint,cell:td});
+}
+function updateLookupNotes(){for(const entry of lookupNotes.values()){setLine(entry.hint,lookupNote(entry.row));statusInPlace(entry.cell,candidateStatus(entry.row));}}
+// Judy 0.22.2 section 4; 0.31.0 (4.5 and 5.2; R1, R3): the details panel's "English title" fact (it was labelled "Original
+// title": for a book written in Chinese the app looks for the English title, which is not the original one). Its values:
+// the title a source gave, nothing found (the sources answered), no answer after the limit (they did not; the engine's
+// number of tries), entered by him. "No answer" and "nothing found" are never worded alike. A Russian original has none.
 function originalTitleFact(row){
-  const lookup=row.metadata_facts?.original_title_lookup;
-  if((row.review_context?.metadata_actor==='user' || (Array.isArray(row.entered) && row.entered.includes('title'))) && lookup)return 'Entered by you.';
-  if(lookup?.state==='found' && typeof lookup.title==='string' && lookup.title)return lookup.title;
-  if(lookup && ['none','russian'].includes(lookup.state))return lookup.state==='none'?'Not found. Filed under the Russian title.':'';
+  const lookup=row.metadata_facts?.original_title_lookup;if(!lookup || typeof lookup!=='object')return '';
+  if(lookup.state==='entered' || row.review_context?.metadata_actor==='user' || (Array.isArray(row.entered) && row.entered.includes('title')))return 'Entered by you.';
+  if(lookup.state==='found' && typeof lookup.title==='string' && lookup.title)return lookup.title;
+  if(lookup.state==='none')return 'No English title found online. Filed under the Russian title.';
+  if(lookup.state==='no_answer'){const tries=lookupTriesMade(lookup);return tries?`No online answer after ${triesWord(tries)}. Filed under the Russian title.`:'';}
   return '';
+}
+// 5.2: the details panel's Series fact of a book whose series got no answer within the limit ('' for any other book; a
+// series nothing was found for, or one dropped as doubtful, gets no line). Read from the facts the book was filed with,
+// else from its look-up record.
+function seriesNoAnswerFact(row){
+  const filed=row?.metadata_facts?.gap_search?.lookup,record=filed && typeof filed==='object'?filed:lookupRecord(row);
+  if(!lookupFields(record,'no_answer').includes('series'))return '';
+  const tries=lookupTriesMade(record);return tries?`No online answer after ${triesWord(tries)}.`:'';
 }
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function minorDamageText(items){
@@ -3462,14 +3554,16 @@ function minorDamageText(items){
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
   renderProducerRetained(row);
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.minor_damage,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move,row.admission_error,row.chapter_corrections,row.chapter_check,row.creation?.job?.folder_cleanup]);
+  const key=JSON.stringify([state?.work?.lookup_before_review?.tries_continue,row.lookup,state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.minor_damage,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move,row.admission_error,row.chapter_corrections,row.chapter_check,row.creation?.job?.folder_cleanup]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
   automaticResultKey=key;const automatic=row.automatic;
   setText('automatic-result-status',candidateStatus(row));
   const attention=rowState(row),kept=!attention && row.creation?.job?.kept===true;
-  setText('automatic-result-hint',attention?attention.hint+(attention.clause || ''):kept?'You chose to keep these files.':'');$('automatic-result-hint').hidden=!attention?.hint && !kept;
+  // 0.31.0 (Judy 5.1): the panel shows the same status and hint as the row of a book that waits for its online answer.
+  const waitNote=!attention && !kept?lookupNote(row):'';
+  setText('automatic-result-hint',attention?attention.hint+(attention.clause || ''):kept?'You chose to keep these files.':waitNote);$('automatic-result-hint').hidden=!attention?.hint && !kept && !waitNote;
   $('automatic-result-hint').classList?.toggle?.('retry-refused',!!attention?.warn);
   // After Repair: a permanent line and one bullet per patch; the technical note is the last line.
   const repaired=row.creation?.job?.repaired,patched=Array.isArray(repaired?.patched)?repaired.patched:[];
@@ -3499,7 +3593,9 @@ function renderAutomaticResult(row){
   const values=approval?{'Canonical title':review.title,'Original work language':review.original_language,Author:review.canonical_author,'Reader / narrator':review.narrator,Series:review.series,'Series position':review.number,Cover:row.selected_cover?.source_label || 'Cover details unavailable','Reviewed destination':row.creation?.destination || 'Destination unavailable','Current audiobook':actual}:{'Title clue':row.title_clue || 'Unknown','Reviewed destination':row.creation?.destination || 'No verified destination yet','Current audiobook':actual};
   if(restartOf(row)?.at)values['Started over']=recoveryDate(restartOf(row).at);
   Object.assign(values,provenanceFacts(row),recordingFacts(row));if(row.metadata_facts?.series_state==='omitted_unknown')delete values['Series position'];
-  const original=originalTitleFact(row);if(original)values['Original title']=original;  // Judy 0.22.2 section 4
+  // 0.31.0 (5.2): a series that got no answer within the limit says so, on a book that has no series.
+  const seriesFact=!(approval && review.series) && !row.place?.series?seriesNoAnswerFact(row):'';if(seriesFact)values.Series=seriesFact;
+  const original=originalTitleFact(row);if(original)values['English title']=original;  // Judy 0.22.2 section 4; 0.31.0 (4.5): the label
   for(const [label,value] of Object.entries(values))if(value!==undefined && value!==null && value!=='')facts.append(node('dt',label),node('dd',value));
   const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
   $('automatic-tracks').replaceChildren();for(const key of row.track_order || members.keys())if(included.has(key) && members.has(key))$('automatic-tracks').append(node('li',[members.get(key).path,...memberComponents(members.get(key),row),members.get(key).missing?'Not found':''].filter(Boolean).join('\n')));
