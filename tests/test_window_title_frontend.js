@@ -104,6 +104,12 @@ reset();assert.equal(show({state:'working',pending:pending({writes:1}),rows:[ser
 // A paused queue that names a look-up still running (G7) is paused.
 reset();assert.equal(show({state:'paused',rows:[series()]},{state:'Paused'}),'Books Arranger: paused');assert.match(get('jobs-status-text').textContent,/^Paused · Finding series/);
 reset();assert.equal(show({state:'paused'},{state:'Pausing'}),'Books Arranger: paused');
+assert.match(get('jobs-status-text').textContent,/^Pausing audiobook jobs…/,'a queue still pausing keeps its own words');
+// R31 (Sergei 2026-11-23; Futaba's 0.31.0 M1): Stop automatic processing. The engine says paused while the audiobook queue
+// itself is not paused: the status line and the title say Paused at the first poll, never "checking what is left".
+reset();assert.equal(show({state:'paused',waits_for_you:['attention'],pending:pending({attention:4})},{attention_counts:{other:4}},false),'Books Arranger: paused','at once');
+assert.match(get('jobs-status-text').textContent,/^Paused · /);assert.equal(get('jobs-state').hidden,true,'Paused is no finished state: no badge');
+reset();assert.equal(show({state:'unknown',waits_for_you:['attention'],pending:pending({attention:4})},{attention_counts:{other:4}},false),'Books Arranger: checking what is left','control: an engine still counting');
 // A drive that is not answering (R14): waiting for you.
 reset();assert.equal(show({state:'waiting_for_you',waits_for_you:['drive'],pending:pending({drives:1}),waiting:[{id:'drive:Z',kind:'drive',subject:'Z:\\Audiobooks'}]}),'Books Arranger: waiting for you');
 // Books with a series found that is not applied do not change it (check 26).

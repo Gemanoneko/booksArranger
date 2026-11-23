@@ -1359,7 +1359,10 @@ function rowName(row){const subject=rowSubject(row);return workLabel(row)+(subje
 function jobsFirstPart(jobs,shown,work={}){
   // 0.31.0 (2.1): a look-up row counts in "N tasks running" only beside main work; alone, the badge leads the line.
   // Amended (G7): that rule is not for Paused. A paused queue names the work Pause does not stop, a look-up included.
-  const all=runningActs(shown),queuePaused=['Paused','paused'].includes(jobs?.state),running=runningActs(mainRows(shown)).length || queuePaused?all:[],paused=queuePaused || shown.some(row=>row.state==='paused');
+  // R31 (Sergei 2026-11-23; Futaba's 0.31.0 M1): the engine's own 'paused' (table 1.1: paused and nothing runs, so after
+  // Stop automatic processing too) reads "Paused" at once, never "Checking what is left"; a queue that is still pausing
+  // keeps its own words below.
+  const all=runningActs(shown),queuePaused=['Paused','paused'].includes(jobs?.state),running=runningActs(mainRows(shown)).length || queuePaused?all:[],paused=queuePaused || shown.some(row=>row.state==='paused') || work?.state==='paused' && jobs?.state!=='Pausing';
   if(!running.length && paused)return 'Paused';
   if(!running.length && jobs?.state==='Pausing')return 'Pausing audiobook jobs…';
   const named=running.length===1?rowName(running[0]):running.length>1?`${running.length.toLocaleString()} tasks running`:'';
