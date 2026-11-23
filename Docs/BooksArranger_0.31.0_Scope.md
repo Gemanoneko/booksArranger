@@ -62,6 +62,8 @@ What "could be wrong" means in engine terms, and how the engine tells a book tha
 | R30 | **(2026-11-23) A Choose folder… pressed while the app rewrites that book wins: after the rewrite, the book moves to the folder Sergei chose** (option A). The app's follow-up move never cancels his choice. No new wording. | — |
 | R31 | **(2026-11-23) After "Stop automatic processing" the status line and window title say "Paused" at once.** | — |
 | R32 | **(2026-11-23) A source that only answers with a human check (DuckDuckGo-backed) counts as "nothing found" at once**, so it does not hold back "All done". | R9 tries for those sources |
+| R33 | **(2026-11-23) R30 holds at any moment of a rewrite** (Senua delta M4, M5): a Choose folder… pressed while the app writes a book waits until the write ends, then moves the rewritten file to his folder. Never fails "in use", never leaves a second copy. In 0.31.0. | — |
+| R34 | **(2026-11-23) Nothing that can never finish holds back "All done"** (Senua delta m9, m11): a refusal that will never clear, and a 0.30-era hold on a book since reconverted, replaced or retained, stop counting as pending. In 0.31.0. | — |
 
 Also on 2026-11-23: no model fallback (Fable only, work waits if the limit is hit); Futaba may launch a packaged 0.31.0 build with visible windows in its own data folder, never the installed copy; the nine leftover `.git` pointer copies in the worktree's scratch were deleted on Sergei's approval.
 
