@@ -420,6 +420,21 @@ class SeriesBackfill:
         record = entry['record']
         if not record.get('move_approved') or record.get('follow_up'):
             return
+        # 0.31.0 ruling R30: a Choose folder… pressed while this book was rewritten wins over the move below, and over a
+        # write in its own folder too (MergeService.choice_after_write). None: there is no such choice.
+        choice = getattr(self.merge, 'choice_after_write', None)
+        if callable(choice):
+            try:
+                answer = choice(job_id, record)
+            except Exception as error:
+                answer = {'state': 'later', 'reason': (str(error) or type(error).__name__)[:300]}
+            if answer is not None:
+                if answer.get('state') == 'later':
+                    self._set(job_id, 'done', '', dict(record, follow_up_wait=dict(answer, at=_stamp())))
+                    return
+                record = {key: value for key, value in record.items() if key != 'follow_up_wait'}
+                self._set(job_id, 'done', '', dict(record, follow_up=dict(answer, at=_stamp())))
+                return
         if not record.get('series_folder'):
             # An approved write in the book's own folder (the guard): it is where it belongs; there is no move to make.
             self._set(job_id, 'done', '', dict(record, follow_up={'state': 'none', 'reason': 'Written in its own folder', 'at': _stamp()}))

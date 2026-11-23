@@ -6502,9 +6502,58 @@ class MergeService:
                      or text.startswith('This audiobook is being moved now'))
             return {'state':'later' if passing else 'refused','reason':text[:300]}
 
-    def _sorting_move(self,job_id,target,origin='user'):
+    def choice_after_write(self,job_id,record):
+        """0.31.0 ruling R30 (Sergei 2026-11-23): a Choose folder… pressed while the app rewrote this book (its series, or its
+        names: record is that write's ledger record) wins, and the app's own follow-up move never cancels it (book_move.plan
+        supersedes a queued move). Asked by the write's follow-up (SeriesBackfill._follow_up) before anything else, for a
+        write in the book's own folder too. His choice is a move of the book with his override (Choose folder…); the newest
+        one that was not taken back decides:
+          - queued from the receipt the write replaced (record old_path/old_sha256): it would stop at its start with nothing
+            moved, so it is re-pointed in place to start from the book as the write left it and go to his folder under the
+            book's new name (book_move.rebase; the queued action he already has runs it);
+          - queued from the book as it is now, or done: it stands as it is;
+          - running or unfinished: {'state': 'later'}, asked again at the next pass;
+          - stopped at its start because the write had replaced the receipt first (failed 'changed', planned from the old
+            receipt after the write was approved): queued again from the book as it is now, to his folder, with his override.
+        None when there is no such choice: the follow-up goes on as before. Otherwise {'state': 'none'}: the rules move
+        nothing (the folder is his, R26), and the rules' record ends this book where the write put it."""
+        import book_move,datetime
+        kept={'state':'none','reason':'You chose its folder; left as it is'}
+        busy={'state':'later','reason':'This audiobook is being moved now. Choose another folder when it finishes.'}
+        with connect(self.inventory.database) as db:
+            if not book_move.have(db):return None
+            moves=[book_move._row(row) for row in db.execute("SELECT * FROM book_moves WHERE job_id=? AND override_id IS NOT NULL AND state!='cancelled' ORDER BY generation DESC",(job_id,))]
+        def replaced(move):
+            start=move.get('from') or {}
+            return bool(record.get('old_path')) and book_move.key(start.get('final_path') or '')==book_move.key(record['old_path']) and start.get('sha256')==record.get('old_sha256')
+        def moment(text):
+            try:return datetime.datetime.fromisoformat(str(text).replace('Z','+00:00'))
+            except (TypeError,ValueError):return None
+        live=next((move for move in moves if move['state']!='failed'),None)
+        if live is not None:
+            if live['state'] in book_move.ACTIVE or live['state']=='queued' and self._move_running(live['move_id']):return busy
+            if live['state']=='queued' and replaced(live):
+                start=self._publication_location(job_id,live['kind'])
+                with connect(self.inventory.database) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    # Under the write lock: a Mover takes the same lock before it reads its move (Mover._run).
+                    if self._move_running(live['move_id']):return busy
+                    try:book_move.rebase(db,live['move_id'],start)
+                    except book_move.Refused:pass  # his folder cannot take the new name: his move stands, the rules move nothing
+                self._destination_changed()
+            return kept
+        stopped=next(iter(moves),None)
+        approved,created=moment(record.get('approved_utc')),moment((stopped or {}).get('created_utc'))
+        if stopped is not None and stopped.get('cause')=='changed' and replaced(stopped) and approved is not None and created is not None and created>=approved:
+            start=self._publication_location(job_id,stopped['kind'])
+            self._sorting_move(job_id,os.path.join(stopped['target_folder'],os.path.basename(start['final_path'])),origin='user',override_id=stopped['override_id'])
+            return kept
+        return None
+
+    def _sorting_move(self,job_id,target,origin='user',override_id=None):
         """One approved sorting move: the usual verified move (book_move) to target, folder and name. origin: 'user' for
-        his approval of a listed move, 'rules' when the app's rules made it (rule_filing)."""
+        his approval of a listed move, 'rules' when the app's rules made it (rule_filing). override_id (0.31.0 R30): his
+        Choose folder… choice the move carries (choice_after_write), else none."""
         import book_move
         with connect(self.inventory.database) as db:
             found=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
@@ -6514,7 +6563,7 @@ class MergeService:
         if not finished or finished[2]!=job_id or finished[1] not in book_move.KINDS:raise ValueError('This audiobook has a newer version; it was not moved')
         row=self.reviews._row('Audiobooks',identity)
         start=self._publication_location(job_id,finished[1])
-        answer=self._queue_move(row,finished,start,os.path.dirname(target),None,name=os.path.basename(target),origin=origin)
+        answer=self._queue_move(row,finished,start,os.path.dirname(target),override_id,name=os.path.basename(target),origin=origin)
         move=answer.get('move') or {}
         return {'state':answer.get('outcome'),'move':move}
 

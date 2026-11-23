@@ -325,6 +325,31 @@ def begun(db, job_id, running=None):
     return False
 
 
+def rebase(db, move_id, start):
+    """0.31.0 ruling R30 (Sergei 2026-11-23): a Choose folder… pressed while the app rewrote that book (its series or its
+    names) wins. The rewrite gave the book a new receipt (a new name in its own folder), so his move, queued from the
+    receipt the rewrite replaced, would stop at its start with nothing moved. It is re-pointed in place instead: it starts
+    from where the book is now (start) and goes to the folder he chose under the book's name now. The same move: its id,
+    the queued action that runs it, his override and who made it; an event records the change. Only a queued move; the
+    caller makes sure nothing runs it, under a write transaction (MergeService.choice_after_write; Mover._run reads its
+    move only after taking the write lock). Returns the move, or None when the book is in his folder already (the move is
+    then cancelled: nothing is left to do)."""
+    move = load(db, move_id)
+    if move is None or move['state'] != 'queued':
+        raise ValueError('Move state changed')
+    start = location(start)
+    target = os.path.join(os.path.normpath(move['target_folder']), ntpath.basename(start['final_path']))
+    if key(target) == key(start['final_path']):
+        _set(db, move_id, 'cancelled', expected='queued', detail={'reason': 'already in the chosen folder'})
+        return None
+    if len(target) > 240:
+        raise Refused('not_writable', "That folder's path is too long for this book's file name. Choose a shorter folder.")
+    db.execute('UPDATE book_moves SET from_json=?,target_path=?,updated_utc=? WHERE move_id=? AND state=?',
+               (json.dumps(start, ensure_ascii=False, sort_keys=True), target, stamp(), move_id, 'queued'))
+    _event(db, move_id, 'queued', 'queued', {'rebased': {'was': {'start': move['from'], 'target': move['target_path']}, 'start': start, 'target': target}})
+    return load(db, move_id)
+
+
 def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None, name=None, origin=None):
     """Queue one move of the book from its current location (start) into folder. None when it is already there (no-op).
     A queued move of the same book is superseded; a move already running is refused. running(move_id): whether that
@@ -547,15 +572,20 @@ class Mover:
         raise Unfinished(_unfinished_cause(last), _raw(last), seen, error) from error
 
     def _run(self, move):
-        start = move['from']
-        target = move['target_path']
-        folder = move['target_folder']
         # Senua's 0.31.0 review, M1: a writer's catalog transaction already under way ends before the book is read. A writer
         # asks book_move.begun() inside its own write transaction, which reads this move as begun from the moment
         # MergeService.run_move registered it; one that asked before that has committed once this write lock is ours, so
         # the location read below is the one it recorded and the move stops here, before the file is held.
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+        # 0.31.0 ruling R30: the move as it is now. His queued Choose folder… is re-pointed after a rewrite of the book
+        # (rebase(), under the same kind of write lock, only while nothing runs it), so it starts from where it points now.
+        move = self._load(move['move_id'])
+        if move is None or move['state'] != 'queued':
+            return  # taken back meanwhile (Cancel, a newer choice): nothing ran
+        start = move['from']
+        target = move['target_path']
+        folder = move['target_folder']
         self._still_at_start(move, start)
         import destination_overrides
         holder = next((source for source in self.sources() or () if source and destination_overrides.inside(folder, source)), None)

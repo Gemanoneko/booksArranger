@@ -134,12 +134,12 @@ class Book:
         self.original = lib.original
         self.path = lib.path
 
-    def queue_move(self, job_id, target, origin='user'):
+    def queue_move(self, job_id, target, origin='user', override_id=None):
         lib = self.lib
         start = book_move.location(self.resolve())
         with connect(lib.db) as db:
             move = book_move.plan(db, job_id=job_id, kind='base', candidate_id=lib.candidate, start=start, folder=os.path.dirname(target), root=str(lib.root),
-                                  name=os.path.basename(target), origin=origin)
+                                  name=os.path.basename(target), origin=origin, override_id=override_id)
         self.queue.append(move['move_id'])
         return {'state': 'move_queued', 'move': book_move.view(move)}
 
@@ -692,14 +692,9 @@ class RollbackTests(unittest.TestCase):
             self.publication(book)  # what any version would read without the intent: a receipt no record explains
 
 
-class MoveWindowTests(unittest.TestCase):
-    """Senua's 0.31.0 review, M1 and M2: Choose folder… pressed while a write of the book is in hand (a write of names, or a
-    series write). The Mover resolves the book and hashes the held file while its journal still reads 'queued'; a write whose
-    catalog step then replaced the receipt left two copies and a book the app could not resolve ("Moved audiobook history
-    does not link to its publication"). Each case runs the real Mover mid-run (its own progress report, during the hash,
-    is where the write's catalog step runs), not a journal state set by hand. One guard serves both writes
-    (SeriesBackfill._no_move_begun, book_move.begun); the Mover stops a move whose book was rewritten before its first
-    journal write (Mover._still_at_start), and reads the book only after a writer's transaction under way has ended."""
+class MoveWindow:
+    """Choose folder… on a book while the app writes it: the real Mover, his move as Choose folder… queues it, and a write
+    of names or a series write stopped before its catalog step (MoveWindowTests, ChoiceDuringWriteTests)."""
 
     def mover(self, book, report=None, strategy='rename'):
         lib = book.lib
@@ -767,6 +762,16 @@ class MoveWindowTests(unittest.TestCase):
         self.assertEqual((entry['state'], entry['record'].get('names')), ('renamed', None), 'a series write alone')
         backfill.clock = lambda: 2_000_000_000.0
         return backfill, Path(entry['record']['new_path'])
+
+
+class MoveWindowTests(MoveWindow, unittest.TestCase):
+    """Senua's 0.31.0 review, M1 and M2: Choose folder… pressed while a write of the book is in hand (a write of names, or a
+    series write). The Mover resolves the book and hashes the held file while its journal still reads 'queued'; a write whose
+    catalog step then replaced the receipt left two copies and a book the app could not resolve ("Moved audiobook history
+    does not link to its publication"). Each case runs the real Mover mid-run (its own progress report, during the hash,
+    is where the write's catalog step runs), not a journal state set by hand. One guard serves both writes
+    (SeriesBackfill._no_move_begun, book_move.begun); the Mover stops a move whose book was rewritten before its first
+    journal write (Mover._still_at_start), and reads the book only after a writer's transaction under way has ended."""
 
     def assert_his_move_kept_the_book(self, book, done, new, ledger):
         moved = book.lib.root / 'Mine' / book.path.name
@@ -858,6 +863,139 @@ class MoveWindowTests(unittest.TestCase):
         self.assertEqual(book.state(), ('done', ''), 'the write finished: its old file removed, no copy left behind')
         self.assertFalse(book.path.exists())
         self.assertEqual(book.resolve()['final_path'], str(new))
+
+
+class ChoiceDuringWriteTests(MoveWindow, unittest.TestCase):
+    """0.31.0 ruling R30 (Sergei 2026-11-23): a Choose folder… pressed while the app rewrites that book wins. After the
+    rewrite the book moves to the folder he chose; the app's follow-up move never cancels his move. His move was queued from
+    the file the write replaced, so as it stood it stopped with nothing moved, and the write's follow-up superseded it with
+    the rules' own move (MergeService.choice_after_write, book_move.rebase). The real writers, follow-up, plan and Mover."""
+
+    def ready(self, book):
+        book.merge.publication_bindings = PublicationBindings(str(book.lib.db))  # what MergeService._publication_location reads
+        return book
+
+    def moves(self, book):
+        with connect(book.lib.db) as db:
+            return [dict(row) for row in db.execute('SELECT move_id,state,origin,override_id,target_path,from_json,cause FROM book_moves ORDER BY created_utc,rowid')]
+
+    def assert_his_choice_won(self, book, his, written):
+        """His move, the same one and the only one, is re-pointed to the file the write left (written) and takes it to Mine
+        under its new name; the rules queue nothing and leave the book there."""
+        moves = self.moves(book)
+        self.assertEqual([(m['move_id'], m['state'], m['origin'], m['override_id']) for m in moves], [(his['move_id'], 'queued', 'user', 'his')],
+                         'his move is never cancelled, and the rules queue no move of their own')
+        self.assertEqual(book.queue, [])
+        self.assertEqual(json.loads(moves[0]['from_json'])['final_path'], str(written), 're-pointed to start from the book as the write left it')
+        done = self.run_move(book, his['move_id'])
+        mine = book.lib.root / 'Mine' / written.name
+        self.assertEqual((done['state'], book.resolve()['final_path']), ('complete', str(mine)), 'in the folder he chose, under its new name')
+        self.assertFalse(written.exists())
+        with connect(book.lib.db) as db:
+            self.assertEqual(sorting_moves._last_move(db, book.lib.job_id), (str(mine), False), 'his move is the last: the rules leave the book there')
+        return mine
+
+    def test_r30_his_choice_during_a_series_write_wins(self):
+        book = self.ready(Book(self, english=None))
+        backfill, new = self.series_renamed(book)
+        his = self.choose_folder(book)
+        backfill.run_pass()  # the catalog step, then its follow-up
+        entry = backfill.entry(book.lib.job_id)
+        self.assertEqual((entry['state'], entry['record']['follow_up']['state']), ('done', 'none'), 'the rules move nothing')
+        mine = self.assert_his_choice_won(book, his, new)
+        self.assertEqual(sha(mine), entry['record']['new_sha256'], 'the rewritten file, every byte')
+        value = book.filing.tick()
+        self.assertEqual([(e['from'], e['to']) for e in book.filing.record()['entries']], [(str(book.path), str(new))], "the rules' record ends where the write put it")
+        self.assertEqual((value['left'], len(self.moves(book))), (0, 1), 'nothing left to file, no move of the rules afterwards')
+
+    def test_r30_his_choice_during_a_write_of_names_with_a_folder_change_wins(self):
+        book = self.ready(Book(self, english=None, author_rule=ORDERED))  # the author's name in order: another author folder
+        new = self.names_renamed(book)
+        his = self.choose_folder(book)
+        book.writer.run_pass()
+        entry = book.writer.entry(book.lib.job_id)
+        self.assertEqual((entry['state'], entry['record']['follow_up']['state'], bool(entry['record'].get('series_folder'))), ('done', 'none', True))
+        self.assert_his_choice_won(book, his, new)
+
+    def test_r30_his_choice_during_a_write_of_names_in_its_own_folder_wins_too(self):
+        book = self.ready(Book(self))  # the English title alone: the write stays in its folder and no move follows it
+        new = self.names_renamed(book)
+        his = self.choose_folder(book)
+        book.writer.run_pass()
+        entry = book.writer.entry(book.lib.job_id)
+        self.assertEqual((entry['state'], entry['record']['follow_up']['state'], entry['record'].get('series_folder')), ('done', 'none', None))
+        self.assert_his_choice_won(book, his, new)
+
+    def test_r30_his_move_stopped_by_the_write_is_queued_again_with_his_choice(self):
+        book = self.ready(Book(self, english=None))
+        backfill, new = self.series_renamed(book)
+        his = self.choose_folder(book)
+        real, stopped = SeriesBackfill._follow_up, []
+
+        def his_move_runs_first(writer, job_id):
+            if not stopped:
+                stopped.append(self.run_move(book, his['move_id']))  # between the catalog step and its follow-up
+            return real(writer, job_id)
+        with mock.patch.object(SeriesBackfill, '_follow_up', his_move_runs_first):
+            backfill.run_pass()
+        self.assertEqual((stopped[0]['state'], stopped[0]['cause']), ('failed', 'changed'), 'his move met the rewritten book: nothing moved')
+        again = self.moves(book)[-1]
+        self.assertEqual((len(book.queue), again['origin'], again['override_id'], again['state'], json.loads(again['from_json'])['final_path']),
+                         (1, 'user', 'his', 'queued', str(new)), 'his choice queued again from the book as the write left it')
+        self.run_move(book, book.queue.pop())
+        self.assertEqual(book.resolve()['final_path'], str(book.lib.root / 'Mine' / new.name))
+
+    def test_r30_his_move_running_at_the_follow_up_is_asked_again_and_never_cancelled(self):
+        book = self.ready(Book(self, english=None))
+        backfill, new = self.series_renamed(book)
+        his = self.choose_folder(book)
+        running, real = book.merge.__dict__.setdefault('_moves_running', set()), SeriesBackfill._follow_up
+
+        def his_move_starts(writer, job_id):
+            running.add(his['move_id'])  # run_move took it after the catalog step (running then, it would have held the write)
+            return real(writer, job_id)
+        with mock.patch.object(SeriesBackfill, '_follow_up', his_move_starts):
+            backfill.run_pass()
+        entry = backfill.entry(book.lib.job_id)
+        self.assertEqual((entry['state'], entry['record'].get('follow_up'), entry['record']['follow_up_wait']['state']), ('done', None, 'later'))
+        self.assertEqual(([m['state'] for m in self.moves(book)], book.queue), (['queued'], []))
+        running.discard(his['move_id'])
+        backfill.run_pass()  # asked again at the next pass
+        self.assert_his_choice_won(book, his, new)
+
+    def test_r30_the_engines_own_queuing_carries_his_choice_to_the_move_it_queues(self):
+        # MergeService._sorting_move itself (the fixtures above stand in for it): a move choice_after_write queues again
+        # carries his override to the move it plans (_queue_move); the rules' own moves carry none.
+        from merge_service import MergeService
+        book = self.ready(Book(self, english=None))
+        merge, seen = book.merge, []
+        merge._finished = lambda identity: ({}, 'base', book.lib.job_id)
+        merge.reviews = SimpleNamespace(_row=lambda library, identity: {'id': identity})
+        merge._queue_move = lambda row, finished, start, folder, override_id, name=None, origin=None: seen.append((folder, override_id, name, origin)) or {'outcome': 'move_queued', 'move': {}}
+        target = book.lib.root / 'Mine' / 'Book.m4b'
+        MergeService._sorting_move(merge, book.lib.job_id, str(target), origin='user', override_id='his')
+        MergeService._sorting_move(merge, book.lib.job_id, str(target), origin='rules')
+        self.assertEqual(seen, [(str(target.parent), 'his', target.name, 'user'), (str(target.parent), None, target.name, 'rules')])
+
+    def test_r30_a_mover_that_read_his_move_before_it_was_re_pointed_runs_it_as_re_pointed(self):
+        # run_move registered his move after the follow-up asked whether it runs, and read it before the change committed.
+        book = self.ready(Book(self, english=None))
+        backfill, new = self.series_renamed(book)
+        his = self.choose_folder(book)
+        real, result = book_move.rebase, {}
+
+        def his_move_starts_meanwhile(db, move_id, start):
+            moved = real(db, move_id, start)  # written, not committed yet
+            thread = threading.Thread(target=lambda: result.update(move=self.run_move(book, move_id)))
+            thread.start()
+            result['thread'] = thread
+            thread.join(1.5)  # the Mover has read its move as it was and waits for this write lock
+            return moved
+        with mock.patch.object(book_move, 'rebase', his_move_starts_meanwhile):
+            backfill.run_pass()
+        result['thread'].join(60)
+        self.assertEqual(result['move']['state'], 'complete', 'it ran as re-pointed, never "changed"')
+        self.assertEqual(book.resolve()['final_path'], str(book.lib.root / 'Mine' / new.name))
 
 
 if __name__ == '__main__':
