@@ -397,7 +397,8 @@ class RuleFiling:
                         self._update(filing['filing_id'], step='', placed_path=placed, written=tags, detail=str(follow.get('reason') or follow.get('state') or '')[:500])
                         continue
                 elif state in ('held', 'none', 'skipped'):
-                    self._fail(filing, sorting_moves.reason_key(entry['reason'], sorting_moves.NOT_MOVED_KEYS), entry['reason'])
+                    keys = sorting_moves.NAMES_NOT_WRITTEN_KEYS if filing['step'] == 'names' else sorting_moves.NOT_MOVED_KEYS
+                    self._fail(filing, sorting_moves.reason_key(entry['reason'], keys), entry['reason'])
                     continue
                 else:
                     continue  # approved and next, waiting for the queue, or being written

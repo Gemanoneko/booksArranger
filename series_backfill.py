@@ -983,7 +983,7 @@ class SeriesBackfill:
         wanted.update(names or {})
         for key, value in wanted.items():
             if new.get(key) != value:
-                raise Held('Series tags did not read back: ' + key)
+                raise Held(('The new names did not read back: ' if key in (names or {}) else 'Series tags did not read back: ') + key)
         if {k: v for k, v in old.items() if k not in wanted} != {k: v for k, v in new.items() if k not in wanted}:
             raise Held('Other metadata changed while retagging; left as it is')
         if before.get('chapters') != after.get('chapters'):

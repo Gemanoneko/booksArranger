@@ -247,6 +247,27 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(rule_filing.route(book.plan_item()), 'names', 'control: on')
 
 
+class ReasonKeyTests(unittest.TestCase):
+    """A name that did not read back has its own key in the could-not list; a series write's own failures keep theirs."""
+
+    def test_the_keys_of_a_failed_write(self):
+        import sorting_moves
+        review = {'title': ENGLISH, 'series': 'S', 'number': '1'}
+        probe_ = lambda title: {'format': {'tags': {'title': title, 'album': 'S - 1 - ' + ENGLISH, 'grouping': 'S', 'sort_album': 'S - 1 - ' + ENGLISH, 'track': '1'}},
+                                'chapters': [], 'streams': []}
+        with self.assertRaises(series_backfill.Held) as caught:
+            SeriesBackfill.check_tags(probe_('Призраки'), probe_('Призраки'), review, {'title': ENGLISH})
+        self.assertEqual(str(caught.exception), 'The new names did not read back: title')
+        SeriesBackfill.check_tags(probe_('Призраки'), probe_(ENGLISH), review, {'title': ENGLISH})  # control: it read back
+        key = lambda text, table=sorting_moves.NOT_MOVED_KEYS: sorting_moves.reason_key(text, table)
+        self.assertEqual(key(str(caught.exception)), 'tags_not_written')
+        self.assertEqual(key('Series tags did not read back: album'), 'other', 'a series write\'s own failure keeps its key')
+        self.assertEqual(key('Other metadata changed while retagging; left as it is'), 'other')
+        self.assertEqual(key('Other metadata changed while retagging; left as it is', sorting_moves.NAMES_NOT_WRITTEN_KEYS), 'tags_not_written',
+                         'the same proof failing in a write of names is that write\'s failure')
+        self.assertEqual(key('A file with the series name already exists: x.m4b', sorting_moves.NAMES_NOT_WRITTEN_KEYS), 'name_exists')
+
+
 class WorkViewTests(unittest.TestCase):
     """Item 5, the engine's side: /api/state work carries the rename row while a write of names runs, one rename_write item per
     book whose write waits (its blocker as a queued action's), the filing counts with renames, and the record's 'written'."""

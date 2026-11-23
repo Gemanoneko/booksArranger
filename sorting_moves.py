@@ -277,10 +277,14 @@ REFUSAL_KEYS = (('name_exists', ('A file with the new name is already there',)),
 NOT_MOVED_KEYS = (('file_changed', ('The book changed since you approved', 'The published audiobook changed', 'no longer matches',
                                     'The book changed since its new names were approved')),
                   ('place_changed', ('The planned place changed',)), ('name_exists', ('A file with the series name already exists',)),
-                  # 0.31.0 R27: the rewrite of the file's tags did not prove out (a tag that did not read back, any other
-                  # change found by the proofs, a file that cannot be retagged); the book is left as it was.
-                  ('tags_not_written', ('did not read back', 'changed while retagging', 'cannot be retagged safely',
-                                        'could not be written', 'Series update failed', "does not fit the book's recorded author credit")))
+                  # 0.31.0 R27: the new title or author credit did not go into the file (a name that did not read back,
+                  # a write of names that failed, names its facts contradict); the book is left as it was. Only the write
+                  # of names' own sentences: a series write's own failures keep their keys ('other').
+                  ('tags_not_written', ('The new names did not read back', 'The names could not be written', "does not fit the book's recorded author credit")))
+# The keys of a write of names (rule_filing, step 'names'): the proofs it shares with the series write are its own failures
+# to write the tags there.
+NAMES_NOT_WRITTEN_KEYS = tuple((name, marks + ('changed while retagging', 'cannot be retagged safely', 'The audio decoder configuration')) if name == 'tags_not_written'
+                               else (name, marks) for name, marks in NOT_MOVED_KEYS)
 
 
 def reason_key(text, table=REFUSAL_KEYS):
