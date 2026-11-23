@@ -320,7 +320,11 @@ class ActionQueue:
         waiting = self._unparked()
         if self.items and not waiting:
             return None  # only restored presses parked for Start (R2-1): a press made now runs as with an empty queue
-        return (waiting[0]['blocker'] or 'operation') if waiting else 'operation'  # behind a head that waits for nothing: the head
+        # R35 (Senua's 0.31.0 delta 2, M6): a move that waits for its own book holds no one; what is ahead is the next action.
+        waiting = [item for item in waiting if not (item['action'] == 'move' and item.get('blocker') == 'book')]
+        if not waiting:
+            return None
+        return waiting[0]['blocker'] or 'operation'  # behind a head that waits for nothing: the head
 
     def _unparked(self):
         """The waiting actions not parked for Start (blocker 'paused': a restored press under a saved Pause, R2-1)."""
@@ -662,26 +666,47 @@ class ActionQueue:
             paused = restored and self._paused_for_start()
             with self.lock:
                 parked = {item['id'] for item in self.items if paused and held_by_pause(item)}
-                head = next((item for item in self.items if item['id'] not in parked), None)
-                if head is None:
+                order = [item for item in self.items if item['id'] not in parked]
+                if not order:
                     for item in self.items:
                         item['blocker'] = 'paused'
                     self.changed.wait(self.poll)
                     continue
-            kind = self.item_blocker(head)
+            # R35 (Sergei 2026-11-23; Senua's 0.31.0 delta 2, M6): a move that waits only for its own book ('book': that book
+            # converts, or the app writes it) keeps its place and holds no other book's action: the first action after it
+            # that nothing holds runs. An action of the same book (a join with it) stays behind it.
+            head, kind, waiting, held_books = None, None, set(), set()
+            for item in order:
+                if held_books & ({item['book_id']} | set(parts_of(item))):
+                    waiting.add(item['id'])
+                    continue
+                kind = self.item_blocker(item)
+                if kind == 'book' and item['action'] == 'move':
+                    waiting.add(item['id'])
+                    held_books.add(item['book_id'])
+                    continue
+                head = item
+                break
             with self.lock:
                 if self.closed:
                     return
+                if head is None:
+                    for item in self.items:
+                        item['blocker'] = 'paused' if item['id'] in parked else 'book'
+                    self.changed.wait(self.poll)
+                    continue
                 if head not in self.items:
                     continue  # cancelled meanwhile
                 if kind is not None:
                     for item in self.items:
-                        item['blocker'] = 'paused' if item['id'] in parked else kind
+                        item['blocker'] = 'paused' if item['id'] in parked else 'book' if item['id'] in waiting else kind
                     self.changed.wait(self.poll)
                     continue
                 for item in self.items:
                     if item['id'] in parked:
                         item['blocker'] = 'paused'
+                    elif item['id'] in waiting:
+                        item['blocker'] = 'book'
                 self.items.remove(head)
                 self.running = head
             self._persist()  # it runs now: an action is never run twice after a crash

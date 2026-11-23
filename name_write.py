@@ -398,7 +398,7 @@ class NameWrite(SeriesBackfill):
             if entry['record'].get('next_attempt', 0) > self.clock():
                 continue
             try:
-                self._idle()
+                self._may_finish()  # R35: a begun write finishes without the Pause or conversion gate (_idle)
                 self.resume(row['job_id'])
             except Later as wait:
                 self._defer(row['job_id'], wait, state=entry['state'])

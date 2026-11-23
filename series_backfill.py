@@ -565,11 +565,12 @@ class SeriesBackfill:
             if entry['record'].get('next_attempt', 0) > self.clock():
                 continue
             try:
-                self._idle()
+                self._may_finish()  # R35: a begun write finishes without the Pause or conversion gate (_idle)
                 self.resume(row['job_id'])
             except Later as wait:
                 self._defer(row['job_id'], wait, state=entry['state'])
-        # 0.30.0 item 2: an approved book whose series was written before a restart still gets its approved move.
+        # 0.30.0 item 2: an approved book whose series was written before a restart still gets its approved move. (R35: a
+        # Choose folder… of the book does not wait for this; run_move records the follow-up itself, _follow_up_now.)
         for row in self._rows("SELECT job_id FROM series_backfill WHERE state='done' AND json_extract(record,'$.move_approved') "
                               "AND json_extract(record,'$.follow_up') IS NULL"):
             try:
@@ -859,6 +860,22 @@ class SeriesBackfill:
             raise Later('A book is being converted or cleaned up', self.clock() + 60)
         if merge.inventory.worker and merge.inventory.worker.is_alive():
             raise Later('A library scan is running', self.clock() + 60)
+
+    def _may_finish(self):
+        """R35 (Sergei 2026-11-23; Senua's 0.31.0 delta 2, M6): a write that has begun (left 'writing', 'written', 'renamed'
+        or 'cataloged' by a Quit or a crash) is finished without waiting for a Pause of the audiobook jobs (his, or one saved
+        before this launch), a conversion or a cleanup (ruling 27: a begun file change finishes once begun). A Choose
+        folder… of the book waits for it (MergeService.rewriting), and must not wait for a Start. A library scan still holds
+        it, as it holds every file change; a new write still waits for everything _idle() names."""
+        merge = self.merge
+        if merge.inventory.worker and merge.inventory.worker.is_alive():
+            raise Later('A library scan is running', self.clock() + 60)
+
+    def _move_registered(self):
+        """R35 (Senua's 0.31.0 delta 2, m13): what tells a write that a still-queued move of its book is being run now: run_move's
+        own registration (MergeService._move_registered), never recovery's "every move runs" (a queued move is never run by
+        recovery). An engine without it: _move_running, as before."""
+        return getattr(self.merge, '_move_registered', None) or getattr(self.merge, '_move_running', None)
 
     # ------------------------------------------------------------------ the update
     def apply(self, job_id, found):
@@ -1281,7 +1298,7 @@ class SeriesBackfill:
         file the move took. The series write had no such check; the write of names read a queued move as not begun while
         the Mover was already hashing the file."""
         import book_move
-        if book_move.begun(db, job_id, getattr(self.merge, '_move_running', None)):
+        if book_move.begun(db, job_id, self._move_registered()):
             raise Held(MOVED_MEANWHILE)
 
     def _give_way(self, job_id, record, reason):
@@ -1294,7 +1311,7 @@ class SeriesBackfill:
         import book_move
         self._set(job_id, 'writing', '', record)
         with connect(self.database) as db:
-            if book_move.begun(db, job_id, getattr(self.merge, '_move_running', None)):
+            if book_move.begun(db, job_id, self._move_registered()):
                 raise Held(reason)
 
     def _clear_stage(self, job_id):

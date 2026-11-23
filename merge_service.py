@@ -6526,10 +6526,10 @@ class MergeService:
         None when there is no such choice: the follow-up goes on as before. Otherwise {'state': 'none'}: the rules move
         nothing (the folder is his, R26), and the rules' record ends this book where the write put it.
         R33: while the write is in hand his move waits (rewriting(), run_move), so it is queued here, never running.
-        R34 (Senua's 0.31.0 delta, m9): a refusal that passes (_passing) is asked again; one that lasts (his folder cannot
-        take the book's new name, a newer version, no publication) is never asked again. His move then fails with its own
-        cause and sentence, as the same press is refused when the name is too long at once (book_move.plan), and the answer
-        is None: the follow-up goes on as without a choice, so the rules' entry ends."""
+        R34 (Senua's 0.31.0 delta, m9) and R35 (delta 2, m14): a refusal that lasts (_lasting: his folder cannot take the
+        book's new name, a newer version, no publication) is never asked again; any other is 'later', asked again. On one
+        that lasts his move fails with its own cause and sentence, as the same press is refused when the name is too long at
+        once (book_move.plan), and the answer is None: the follow-up goes on as without a choice, so the rules' entry ends."""
         import book_move,datetime
         kept={'state':'none','reason':'You chose its folder; left as it is'}
         busy={'state':'later','reason':'This audiobook is being moved now. Choose another folder when it finishes.'}
@@ -6554,6 +6554,7 @@ class MergeService:
                         if self._move_running(live['move_id']):return busy
                         try:book_move.rebase(db,live['move_id'],start)
                         except book_move.Refused as refusal:
+                            if not self._lasting(refusal):raise
                             # Lasting (m9): his folder cannot take the new name. His move fails with that cause and sentence.
                             book_move._set(db,live['move_id'],'failed',expected='queued',cause=refusal.cause,detail={'reason':str(refusal)[:500]})
                             live=None
@@ -6570,7 +6571,23 @@ class MergeService:
         except sqlite3.Error as error:
             return {'state':'later','reason':str(error)[:300] or 'The catalog was busy'}
         except ValueError as error:
-            return {'state':'later','reason':str(error)[:300]} if self._passing(error) else None
+            # R35 (Senua's 0.31.0 delta 2, m14): only a refusal that never clears is lasting; any other is asked again.
+            return None if self._lasting(error) else {'state':'later','reason':str(error)[:300]}
+
+    @staticmethod
+    def _lasting(error):
+        """R35 (Senua's 0.31.0 delta 2, m14): the refusals of re-pointing his move, or queuing it again, that never clear by
+        themselves: his folder cannot take the book's new name (book_move.Refused 'not_writable', the 240-character path),
+        a book or a name no move can take (book_move.plan: a chapter update, a name that is no audiobook file's), a newer
+        version of the book, no completed publication, a job no longer in the catalog. Any other (a publication generation
+        that changed during the read, a move whose state changed meanwhile, a move of the book running or waiting for a
+        restart, a busy queue, Books Arranger closing) is asked again."""
+        import book_move
+        if isinstance(error,book_move.Refused):
+            return error.cause=='not_writable' or error.cause=='changed' and str(error) in (
+                'This audiobook cannot be moved: it is a chapter update of another file.','This audiobook cannot be moved under that name.')
+        return str(error) in ('This audiobook has a newer version; it was not moved','The audiobook has no completed publication',
+                              'The audiobook is not in the catalog')
 
     def _sorting_move(self,job_id,target,origin='user',override_id=None):
         """One approved sorting move: the usual verified move (book_move) to target, folder and name. origin: 'user' for
@@ -6622,21 +6639,49 @@ class MergeService:
                                output_root=getattr(self.inventory,'output_root',None),same_volume=self.move_same_volume or book_move.default_same_volume,
                                fault=self.move_fault,progress=report,remove_folder=book_delete._remove_folder,protected_roots=lambda:configured)
 
+    # The two ledgers of a write into a finished file, and the engine attribute that holds each writer.
+    WRITE_LEDGERS=(('series_backfill','series_backfill'),('name_writes','name_write'))
+
+    def _writes_of(self,move_id):
+        """[(writer, job id, state, follow-up still to record)] for each write of the book this move is of."""
+        import book_move
+        found=[]
+        with connect(self.inventory.database) as db:
+            if not book_move.have(db):return found
+            row=db.execute('SELECT job_id FROM book_moves WHERE move_id=?',(move_id,)).fetchone()
+            if row is None:return found
+            for table,attr in self.WRITE_LEDGERS:
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone():continue
+                entry=db.execute("SELECT state,json_extract(record,'$.move_approved'),json_extract(record,'$.follow_up') IS NOT NULL FROM "+table+" WHERE job_id=?",(row[0],)).fetchone()
+                if entry:found.append((attr,row[0],entry[0],entry[0]=='done' and bool(entry[1]) and not entry[2]))
+        return found
+
     def rewriting(self,move_id):
         """0.31.0 ruling R33 (Sergei 2026-11-23): whether the app is writing the book this move is of (its series or its
-        names): being written, renamed or recorded, or done with its follow-up (choice_after_write, the rules' move) still to
-        come. A move of that book waits for the write (the action queue's blocker 'book', and run_move): it never meets the
-        write's held file ("in use") nor runs beside it, and the follow-up re-points it to the rewritten file (R30)."""
-        import book_move,series_backfill
-        with connect(self.inventory.database) as db:
-            if not book_move.have(db):return False
-            row=db.execute('SELECT job_id FROM book_moves WHERE move_id=?',(move_id,)).fetchone()
-            if row is None:return False
-            for table in ('series_backfill','name_writes'):
-                if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone():continue
-                found=db.execute("SELECT state,json_extract(record,'$.move_approved'),json_extract(record,'$.follow_up') IS NOT NULL FROM "+table+" WHERE job_id=?",(row[0],)).fetchone()
-                if found and (found[0] in series_backfill.ACTIVE or found[0]=='done' and found[1] and not found[2]):return True
-        return False
+        names): being written, renamed or recorded. A move of that book waits for the write (the action queue's blocker
+        'book', and run_move): it never meets the write's held file ("in use") nor runs beside it, and the write's follow-up
+        re-points it to the rewritten file (R30). R35 (Senua's 0.31.0 delta 2, M6): a write whose file work has ended
+        ('done') holds no move, even before its follow-up is recorded (run_move records it, _follow_up_now)."""
+        import series_backfill
+        return any(state in series_backfill.ACTIVE for _attr,_job,state,_pending in self._writes_of(move_id))
+
+    def _follow_up_now(self,move_id):
+        """R35 (Senua's 0.31.0 delta 2, M6): a write of this move's book has ended ('done') and its follow-up is still to be
+        recorded: after a Quit at its end the writer's pass records it only once the app is idle and not paused (a saved
+        Pause waits for Start). It is recorded now, before the move is registered as running, so choice_after_write
+        re-points this move to the rewritten file (R30) and the move runs at once. Not again from inside a follow-up (one that
+        queues and runs a move itself, with no action queue). Returns the writes it read before that, as (writer, job id) to
+        state, or None when it did not look."""
+        if self.__dict__.get('_following_up'):return None
+        self.__dict__['_following_up']=True
+        try:
+            writes=self._writes_of(move_id)
+            for attr,job_id,_state,pending in writes:
+                writer=self.__dict__.get(attr)
+                if pending and writer is not None and callable(getattr(writer,'_follow_up',None)):writer._follow_up(job_id)
+            return {(attr,job_id):state for attr,job_id,state,_pending in writes}
+        finally:
+            self.__dict__['_following_up']=False
 
     @operation
     def run_move(self,move_id):
@@ -6647,11 +6692,19 @@ class MergeService:
         if self.draining or self.__dict__.get('_closing'):
             with connect(self.inventory.database) as db:book_move.cancel(db,move_id)
             raise ValueError('Books Arranger is closing. Nothing was moved.')
+        # R35: a write that has ended is followed up now, before the registration below (it re-points this move, R30).
+        try:seen=self._follow_up_now(move_id)
+        except sqlite3.Error:seen=None  # the catalog is busy: the write's own pass records it
         running=self.__dict__.setdefault('_moves_running',set());running.add(move_id)
         try:
             # R33: asked after the move is registered as running. A write that starts after this point sees the registration
-            # and gives way (SeriesBackfill._give_way); one that started before it is seen here, and the move waits.
-            try:waits=self.rewriting(move_id)
+            # and gives way (SeriesBackfill._give_way); one that started before it is seen here, and the move waits. R35: a
+            # write that ended between the follow-up above and the registration has its follow-up still to record: the move
+            # waits one more poll, and the next run_move records it first.
+            try:
+                import series_backfill
+                waits=self.rewriting(move_id) or bool(seen) and any(pending and seen.get((attr,job_id)) in series_backfill.ACTIVE
+                                                                     for attr,job_id,_state,pending in self._writes_of(move_id))
             except sqlite3.Error:waits=True  # not known: it waits rather than meet a write
             if waits:raise book_move.WaitsForWrite('The app is writing this audiobook; the move waits for it')
             move=self._mover().run(move_id)
@@ -6669,6 +6722,12 @@ class MergeService:
         """Whether this journaled move is being run (run_move) or reconciled (recovery at start) now."""
         recovery=self.__dict__.get('_move_recovery')
         return move_id in self.__dict__.get('_moves_running',()) or bool(recovery is not None and recovery.is_alive())
+
+    def _move_registered(self,move_id):
+        """R35 (Senua's 0.31.0 delta 2, m13): whether run_move has this move now. A write asks it of a move that is still
+        'queued' (book_move.begun): recovery at start never runs a queued move (it cancels the ones it found and leaves the
+        newer ones queued), so its "every move runs" reading of _move_running is not taken for one."""
+        return move_id in self.__dict__.get('_moves_running',())
 
     def _renamed_waiting(self,identity):
         """Senua 0.24.0 D1r3: the book's latest move when it is a same-volume rename that waits for a restart (unfinished,
