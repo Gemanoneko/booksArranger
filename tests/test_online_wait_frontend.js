@@ -48,7 +48,8 @@ function panel(row){context.fixture3=row;run('automaticResultKey=null;renderAuto
   assert.deepEqual(buttonsOf(tr).filter(b=>b.textContent && !b.hidden).map(b=>b.textContent),['Edit names','View metadata','Open source folder']);
   assert.equal(run('askOf(rows[0])'),null);
   // The asked part follows the book.
-  for(const [asking,words] of [[['original_title'],'its English title'],[['series'],'its series'],[['series_name'],'its series'],[['original_title','series_name'],'its English title and series'],[[],'this book'],[['something_new'],'this book']]){
+  for(const [asking,words] of [[['original_title'],'its English title'],[['series'],'its series'],[['series_name'],'the English name of its series'],[['original_title','series_name'],'its English title and series name'],
+      [['original_title','series'],'its English title and series'],[['original_title','series','series_name'],'its English title and series'],[['series','series_name'],'its series'],[[],'this book'],[['something_new'],'this book']]){
     paint([waiting('w',record({asking}))]);assert.equal(hintOf(trOf('cand-w')),'No online answer yet about '+words+'. Try 2 of 3 at '+clock+'. Nothing to do.',JSON.stringify(asking));
   }
   // A record that does not list what still waits is read from its fields; one that says nothing: "this book".

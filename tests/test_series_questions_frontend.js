@@ -49,6 +49,8 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
 function open(row){context.fixture1=row;run('automaticResultKey=null;mergeRenderKey=null;selectedPath=null;select(fixture1,true)');}
 // Everything the page shows outside the list: every element the page reads by id (the details panel, the jobs panel).
 const panelText=()=>[...nodes.entries()].filter(([id])=>id!=='inventory').map(([,element])=>deepText(element)).join('\n');
+// Every worded line of the panels: all but Accepted evidence, the raw record, which prints the book's facts whole (gap 5).
+const wordedText=()=>[...nodes.entries()].filter(([id])=>id!=='inventory' && id!=='automatic-accepted-evidence').map(([,element])=>deepText(element)).join('\n');
 const ORDINARY=['Edit names','View metadata','Open source folder'];
 (async()=>{
   const source=fs.readFileSync(path.join(__dirname,'..','web','app.js'),'utf8'),html=fs.readFileSync(path.join(__dirname,'..','web','index.html'),'utf8');
@@ -64,16 +66,22 @@ const ORDINARY=['Edit names','View metadata','Open source folder'];
     assert.equal(placeLine(tr),'',id+': no Place line');
     assert.ok(!deepText(tr).includes(DROPPED),id+': nothing about the dropped series on the row');
   }
-  // The details panel: no "Sources disagree" block, no Resolve metadata, no Save choices, and nothing about the series,
-  // the recorded facts' dump included. Positive control: that dump still prints the book's other facts.
+  // The details panel: no "Sources disagree" block, no Resolve metadata, no Save choices, and no worded line about the
+  // series. Amended 2026-11-23 (gap 5, check 48): Accepted evidence is the raw record and prints the book's facts whole,
+  // the dropped series among them; it is the only place that names it.
   open(dropped('a'));
   assert.equal(get('metadata-questions').hidden,true,'the block is hidden whole');assert.equal(get('edit-held-metadata').hidden,true);
   assert.equal(get('metadata-question-fields').children.length,0);
-  assert.ok(!panelText().includes(DROPPED),'the dropped series is nowhere in the panels');
+  assert.ok(!wordedText().includes(DROPPED),'no worded line anywhere names the dropped series');
   assert.match(get('automatic-accepted-evidence').textContent,/"original_language"/,'positive control: the facts are printed');
-  assert.match(get('automatic-accepted-evidence').textContent,/"gap_search"/);assert.doesNotMatch(get('automatic-accepted-evidence').textContent,/series_doubt|number_mismatch/);
-  assert.equal(run('JSON.stringify(shownFacts({gap_search:{gaps:["series"],series_doubt:[1]},x:1}))'),'{"gap_search":{"gaps":["series"]},"x":1}');
-  assert.equal(run('shownFacts(null)'),null);assert.equal(run('JSON.stringify(shownFacts({x:1}))'),'{"x":1}','facts without the entry are printed as they are');
+  assert.match(get('automatic-accepted-evidence').textContent,/"gap_search"/);
+  assert.match(get('automatic-accepted-evidence').textContent,/"series_doubt"/,'the raw record prints the dropped series');
+  assert.ok(get('automatic-accepted-evidence').textContent.includes(DROPPED) && /number_mismatch/.test(get('automatic-accepted-evidence').textContent),'with its name and why it was dropped');
+  // Negative control: a book with no dropped series has no such entry in its record.
+  open(book('plain',{metadata_facts:{original_language:{status:'known',value:'Russian'},gap_search:{gaps:['series'],unfilled:['series']}}}));
+  assert.match(get('automatic-accepted-evidence').textContent,/"gap_search"/);assert.doesNotMatch(get('automatic-accepted-evidence').textContent,/series_doubt/);
+  assert.equal(run('typeof shownFacts'),'undefined','the filter is gone');
+  open(dropped('a'));
   for(const word of ['Number unclear','Title unclear','Sources disagree — choose again','possible series','Possible series'])assert.ok(!panelText().includes(word) && !deepText(get('inventory')).includes(word),word);
 
   // 2. A question from before the update that is still on a row: the same ordinary row, never the old words, fields or
@@ -146,7 +154,7 @@ const ORDINARY=['Edit names','View metadata','Open source folder'];
   assert.deepEqual(listed,['Which title should this book use?']);
   assert.equal(get('edit-held-metadata').hidden,false);assert.equal(get('edit-held-metadata').textContent,'Resolve metadata question');
   assert.ok(!panelText().includes('Which series should this book use?') && !panelText().includes('Which number should this book use?'));
-  assert.ok(!panelText().includes(DROPPED));
+  assert.ok(!wordedText().includes(DROPPED));
   // With that question gone too the block hides whole again: no heading over an empty list, no Save choices to press.
   open(dropped('q'));assert.equal(get('metadata-questions').hidden,true);assert.equal(get('edit-held-metadata').hidden,true);
 
