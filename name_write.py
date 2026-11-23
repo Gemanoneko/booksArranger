@@ -571,11 +571,10 @@ class NameWrite(SeriesBackfill):
             updated = dict(output, final_path=str(new), sha256=record['new_sha256'], size=record['new_size'], parent_identity=ancestry, validation=validation)
             journal = journal_named(row['journal'], updated)
             db.execute('BEGIN IMMEDIATE')
-            import book_move
-            if book_move.have(db) and db.execute("SELECT 1 FROM book_moves WHERE job_id=? AND state NOT IN ('queued','failed','cancelled') LIMIT 1", (job_id,)).fetchone():
-                # A move of this book began meanwhile (Choose folder… during the write): its chain starts from the receipt as
-                # it is, so the receipt is not changed under it. Both copies are kept; the catalog still names the old file.
-                raise Held('The audiobook was moved meanwhile; the catalog is unchanged and both copies are kept')
+            # A move of this book began meanwhile (Choose folder… during the write): its chain starts from the receipt as it
+            # is, so the receipt is not changed under it. Both copies are kept; the catalog still names the old file. One
+            # check for both writes (Senua's 0.31.0 review, M1: a queued move the Mover runs has begun).
+            self._no_move_begun(db, job_id)
             count = db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=?,output=?,journal=?,updated=? WHERE job_id=? AND output=?',
                                (text, digest, json.dumps(updated), journal, series_backfill._stamp(), job_id, row['output'])).rowcount
             if count != 1:

@@ -23,6 +23,11 @@
 - A book whose question was withdrawn no longer shows as Held before Start.
 - An English title, or an author's name put in order, is written inside the finished file's tags and into the app's list, not only into its name and folder. The audio is not changed.
 
+### Fixed
+
+- Choose folder… while a book's new names are written into its file no longer leaves two copies and a book the app cannot find. Whichever began first finishes; the other stops, and no file is lost.
+- The same holds while a book's series is written into its file.
+
 ## [v0.30.1] - 2026-11-20
 
 ### Fixed

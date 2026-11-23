@@ -692,6 +692,174 @@ class RollbackTests(unittest.TestCase):
             self.publication(book)  # what any version would read without the intent: a receipt no record explains
 
 
+class MoveWindowTests(unittest.TestCase):
+    """Senua's 0.31.0 review, M1 and M2: Choose folder… pressed while a write of the book is in hand (a write of names, or a
+    series write). The Mover resolves the book and hashes the held file while its journal still reads 'queued'; a write whose
+    catalog step then replaced the receipt left two copies and a book the app could not resolve ("Moved audiobook history
+    does not link to its publication"). Each case runs the real Mover mid-run (its own progress report, during the hash,
+    is where the write's catalog step runs), not a journal state set by hand. One guard serves both writes
+    (SeriesBackfill._no_move_begun, book_move.begun); the Mover stops a move whose book was rewritten before its first
+    journal write (Mover._still_at_start), and reads the book only after a writer's transaction under way has ended."""
+
+    def mover(self, book, report=None, strategy='rename'):
+        lib = book.lib
+        same = book_move.default_same_volume if strategy == 'rename' else (lambda old, new: False)  # 'copy': as to another volume
+        return book_move.Mover(lambda: connect(lib.db), lambda job_id, kind: book.resolve(), sources=lambda: (str(lib.source_root),),
+                               output_root=str(lib.root), remove_folder=book_delete._remove_folder, same_volume=same,
+                               protected_roots=lambda: (str(lib.root), str(lib.source_root)), progress=report)
+
+    def run_move(self, book, move_id, report=None, registered=True, strategy='rename'):
+        """The move as MergeService.run_move runs it: registered as running (_move_running) while the Mover has it.
+        registered=False: a Mover the writer cannot see (the journal's own backstop is what is left)."""
+        running = book.merge.__dict__.setdefault('_moves_running', set())
+        if registered:
+            running.add(move_id)
+        try:
+            return self.mover(book, report, strategy).run(move_id)
+        finally:
+            running.discard(move_id)
+
+    def choose_folder(self, book):
+        """Choose folder… on the finished book: his move to Mine, from where the catalog says the book is now."""
+        with connect(book.lib.db) as db:
+            return book_move.plan(db, job_id=book.lib.job_id, kind='base', candidate_id=book.lib.candidate, start=book_move.location(book.resolve()),
+                                  folder=str(book.lib.root / 'Mine'), root=str(book.lib.root), origin='user', override_id='his')
+
+    def during_the_hash(self, book, then):
+        """The Mover's progress report while it hashes the held file: the first one records the move's journal state and
+        runs then() (a write's catalog step) at that moment."""
+        seen = []
+
+        def report(move_id, percent):
+            if not seen:
+                with connect(book.lib.db) as db:
+                    seen.append(db.execute('SELECT state FROM book_moves WHERE move_id=?', (move_id,)).fetchone()[0])
+                then()
+        return report, seen
+
+    def names_renamed(self, book):
+        """A write of names approved by the rules, written and renamed; its catalog step waits for a busy catalog."""
+        book.approve()
+        with mock.patch.object(NameWrite, 'catalog', side_effect=sqlite3.OperationalError('database is locked')):
+            book.writer.run_pass()
+        self.assertEqual(book.state()[0], 'renamed')
+        book.writer.clock = lambda: 2_000_000_000.0
+        return Path(book.writer.entry(book.lib.job_id)['record']['new_path'])
+
+    def series_renamed(self, book):
+        """A series write (no names: the book has no English title) approved by the rules, written and renamed in its own
+        folder; its catalog step waits for a busy catalog."""
+        from test_sorting_030 import cycle
+        with connect(book.lib.db) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS public_research_cache(url TEXT PRIMARY KEY, raw TEXT, sha256 TEXT, fetched REAL)')
+            cycle(db, 777, 'Нормальное аномальное', 'Normal Abnormal', 'en')
+            db.execute('DELETE FROM series_backfill')
+        research = SimpleNamespace(_series_goodreads=lambda *a: None, _series_wikidata=lambda *a: None, _series_publisher=lambda *a: None,
+                                   _series_litres=lambda *a: None,
+                                   _series_fantlab=lambda *a: {'provider': 'fantlab', 'name': 'Нормальное аномальное', 'number': '10', 'number_from': 'counted',
+                                                               'source_url': 'https://fantlab.ru/work777'})
+        backfill = book.merge.series_backfill = SeriesBackfill(book.merge, research=research, stage=book.lib.base / 'proof-stage')
+        backfill.run_pass()  # the look-up finds the series and holds the book for the rules
+        book.filing.tick()  # the rules approve the write
+        with mock.patch.object(SeriesBackfill, 'catalog', side_effect=sqlite3.OperationalError('database is locked')):
+            backfill.run_pass()
+        entry = backfill.entry(book.lib.job_id)
+        self.assertEqual((entry['state'], entry['record'].get('names')), ('renamed', None), 'a series write alone')
+        backfill.clock = lambda: 2_000_000_000.0
+        return backfill, Path(entry['record']['new_path'])
+
+    def assert_his_move_kept_the_book(self, book, done, new, ledger):
+        moved = book.lib.root / 'Mine' / book.path.name
+        self.assertEqual(book.resolve()['final_path'], str(moved), 'the book resolves where his move took it (was: the chain does not link)')
+        self.assertEqual(done['state'], 'complete', 'his move went on from the receipt it started from')
+        state, reason = ledger.entry(book.lib.job_id)['state'], ledger.entry(book.lib.job_id)['reason']
+        self.assertEqual(state, 'held')
+        self.assertIn('moved meanwhile', reason)
+        output = book.output()
+        self.assertEqual((output['final_path'], output['sha256']), (str(book.path), book.original), 'the receipt is the one his move started from')
+        self.assertEqual(sha(moved), book.original, 'every byte moved')
+        self.assertEqual(sha(new), ledger.entry(book.lib.job_id)['record']['new_sha256'], 'the proven new copy is kept, never half written')
+
+    def test_m1_a_move_the_mover_runs_while_its_journal_reads_queued_stops_the_write_of_names(self):
+        book = Book(self)
+        new = self.names_renamed(book)
+        move = self.choose_folder(book)
+        report, seen = self.during_the_hash(book, book.writer.run_pass)
+        done = self.run_move(book, move['move_id'], report)
+        self.assertEqual(seen, ['queued'], "Senua's window: the write's catalog step ran while the Mover hashed the file under 'queued'")
+        self.assert_his_move_kept_the_book(book, done, new, book.writer)
+
+    def test_m2_a_move_that_completed_before_the_series_writes_catalog_step_keeps_the_catalog(self):
+        book = Book(self, english=None)
+        backfill, new = self.series_renamed(book)
+        move = self.choose_folder(book)
+        done = self.run_move(book, move['move_id'])
+        self.assertEqual(done['state'], 'complete')
+        backfill.run_pass()  # the series write's catalog step, after his move
+        self.assert_his_move_kept_the_book(book, done, new, backfill)
+
+    def test_m2_a_move_the_mover_runs_while_its_journal_reads_queued_stops_the_series_write_too(self):
+        book = Book(self, english=None)
+        backfill, new = self.series_renamed(book)
+        move = self.choose_folder(book)
+        report, seen = self.during_the_hash(book, backfill.run_pass)
+        done = self.run_move(book, move['move_id'], report)
+        self.assertEqual(seen, ['queued'])
+        self.assert_his_move_kept_the_book(book, done, new, backfill)
+
+    def test_control_a_queued_move_nothing_runs_yet_lets_the_series_write_finish(self):
+        # The same press with no Mover on it yet: a move only queued has not begun, so the write is recorded and the book
+        # resolves at its new name. (Such a move, run later, starts from a place the book is no longer at and moves nothing:
+        # test_a_move_begun_during_the_write_keeps_the_catalog_and_both_copies' control, for the write of names.)
+        book = Book(self, english=None)
+        backfill, new = self.series_renamed(book)
+        self.choose_folder(book)
+        backfill.run_pass()
+        self.assertEqual(backfill.entry(book.lib.job_id)['state'], 'done', 'the write is recorded')
+        self.assertEqual(book.resolve()['final_path'], str(new))
+        self.assertFalse(book.path.exists(), 'its old file removed: no copy left behind')
+
+    def test_a_move_its_writer_cannot_see_stops_at_its_first_journal_write_and_moves_nothing(self):
+        # The journal's own backstop: the writer read the move as not begun (nothing told it the Mover had it), recorded
+        # the write, and the Mover, already past its start, stops at its first journal write. Both strategies: a rename
+        # (rename_intent) and a copy to another volume (copy_intent, before its temporary is made).
+        for strategy in ('rename', 'copy'):
+            with self.subTest(strategy=strategy):
+                book = Book(self)
+                new = self.names_renamed(book)
+                move = self.choose_folder(book)
+                report, seen = self.during_the_hash(book, book.writer.run_pass)
+                done = self.run_move(book, move['move_id'], report, registered=False, strategy=strategy)
+                self.assertEqual(seen, ['queued'])
+                self.assertEqual(book.resolve()['final_path'], str(new), 'the book resolves at its new name (was: the chain does not link)')
+                self.assertEqual((done['state'], done['cause'], done['strategy']), ('failed', 'changed', strategy), 'the move stopped before anything moved')
+                self.assertEqual([item.name for item in (book.lib.root / 'Mine').iterdir()], [], 'nothing in his folder, not even a temporary')
+                self.assertEqual((book.output()['final_path'], book.manifest()['metadata']['title']), (str(new), ENGLISH))
+
+    def test_a_move_registered_after_the_writers_check_reads_the_book_only_once_that_write_is_recorded(self):
+        # The writer asked (nothing had begun) and has not committed yet when run_move registers the move and starts it.
+        book = Book(self)
+        new = self.names_renamed(book)
+        move = self.choose_folder(book)
+        hashed, result = [], {}
+        real = SeriesBackfill._no_move_begun
+
+        def check_then_his_move_starts(writer, db, job_id):
+            real(writer, db, job_id)
+            thread = threading.Thread(target=lambda: result.update(move=self.run_move(book, move['move_id'], lambda *a: hashed.append(a))))
+            thread.start()
+            result['thread'] = thread
+            thread.join(1.5)  # the Mover is registered and running now, while this write transaction is still open
+        with mock.patch.object(SeriesBackfill, '_no_move_begun', check_then_his_move_starts):
+            book.writer.run_pass()
+        result['thread'].join(60)
+        self.assertEqual(hashed, [], 'the Mover never held the file: it read the book after the write was recorded')
+        self.assertEqual((result['move']['state'], result['move']['cause']), ('failed', 'changed'))
+        self.assertEqual(book.state(), ('done', ''), 'the write finished: its old file removed, no copy left behind')
+        self.assertFalse(book.path.exists())
+        self.assertEqual(book.resolve()['final_path'], str(new))
+
+
 if __name__ == '__main__':
     if sys.argv[1:2] == ['--child']:
         child(sys.argv[2], sys.argv[3])

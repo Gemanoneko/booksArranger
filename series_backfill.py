@@ -106,6 +106,9 @@ BLOCKED = 'Its source cleanup is on hold; the series look-up waits for it'
 # such a book is looked up once more under the rule.
 REVIEW_REASON = 'Series sources need review'
 WAITING_ON = ('blocked',)
+# Senua's 0.31.0 review, M1 and M2: a move of the book began during a write (Choose folder… while it was written); the
+# write's catalog step leaves the receipt the move started from as it is (SeriesBackfill._no_move_begun).
+MOVED_MEANWHILE = 'The audiobook was moved meanwhile; the catalog is unchanged and both copies are kept'
 # The hosts a deferral recorded before 0.31.0 named, as the sources that ask them.
 HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
                 'html.duckduckgo.com': ('publisher', 'litres'), 'en.wikipedia.org': ('publisher',), 'ru.wikipedia.org': ('publisher',),
@@ -1143,6 +1146,7 @@ class SeriesBackfill:
                 import name_write
                 journal = name_write.journal_named(row['journal'], updated)
             db.execute('BEGIN IMMEDIATE')
+            self._no_move_begun(db, job_id)
             changed = db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=?,output=?,journal=?,updated=? WHERE job_id=? AND output=?',
                                  (text, digest, json.dumps(updated), journal, _stamp(), job_id, row['output'])).rowcount
             if changed != 1:
@@ -1176,6 +1180,17 @@ class SeriesBackfill:
         merge.__dict__.get('_validated_outputs', {}).pop(job_id, None)
         if hasattr(merge, 'invalidate_status'):
             merge.invalidate_status()
+
+    def _no_move_begun(self, db, job_id):
+        """Senua's 0.31.0 review, M1 and M2: the one move check of both writes' catalog step (this one and the write of
+        names'), asked inside its write transaction before the receipt is replaced. A move of the book that has begun
+        (book_move.begun: past 'queued', or queued and being run now, MergeService._move_running) starts its chain from
+        the receipt as it is, so the receipt is not changed under it: Held, both copies kept, the catalog still names the
+        file the move took. The series write had no such check; the write of names read a queued move as not begun while
+        the Mover was already hashing the file."""
+        import book_move
+        if book_move.begun(db, job_id, getattr(self.merge, '_move_running', None)):
+            raise Held(MOVED_MEANWHILE)
 
     def _clear_stage(self, job_id):
         """The proof tools' own output files for this book (never anything else)."""

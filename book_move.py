@@ -309,6 +309,22 @@ def current(db, job_id, kind):
     return {'move_id': record[0], 'generation': record[1]} if record else None
 
 
+def begun(db, job_id, running=None):
+    """Senua's 0.31.0 review, M1 and M2: whether a move of this book has begun, asked by a writer about to replace the book's
+    receipt (the write of names and the series write, inside their catalog transaction: SeriesBackfill._no_move_begun).
+    A move past 'queued' that did not fail or get cancelled has begun. So has a 'queued' one that running(move_id) says is
+    being run now: the Mover resolves the book and hashes the held file while its journal still reads 'queued' (its first
+    journal write comes after the hash), so 'queued' alone is not "not begun". running: None reads every queued move as not
+    begun. Either way the Mover itself stops a move whose book was rewritten before its first journal write
+    (Mover._still_at_start), so a receipt is never replaced under a move that goes on."""
+    if not have(db):
+        return False
+    for move_id, state in db.execute("SELECT move_id,state FROM book_moves WHERE job_id=? AND state NOT IN ('failed','cancelled')", (job_id,)).fetchall():
+        if state != 'queued' or running is not None and running(move_id):
+            return True
+    return False
+
+
 def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None, name=None, origin=None):
     """Queue one move of the book from its current location (start) into folder. None when it is already there (no-op).
     A queued move of the same book is superseded; a move already running is refused. running(move_id): whether that
@@ -534,12 +550,13 @@ class Mover:
         start = move['from']
         target = move['target_path']
         folder = move['target_folder']
-        try:
-            now = location(self.resolve(move['job_id'], move['kind']))
-        except (ValueError, OSError, KeyError) as error:
-            raise Failed('source_missing', str(error))
-        if not same_location(now, start):
-            raise Failed('changed', 'The audiobook is not where this move was planned from')
+        # Senua's 0.31.0 review, M1: a writer's catalog transaction already under way ends before the book is read. A writer
+        # asks book_move.begun() inside its own write transaction, which reads this move as begun from the moment
+        # MergeService.run_move registered it; one that asked before that has committed once this write lock is ours, so
+        # the location read below is the one it recorded and the move stops here, before the file is held.
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+        self._still_at_start(move, start)
         import destination_overrides
         holder = next((source for source in self.sources() or () if source and destination_overrides.inside(folder, source)), None)
         if holder:
@@ -598,6 +615,20 @@ class Mover:
             if settled:
                 self._after_old_closed(move)  # only after a normal end: a fault (a crash) leaves the journal to recovery
 
+    def _still_at_start(self, move, start):
+        """The book is still where this move was planned from (its effective location now: receipt, relocation, moves).
+        Asked at the start, and again right after the move's first journal write out of 'queued' (Senua's 0.31.0 review,
+        M1 and M2): a writer that replaced the book's receipt before that write committed read the move as not begun
+        (book_move.begun), and the move then stops with nothing moved. Its chain would otherwise start from a receipt that
+        is no longer the book's, and the book would read as unavailable. From that write on, every writer reads the move as
+        begun and leaves the receipt as it is."""
+        try:
+            now = location(self.resolve(move['job_id'], move['kind']))
+        except (ValueError, OSError, KeyError) as error:
+            raise Failed('source_missing', str(error))
+        if not same_location(now, start):
+            raise Failed('changed', 'The audiobook is not where this move was planned from')
+
     def _hash(self, held, move, size, offset, share):
         import hashlib
         value = hashlib.sha256()
@@ -619,6 +650,7 @@ class Mover:
         self._write(move['move_id'], 'rename_intent', expected='queued', strategy='rename',
                     proof={'old': start, 'old_native': facts, 'target': str(target)})
         self.fault('rename_intent')
+        self._still_at_start(move, start)  # nothing renamed yet: a 'changed' failure here moved nothing
         refused = None
         try:
             with DirectoryBoundary(target_root, target.parent, rename_destination=True) as destination:
@@ -667,6 +699,8 @@ class Mover:
             proof['rename_refused'] = refused
         self._write(move['move_id'], 'copy_intent', expected=expected, strategy='copy', temp=str(temp), proof=proof)
         self.fault('copy_intent')
+        if expected == 'queued':
+            self._still_at_start(move, start)  # the temporary is not made yet: a 'changed' failure here moved nothing
         import hashlib
         try:
             with DirectoryBoundary(target_root, target.parent) as destination:
