@@ -44,6 +44,7 @@ const measuredSeconds={'test_inplace_m4b.py':389,'test_inplace_m4b.py:EligiblePa
   'test_set_release.py':200,  // 0.22.3: six real automatic runs with conversions, 150 s alone (2026-10-28), scaled for the workers at once
   'test_launch_held_cleanup.py':150,  // 0.30.0 R2-1: real conversions and four engine relaunches, 145 s alone (2026-11-20)
   'test_rule_filing_031.py':90,  // 0.31.0 milestone B: 340 real moves of 300 fixture books and one ffmpeg audiobook, 41 s alone (2026-11-23), scaled for the workers at once
+  'test_rule_filing_names_031.py':25,  // 0.31.0 R27: the rules' pass with the write of names, 11 s alone (2026-11-23), scaled the same
   'test_name_write_031.py':80,  // 0.31.0 R27: ten ffmpeg audiobooks written, five killed in a child process and recovered, 37 s alone (2026-11-23), scaled as test_rule_filing_031
   'test_part_sets.py':163,'test_automatic_media.py':118,'test_series_backfill.py':110,'test_iron_skazka.py':107,'test_destination_admission.py':85,
   'test_split_books.py':78,'test_migration_planning.py':70,'test_automatic_media_policy.py':67,'test_m4b_join.py':62,'test_retry_intent.py':62,

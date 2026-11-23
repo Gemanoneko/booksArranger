@@ -50,7 +50,10 @@ from scanner import connect
 TABLE = ('CREATE TABLE IF NOT EXISTS rule_filings(filing_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, candidate_id TEXT NOT NULL, state TEXT NOT NULL,'
          ' step TEXT NOT NULL, from_path TEXT NOT NULL, to_path TEXT NOT NULL, placed_path TEXT, final_path TEXT, kinds TEXT NOT NULL,'
          ' reasons TEXT NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL, move_id TEXT, cause TEXT, detail TEXT,'
-         ' created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL, done_utc TEXT)')
+         ' created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL, done_utc TEXT, written TEXT)')
+# 0.31.0 R27: 'written', what the change put inside the file's tags (WRITTEN_KINDS, a JSON list; NULL: nothing, as for a move,
+# and for every entry made before the column). Added to a table made by an earlier 0.31.0 build (setup()).
+WRITTEN_KINDS = ('series', 'title', 'author')
 INDEXES = ("CREATE UNIQUE INDEX IF NOT EXISTS rule_filings_open ON rule_filings(job_id) WHERE state='open'",  # one book, one entry in hand
            'CREATE INDEX IF NOT EXISTS rule_filings_by_state ON rule_filings(state,done_utc)')
 OPEN, DONE, FAILED = 'open', 'done', 'failed'
@@ -65,7 +68,7 @@ REFUSALS = 3               # a book the engine would not even queue this often i
 # Refusals to queue a move that pass by themselves (the app is closing, the book has another queued action, a move of it
 # runs): no try and no record; the next pass asks again.
 PASSING = ('Move was not accepted. Nothing was moved.', 'Books Arranger is closing. Nothing was moved.', 'This audiobook is being moved now',
-           'Close and reopen Books Arranger to finish the move')
+           'Close and reopen Books Arranger to finish the move', 'This audiobook is being renamed now')
 RECORD_LIMIT = 200         # entries the record's route returns at a time (Judy 3.4)
 DID_NOT_FINISH = 'did_not_finish'  # the could-not-move key of a change that started and did not finish
 COULD_NOT_KEYS = sorting_moves.LASTING_KEYS + (DID_NOT_FINISH,)
@@ -84,6 +87,8 @@ def _epoch(value):
 
 def setup(db):
     db.execute(TABLE)
+    if 'written' not in {row[1] for row in db.execute('PRAGMA table_info(rule_filings)')}:
+        db.execute('ALTER TABLE rule_filings ADD COLUMN written TEXT')
     for statement in INDEXES:
         db.execute(statement)
 
@@ -94,10 +99,12 @@ def have(db):
 
 def _row(record):
     value = dict(record)
-    for name in ('kinds', 'reasons'):
+    for name in ('kinds', 'reasons', 'written'):
         try:
-            value[name] = json.loads(value[name])
+            value[name] = json.loads(value[name]) if name in value else []
         except (TypeError, ValueError):
+            value[name] = []
+        if not isinstance(value[name], list):
             value[name] = []
     return value
 
@@ -115,7 +122,8 @@ def record(db, output_root=None, search='', limit=RECORD_LIMIT):
     'entries': the newest `limit` of them}. search: a text looked for in every entry's title, author and both paths, case
     aside; '' matches all. An entry: {'id', 'book_id', 'job_id', 'title', 'author' (as filed now), 'at', 'from', 'to',
     'from_shown', 'to_shown' (under Audiobooks Sorted), 'kinds', 'reasons' (sorting_moves.REASON_KINDS, as fields),
-    'in_app': the book is still in the app's list}."""
+    'in_app': the book is still in the app's list, 'written' (0.31.0 R27): what went inside the file's tags (WRITTEN_KINDS;
+    [] for a change of path only)}."""
     limit = max(1, min(int(limit or RECORD_LIMIT), RECORD_LIMIT))
     count, last = totals(db)
     if not count:
@@ -132,7 +140,7 @@ def record(db, output_root=None, search='', limit=RECORD_LIMIT):
     entries = [{'id': row['filing_id'], 'book_id': row['candidate_id'], 'job_id': row['job_id'], 'title': row['title'], 'author': row['author'],
                 'at': row['done_utc'], 'from': row['from_path'], 'to': row['final_path'], 'from_shown': sorting_moves._shown(row['from_path'], output_root),
                 'to_shown': sorting_moves._shown(row['final_path'], output_root), 'kinds': row['kinds'], 'reasons': row['reasons'],
-                'in_app': row['candidate_id'] in listed} for row in shown]
+                'in_app': row['candidate_id'] in listed, 'written': row['written']} for row in shown]
     return {'count': count, 'matching': len(rows), 'last_at': last, 'limit': limit, 'entries': entries}
 
 
@@ -219,6 +227,30 @@ def kinds_of(item):
     """The kinds of change of a planned book as the record names them (sorting_moves.REASON_KINDS)."""
     names = {'series_language': 'series_name'}
     return [names.get(name, name) for name in item.get('items') or []]
+
+
+def route(item, names_writer=True):
+    """How a planned book is put in hand (0.31.0 R27, one pass per book): 'write', its series written into the file (with the
+    names the list files it under, in the same rewrite); 'names', its new title or author credit written into the file
+    (name_write) when it has no series to write; 'move', the app's verified move alone (the new name and folder only). A
+    book whose write is done (placed) is moved. names_writer: the engine runs the write of names."""
+    if 'series' in (item.get('items') or []) and not item.get('placed'):
+        return 'write'
+    if item.get('names') and not item.get('placed') and names_writer:
+        return 'names'
+    return 'move'
+
+
+def written_kinds(record):
+    """WRITTEN_KINDS a finished write's ledger record says went into the file: the series (series_backfill), the title
+    and the author credit (record 'names')."""
+    names = record.get('names') if isinstance(record.get('names'), dict) else {}
+    found = ['series'] if record.get('series') else []
+    if 'title' in names:
+        found.append('title')
+    if 'canonical_author' in names:
+        found.append('author')
+    return found
 
 
 class RuleFiling:
@@ -323,12 +355,12 @@ class RuleFiling:
             db.execute("DELETE FROM rule_filings WHERE filing_id=? AND state='open' AND placed_path IS NULL", (filing['filing_id'],))
 
     def _failed(self):
-        """{(job id, planned path): (tries that did not finish, epoch of the last one)}."""
+        """{(job id, planned path): (tries that did not finish, epoch of the last one, the last one's cause key)}."""
         found = {}
-        for row in self._rows("SELECT job_id,to_path,updated_utc,kinds,reasons FROM rule_filings WHERE state='failed'"):
+        for row in self._rows("SELECT job_id,to_path,updated_utc,cause,kinds,reasons FROM rule_filings WHERE state='failed' ORDER BY updated_utc,rowid"):
             name = (row['job_id'], sorting_moves.key(row['to_path']))
-            count, last = found.get(name, (0, 0.0))
-            found[name] = (count + 1, max(last, _epoch(row['updated_utc'])))
+            count, last, _ = found.get(name, (0, 0.0, None))
+            found[name] = (count + 1, max(last, _epoch(row['updated_utc'])), row['cause'] or None)
         return found
 
     # ------------------------------------------------------------------ entries in hand
@@ -336,12 +368,13 @@ class RuleFiling:
         """Close every entry in hand whose work has ended, from the series look-up's ledger and the move journal; an entry
         whose queued move was taken back before it ran (the app closed) goes back to be queued again."""
         import book_move
-        backfill = self.merge.__dict__.get('series_backfill')
+        ledgers = {'write': self.merge.__dict__.get('series_backfill'), 'names': self.merge.__dict__.get('name_write')}
         for filing in self._open().values():
-            if filing['step'] == 'write':
-                entry = backfill.entry(filing['job_id']) if backfill is not None else None
+            if filing['step'] in ledgers:
+                ledger = ledgers[filing['step']]
+                entry = ledger.entry(filing['job_id']) if ledger is not None else None
                 if entry is None:
-                    self._fail(filing, 'changed', 'The series update is not on record')
+                    self._fail(filing, 'changed', 'The series update is not on record' if filing['step'] == 'write' else 'The new names are not on record')
                     continue
                 state, written = entry['state'], entry['record']
                 if state == 'done':
@@ -350,16 +383,18 @@ class RuleFiling:
                         continue  # its move into the series folder is still to be asked for
                     placed = written.get('new_path')
                     move_id = (follow.get('move') or {}).get('move_id') if isinstance(follow.get('move'), dict) else None
+                    tags = json.dumps(written_kinds(written))
                     if follow.get('state') == 'none':
+                        self._update(filing['filing_id'], written=tags)
                         self._finish(filing, placed)
                         continue
                     if move_id:
                         filing = dict(filing, step='move', move_id=move_id, placed_path=placed)
-                        self._update(filing['filing_id'], step='move', move_id=move_id, placed_path=placed)
+                        self._update(filing['filing_id'], step='move', move_id=move_id, placed_path=placed, written=tags)
                     else:
                         # Written and renamed in its own folder; the move was not queued. The plan lists the book again from
                         # there (sorting_moves: placed) and this entry goes on with it.
-                        self._update(filing['filing_id'], step='', placed_path=placed, detail=str(follow.get('reason') or follow.get('state') or '')[:500])
+                        self._update(filing['filing_id'], step='', placed_path=placed, written=tags, detail=str(follow.get('reason') or follow.get('state') or '')[:500])
                         continue
                 elif state in ('held', 'none', 'skipped'):
                     self._fail(filing, sorting_moves.reason_key(entry['reason'], sorting_moves.NOT_MOVED_KEYS), entry['reason'])
@@ -381,18 +416,27 @@ class RuleFiling:
                 elif move['state'] == 'cancelled':
                     self._update(filing['filing_id'], step='', move_id=None)  # it never ran: queued again by the rules
 
+    def _route(self, item):
+        return route(item, self.merge.__dict__.get('name_write') is not None)
+
     def _dispatch(self, item, filing=None):
         """Put one planned book in hand: its series write approved (series_backfill.approve, exactly as an approval of the
-        list did), or its move queued as the app's own. True when it is in hand."""
+        list did, with the names the list files it under: one rewrite), its names approved for a write of their own
+        (name_write.approve, 0.31.0 R27), or its move queued as the app's own. True when it is in hand."""
         merge = self.merge
         job = item['job_id']
         created = filing is None
         try:
             if created:
                 filing = self._begin(item)
-            if 'series' in (item.get('items') or []) and not item.get('placed'):
-                merge.series_backfill.approve(job, item['series'], item['to'], by=ORIGIN)
+            kind = self._route(item)
+            if kind == 'write':
+                extra = {'names': item['names'], 'reasons': item.get('reasons')} if item.get('names') else {}
+                merge.series_backfill.approve(job, item['series'], item['to'], by=ORIGIN, **extra)
                 self._update(filing['filing_id'], step='write', to_path=item['to'])
+            elif kind == 'names':
+                merge.name_write.approve(job, item['names'], item['to'], by=ORIGIN, reasons=item.get('reasons'))
+                self._update(filing['filing_id'], step='names', to_path=item['to'])
             else:
                 answer = merge._sorting_move(job, item['to'], origin=ORIGIN)
                 move = answer.get('move') if isinstance(answer.get('move'), dict) else {}
@@ -502,7 +546,7 @@ class RuleFiling:
                 continue
             tries = failed.get((job, sorting_moves.key(item['to'])))
             if tries and job not in opened and (tries[0] >= TRIES or now - tries[1] < SPACING):
-                could.append(self._could(item, DID_NOT_FINISH, output_root, tries=tries[0]))
+                could.append(self._could(item, DID_NOT_FINISH, output_root, tries=tries[0], cause=tries[2]))
                 continue
             ready.append(item)
         for item in answer['refused']:
@@ -556,14 +600,16 @@ class RuleFiling:
         except Exception:
             return False
 
-    def _could(self, item, name, output_root, tries=None):
+    def _could(self, item, name, output_root, tries=None, cause=None):
         filed = item.get('filed') or {}
         value = {'job_id': item['job_id'], 'book_id': item.get('book_id'), 'title': str(filed.get('title') or item.get('title') or ''),
                  'author': str(filed.get('author') or item.get('author') or ''), 'from': item.get('from') or '', 'to': item.get('to') or None,
                  'from_shown': item.get('from_shown') if item.get('from_shown') is not None else sorting_moves._shown(item.get('from'), output_root),
                  'to_shown': item.get('to_shown'), 'key': name, 'kinds': kinds_of(item), 'reasons': item.get('reasons') or []}
         if tries is not None:
-            value.update(tries=tries, tries_limit=TRIES, retries=tries < TRIES)
+            # 'cause' (0.31.0 R27): the last try's own key (sorting_moves.NOT_MOVED_KEYS, a move's cause, 'refused', or
+            # 'other'), e.g. 'tags_not_written' when the new names did not read back from the rewritten file.
+            value.update(tries=tries, tries_limit=TRIES, retries=tries < TRIES, cause=cause)
         return value
 
     def _count(self, answer, ready, could, counts, paused, now):
@@ -572,12 +618,16 @@ class RuleFiling:
         import series_backfill
         opened = self._open()
         backfill = self.merge.__dict__.get('series_backfill')
-        groups = {'writes_waiting': [], 'writes_running': [], 'moves_waiting': [], 'moves_running': []}
+        names = self.merge.__dict__.get('name_write')
+        groups = {'writes_waiting': [], 'writes_running': [], 'renames_waiting': [], 'renames_running': [], 'moves_waiting': [], 'moves_running': []}
         by_job = {item['job_id']: item for item in answer['items']}
         for job, filing in opened.items():
             if filing['step'] == 'write':
                 entry = backfill.entry(job) if backfill is not None else None
                 groups['writes_running' if entry and entry['state'] in series_backfill.ACTIVE else 'writes_waiting'].append(self._book(filing, by_job.get(job)))
+            elif filing['step'] == 'names':
+                entry = names.entry(job) if names is not None else None
+                groups['renames_running' if entry and entry['state'] in series_backfill.ACTIVE else 'renames_waiting'].append(self._book(filing, by_job.get(job)))
             elif filing['step'] == 'move':
                 with connect(self.database) as db:
                     move = book_move.load(db, filing['move_id'])
@@ -585,17 +635,18 @@ class RuleFiling:
         for item in ready:
             if item['job_id'] in opened and opened[item['job_id']]['step']:
                 continue
-            write = 'series' in (item.get('items') or []) and not item.get('placed')
-            groups['writes_waiting' if write else 'moves_waiting'].append({'job_id': item['job_id'], 'book_id': item.get('book_id'), 'title': item.get('title') or '', 'move_id': None})
+            group = {'write': 'writes_waiting', 'names': 'renames_waiting'}.get(self._route(item), 'moves_waiting')
+            groups[group].append({'job_id': item['job_id'], 'book_id': item.get('book_id'), 'title': item.get('title') or '', 'move_id': None})
         with connect(self.database) as db:
             total, last = totals(db)
         return {'known': True, 'at': now, 'paused': paused, 'drive_away': False, 'left': sum(len(group) for group in groups.values()),
                 'writes_waiting': len(groups['writes_waiting']), 'writes_running': len(groups['writes_running']),
                 'moves_waiting': len(groups['moves_waiting']), 'moves_running': len(groups['moves_running']),
-                # A rename for an English title, an author's name or a series' name is part of the book's one move (F10): it is
-                # never a job of its own, so this is always 0 and the page's rename row and items are never sent.
-                'renames_waiting': 0,
+                # 0.31.0 R27: an English title or an author's name written into the file of a book with no series to write
+                # (name_write) is a job of its own: its row and items (Judy 3.3). One written with a series is the series write's.
+                'renames_waiting': len(groups['renames_waiting']), 'renames_running': len(groups['renames_running']),
                 'next_write': (groups['writes_waiting'] or [None])[0], 'next_move': (groups['moves_waiting'] or [None])[0],
+                'next_rename': (groups['renames_waiting'] or [None])[0],
                 'could_not': len(could), 'record': {'count': total, 'last_at': last},
                 'waiting_for_lookup': counts['waiting_for_lookup'], 'on_hold': counts['on_hold'], 'settling': counts['settling'],
                 'tries': {'limit': TRIES, 'spacing_seconds': SPACING}, 'feed': FEED}
@@ -613,8 +664,11 @@ class RuleFiling:
                           with a series write and then a move counts once until both are done). The notice's number (3.3a)
           writes_waiting, writes_running   books whose series is still to be written into the file / is being written
           moves_waiting, moves_running     books whose one move (new name and folder) waits / runs
-          renames_waiting always 0 (F10: a rename is part of the move)
-          next_write, next_move   the first waiting book of each group: {'job_id', 'book_id', 'title', 'move_id'} or None
+          renames_waiting, renames_running (0.31.0 R27) books whose new title or author credit is still to be written into
+                          the file / is being written, with no series to write (name_write); a book whose names are written
+                          with its series counts as a series write
+          next_write, next_move, next_rename   the first waiting book of each group: {'job_id', 'book_id', 'title', 'move_id'}
+                          or None
           could_not       finished audiobooks with a certain new name or folder that could not be given it, for a lasting
                           reason (the quiet line's number, 3.2; the list is could_not())
           record          {'count', 'last_at'}: the record's summary (3.4)
@@ -633,14 +687,16 @@ class RuleFiling:
             total, last = 0, None
         started = bool(self.thread and self.thread.is_alive())
         return {'known': not started, 'at': None, 'paused': False, 'drive_away': False, 'left': None if started else 0, 'writes_waiting': 0, 'writes_running': 0,
-                'moves_waiting': 0, 'moves_running': 0, 'renames_waiting': 0, 'next_write': None, 'next_move': None, 'could_not': None if started else 0,
+                'moves_waiting': 0, 'moves_running': 0, 'renames_waiting': 0, 'renames_running': 0, 'next_write': None, 'next_move': None, 'next_rename': None,
+                'could_not': None if started else 0,
                 'record': {'count': total, 'last_at': last}, 'waiting_for_lookup': 0, 'on_hold': 0, 'settling': 0,
                 'tries': {'limit': TRIES, 'spacing_seconds': SPACING}, 'feed': FEED}
 
     def could_not(self):
         """The books summary()['could_not'] counts, by author folder and title (Judy 3.4a): [{'job_id', 'book_id', 'title',
         'author', 'from', 'to', 'from_shown', 'to_shown', 'key' (one of COULD_NOT_KEYS), 'kinds', 'reasons'}]; a book whose
-        change started and did not finish also carries 'tries', 'tries_limit' and 'retries' (it is tried again by itself)."""
+        change started and did not finish also carries 'tries', 'tries_limit', 'retries' (it is tried again by itself) and
+        'cause' (the last try's key: why it did not finish)."""
         with self.lock:
             return {'count': len(self._could_not), 'known': self._value is not None, 'keys': list(COULD_NOT_KEYS), 'entries': [dict(entry) for entry in self._could_not]}
 
