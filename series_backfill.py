@@ -113,6 +113,9 @@ MOVED_MEANWHILE = 'The audiobook was moved meanwhile; the catalog is unchanged a
 HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
                 'html.duckduckgo.com': ('publisher', 'litres'), 'en.wikipedia.org': ('publisher',), 'ru.wikipedia.org': ('publisher',),
                 'ja.wikipedia.org': ('publisher',), 'www.penguinrandomhouse.com': ('publisher',), 'www.litres.ru': ('litres',)}
+# Ruling R32 (Sergei 2026-11-23): the search the publisher and Litres sources go through; its human check counts as
+# "nothing found" at once (SeriesBackfill.lookup). A human check from any other host is still a try (R9).
+HUMAN_CHECK_HOST = 'html.duckduckgo.com'
 
 
 class Held(ValueError):
@@ -764,7 +767,7 @@ class SeriesBackfill:
         can still answer. memory (step 4a, kept in the ledger by the caller): a source that answered is not asked again, the
         app's own limits are no try, and a source that could not be reached is given up after SOURCE_TRIES tries."""
         import series_certainty
-        from public_research import ResearchWait, edition_volume
+        from public_research import CHALLENGE_REASON, ResearchWait, edition_volume
         from public_work_identity import EvidenceConflict
         review = manifest['metadata']
         result = {'sources': []}
@@ -812,6 +815,11 @@ class SeriesBackfill:
                 if verdict:
                     memory[name].update(doubt=verdict['why'], dropped=series_certainty.dropped(verdict))
             except ResearchWait as wait:
+                if wait.reason == CHALLENGE_REASON and wait.source == HUMAN_CHECK_HOST and name in HOST_SOURCES[HUMAN_CHECK_HOST]:
+                    # Ruling R32 (Sergei 2026-11-23): a source that only answers with a human check (the two that go through
+                    # DuckDuckGo) counts as "nothing found" at once, never a try: it held "All done" back for 12 hours or more.
+                    memory[name] = {'answer': 'none', 'at': now, 'reason': str(wait.reason)[:200]}
+                    continue
                 closed(name, {'source': wait.source, 'reason': wait.reason, 'retry_at': wait.retry_at, 'kind': wait.kind, 'scope': wait.scope},
                        wait.kind == 'app_limit')
             except EvidenceConflict as error:

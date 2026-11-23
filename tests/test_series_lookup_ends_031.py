@@ -21,9 +21,17 @@ from series_backfill import SOURCE_TRIES, TRY_SPACING, FAILURE_TRIES, SeriesBack
 AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'series-lookup-ends-tests'
 
 
-def human_check(clock):
+def human_check(clock, host='html.duckduckgo.com'):
     def closed(*_):
-        raise ResearchWait('html.duckduckgo.com', CHALLENGE_REASON, clock() + 3600, 'source_pause', 'host')
+        raise ResearchWait(host, CHALLENGE_REASON, clock() + 3600, 'source_pause', 'host')
+    return closed
+
+
+def unavailable(clock, host='html.duckduckgo.com'):
+    """A source that does not answer (no human check): a try, three of them six hours apart (R9). Ruling R32 made
+    DuckDuckGo's human check "nothing found" at once, so the cases about tries use this instead (HumanCheckTests)."""
+    def closed(*_):
+        raise ResearchWait(host, 'Public source unavailable; no bypass attempted', clock() + 300, 'source_unavailable', 'host')
     return closed
 
 
@@ -81,8 +89,9 @@ class Fixture(unittest.TestCase):
 
 class UnreachableSourceTests(Fixture):
     def test_a_book_with_an_unreachable_source_is_settled_after_the_tries(self):
-        # Four sources answer "no series"; the two that go through DuckDuckGo meet its human check every time.
-        self.sources.answers.update(publisher=human_check(lambda: self.now[0]), litres=human_check(lambda: self.now[0]))
+        # Three sources answer "no series"; the two that go through DuckDuckGo find it not answering every time (its human
+        # check is "nothing found" at once since R32: HumanCheckTests).
+        self.sources.answers.update(publisher=unavailable(lambda: self.now[0]), litres=unavailable(lambda: self.now[0]))
         self.passes(1)
         first = self.entry()
         self.assertEqual(first['state'], 'deferred')
@@ -123,7 +132,7 @@ class UnreachableSourceTests(Fixture):
         self.assertEqual(self.asked('goodreads'), 40, 'and it asked every source again every time')
 
     def test_between_tries_a_pass_asks_nothing(self):
-        self.sources.answers.update(litres=human_check(lambda: self.now[0]))
+        self.sources.answers.update(litres=unavailable(lambda: self.now[0]))
         self.passes(1)
         asked = len(self.sources.asked)
         for _ in range(20):
@@ -133,7 +142,7 @@ class UnreachableSourceTests(Fixture):
         self.assertEqual(self.entry()['record']['deferrals'], 1)
 
     def test_a_series_found_later_by_another_source_still_wins(self):
-        self.sources.answers.update(goodreads=human_check(lambda: self.now[0]))
+        self.sources.answers.update(goodreads=unavailable(lambda: self.now[0], 'www.goodreads.com'))
         self.passes(1)
         self.sources.answers['goodreads'] = {'provider': 'goodreads', 'name': "Remembrance of Earth's Past", 'number': '2', 'source_url': 'https://www.goodreads.com/book/show/1'}
         self.passes(2)
@@ -207,10 +216,55 @@ class FailureTests(Fixture):
         self.sources.answers.update(goodreads=unreachable, publisher=human_check(lambda: self.now[0]), litres=human_check(lambda: self.now[0]))
         self.passes(1)
         entry = self.entry()
-        self.assertEqual((entry['state'], entry['record']['unreached']), ('none', ['goodreads', 'publisher', 'litres']), 'settled in one pass')
+        # R32: DuckDuckGo's human check is "nothing found" for publisher and Litres (not given up); Goodreads' last try ends it.
+        self.assertEqual((entry['state'], entry['record']['unreached']), ('none', ['goodreads']), 'settled in one pass')
+        self.assertEqual((entry['record']['sources']['publisher']['answer'], entry['record']['sources']['litres']['answer']), ('none', 'none'))
         self.assertEqual((self.asked('fantlab'), self.asked('wikidata')), (1, 1))
         fresh = self.backfill._memory({'deferrals': 2, 'waits': waits})
         self.assertEqual(fresh, {}, 'a book deferred fewer times starts its tries from the beginning')
+
+
+class HumanCheckTests(Fixture):
+    """Ruling R32 (Sergei 2026-11-23; Futaba's 0.31.0 M2): a source that only answers with a human check (the publisher and
+    Litres sources, through DuckDuckGo) counts as "nothing found" at once. Every newly converted book with no series was
+    left between tries for 12 hours or more (three tries six hours apart), so "All done" did not show that day. The engine's
+    finished state is read from this look-up's real summary (background_work.view, as /api/state sends it)."""
+
+    def finished_state(self):
+        from test_background_work import WorkTests, jobs_state
+        from test_finished_state_031 import DETAILS, Lookup
+        case = WorkTests('test_the_brom_case_names_the_whole_queue_and_every_row_has_its_own_id')
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        case.engine.series_backfill = Lookup(self.backfill.summary())
+        case.engine.gap_fill = Lookup(dict(DETAILS))  # the detail look-up has ended: only this one is asked about
+        case.engine.gap_fill.thread = None
+        return case.work(jobs_state())['state']
+
+    def test_r32_a_converted_book_with_no_series_is_settled_at_its_first_look_up_and_all_done_shows(self):
+        self.sources.answers.update(publisher=human_check(lambda: self.now[0]), litres=human_check(lambda: self.now[0]))
+        self.passes(1)
+        entry = self.entry()
+        self.assertEqual((entry['state'], entry['reason']), ('none', series_backfill.NO_SERIES), 'settled at its first look-up')
+        self.assertEqual({name: entry['record']['sources'][name]['answer'] for name in series_backfill.SOURCES}, dict.fromkeys(series_backfill.SOURCES, 'none'))
+        self.assertNotIn('next_attempt', entry['record'], 'no six-hour wait')
+        value = self.backfill.summary()
+        self.assertEqual((value['left'], value['between_tries'], value['next_at']), (0, 0, None))
+        self.assertEqual(self.finished_state(), 'all_done', 'All done the same pass (was: background look-ups only for 12 hours or more)')
+        self.passes(3, step=TRY_SPACING + 1)
+        self.assertEqual((self.asked('publisher'), self.asked('litres')), (1, 1), 'never asked about this book again')
+
+    def test_control_a_human_check_from_another_host_is_still_a_try(self):
+        self.sources.answers.update(goodreads=human_check(lambda: self.now[0], 'www.goodreads.com'))
+        self.passes(1)
+        self.assertEqual((self.entry()['state'], self.entry()['record']['next_attempt']), ('deferred', 1000.0 + TRY_SPACING))
+        self.assertEqual(self.finished_state(), 'background_only')
+
+    def test_control_duckduckgo_not_answering_is_still_a_try(self):
+        self.sources.answers.update(publisher=unavailable(lambda: self.now[0]))
+        self.passes(1)
+        self.assertEqual((self.entry()['state'], self.entry()['record']['sources']['publisher']['tries']), ('deferred', 1))
+        self.assertEqual(self.finished_state(), 'background_only')
 
 
 class BlockedCleanupTests(Fixture):
@@ -263,7 +317,7 @@ class SummaryTests(Fixture):
                          'before the first pass the books not visited are not known: never guessed, never 0')
         found = {'provider': 'fantlab', 'name': 'Память о прошлом Земли', 'number': '3', 'source_url': 'https://fantlab.ru/work1'}
         self.sources.answers['fantlab'] = lambda title, *a: found if title == 'Вечная жизнь Смерти' else None
-        self.sources.answers['litres'] = lambda title, *a: human_check(lambda: self.now[0])() if title == 'Задача трёх тел' else None
+        self.sources.answers['litres'] = lambda title, *a: unavailable(lambda: self.now[0])() if title == 'Задача трёх тел' else None
         self.assertEqual(len(self.backfill.candidates()), 4)
         counted = self.backfill.summary()
         self.assertEqual((counted['known'], counted['left'], counted['to_look_up'], counted['done'], counted['total']), (True, 4, 4, 0, 4))
