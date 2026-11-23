@@ -4125,7 +4125,7 @@ function askPreview(entry,delay){
   const send=async()=>{
     d.timer=null;d.previewKey=key;const seq=++d.seq;
     try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string'){d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true,reason:p.reason || '',shared:sharedValue(p.shared)};d.shownTitle=typeof values.title==='string'?values.title:undefined;}
-      const state=namesState.get(id);if(seq===d.seq && names && state && p)state.preview={...(state.preview || {}),place:p.place,applies:p.applies,path:p.path,absolute:p.absolute};}
+      const state=namesState.get(id);if(seq===d.seq && names && state && p)state.preview={...(state.preview || {}),place:p.place,series:p.series,applies:p.applies,path:p.path,absolute:p.absolute};}
     catch(error){if(seq===d.seq)d.previewKey=null;}
     finally{const fresh=askRows.get(id);if(fresh && seq===d.seq)updateAskRow(fresh);batchCounts();}
   };
@@ -4660,7 +4660,51 @@ function seriesOriginText(place){
   if(place.origin==='source'){const name=SERIES_SOURCES[String(place.provider || '').toLowerCase()];return name?` · found on ${name}`:' · found online';}
   return '';
 }
-function placeText(place){const base=placeBase(place);return base?base+seriesOriginText(place):'';}
+// 0.31.0 (Judy 4.5; R1): the series of a translated book is named in English. Where that name came from another source
+// than the origin already said (the engine's name_from: the files' own series named in English from Wikidata; FantLab's
+// series with Wikidata's English name), the line says so, because it would otherwise name a source the name is not from.
+// Never after a series he typed, never when the name's source is the origin itself.
+function englishNameText(place){
+  if(!place || typeof place!=='object' || !(place.series && place.number) || place.origin==='entered' || typeof place.name_from!=='string' || !place.name_from.trim())return '';
+  const key=place.name_from.trim().toLowerCase();if(place.origin==='source' && key===String(place.provider || '').toLowerCase())return '';
+  return SERIES_SOURCES[key]?` · English name from ${SERIES_SOURCES[key]}`:' · English name found online';
+}
+function placeText(place){const base=placeBase(place);return base?base+seriesOriginText(place)+englishNameText(place):'';}
+// An open editor's Place line follows the engine's preview, whose place carries the origin but not the English name's
+// source: that is on the preview's series. Before anything is typed the editor shows the row's own series, so its source.
+function editorPlace(row,state){
+  const preview=state?.preview,place=preview?.place || namesData(row.id)?.place;
+  if(!place || typeof place!=='object' || place.name_from)return place;
+  const own=row.place && typeof row.place==='object'?row.place:{},same=String(place.series || '')===String(own.series || '') && String(place.number || '')===String(own.number || '');
+  const from=preview?.place?preview.series?.name_from:same?own.name_from:'';
+  return typeof from==='string' && from?{...place,name_from:from}:place;
+}
+// 0.31.0 (Judy 4.5; R1, R3): the Title line. A translated book is filed under the English title a source gave, in place
+// of the files' own, and its row says once where that title came from: one line directly above the Place line, in its
+// look. Not a control and never a question. No line for the files' own title, for a book no English title was found for
+// or that got no answer (R3: the row says nothing), or for a title he typed ("Entered by you: title." says that).
+function titleTyped(row){
+  if(askOf(row))return Object.hasOwn(askValues(row),'title');
+  const draft=namesState.get(row.id);
+  return !!(draft?.open && draft.draft && Object.hasOwn(draft.draft,'title') && String(draft.draft.title ?? '').trim()!==namesProposal(row.id,'title').trim());
+}
+function englishTitleLine(row){
+  if(row?.kind!=='candidate')return '';
+  const lookup=row.metadata_facts?.original_title_lookup;
+  if(!lookup || lookup.state!=='found' || !lookup.title || originalTitleFact(row)!==lookup.title || titleTyped(row))return '';
+  const name=SERIES_SOURCES[String(lookup.provider || row.title_origin?.provider || '').toLowerCase()];
+  return name?`English title found on ${name}.`:'English title found online.';
+}
+// Its element is made the first time the row has the line (so a row without one keeps the cell it had), directly above
+// the Place line, and follows the row in place afterwards.
+function updateTitleLine(row,entry){
+  const text=englishTitleLine(row);
+  if(!entry.titled){
+    if(!text || !entry.place?.parentElement)return;
+    entry.titled=node('p','','field-help book-english-title');entry.place.parentElement.insertBefore(entry.titled,entry.place);
+  }
+  setLine(entry.titled,text);
+}
 function placeBase(place){
   if(!place || typeof place!=='object')return '';
   const series=place.series && place.number?[`Series: ${place.series}`,`No. ${place.number}`]:[];
@@ -4775,7 +4819,7 @@ function buildNamesBlock(row,td){
   // directly above the source line (Judy's checklist 10, fallback).
   const ask=askRows.get(id),before=ask?.destBox || [...(td.children || [])].find(child=>String(child.className || '').includes('goes-to')) || null;
   const above=[...(td.children || [])].find(child=>child.className==='source-box') || before;
-  const place=node('p','','field-help book-place'),entered=node('p','','field-help names-entered');entry.place=place;entry.entered=entered;
+  const place=node('p','','field-help book-place'),entered=node('p','','field-help names-entered');entry.place=place;entry.entered=entered;entry.titled=null;
   const insert=(element,at=before)=>{if(at && at.parentElement===td)td.insertBefore(element,at);else td.append(element);};
   if(!open){insert(place,above);insert(entered);updateNamesRow(row);return;}
   const box=node('div','','names-editor');box.id='names-editor-'+id;entry.box=box;
@@ -4830,8 +4874,9 @@ function buildNamesBlock(row,td){
 }
 function updateNamesRow(row){
   const entry=namesRows.get(row.id);if(!entry)return;const state=namesState.get(row.id),open=namesOpen(row.id);
-  const place=open?(state?.preview?.place || namesData(row.id)?.place):row.place,placeLine=placeText(place);
+  const place=open?editorPlace(row,state):row.place,placeLine=placeText(place);
   if(entry.place){if(entry.place.textContent!==placeLine)entry.place.textContent=placeLine;entry.place.hidden=!placeLine;}
+  updateTitleLine(row,entry);  // 0.31.0 (Judy 4.5): the Title line, directly above the Place line
   const entered=enteredText(open?namesData(row.id)?.entered:row.entered);
   if(entry.entered){if(entry.entered.textContent!==entered)entry.entered.textContent=entered;entry.entered.hidden=!entered;}
   if(open && entry.scope){const n=Number(state?.preview?.applies || namesData(row.id)?.applies) || 1,text=NAMES_SCOPE+(n>1?` Applies to ${n.toLocaleString()} books.`:'');if(entry.scope.textContent!==text)entry.scope.textContent=text;}
