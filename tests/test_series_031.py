@@ -317,6 +317,63 @@ class RecheckTests(SeparatedVolumeTests):
         read = dict(self.HELD, local_recheck=public_research.LOCAL_RECHECK)
         self.assertTrue(AutomaticProcessing._refresh_wait(None, {'id': 'count-zero'}, read)['until_change'], 'a record read under the new rules waits for a change, as before')
 
+    def test_a_withdrawn_question_does_not_linger_as_held_without_a_start(self):
+        # 0.31.0 (R22, R25): with automatic processing not running, a record whose question was withdrawn showed in the All
+        # list as "Held — Title or author missing" until a Start read the book again. At load it is put back to Pending.
+        import json
+        import automatic_processing
+        import public_research
+        db = sqlite3.connect(':memory:')
+        db.row_factory = sqlite3.Row
+        db.execute('CREATE TABLE automatic_candidates(id TEXT PRIMARY KEY,revision INTEGER,fingerprint TEXT,state TEXT,result TEXT,retry_at REAL,attempted TEXT,matcher_version TEXT)')
+        db.execute("CREATE TABLE automatic_runs(id INTEGER PRIMARY KEY,state TEXT,phase TEXT,reason TEXT,restart_paused INTEGER)")
+        db.execute("INSERT INTO automatic_runs VALUES(1,'Paused','research','Paused by you',0)")
+        db.execute('CREATE TABLE pause_state(scope TEXT PRIMARY KEY,origin TEXT,reason TEXT)')
+        db.execute("INSERT INTO pause_state VALUES('automatic','user','x'),('jobs','user','x')")
+        db.execute('CREATE TABLE audio_jobs(job_id TEXT PRIMARY KEY,state TEXT)')
+        history = [{'attempt': 1, 'at': 'then', 'state': 'Held', 'reasons': ['Title or author missing'], 'sources': []}]
+        lookup = {'asked': ['series'], 'tries': 2, 'limit': 3, 'fields': {'series': 'waiting'}}
+        base = {'research_version': public_research.RESEARCH_VERSION, 'duplicate_cleanup_policy': 1, 'research_attempt': 1, 'research_history': history, 'lookup': lookup,
+                'until_change': True, 'metadata_facts': {'x': 1}}
+        asked = lambda why: dict(base, reasons=['Title or author missing'], identity_hold={'kind': 'title_author', 'detail': ''}, ask={'kind': 'title_author', 'why': why})
+        records = {
+            'split': ('Held', asked('title_series')), 'number': ('Held', asked('number_unclear')),
+            'stop': ('Held', dict(base, reasons=['Series and standalone evidence conflicts'])),
+            'stop2': ('Held', dict(base, reasons=['Series membership has conflicting author credits. Confirm this book in Edit names.'])),
+            'piece': ('Held', dict(base, **{key: self.HELD[key] for key in ('reasons', 'ask', 'identity_hold')})),
+            # Negative controls: read under the new rules already; another question; no hold; not held; a record that cannot be read.
+            'read': ('Held', dict(asked('title_series'), local_recheck=public_research.LOCAL_RECHECK)),
+            'author': ('Held', dict(base, reasons=['Author unclear'], identity_hold={'kind': 'author_unclear', 'detail': ''}, ask={'kind': 'author_unclear', 'why': 'english_spelling'})),
+            'bitrate': ('Held', dict(base, reasons=['Title or author missing'], identity_hold={'kind': 'title_author', 'detail': ''}, ask={'kind': 'title_author', 'why': 'bitrate'})),
+            'waiting': ('Waiting for source', asked('title_series')), 'queued': ('Queued', asked('number_unclear')), 'broken': ('Held', None)}
+        for identity, (state, result) in records.items():
+            db.execute('INSERT INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)', (identity, 3, 'f-' + identity, state, json.dumps(result) if result is not None else '{not json', 99.0, 'then', 'v'))
+        before = {name: [tuple(row) for row in db.execute('SELECT * FROM ' + name)] for name in ('automatic_runs', 'pause_state', 'audio_jobs')}
+        self.assertEqual(automatic_processing.withdrawn_to_pending(db), 5)
+        rows = {row['id']: row for row in db.execute('SELECT * FROM automatic_candidates')}
+        for identity in ('split', 'number', 'stop', 'stop2', 'piece'):
+            row, result = rows[identity], json.loads(rows[identity]['result'])
+            self.assertEqual((row['state'], row['retry_at'], row['revision'], row['fingerprint']), ('Pending', None, 3, 'f-' + identity), identity)
+            self.assertEqual(result, {'reasons': [], 'lookup': lookup, 'research_attempt': 1, 'research_history': history, 'research_version': public_research.RESEARCH_VERSION,
+                                      'duplicate_cleanup_policy': 1}, identity + ': no question and no reason left; the look-up record and the history kept')
+            self.assertFalse(public_research.needs_local_recheck(result), 'once')
+        for identity in ('read', 'author', 'bitrate', 'waiting', 'queued', 'broken'):
+            state, result = records[identity]
+            self.assertEqual((rows[identity]['state'], rows[identity]['retry_at']), (state, 99.0), identity + ': untouched')
+            self.assertEqual(rows[identity]['result'], json.dumps(result) if result is not None else '{not json', identity)
+        # Nothing else is written: a saved Pause is not flipped, no run changes state, no job is made.
+        self.assertEqual({name: [tuple(row) for row in db.execute('SELECT * FROM ' + name)] for name in before}, before)
+        self.assertEqual(automatic_processing.withdrawn_to_pending(db), 0, 'a second load changes nothing')
+        # The next run reads such a book as one not read yet: nothing about a Pending record makes the pass skip it.
+        from automatic_processing import AutomaticProcessing
+        pending = {'state': 'Pending', 'until_change': False, 'retry_at': None, 'research_version': public_research.RESEARCH_VERSION, 'reasons': [], 'lookup': lookup}
+        self.assertEqual(AutomaticProcessing._refresh_wait(None, {'id': 'split'}, dict(pending)), pending)
+        # The load does it: the constructor calls it right after it settles the records a crash left "Researching".
+        import inspect
+        source = inspect.getsource(AutomaticProcessing.__init__)
+        self.assertIn('withdrawn_to_pending(db)', source)
+        self.assertLess(source.index("SET state='Pending' WHERE state='Researching'"), source.index('withdrawn_to_pending(db)'))
+
     def test_the_new_reading_is_stamped_and_asks_no_online_source(self):
         import public_research
         for row in self.volumes():

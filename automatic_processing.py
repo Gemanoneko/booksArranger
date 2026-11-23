@@ -84,6 +84,30 @@ def waits_for(state,result):
     return 'source'
 
 
+# What a record put back to Pending keeps of its held result (withdrawn_to_pending): the look-up before review so far
+# and the attempt count and history, which the next reading takes up; never the withdrawn question or its reasons.
+PENDING_KEEPS=('lookup','research_attempt','research_history','source_refresh','research_version','duplicate_cleanup_policy')
+
+def withdrawn_to_pending(db):
+    """0.31.0 (rulings R22 and R25). A held book whose stored question was withdrawn (public_research.needs_local_recheck: a
+    series split of the title, "Number unclear", one of the two withdrawn stops, a part beside files that carry its title)
+    is read once more, from its files, at its next visit by automatic processing. Until that visit its record still said
+    Held with the old reason, so with automatic processing not running the list showed "Held — Title or author missing"
+    for a book nothing holds any more. Each such record is put back to Pending here, as a book not read yet: the state a
+    book has before its research, with no reasons. Local and one-time: nothing is researched, no request is made, no run,
+    queue or conversion is started and no Pause is read or written. What the next reading needs is kept (PENDING_KEEPS);
+    what was held and why stays in research_history, where the held record put it. A record read under the new rules
+    carries LOCAL_RECHECK and is never touched. Returns the number of records changed."""
+    from public_research import needs_local_recheck
+    changed=0
+    for record in db.execute("SELECT id,result FROM automatic_candidates WHERE state='Held'").fetchall():
+        try:result=json.loads(record['result'])
+        except (TypeError,ValueError):continue
+        if not needs_local_recheck(result):continue
+        kept={'reasons':[],**{key:result[key] for key in PENDING_KEEPS if key in result}}
+        changed+=db.execute("UPDATE automatic_candidates SET state='Pending',result=?,retry_at=NULL WHERE id=? AND state='Held'",(json.dumps(kept,ensure_ascii=False),record['id'])).rowcount
+    return changed
+
 def research_retry(run):
     if not run or run['state']!='Needs attention' or run['phase']!='research':return False
     try:
@@ -156,6 +180,8 @@ class AutomaticProcessing:
             # never writes the reason with the flag set.
             db.execute("UPDATE automatic_runs SET restart_paused=0 WHERE restart_paused<>0 AND reason='Paused after server restart — start to continue saved work'")
             db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
+            # 0.31.0 (R22, R25): a held book whose question was withdrawn is not shown as held until the next Start.
+            withdrawn_to_pending(db)
     def _run_row(self):
         with connect(self.database) as db:
             r=db.execute('SELECT * FROM automatic_runs ORDER BY created DESC LIMIT 1').fetchone()
