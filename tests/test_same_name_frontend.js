@@ -175,7 +175,7 @@ const FREE='The name is free now. Approve files the book under it.',ON_DISK='A b
   // Every other group keeps its status, sentence and approve face; the three additions come with shared.
   const two=shared(other('03-Мона Лиза овердрайв'));
   const groups=[
-    [askRow('g1',base('title_author',{why:'title_series',destination:dest({shared:two})})),'Title unclear','The title starts with what looks like a series name and number.','Approve'],
+    [askRow('g1',base('title_author',{why:'title_bitrate',destination:dest({shared:two})})),'Title unclear','The title ends with a number that looks like a bitrate.','Approve'],
     [askRow('g2',base('author_unclear',{why:'two_people',candidates:[{name:'William Gibson',source:'artist tag',reader_count:0},{name:'Иван Литвинов',source:'album artist tag',reader_count:4}],destination:dest({shared:two})})),'Author unclear',"Two people are credited. The app can't tell who wrote it.",'Approve'],
     [askRow('g3',base('same_author',{same_author:{new:'W. Gibson',existing:'William Gibson',existing_books:3,why:'near',count:1},destination:dest({shared:two})})),'Same author?','Is "W. Gibson" the same author as "William Gibson"?','Approve'],
     [holdRow('g4','files_unclear','mixed',two),'Files unclear','The files carry different albums or artists. They may be more than one book.','Approve these files'],
@@ -215,7 +215,7 @@ const FREE='The name is free now. Approve files the book under it.',ON_DISK='A b
 
   // 4. The clash appears only at the press (the engine's same_name refusal, on a row of any class): Approve answers with
   // the sentence, and the row's Goes to line is read again, so its label, reason and Show the other book follow.
-  const late=askRow('l1',base('title_author',{why:'title_series'}));paint([late]);tr=trOf('cand-l1');
+  const late=askRow('l1',base('title_author',{why:'title_bitrate'}));paint([late]);tr=trOf('cand-l1');
   assert.match(goesTo(tr),/^Goes to /);assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Another book would get the same name. Change the title, author, series or number. Nothing was changed.',code:'same_name',row:null})});
   previewAnswer=()=>({ok:true,status:200,json:async()=>({preview:{path:SHARED,absolute:ROOT+'\\'+SHARED,taken:false,reason:'',shared:two}})});
@@ -272,7 +272,7 @@ const FREE='The name is free now. Approve files the book under it.',ON_DISK='A b
     scope_view:{kind:'volume',basis:'each file carries its own title',album:'Sprawl Trilogy',folders:['Z:\\Audiobooks\\William Gibson']}};
   context.fixture=[filed];run('rows=fixture.map(row=>({...row}));totalRows=rows.length;renderRows(true);controls()');
   assert.equal(walk(statusCell(trOf('cand-p1'))).find(e=>String(e.className || '').split(' ').includes('book-place')).textContent,"Series: Sprawl Trilogy · No. 2 · from the file's tags");
-  const asking=askRow('p2',base('title_author',{why:'title_series',series:{name:'Sprawl Trilogy',number:'2',basis:'research',origin:'tags'}}),{place:{universe:'',series:'Sprawl Trilogy',number:'2',collection:false,origin:'tags'}});
+  const asking=askRow('p2',base('title_author',{why:'title_bitrate',series:{name:'Sprawl Trilogy',number:'2',basis:'research',origin:'tags'}}),{place:{universe:'',series:'Sprawl Trilogy',number:'2',collection:false,origin:'tags'}});
   paint([asking]);assert.equal(run('seriesLine(rows[0])'),'','the Place line already says it, origin or not');
   // The details panel's line of a volume named from its own tags (4.3): two sentences after "Kept as a separate book".
   const view={kind:'volume',basis:'each file carries its own title',album:'Sprawl Trilogy'};

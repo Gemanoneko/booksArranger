@@ -1827,7 +1827,7 @@ function waitingList(work){
 // its id and title (Show in list). null while none waits, and while automatic processing is stopped (the engine's
 // tries_continue): nothing is waiting to run by itself then, and the row's hint names the button that starts the tries.
 function onlineAnswerItem(work){
-  const before=work.before,n=Number.isInteger(before.count) && before.count>0?before.count:0;
+  const before=work?.before && typeof work.before==='object'?work.before:{},n=Number.isInteger(before.count) && before.count>0?before.count:0;
   if(!n || before.tries_continue!==true)return null;
   const only=n===1 && Array.isArray(before.waiting)?before.waiting[0]:null,title=typeof only?.title==='string'?only.title.trim():'';
   return {id:'online_answer',kind:'online_answer',count:n,at:Number.isFinite(before.next_at) && before.next_at>0?before.next_at:null,limit:before.limits?.per_source,
@@ -3545,6 +3545,14 @@ function seriesNoAnswerFact(row){
   if(!lookupFields(record,'no_answer').includes('series'))return '';
   const tries=lookupTriesMade(record);return tries?`No online answer after ${triesWord(tries)}.`:'';
 }
+// 0.31.0 (Judy 3.5 and 4.4; R21, R22): a doubtful series that was dropped is treated as not found and is shown nowhere.
+// The engine keeps what the source named with the book's facts (gap_search.series_doubt); the panel's Accepted evidence
+// prints those facts whole, so that one entry is left out of what is printed.
+function shownFacts(facts){
+  const search=facts && typeof facts==='object'?facts.gap_search:null;
+  if(!search || typeof search!=='object' || !Object.hasOwn(search,'series_doubt'))return facts || null;
+  const {series_doubt:dropped,...rest}=search;return {...facts,gap_search:rest};
+}
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function minorDamageText(items){
   return (Array.isArray(items)?items:[]).filter(item=>typeof item?.file==='string' && item.file && Number.isFinite(item.glitch_at_seconds)).map(item=>{
@@ -3600,7 +3608,7 @@ function renderAutomaticResult(row){
   const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
   $('automatic-tracks').replaceChildren();for(const key of row.track_order || members.keys())if(included.has(key) && members.has(key))$('automatic-tracks').append(node('li',[members.get(key).path,...memberComponents(members.get(key),row),members.get(key).missing?'Not found':''].filter(Boolean).join('\n')));
   const sources=$('automatic-sources');sources.replaceChildren();if(automatic?.sources?.length){sources.append(node('h3','Research sources'));for(const source of automatic.sources){const line=node('p');let label=source.provider || source.kind || 'Public source';try{label+=' — '+new URL(source.url).hostname;}catch{}line.append(source.kind==='manual_metadata'?node('span','Entered by you'):sourceLink(source.url,label));const facts=[source.verified_identity===true?'Identity verified':source.verified_identity===false?'Identity unverified':'',typeof source.credit==='object' && source.credit!==null?[source.credit.author,source.credit.title].filter(Boolean).join(' — '):source.credit,source.retrieved_utc?'Retrieved '+recoveryDate(source.retrieved_utc):''].filter(Boolean);if(facts.length)line.append(node('span',' · '+facts.join(' · ')));sources.append(line);}}
-  const accepted={metadata:context.metadata_evidence || [],recording:context.track_evidence || '',metadata_provenance:row.metadata_facts || null,recording_review:row.duplicate_review || null};
+  const accepted={metadata:context.metadata_evidence || [],recording:context.track_evidence || '',metadata_provenance:shownFacts(row.metadata_facts),recording_review:row.duplicate_review || null};
   $('automatic-accepted-evidence').textContent=plainEvidence(JSON.stringify(accepted,null,2));$('automatic-accepted').hidden=!accepted.metadata.length && !accepted.recording && !accepted.metadata_provenance && !accepted.recording_review;
 }
 async function ensureCandidateInspector(row){
@@ -3656,7 +3664,6 @@ const ASK_COPY={title_missing:['Title missing','No title in the tags, file name 
   // Odd names (0.22.1, Q3): the engine asks instead of filing a name that looks wrong; nothing is renamed by itself.
   // One sentence each, saying only what the engine tests (Judy's section 11).
   title_bitrate:['Title unclear','The title ends with a number that looks like a bitrate.'],
-  title_series:['Title unclear','The title starts with what looks like a series name and number.'],
   title_latin:['Title unclear','The title looks like Russian written in Latin letters.'],
   author_folder:['Author unclear',"The author's name has underscores and may include more than a name."],
   // Ruling 33 (Sergei 2026-10-26): a Latin name with a Russian first name; one folder per person, by writing language.
@@ -3664,7 +3671,7 @@ const ASK_COPY={title_missing:['Title missing','No title in the tags, file name 
   // Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Russian letters whose English spelling the lookup
   // didn't find (Judy's 0.22.2 doc, 15.1). The answer is kept for every book of this author.
   english_spelling:['Author unclear',"The app found no English spelling of this author's name online. Type one under Other, or keep this name if the author writes in Russian."]};
-const ODD_TITLE=['title_bitrate','title_series','title_latin'];
+const ODD_TITLE=['title_bitrate','title_latin'];
 // The three hold rows (Judy 2026-10-24, 0.22.0 review B4): status, then one sentence per typed cause; 'unknown' too.
 const HOLD_STATUS={part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear'};
 function holdSentence(kind,cause,f={}){
@@ -3722,22 +3729,26 @@ const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames an
   found:[null,'Files found. The book is checked again.'],separate:[null,'Kept as separate books. Each is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
   changed:[null,'Changes found. The book is checked again.'],deleted:[null,'Deleted. The book is gone from the app.'],copy_removed:[null,'Removed. The copy is gone from the app.'],later:[null,'Changes found. The next library scan will pick them up.']};
 const ASK_REFUSED={delete:'Delete was not accepted. Nothing was deleted.',copy:'Remove was not accepted. Nothing was deleted.',approve:'Approve was not accepted. Nothing was changed.',separate:'Keep as separate books was not accepted. Nothing was changed.',convert:'Convert was not accepted. Nothing was changed.',scan:'Scan did not finish. Nothing was changed.',remove:'Remove from list was not accepted. Nothing was changed.'};
-function askOf(row){const ask=row?.kind==='candidate' && row.manual_conversion!==true?row.ask:null;return ask && typeof ask==='object' && typeof ask.kind==='string'?ask:null;}
-function askKind(ask){return ask.kind==='files_missing'?ask.also || '':ask.kind;}
+// 0.31.0 (Judy 4.4; Sergei's R22): a book not converted yet no longer asks about a doubtful series. The engine sends neither
+// question any more (a title that only looks like a series name and number, ruling 52; the title's number against a
+// source's, ruling 74b), and the page has no words, fields or button for them. A row that still carries one from before
+// the update, until the engine's re-check takes it, is an ordinary row: its real status, no sentence, no inline fields, no
+// Approve. A Missing files row that carried one as its second cause is a plain Missing files row.
+const WITHDRAWN_ASKS=['title_series','number_unclear'];
+function withdrawnCause(ask){return WITHDRAWN_ASKS.includes(ask?.why);}
+function askOf(row){
+  const ask=row?.kind==='candidate' && row.manual_conversion!==true?row.ask:null;
+  return ask && typeof ask==='object' && typeof ask.kind==='string' && !(ask.kind==='title_author' && withdrawnCause(ask))?ask:null;
+}
+function askKind(ask){return ask.kind==='files_missing'?(ask.also==='title_author' && withdrawnCause(ask)?'':ask.also || ''):ask.kind;}
 function askName(row){return row.title_clue || row.review?.title || 'Book';}
 function askDraft(id){if(!askDrafts.has(id))askDrafts.set(id,{seq:0,previewKey:'{}',timer:null});return askDrafts.get(id);}
 function askProposal(ask,name){const value=ask?.fields?.[name]?.proposal;return typeof value==='string'?value:'';}
 function plural(n,one,many){return `${n.toLocaleString()} ${n===1?one:many}`;}
 // Which fields the row shows: Title when it is missing or a guess, Author when it is missing or unclear (section 3).
-function inlineNames(row){const ask=askOf(row);return !!ask && (['author_unclear','same_author'].includes(askKind(ask)) || askKind(ask)==='title_author' && (!!askFieldPlanOf(ask).author || ['title_series','number_unclear'].includes(ask.why)));}
-// Ruling 74b (Judy): "Number unclear": the title's number (an Arabic numeral) against the source's, the source named by its
-// provider's site, else "an online source"; never "the catalog".
+function inlineNames(row){const ask=askOf(row);return !!ask && (['author_unclear','same_author'].includes(askKind(ask)) || askKind(ask)==='title_author' && !!askFieldPlanOf(ask).author);}
+// The names of the online sources, as the Place line and the Title line print them (Judy 4.3).
 const NUMBER_SOURCES={fantlab:'FantLab',goodreads:'Goodreads',wikidata:'Wikidata',litres:'Litres'};
-function numberUnclear(ask){
-  const v=ask?.volume || {},title=Number(v.title_number),series=String(v.series_number ?? '').trim();
-  if(!Number.isInteger(title) || title<1 || !series)return ASK_COPY.other[1];
-  return `The title says book ${title}, but ${NUMBER_SOURCES[String(v.provider || '').toLowerCase()] || 'an online source'} says book ${series}.`;
-}
 function askFieldPlan(ask,row=null){
   const plan=askFieldPlanOf(ask);
   if(row && inlineNames(row))return {...plan,title:true,author:namesOpen(row.id)?plan.author || 'input':plan.author};
@@ -3856,7 +3867,6 @@ function askText(row){
   if(copyOffer(row))return {status:ASK_COPY.other[0],hint:sortedText(COPY_HINT)};
   if(ask.kind==='same_author')return {status:'Same author?',hint:`Is "${ask.same_author?.new || ''}" the same author as "${ask.same_author?.existing || ''}"?`};
   if(holdKind(ask))return {status:HOLD_STATUS[ask.kind],hint:holdSentence(ask.kind,ask.cause,{...(ask.facts || {}),membership:ask.membership})};
-  if(ask.kind==='title_author' && ask.why==='number_unclear')return {status:'Number unclear',hint:numberUnclear(ask)};
   if(sameNameRow(ask))return {status:SAME_NAME_STATUS,hint:sameNameSentence(row)};  // 0.31.0 class S; listed under Name taken
   const copy=ASK_COPY[['title_author','author_unclear'].includes(ask.kind)?ask.why:ask.kind] || ASK_COPY[{title_author:'both_missing',author_unclear:'two_people'}[ask.kind] || 'other'];
   return {status:copy[0],hint:copy[1]};
@@ -4614,7 +4624,7 @@ function namesOpen(id){return !!namesState.get(id)?.open;}
 function namesAny(){for(const value of namesState.values())if(value.open)return true;return false;}
 function namesDropped(id){namesState.delete(id);namesRows.delete(id);}
 function namesData(id){return namesState.get(id)?.data || null;}
-function namesProposal(id,field){const row=rows.find(row=>row.id===id),value=namesData(id)?.fields?.[field]?.proposal ?? (['series','number'].includes(field)?(row?.ask?.fields?.[field]?.proposal ?? row?.place?.[field]):undefined);return NAMES_BOOL.has(field)?value===true:typeof value==='string'?value:'';}
+function namesProposal(id,field){const row=rows.find(row=>row.id===id),value=namesData(id)?.fields?.[field]?.proposal ?? (['series','number'].includes(field)?(askOf(row)?.fields?.[field]?.proposal ?? row?.place?.[field]):undefined);return NAMES_BOOL.has(field)?value===true:typeof value==='string'?value:'';}
 // The values shown: the draft over what the editor read; Title and Author of a question row are its ask draft (one draft).
 function namesValue(row,field){
   const state=namesState.get(row.id),draft=state?.draft || {};

@@ -19,7 +19,7 @@ function mp3Row(name,folder,ask){
     creation:{status:'Tracks need review',can_create:false,reasons:[],chapters_default:true,chapters_available:true},source_directory_count:1,ask};
 }
 const dest=p=>({path:p,absolute:ROOT+'\\'+p,taken:false,reason:''});
-const rats=mp3Row('rats','Джеймс Герберт - Крысы 1. Крысы',{kind:'title_author',also:null,why:'title_series',odd_name:true,reasons:['Title unclear'],
+const rats=mp3Row('rats','Джеймс Герберт - Крысы 1. Крысы',{kind:'title_author',also:null,why:'title_latin',odd_name:true,reasons:['Title unclear'],
   fields:{title:{proposal:'Крысы 1. Крысы',basis:'folder_name'},author:{proposal:'Джеймс Герберт',basis:'folder_name'}},candidates:[],destination:dest('Герберт Джеймс\\Крысы 1. Крысы - Герберт Джеймс.m4b')});
 const krampus=mp3Row('krampus','Крампус. Повелитель Йоля',{kind:'same_author',also:null,why:'near',reasons:['Same author?'],fields:{title:{proposal:'Крампус. Повелитель Йоля',basis:'tag'},author:{proposal:'Бром Джеральд',basis:'tag'}},
   candidates:[],same_author:{new:'Бром Джеральд',existing:'Brom',existing_books:1,why:'near',count:1},destination:dest('Бром Джеральд\\Крампус. Повелитель Йоля - Бром Джеральд.m4b')});

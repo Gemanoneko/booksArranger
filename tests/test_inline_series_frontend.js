@@ -35,16 +35,17 @@ const call=route=>posts.filter(p=>p.route===route).at(-1)?.data;
  run('askDone.clear();queueState.queued=[];queueState.running=null;askPendings.clear()');
  type('series','');type('number','');assert.deepEqual(JSON.parse(run('JSON.stringify(namesFor(rows[0]))')),{series:'',number:''},'intentional clearing is explicit');assert.equal(input('title').value,'Уэлихолн');assert.equal(run('askValues(rows[0]).author'),'Олег Яковлев, Владимир Торин');
 
- // Title-unclear/title_series reuses the exact inline pair without adding an author or a second Title.
- Object.assign(row,{title_clue:'Оттенки магии01. Темный оттенок магии',place:{series:'',number:''},ask:{kind:'title_author',why:'title_series',fields:{title:{proposal:'Темный оттенок магии',basis:'tag'},author:{proposal:'Schwab Victoria',basis:'tag'}},split:{series:'Оттенки магии',number:'1',title:'Темный оттенок магии'},destination:{path:'preview.m4b'}}});
+ // A title_author question with an author to settle (a folder name used as the author) reuses the exact inline pair without a
+ // second Title. (It was shown on the title_series question, which Sergei's R22 withdrew: tests/test_series_questions_frontend.js.)
+ Object.assign(row,{title_clue:'Оттенки магии01. Темный оттенок магии',place:{series:'',number:''},ask:{kind:'title_author',why:'author_folder',fields:{title:{proposal:'Темный оттенок магии',basis:'tag'},author:{proposal:'Schwab Victoria',basis:'tag'}},split:{series:'Оттенки магии',number:'1',title:'Темный оттенок магии'},destination:{path:'preview.m4b'}}});
  run('askDrafts.clear();namesState.clear();askDone.clear();askResults.clear();queueState.queued=[];queueState.running=null');paint();
  for(const name of ['title','series','number'])assert.equal(controls().filter(e=>e.dataset.name===name).length,1);
- assert.equal(controls().filter(e=>e.dataset.name==='author').length,0,'Title question gains no author field');
+ assert.equal(controls().filter(e=>e.dataset.name==='author').length,1,'one Author field: the question it asks');
  type('series','Оттенки магии');type('number','1');input('number').handlers.blur();await tick();
  assert.equal(Object.hasOwn(call('/api/candidate/approve-preview'),'title'),false,'pair-only Title-row edit preserves R49 untouched title authority');
  assert.equal(Object.hasOwn(call('/api/candidate/approve-preview'),'author'),false,'pair-only never reanswers English author');
  answers['/api/candidate/names']=()=>ok({editor:{fields:{title:{proposal:'Темный оттенок магии'},author:{proposal:'Schwab Victoria'},series:{proposal:''},number:{proposal:''},universe:{proposal:''},collection:{proposal:false}},universes:['Warhammer 40K','SCP','Eve Online','World of Warcraft','Learned custom universe'],series:[],remembered:[],entered:[],job:'none'}});
- await run('namesToggle("cand-inline")');for(const name of ['title','author','series','number'])assert.equal(controls().filter(e=>e.dataset.name===name).length,1,'full editor retains one '+name);assert.equal(input('series').value,'Оттенки магии');run('namesClose("cand-inline",true)');assert.equal(input('number').value,'1');assert.equal(controls().filter(e=>e.dataset.name==='author').length,0,'collapse restores title-only inline author plan');
+ await run('namesToggle("cand-inline")');for(const name of ['title','author','series','number'])assert.equal(controls().filter(e=>e.dataset.name===name).length,1,'full editor retains one '+name);assert.equal(input('series').value,'Оттенки магии');run('namesClose("cand-inline",true)');assert.equal(input('number').value,'1');assert.equal(controls().filter(e=>e.dataset.name==='author').length,1,'collapse restores the fields of the question');
  await run('namesToggle("cand-inline")');
  const universeList=run('namesRows.get("cand-inline").box').children.find(element=>element.id==='names-universes-cand-inline');
  assert.deepEqual(universeList.children.map(option=>option.value),['Warhammer 40K','SCP','Eve Online','World of Warcraft','Learned custom universe']);
