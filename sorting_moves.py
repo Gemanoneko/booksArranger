@@ -249,13 +249,19 @@ def _last_move(db, job_id):
 
 def certain(found, manifest):
     """0.31.0 (rulings R18 and R21): a series the look-up kept for a finished book, judged by the one rule
-    (series_certainty). A record kept before that rule existed never passed it; a doubtful one counts as not found, so the
-    book is planned without it and nothing says so. Any failure to judge is doubtful."""
+    (series_certainty); a doubtful one counts as not found, so the book is planned without it and nothing says so. Any
+    failure to judge is doubtful. Senua's 0.31.0 review, M3: a series kept before that rule existed was found by adapters
+    that let doubtful shapes through (several series, a universe), and its stored fields cannot show them, so judging them
+    again here proves nothing: it is doubtful until the look-up has found it again through 0.31.0's own adapters
+    (series_backfill.judged, pre_rule). A doubtful shape stored with the series stays doubtful."""
     try:
+        import series_backfill
         import series_certainty
         from public_research import edition_volume
+        if not series_backfill.judged(found):
+            return False
         title = str((manifest.get('metadata') or {}).get('title') or '')
-        candidate = {name: found.get(name) for name in ('name', 'number', 'provider', 'source_url')}
+        candidate = {name: found.get(name) for name in ('name', 'number', 'provider', 'source_url', 'number_from', 'doubt') if name in found}
         return series_certainty.judge(candidate, {'volume': edition_volume(title)[1]})['verdict'] == series_certainty.CERTAIN
     except Exception:
         return False
@@ -322,6 +328,9 @@ def _held_series(db):
         if name and number:
             found[job_id] = {'name': name, 'number': number, 'provider': record.get('provider') or approved.get('provider') or '',
                              'source_url': record.get('source_url') or approved.get('source_url') or ''}
+            if series_backfill.judged(record):
+                # The one rule judged it (Senua's 0.31.0 review, M3): where its number came from goes with it to certain().
+                found[job_id]['number_from'] = series_backfill.judged(record)
             if failed:
                 found[job_id]['failed'] = str(failed.get('reason') or reason)
     return found

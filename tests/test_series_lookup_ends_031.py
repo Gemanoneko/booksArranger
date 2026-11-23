@@ -280,7 +280,8 @@ class SummaryTests(Fixture):
 
     def test_a_series_found_that_waits_for_approval_or_for_the_queue(self):
         self.passes(1)
-        self.backfill._set('0', 'held', series_backfill.MOVE_WAITS, {'series': 'Память о прошлом Земли', 'number': '2'})
+        # A series 0.31.0's look-up judged (series_proof's number_from); one kept before that rule is looked up again (M3).
+        self.backfill._set('0', 'held', series_backfill.MOVE_WAITS, {'series': 'Память о прошлом Земли', 'number': '2', 'series_proof': {'number_from': 'source'}})
         self.backfill._set('1', 'deferred', 'A book is being converted or cleaned up', {'found': {'name': 'S', 'number': '1'}, 'next_attempt': self.now[0] + 60})
         self.backfill._set('2', 'held', 'The book changed since you approved its move; nothing was changed', {'move_approved': True, 'approved_failed': {'reason': 'x'}})
         value = self.backfill.summary()

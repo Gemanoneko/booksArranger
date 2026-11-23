@@ -263,8 +263,11 @@ class SortedCatalog(unittest.TestCase):
         return job_id
 
     def held(self, job_id, series, number, url, provider='fantlab'):
-        """Series backfill found a series and held the book on the old bug (item 2)."""
-        record = {'series': series, 'number': number, 'provider': provider, 'source_url': url, 'research_receipts': []}
+        """Series backfill found a series and held the book on the old bug (item 2). The series is one 0.31.0's look-up
+        judged certain (series_proof's number_from, as every hold it makes records it): one kept before that rule is not
+        planned until it is looked up again (Senua's 0.31.0 review, M3; test_series_moves_031.PreRuleSeriesTests)."""
+        record = {'series': series, 'number': number, 'provider': provider, 'source_url': url, 'research_receipts': [],
+                  'series_proof': {'number_from': 'source'}}
         with contextlib.closing(sqlite3.connect(self.database)) as db:
             db.execute("INSERT INTO series_backfill VALUES(?,'held',?,?,'now')", (job_id, 'The recorded series paths do not share their original parent',
                                                                                  json.dumps(record, ensure_ascii=False)))

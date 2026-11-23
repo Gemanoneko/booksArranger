@@ -430,7 +430,8 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(self.backfill._next_wait(),30,'minimum wait prevents a hot loop')
 
     def test_idle_wait_keeps_found_receipts_without_researching_the_same_book_again(self):
-        found={'provider':'goodreads','name':'S','number':'10','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
+        # lookup()'s answer: a series the one rule judged certain (number_from); one kept without it is looked up again (Senua's 0.31.0 M3).
+        found={'provider':'goodreads','name':'S','number':'10','number_from':'source','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
         self.backfill.lookup=Mock(return_value=found)
         def busy(*_):raise series_backfill.Later('Conversion is running',1060)
         self.backfill.apply=busy;self.backfill.run_pass()
@@ -442,7 +443,8 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(self.backfill.entry('1')['state'],'done')
 
     def test_repeated_busy_deferrals_do_not_renew_evidence_freshness(self):
-        found={'provider':'goodreads','name':'S','number':'10','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
+        # lookup()'s answer: a series the one rule judged certain (number_from); one kept without it is looked up again (Senua's 0.31.0 M3).
+        found={'provider':'goodreads','name':'S','number':'10','number_from':'source','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
         self.backfill.lookup=Mock(return_value=found)
         def busy(*_):raise series_backfill.Later('Conversion is running',self.now[0]+60)
         self.backfill.apply=busy;self.backfill.run_pass();original_at=self.backfill.entry('0')['record']['found_at']
@@ -454,7 +456,8 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(self.backfill.lookup.call_count,4,'evidence older than seven days requires fresh provider lookup for both books')
 
     def test_old_cached_or_malformed_receipt_does_not_gain_a_fresh_seven_days(self):
-        found={'provider':'goodreads','name':'S','number':'10','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
+        # lookup()'s answer: a series the one rule judged certain (number_from); one kept without it is looked up again (Senua's 0.31.0 M3).
+        found={'provider':'goodreads','name':'S','number':'10','number_from':'source','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
         self.now[0]=1000+6*86400;self.backfill.lookup=Mock(return_value=found)
         def busy(*_):raise series_backfill.Later('Conversion is running',self.now[0]+60)
         self.backfill.apply=busy;self.backfill.run_pass()

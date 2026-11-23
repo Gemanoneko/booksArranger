@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import json
 import sqlite3
+import unittest
 
 import series_backfill
 import sorting_moves
@@ -82,7 +83,8 @@ class ApprovedNotMovedTests(SortedCatalog):
 
     def hold_approved(self, job, reason, approved_failed=True):
         record = {'series': 'Гарри Поттер', 'number': '7', 'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work3650', 'move_approved': True,
-                  'approved_found': {'name': 'Harry Potter', 'number': '7', 'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work3650'},
+                  # number_from: approve() copies the judgment of 0.31.0's look-up into what it approves (Senua's 0.31.0 M3).
+                  'approved_found': {'name': 'Harry Potter', 'number': '7', 'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work3650', 'number_from': 'source'},
                   'approved_target': str(self.sorted / HP7_TO)}
         if approved_failed:
             record['approved_failed'] = {'reason': reason, 'at': 'now'}
@@ -159,6 +161,123 @@ class ApproveAnswerTests(GateTests):
         merge._sorting_move = refuse
         answer = merge.sorting_moves_apply(merge.sorting_moves()['digest'])
         self.assertEqual([(r['job_id'], r['code'], r['reason_key']) for r in answer['results']], [(hp2, 'refused', 'other')])
+
+
+class PreRuleSeriesTests(unittest.TestCase):
+    """Senua's 0.31.0 review, M3 (R18: a result that could be wrong counts as not found). 0.30.x held 55 live books with a
+    series that waits for a move (MOVE_WAITS), found by adapters that let doubtful shapes through: Goodreads kept the first
+    of several series, FantLab had no universe check. The plan's re-judgment sees only the stored name, number, provider and
+    address, so those shapes pass it. Such a series now counts as not found until the look-up finds it again through
+    0.31.0's own adapters; the rules wait for that look-up. A real audiobook made by ffmpeg in a private Sorted folder
+    (books-hierarchy-v2: its series folder is another folder); no network. Each case has its control: the same series as
+    0.31.0's look-up records it."""
+
+    OLD = {'series': 'Discworld', 'number': '10', 'provider': 'goodreads', 'source_url': 'https://www.goodreads.com/book/show/1'}
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        import test_series_backfill as base
+        short = Path(__file__).resolve().parents[1] / 'scratch' / 's'  # as test_sorting_030.SeriesFolderBackfillTests
+        short.mkdir(parents=True, exist_ok=True)
+        temp = tempfile.TemporaryDirectory(dir=short, prefix='')
+        self.addCleanup(temp.cleanup)
+        original = base.Library.__init__.__globals__['propose']
+
+        def v2(path, root, kind, metadata, review=None, automatic_facts=None):
+            return original(path, root, kind, metadata, dict(review or {}, organization_policy='books-hierarchy-v2'), automatic_facts)
+        with mock.patch.object(base, 'propose', v2):
+            self.lib = base.Library(Path(temp.name), separate_sorted=True)
+        with __import__('scanner').connect(self.lib.db) as db:
+            self.manifest = json.loads(db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?', (self.lib.job_id,)).fetchone()[0])
+            self.manifest['metadata']['organization_policy'] = 'books-hierarchy-v2'
+            text, digest = series_backfill.encoded(self.manifest)
+            db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=? WHERE job_id=?', (text, digest, self.lib.job_id))
+
+    def backfill(self, answers=None, calls=None):
+        """The series look-up with these source answers ({source: answer}; every other source answers none)."""
+        from types import SimpleNamespace
+
+        def source(name):
+            def answer(*args):
+                if calls is not None:
+                    calls.append(name)
+                return (answers or {}).get(name)
+            return answer
+        research = SimpleNamespace(**{'_series_' + name: source(name) for name in series_backfill.SOURCES})
+        return series_backfill.SeriesBackfill(self.lib.merge(), research=research, stage=self.lib.base / 'proof-stage')
+
+    def hold(self, backfill, judged=False):
+        """The book held with OLD, its record's keys as on a copy of the live catalog (judged=False: the 0.30.x shape, an
+        empty series_proof; True: as 0.31.0's look-up records the same series)."""
+        record = dict(self.OLD, old_path=str(self.lib.path), old_sha256=self.lib.original, old_size=self.lib.path.stat().st_size,
+                      research_receipts=[], deferred_sources=[], series_proof={'number_from': 'source'} if judged else {})
+        backfill._set(self.lib.job_id, 'held', series_backfill.MOVE_WAITS, record)
+
+    def planned(self):
+        """(the plan's series for the book or None, the item's kinds)."""
+        with __import__('scanner').connect(self.lib.db) as db:
+            plan = sorting_moves.plan(db, str(self.lib.root))
+        item = next((i for i in plan['items'] if i['job_id'] == self.lib.job_id), None)
+        return ((item or {}).get('series', {}).get('name'), (item or {}).get('items'))
+
+    def test_probe_b_the_rule_cannot_judge_a_series_kept_before_it(self):
+        backfill = self.backfill()
+        self.hold(backfill)
+        with __import__('scanner').connect(self.lib.db) as db:
+            found = sorting_moves._held_series(db)[self.lib.job_id]
+        self.assertFalse(sorting_moves.certain(found, self.manifest), 'its stored fields alone pass the rule (a8b6804 said certain)')
+        self.assertEqual(self.planned(), (None, None), 'not planned with it')
+        self.hold(backfill, judged=True)
+        with __import__('scanner').connect(self.lib.db) as db:
+            judged = sorting_moves._held_series(db)[self.lib.job_id]
+        self.assertTrue(sorting_moves.certain(judged, self.manifest), 'control: the same series judged by 0.31.0 is certain')
+        self.assertEqual(self.planned(), ('Discworld', ['series']), 'control: and planned with it')
+        self.assertFalse(sorting_moves.certain(dict(judged, doubt='several_series'), self.manifest), 'a doubtful shape kept with it stays doubtful')
+
+    def test_it_is_looked_up_again_and_the_rules_wait_for_that(self):
+        backfill = self.backfill()
+        self.hold(backfill)
+        self.assertEqual([row['job_id'] for row in backfill.candidates()], [self.lib.job_id], 'looked up once more')
+        self.assertEqual(backfill.unsettled(), {self.lib.job_id}, 'the rules wait for that look-up (a book moves once)')
+        value = backfill.summary()
+        self.assertEqual((value['to_look_up'], value['moves_waiting'], value['left']), (1, 0, 1), 'counted as a look-up still to do')
+        self.hold(backfill, judged=True)  # control
+        self.assertEqual((backfill.candidates(), backfill.unsettled()), ([], set()))
+        value = backfill.summary()
+        self.assertEqual((value['to_look_up'], value['moves_waiting'], value['left']), (0, 1, 0))
+
+    def test_looked_up_again_a_doubtful_answer_files_no_series_and_a_certain_one_replaces_the_old(self):
+        doubtful = dict(name='Discworld', number='10', provider='goodreads', source_url=self.OLD['source_url'], doubt='several_series')
+        backfill = self.backfill({'goodreads': doubtful})
+        self.hold(backfill)
+        backfill.run_pass()
+        entry = backfill.entry(self.lib.job_id)
+        self.assertEqual((entry['state'], entry['record']['sources']['goodreads']['doubt']), ('none', 'several_series'), 'treated as not found (R18)')
+        self.assertEqual((backfill.unsettled(), self.planned()), (set(), (None, None)), 'settled; the rules file it without a series')
+        self.assertEqual(series_backfill.sha256(self.lib.path, __import__('threading').Event()), self.lib.original, 'a look-up only')
+        certain = {'name': 'Нормальное аномальное', 'number': '10', 'provider': 'goodreads', 'source_url': 'https://www.goodreads.com/book/show/55108791'}
+        backfill = self.backfill({'goodreads': certain})  # control: the 0.31.0 adapter finds one series
+        self.hold(backfill)
+        backfill.run_pass()
+        entry = backfill.entry(self.lib.job_id)
+        self.assertEqual((entry['state'], entry['reason'], entry['record']['series']), ('held', series_backfill.MOVE_WAITS, 'Нормальное аномальное'))
+        self.assertEqual((backfill.unsettled(), self.planned()), (set(), ('Нормальное аномальное', ['series'])), 'the new answer is filed, never the old one')
+
+    def test_a_series_kept_from_a_pass_before_0_31_is_looked_up_again_not_used(self):
+        import time
+        found = {'name': 'Discworld', 'number': '10', 'provider': 'goodreads', 'source_url': self.OLD['source_url']}
+        for judged, state, asked in ((False, 'none', list(series_backfill.SOURCES)), (True, 'held', [])):
+            with self.subTest(judged=judged):
+                calls = []
+                backfill = self.backfill(calls=calls)
+                kept = dict(found, number_from='source') if judged else found
+                backfill._set(self.lib.job_id, 'deferred', 'A book is being converted or cleaned up',
+                              {'found': kept, 'found_binding': series_backfill.encoded(self.manifest)[1], 'found_at': time.time() - 60})
+                backfill.run_pass()
+                self.assertEqual((backfill.entry(self.lib.job_id)['state'], calls), (state, asked),
+                                 'a 0.30.x answer is asked again; control: a judged one is used as kept')
 
 
 del GateTests, SortedCatalog  # only their fixtures are reused; their own cases run in test_sorting_030

@@ -176,9 +176,12 @@ class Shelf(unittest.TestCase):
         with connect(self.db) as db:
             db.execute("INSERT OR REPLACE INTO gap_fill VALUES(?,?,'found','',?,'now')", (job_id, 'c', json.dumps({'found': found})))
 
-    def held_series(self, job_id, series, number, url='https://fantlab.ru/work100', provider='fantlab'):
-        """The series look-up found a series and holds the book (its series folder is another folder)."""
-        record = {'series': series, 'number': number, 'provider': provider, 'source_url': url, 'research_receipts': []}
+    def held_series(self, job_id, series, number, url='https://fantlab.ru/work100', provider='fantlab', judged=True):
+        """The series look-up found a series and holds the book (its series folder is another folder). 0.31.0's look-up
+        judged it certain and records so (series_proof's number_from; Senua's 0.31.0 review, M3). judged=False: a series
+        0.30.x found and held, in the record's shape on a copy of the live catalog (no judgment, an empty series_proof)."""
+        record = {'series': series, 'number': number, 'provider': provider, 'source_url': url, 'research_receipts': [],
+                  'series_proof': {'number_from': 'source'} if judged else {}}
         with connect(self.db) as db:
             db.execute("INSERT OR REPLACE INTO series_backfill VALUES(?,'held',?,?,'now')", (job_id, series_backfill.MOVE_WAITS, json.dumps(record, ensure_ascii=False)))
 
@@ -269,6 +272,25 @@ class AppliedByTheRulesTests(Shelf):
         job = self.book('Желязны Роджер', 'Хроники Амбера. Книга 2')
         self.held_series(job, 'Хроники Амбера', '2')
         self.assertEqual([(i['job_id'], i['items']) for i in self.engine.sorting_moves()['items']], [(job, ['series'])])
+
+    def test_a_series_found_before_0_31_is_neither_written_nor_moved_until_it_is_looked_up_again(self):
+        # Senua's 0.31.0 review, M3 (R18): 0.30.x held 55 live books with a series its adapters let through (Goodreads kept
+        # the first of several series, FantLab had no universe check). Its stored fields pass the rule (the case above),
+        # which proves nothing: the book is looked up again first, and until then the rules neither write nor move it.
+        job = self.book('Желязны Роджер', 'Хроники Амбера. Книга 2')
+        self.held_series(job, 'Хроники Амбера', '2', judged=False)
+        before = (self.path(job), sha(self.path(job)))
+        value = self.settle()
+        self.assertEqual((value['left'], value['could_not']), (0, 0), 'without its old series it has no listed change at all')
+        self.assertEqual((self.moves(), self.filings()), ([], []))
+        self.assertEqual(self.engine.series_backfill.entry(job)['state'], 'held', 'never approved, never written')
+        self.assertEqual(self.engine.sorting_moves()['items'], [], 'its old series is in no list')
+        self.assertIn(job, self.engine.series_backfill.unsettled())
+        self.assertEqual((self.path(job), sha(self.path(job))), before)
+        # Control: the same series, judged by 0.31.0's look-up, is filed by the rules.
+        self.held_series(job, 'Хроники Амбера', '2')
+        self.assertEqual([(i['job_id'], i['items']) for i in self.engine.sorting_moves()['items']], [(job, ['series'])])
+        self.assertNotIn(job, self.engine.series_backfill.unsettled())
 
     def test_a_book_waits_for_its_look_ups_to_end_so_it_moves_once(self):
         # R19: its series look-up has not ended; a series found later must not move it a second time.

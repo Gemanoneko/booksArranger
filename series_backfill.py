@@ -131,6 +131,30 @@ class Later(Exception):
         self.waits = waits or []
 
 
+def judged(found):
+    """0.31.0 (Senua's review, M3; ruling R18): a series the look-up kept passed series_certainty, the one rule. Every certain
+    verdict says where its number came from (series_certainty.NUMBER_FROM), and the ledger keeps that with the series (the
+    record's 'series_proof', an approval's 'approved_found'). A series found before 0.31.0 carries none (0.30.x had no such
+    key): its adapters let through shapes the rule calls doubtful (Goodreads kept the first of several series, FantLab had
+    no universe check), and the fields stored with it cannot show them. (A hold made by a 0.31.0 build before this check
+    kept none either; it is looked up once more too.) Such a series is looked up again through 0.31.0's own adapters
+    before the rules may act on it (pre_rule()), and until then it counts as not found
+    (sorting_moves.certain). found: a look-up's answer or a ledger record. Returns where the number came from (one of
+    NUMBER_FROM), '' when the rule never judged it."""
+    import series_certainty
+    if not isinstance(found, dict):
+        return ''
+    return next((place['number_from'] for place in (found, found.get('series_proof'), found.get('approved_found'))
+                 if isinstance(place, dict) and place.get('number_from') in series_certainty.NUMBER_FROM), '')
+
+
+def pre_rule(reason, record):
+    """Senua's 0.31.0 review, M3: a book held with a series found before 0.31.0 that waits for the rules (MOVE_WAITS, or
+    WRITE_WAITS) and that no one approved: it is looked up once more through 0.31.0's adapters (candidates()), and the rules
+    wait for that look-up (unsettled()), as for a book held by the old bug (OLD_FOLDER_REASON)."""
+    return reason in (MOVE_WAITS, WRITE_WAITS) and isinstance(record, dict) and not record.get('move_approved') and not judged(record)
+
+
 def _stamp():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
@@ -296,14 +320,17 @@ class SeriesBackfill:
             # series is 'approved_found') and counted as a look-up between tries; it is a write that waits.
             rows = db.execute("SELECT job_id,state,reason,json_extract(record,'$.next_attempt'),json_extract(record,'$.found') IS NOT NULL "
                               "OR json_extract(record,'$.move_approved') IS NOT NULL,"
-                              "json_extract(record,'$.unreached') IS NOT NULL,json_extract(record,'$.approved_failed') IS NOT NULL FROM series_backfill").fetchall()
+                              "json_extract(record,'$.unreached') IS NOT NULL,json_extract(record,'$.approved_failed') IS NOT NULL,"
+                              "CASE WHEN state='held' AND reason IN (?,?) THEN record END FROM series_backfill", (MOVE_WAITS, WRITE_WAITS)).fetchall()
         counts = dict.fromkeys(('between_tries', 'due', 'write_waiting', 'writing', 'moves_waiting', 'blocked', 'with_series', 'without', 'gave_up', 'left_alone'), 0)
         writes, nexts, writes_held = [], [], 0
-        for job_id, state, reason, next_attempt, found, unreached, failed in rows:
+        for job_id, state, reason, next_attempt, found, unreached, failed, waits in rows:
             later = isinstance(next_attempt, (int, float)) and next_attempt > now
+            # Senua's 0.31.0 review, M3: a series found before 0.31.0 is looked up again (pre_rule()): due, not a move waiting.
+            again = waits is not None and pre_rule(reason, json.loads(waits))
             if state == 'held' and (reason in (MOVE_WAITS, WRITE_WAITS, OLD_FOLDER_REASON) or failed or str(reason).startswith(REVIEW_REASON)):
-                counts['due' if reason == OLD_FOLDER_REASON or str(reason).startswith(REVIEW_REASON) and not failed else 'moves_waiting'] += 1
-                writes_held += reason == WRITE_WAITS
+                counts['due' if reason == OLD_FOLDER_REASON or str(reason).startswith(REVIEW_REASON) and not failed or again else 'moves_waiting'] += 1
+                writes_held += reason == WRITE_WAITS and not again
             elif state in ACTIVE or state == 'pending':
                 counts['writing'] += 1
             elif state in WAITING_ON:
@@ -417,9 +444,11 @@ class SeriesBackfill:
         from storage_relocation_native import retained_job
         entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,reason,record FROM series_backfill')}
         for entry in entries.values():
-            if entry['state'] == 'held' and (entry['reason'] == OLD_FOLDER_REASON or str(entry['reason']).startswith(REVIEW_REASON)):
+            if entry['state'] == 'held' and (entry['reason'] == OLD_FOLDER_REASON or str(entry['reason']).startswith(REVIEW_REASON)
+                                             or entry['reason'] in (MOVE_WAITS, WRITE_WAITS) and pre_rule(entry['reason'], json.loads(entry['record']))):
                 # 0.30.0 item 2: held by the old bug; looked up once more (see OLD_FOLDER_REASON). 0.31.0: so is a book held
-                # because a source contradicted itself (REVIEW_REASON): that is a doubtful answer now, not a hold.
+                # because a source contradicted itself (REVIEW_REASON): that is a doubtful answer now, not a hold; and a
+                # series found before 0.31.0 that waits for the rules (pre_rule(), Senua's 0.31.0 review, M3).
                 entry['state'] = 'deferred'
         generation = self._local_generation()
         newest = {}
@@ -548,8 +577,10 @@ class SeriesBackfill:
                     self.progress = {'title': title, 'done': index, 'total': len(books), 'step': 'updating'}
                     self.apply(row['job_id'], dict(prior['approved_found']))
                     continue
+                # A series kept from an earlier pass is used again only when the one rule judged it (judged(); Senua's 0.31.0
+                # review, M3): one found before 0.31.0 is looked up again.
                 found = prior.get('found') if prior.get('found_binding') == encoded(manifest)[1] and prior.get('found_at', 0) > 0 \
-                    and 0 <= self.clock() - prior.get('found_at', 0) <= 7 * 86400 else None
+                    and 0 <= self.clock() - prior.get('found_at', 0) <= 7 * 86400 and judged(prior.get('found')) else None
                 found = found or self.lookup(manifest, memory)
                 preferred = prior.get('found') or {}
                 if found and prior.get('found_binding') == encoded(manifest)[1] and preferred.get('provider') == 'goodreads' \
@@ -680,8 +711,8 @@ class SeriesBackfill:
                 continue
             state, reason, record = entry['state'], str(entry['reason']), json.loads(entry['record'])
             if state == 'held':
-                if (reason == OLD_FOLDER_REASON or reason.startswith(REVIEW_REASON)) and not record.get('approved_failed'):
-                    found.add(job_id)
+                if (reason == OLD_FOLDER_REASON or reason.startswith(REVIEW_REASON)) and not record.get('approved_failed') or pre_rule(reason, record):
+                    found.add(job_id)  # pre_rule(): a series found before 0.31.0 is looked up again first (Senua's review, M3)
             elif state == 'none':
                 if not (record.get('lookup_policy') == LOOKUP_POLICY and (generation is None or record.get('local_generation') == generation)):
                     found.add(job_id)
@@ -822,7 +853,8 @@ class SeriesBackfill:
         record = {'series': found['name'], 'number': found['number'], 'provider': found['provider'], 'source_url': found['source_url'],
                   'old_path': str(old), 'old_sha256': output['sha256'], 'old_size': output['size'],
                   'research_receipts': found.get('receipts', []), 'deferred_sources': found.get('deferred_sources', []),
-                  'series_proof': {key:copy.deepcopy(found[key]) for key in ('work_id','series_id','statement_id','work_revision','series_revision','references','numbering_scheme','isbn','series_url','local_identity') if key in found}}
+                  # number_from: series_certainty judged this series certain (judged(); Senua's 0.31.0 review, M3).
+                  'series_proof': {key:copy.deepcopy(found[key]) for key in ('work_id','series_id','statement_id','work_revision','series_revision','references','numbering_scheme','isbn','series_url','local_identity','number_from') if key in found}}
         if names:
             record.update(names=names, was={field: manifest['metadata'].get(field) for field in names}, name_reasons=reasons)
         # His approval travels with the record from the start, so a hold at any step below still says it was approved.
