@@ -1,6 +1,6 @@
 # Books Arranger 0.31.0: UX spec (honest status)
 
-Judy, 2026-11-22. For Ender. Source: `BooksArranger_0.31.0_Scope.md` (`d134484`; second round `d28f9ff`; third round `4a6c3a8`; fourth round `32ced7c`): Sergei's report, rulings R1 to R7 and, since the amendments of the same day, R8 to R22, step 4 ("Honest status"), the part of step 1 that shows on the page and, since the fourth round, the parts of steps 2 and 3 that show on the page. Sergei, 2026-11-22: "How do I know that the app finished its queue and have nothing to do anymore? ... But what is 'Updating Metadata'? Is it re-researching old books? Or is it still a first pass?"
+Judy, 2026-11-22. For Ender. Source: `BooksArranger_0.31.0_Scope.md` (`d134484`; second round `d28f9ff`; third round `4a6c3a8`; fourth round `32ced7c`, with R23 to R26 at `9aedf73`): Sergei's report, rulings R1 to R7 and, since the amendments, R8 to R26, step 4 ("Honest status"), the part of step 1 that shows on the page and, since the fourth round, the parts of steps 2 and 3 that show on the page. Sergei, 2026-11-22: "How do I know that the app finished its queue and have nothing to do anymore? ... But what is 'Updating Metadata'? Is it re-researching old books? Or is it still a first pass?"
 
 **This is an EXTEND of `BooksArranger_0.30.0_UX.md`.** The jobs panel, the Waiting list, the freshness cue, the blocker sentence and every string not named here stay as built. Where this spec replaces a 0.30.0 line it says so.
 
@@ -118,14 +118,14 @@ Read for this round, read-only: the build at `ender/0.31.0`, `4484f8f` (`web/app
 |---|---|---|
 | Waiting for the online answer | This version. Final wording for the row, the Waiting item, the tries text and the three ways the wait ends; one more hint for a book whose tries do not go on by themselves | 5 |
 | A translated book's row | New Title line `English title found on Wikidata.`; the Place line gains ` · English name from Wikidata` only where the name's source is not the origin already named; a book with no English title found says nothing on its row (R3) | 4.5 |
-| Author folders, surname first | No new words. What to do when the app cannot tell the order is Question 13 | 4.5 |
+| Author folders, surname first | No new words. What to do when the app cannot tell the order is Question 13 (**answered 2026-11-23, R23: nothing is said**) | 4.5 |
 | The three series questions | Gone from books not converted yet. The row is an ordinary row; nothing about the dropped series is shown anywhere | 4.4, 3.5 |
 | The "guard at hold" variant | Removed everywhere: one tooltip for the series row, one state | 2.1, 3 |
 | The quiet line | Re-decided: one case is left, a book the rules could not rename or move. New words, new number | 3.2 |
 | Rows and Waiting items for renames and moves | Finished as buildable: one more row for a rename, grouped items above 5, no Cancel on a move the app queued by its rules | 3.3 |
 | Several hundred at once (the first launch after the update) | New notice above the Running list: a count and what is happening. Nothing says "interrupted" or "resumed" after a Quit | 3.3a |
 | The record | Finished as buildable: where it opens, 200 entries with scroll, search over all, empty states, keyboard, one more reason (`English title`) | 3.4 |
-| A list of the books that could not be moved | Specced, **not built** until Question 14 is answered | 3.4a |
+| A list of the books that could not be moved | Specced, **not built** until Question 14 is answered (**answered 2026-11-23, R24: yes, it is built**) | 3.4a |
 | Finished states and window title | Checked against R20 to R22: the table holds. Three clarifications, no new state, no new title | 1.1, 1.5 |
 | The detail look-up's name | `Finding English titles and author names` (R1: the app looks for the English title, which for a Chinese book is not the original one) | 2.1, 2.2 |
 | Acceptance checks | 26, 28 and 31 replaced; 1, 12, 13, 21, 27, 29, 30 and 32 amended; 36 to 46 added | 9 |
@@ -142,6 +142,33 @@ Read for this round, read-only: the build at `ender/0.31.0`, `4484f8f` (`web/app
 5. `Number unclear` and the `Title unclear` sentence about a series name and number: their copy, their inline Series and Number fields and their `Also:` line go with the questions (4.4).
 6. New: the Title line and the English-name part of the Place line (4.5); the notice (3.3a); the rename row, the grouped Waiting items and the missing Cancel (3.3); the record (3.4).
 
+## Amended 2026-11-23, after the fourth-round build
+
+Ender built sections 5, 4.5, 4.4 and 2.1/2.2 (`ender/0.31.0`: `95290af`, `fccef93`, `3d50a93`, `b7897bf`) and reported ten gaps. Sergei answered Questions 13 to 16: R23 to R26 in the Scope's fourth-round table (`9aedf73`), which is the authority. Each ruling is written into its section, marked **Amended 2026-11-23, after the fourth-round build**. Read for this round, read-only: his `web/app.js` (`lookupAsked`, `lookupNote`, `lookupTriesMade`, `originalTitleFact`, `seriesNoAnswerFact`, `shownFacts`, `provenanceFacts`, `englishTitleLine`, `titleTyped`, `englishNameText`, `seriesLine`, `waitingLines`), the candidate table's width rules in `web/style.css`, and `merge_service.py` at `series_clue`. Nothing launched, no rect measured.
+
+| # | Sergei's answer | Was | Where |
+|---|---|---|---|
+| R23 | An author name the app cannot put in order is filed as the source wrote it, and nothing is said | Question 13 | 4.5 |
+| R24 | Books the app could not rename or move are listed, read-only, each with its reason | Question 14 | 3.4a is built; 3.2's line is not shown |
+| R25 | `Series and standalone evidence conflicts` and `Series membership has conflicting author credits…` no longer stop a book | Question 15 | 4.4 |
+| R26 | No `Cancel` on a move the app queued by its rules | Question 16 | 3.3 |
+
+| Gap | Ruling | Code | Where |
+|---|---|---|---|
+| 1. `Press Resume automatic processing…` while paused | Confirmed. The hint names the button by the face it has at that moment. | no | 5.1 |
+| 2. The English name of a series the files already name is worded `its series` | Corrected: beside a Place line that shows the series, "no answer about its series" reads as a contradiction. `the English name of its series`; with the title, `its English title and series name`. | yes, small: two phrases | 5.1, 6.1 |
+| 3. The number in the no-answer sentences | Confirmed: the tries made, else the limit, else no sentence. | no | 5.2 |
+| 4. `Series: Not established` | It stays, for every book with no series. "No line for a missing series" meant no added line. Only the no-answer sentence takes its place. | no | 5.2 |
+| 5. `Accepted evidence` leaves out the dropped series | Not confirmed. That block is the raw record, not a worded line: it prints the facts whole. | yes, small: take the filter out | 3.5, 4.4 |
+| 6. The Title line goes as soon as he types a title | Confirmed. It follows the draft, as `Goes to` does, and comes back if he restores the app's title. | no | 4.5 |
+| 7. An unknown origin with an English-name source | Confirmed: `Series: … · No. 2 · English name from Wikidata`. | no | 4.5 |
+| 8. A one-book Waiting item with no title | Confirmed: `Waiting for an online answer: 1 book`, no button. | no | 5.1, 6.1 |
+| 9. `The title mentions a series: … Not used in the file name.` | Kept, with one condition: never on a book whose series was dropped as doubtful. | yes, small: one condition | 4.4 |
+| 10. The select cell reaches 8 px into the text column in the compact band | Fixed now: under 600 px the select cell is as wide as its 40 px column. Not from this work; the no-overlap rule has no waiver. | yes, small: one width | 8 |
+| also: `English title found online.` for a book approved before 0.31.0, which has no source name | Confirmed: it is true, and nothing more is known. | no | 4.5 |
+
+Not a gap, for the record: the page of 3.2 to 3.4a is not built yet, and the quiet line still carries the third round's sentence (`Series found for N finished audiobooks…`). That sentence must not ship (check 36). With R24 the line is not reworded: it goes, and the list's summary carries the number (3.2).
+
 ## Decisions in brief
 
 - **Three finished states, one badge.** When no job runs, waits or is queued, the status line starts with a badge: `All done`, `Waiting for you` or `Background look-ups only`. The badge is there only when the queue is finished, so its presence alone answers Sergei's question; its words say which of the three.
@@ -149,7 +176,7 @@ Read for this round, read-only: the build at `ender/0.31.0`, `4484f8f` (`web/app
 - **Bare `Nothing running` goes from the status line.** It read as "done" while work waited. With work waiting it says `Continues by itself`.
 - **Two background look-ups get plain names** that say which books they are for and whether a file changes. Their bar counts the whole look-up, not one pass, so `691 of 903 books` answers "how much is left".
 - **A look-up between tries is a Waiting item**, grouped, with the next try time.
-- **Nothing about a finished book's name or place is asked of him** (amended, third round, R18 and R19: the approval dialog of the earlier rounds is withdrawn). The app renames and moves a finished audiobook by its rules when author and series are found for certain, and leaves it alone otherwise. He sees it happen as ordinary rows, reads afterwards what moved where in a record, and is told in one quiet line how many books the app could not rename or move (amended, fourth round: the line counted books with a series found that was not applied). Several hundred at once get one notice with a count (3.3a).
+- **Nothing about a finished book's name or place is asked of him** (amended, third round, R18 and R19: the approval dialog of the earlier rounds is withdrawn). The app renames and moves a finished audiobook by its rules when author and series are found for certain, and leaves it alone otherwise. He sees it happen as ordinary rows, reads afterwards what moved where in a record, and is told in one quiet line how many books the app could not rename or move (amended, fourth round: the line counted books with a series found that was not applied; amended 2026-11-23, R24: not a line but a read-only list of those books, each with its reason, 3.4a). Several hundred at once get one notice with a count (3.3a).
 - **A doubtful series is silent everywhere** (amended, fourth round, R21 and R22): on a finished audiobook and on a book not converted yet. No status, no question, no note. The book reads as a book with no series.
 - **A translated book says once where its English names came from** (amended, fourth round, R1 and R3): `English title found on Wikidata.` on its row, and the origin on its Place line. A book for which no English title was found keeps its Russian title and says nothing on its row.
 - **A book held only because another book has its name** reads `Same name as another book` and is offered a name change. A row with a question of its own keeps that question and its buttons (amended, G9).
@@ -179,7 +206,7 @@ Read for this round, read-only: the build at `ender/0.31.0`, `4484f8f` (`web/app
 - **Loading:** no badge until the jobs part has loaded.
 - **Amended 2026-11-22, third round (R18, R19); amended 2026-11-22, fourth round (R20–R22): finished books and the states.** One state: the guard is switched to automatic.
   - A book the app is about to change is work like any other: writing new names into a finished file and moving a finished book are **main work**, because they change his files. Only the asking online is a background look-up. So `Background look-ups only` never shows while a write, a rename or a move of a finished book runs or waits, and `All done` waits for them.
-  - A finished audiobook the rules could not rename or move (3.2) is not main work, is not a background look-up and does not wait for him. **It does not hold back `All done`** and is part of no state. It shows in one quiet line only.
+  - A finished audiobook the rules could not rename or move (3.2) is not main work, is not a background look-up and does not wait for him. **It does not hold back `All done`** and is part of no state. It shows in one quiet line only (amended 2026-11-23, R24: in the list of 3.4a only).
   - A doubtful result is the same as no result (3.5, 4.4): it leaves nothing pending, on a finished audiobook and on a book not converted yet.
 - **Amended 2026-11-22, fourth round (R20–R22): the table was checked with moves automatic and look-ups before review. It holds.** Three clarifications, no new state:
   - **A book waiting for an online answer (section 5) is main work.** A conversion follows by itself, so the queue is not finished: the first part is `Continues by itself` and there is no badge. This holds also while books need attention: `N need attention` stays in the status line, and `Waiting for you` comes up when the wait is over. The wait is bounded (R2), so that badge is late by a few tries at most. Why no badge: a badge means "the queue is finished" (Decisions in brief), and here a book will still convert.
@@ -347,6 +374,8 @@ Their singulars (6.1), control rows (7), layout states (8), acceptance checks (9
 
 **Amended 2026-11-22, fourth round (R20). This replaces "A series found and not applied" whole.** That section had two causes: the guard at hold, and R19's books kept for a later version. Both are gone: the guard is automatic, and English names ship in the same version, so no book waits for a switch or for a version. The line `Series found for N finished audiobooks. They are recorded and stay where they are.` is withdrawn with them.
 
+**Amended 2026-11-23, after the fourth-round build (R24: the list is built). No quiet line is built at all.** This section still says which books count and that they hold nothing back. Their number is shown by the summary of 3.4a, not by the line worded below.
+
 **One case is left, and it is a different one.** The rules have a new name or folder for a finished audiobook, found for certain, and the change cannot be made, for a lasting reason that only he could clear:
 
 | Why the book stays (the engine's key) | Counted |
@@ -372,6 +401,7 @@ Such a book is not pending work: nothing happens to it while its reason lasts. S
   One book: `1 finished audiobook could not be renamed or moved. It stays where it is.` Hidden at zero, and when the engine sends no number.
 - **Why it is shown at all.** After the app has filed several hundred books by itself, a book he knows belongs to a series and is still outside its folder reads as a fault of the look-up. The line says the app knows about it. A doubtful result is different and stays silent (3.5): there the app has nothing it relies on.
 - **Why these words.** They say what happened and that nothing is lost. No "yet" and no promise: the app does not know that it will ever be able to move the book.
+- **Amended 2026-11-23, after the fourth-round build (R24: yes).** The list of 3.4a is built, so **this line is not shown**: its element goes, and the list's summary `Could not be renamed or moved · 12` carries the number, in the same place at the bottom of the panel. Everything else in this section holds for the list: which books count, that they hold nothing back, that they are in no state. The words of the line above are kept here for the record and are not built.
 - **A count only, until Question 14 is answered.** Which books, and why each stays, is a list (3.4a). It is specced and not built: a list is a new surface and that is his to say. If he says yes, the count becomes the summary of that list and this line is not shown. If he says no, this line stays as written here.
 - Nothing is added to the books' own rows.
 - The number is books, each once. It falls when a reason is gone (the file that was in the way is removed). Whether the rules then file the book by themselves is the engine's (F12); if they do, it shows as a row of 3.3 and an entry of 3.4, and nothing else explains it.
@@ -405,7 +435,7 @@ Such a book is not pending work: nothing happens to it while its reason lasts. S
   - `Choose folder…` is `aria-disabled`, with the tooltip `The app is about to move this audiobook. Choose another folder when it has moved.` (a rename in place: `The app is about to rename this audiobook. Choose a folder when it is done.`);
   - once the book has moved, `Choose folder…` works as on any finished audiobook, and the folder he chooses then is his: the rules leave such a book where he put it (0.30.0).
   - A move he queued himself keeps `Cancel` and its tooltip, unchanged.
-  - This is what is built until Question 16 is answered.
+  - This is what is built until Question 16 is answered. **Amended 2026-11-23, after the fourth-round build (R26: yes).** Ruled as written. To override a move he waits until the book has moved and uses `Choose folder…`; that choice is kept.
 - **State.** A write, a rename or a move of a finished book is main work (1.1): the first part names it or reads `Continues by itself`, the window title reads `working` or `continues by itself`, and `All done` comes only after the last one.
 - **The book's own row** in the list reads as 0.30.0 reads any move: `Moves to`, `Moving to`, then `Now in`. Nothing is added but the two points above.
 - No toast, no sound, no focus change, no confirmation of any kind, before or after.
@@ -493,9 +523,9 @@ He no longer sees a move before it happens, so he must be able to read afterward
 
 ### 3.4a The books that could not be renamed or moved: a list
 
-**Amended 2026-11-22, fourth round. New. Not built until Question 14 is answered yes.** Until then 3.2's line stands alone, with its count.
+**Amended 2026-11-22, fourth round. New.** It was gated on Question 14.
 
-If yes: the count of 3.2 gets the list it lacks, read-only like the record, and 3.2's line is not shown (the summary below carries the number).
+**Amended 2026-11-23, after the fourth-round build (R24: yes). Built in 0.31.0.** The count of 3.2 gets the list it lacked, read-only like the record, and 3.2's line is not shown (the summary below carries the number). Every "only if Question 14 is answered yes" in this spec now reads "built".
 
 **Where.** A second `<details>`, directly under the record's, built the same way. Closed by default. Hidden while the number is zero.
 
@@ -542,6 +572,8 @@ R18: a result that could be wrong is treated as if nothing was found. On the pag
 - it is not in the quiet line's number (3.2; amended, fourth round: that number counts only books for which the app has a certain result it could not apply).
 
 Why nothing: any visible "possible series" is a question in other clothes. It would sit on the book until he dealt with it, which is the thing he asked not to have. If the app is not sure, the honest display is the one a book without a series has.
+
+**Amended 2026-11-23, after the fourth-round build (gap 5): the raw record is not a line.** "Says nothing" is about worded things: a status, a hint, a chip, a count, a line. The details panel's `Accepted evidence` is none of these. It is a closed block that prints what the engine recorded, unworded, and it is where he or the studio looks when a book he knows belongs to a series has none. It prints the book's facts whole, the dropped series among them. Built: that entry was left out; it is put back. Nothing else changes: no label is added for it and no line anywhere reads it. (The studio does not strip diagnostic output on its own initiative.)
 
 ## 4. Two books, one destination
 
@@ -674,6 +706,8 @@ The book is filed without asking, so the row carries no question. It says where 
 | Row status `Number unclear`, sentence `The title says book 2, but FantLab says book 3.`, the Title, Series and Number fields, `Approve` | No question. An ordinary row (below). |
 | Row status `Title unclear`, sentence `The title starts with what looks like a series name and number.`, the same fields, `Approve` | No question. An ordinary row. |
 | Details panel, `Sources disagree — which is correct?`, where the sources differ only in the series or in the number in it | That question is not listed. If it was the only one, the whole block is hidden. |
+| **Amended 2026-11-23, after the fourth-round build (R25).** A book held with `Held — Series and standalone evidence conflicts` | Not held for it. No series; an ordinary row. |
+| **R25.** A book stopped with `Series membership has conflicting author credits. Confirm this book in Edit names.` | Not stopped for it. No series; an ordinary row. |
 
 **An ordinary row** is exactly what a book with no series reads today. Nothing is new, so nothing can be left over:
 
@@ -707,7 +741,14 @@ If the series is found for certain later, after the book has converted, the book
 - `Needs you`;
 - in the details panel, `Sources disagree — which is correct?` for a title, an author, the original language, a universe, a genre, a topic or a reader, and `Which book is this recording of?` where the sources differ in title or author. In that last question each choice still prints its source's Cycle and Number in cycle beside its title and author: by choosing the book he chooses its series, and that is his answer, not a doubt.
 
-Two points this spec does not settle: under which title a book shaped "Series N. Title" is filed once its series is dropped (F9: the page shows whatever title the engine files it under), and whether other stops of the same kind follow the same rule (Question 15).
+Two points this spec does not settle: under which title a book shaped "Series N. Title" is filed once its series is dropped (F9: the page shows whatever title the engine files it under), and whether other stops of the same kind follow the same rule (Question 15; **answered 2026-11-23, R25: yes, the two rows added to the table above**).
+
+**Amended 2026-11-23, after the fourth-round build.**
+- **The raw record (gap 5).** `Accepted evidence` in the details panel prints the book's facts whole, the dropped series included. It is the engine's record, not a line about the book (3.5). Every other place stays silent, as above.
+- **The 0.23.1 line `The title mentions a series: <text>. Not used in the file name.` (gap 9).** Kept, with one condition. It is on a row that asks something else, in the Book cell, when brackets in the files' own title name a series the app does not file the book under.
+  - **Never on a book whose series was dropped as doubtful** (R21, R22, R25). There the line would print the very series the app decided not to rely on, which this section says is shown nowhere.
+  - In every other case it stays as built. It is the files' own text, it says what the app does with it, and it goes with the row when he answers the row's question. Since the brackets rule (4.3) files most such series by itself, the line is rare.
+  - Which case a row is in is a fact the row already has: the book's record says whether a series was dropped.
 
 ### 4.5 English names on a row (R1, R3)
 
@@ -739,6 +780,8 @@ Goes to  Liu Cixin\Remembrance of Earth's Past\2 - The Dark Forest - Liu Cixin.m
 - **The title itself stays where it is today:** the Title field's proposal on a row that asks and in `Edit names`; `Canonical title: The Dark Forest` in the title cell once the book is approved; the file name in `Goes to` or `Now in`. Nothing is added for it.
 - **The files' own title stays where it is today:** `Title clue: Тёмный лес`, in the title cell of a row not approved yet and under the Title field of a row that asks. Nothing is added for it either.
 - The list's search still finds the book by its Russian name: it matches the title clue and the file paths (as built).
+- **Amended 2026-11-23, after the fourth-round build (gap 6): the line follows what he types.** As soon as the Title field holds a title other than the app's (on a row that asks, or in `Edit names`), the line goes, before Save or Approve. It comes back if he puts the app's title back. That is how `Goes to` and the Place line already behave: the row shows what a press would do, and `English title found on Wikidata.` beside a title he typed would be untrue. Confirmed as built.
+- **Amended 2026-11-23 (for the record): a book approved before 0.31.0** has no source name with its English title and reads `English title found online.` Confirmed: it is true, and nothing more is known about it.
 
 **The Place line (R1).** The series is named in English. The origin suffix of 4.3 keeps its meaning: where the series and the number came from. One part is new, and it is added only where the line would otherwise be untrue:
 
@@ -753,6 +796,7 @@ Goes to  Liu Cixin\Remembrance of Earth's Past\2 - The Dark Forest - Liu Cixin.m
 - Why the new part: without it a row says `from the file's tags` beside a name the tags do not contain. 4.3's rule: a row must not say a name came from somewhere it did not.
 - A source with no name the page knows: ` · English name found online`.
 - The record (3.4) uses the same words in an entry's series reason.
+- **Amended 2026-11-23, after the fourth-round build (gap 7): an unknown origin.** A series whose origin the engine does not know has no origin suffix (4.3). If its English name has a source, the line ends with that part alone: `Series: Remembrance of Earth's Past · No. 2 · English name from Wikidata`. Confirmed as built: it says only what is known.
 
 **No English title found (R3).** The Russian title stays and nothing asks. **The row says nothing:** no Title line, no note, no hint. He has nothing to do, and a note would stand on every such book. The details panel says it once (section 5, the facts).
 
@@ -760,7 +804,9 @@ Goes to  Liu Cixin\Remembrance of Earth's Past\2 - The Dark Forest - Liu Cixin.m
 
 **Author folders (the name-order fix).** An author's folder is the Latin name, surname first: `Liu Cixin`. The row shows it where it shows the author today (the `Author` line, the line under the title, the `Goes to` path). **No new words:** no origin is added for the author's spelling, and the `Author unclear` questions keep their causes (4.4).
 
-**When the app cannot tell which word is the surname.** Not ruled (Scope: "what to do with author names the app cannot order beyond the Liu Cixin fix"). Until Question 13 is answered the page has no words for it: the row shows the author as the engine files it and asks nothing, and a finished audiobook in such a folder is left alone and says nothing (3.5). If the answer is "ask", it is one more cause of the existing `Author unclear` question, with the sentence `The app can't tell which word is the surname.` and the two orders as its choices. Nothing else on the row would change.
+**When the app cannot tell which word is the surname. Amended 2026-11-23, after the fourth-round build (R23).** Ruled: the name is filed as the source wrote it and the app says nothing. No question on the row, no line, no new `Author unclear` cause: the sentence `The app can't tell which word is the surname.` below is not built. He corrects such a name in `Edit names`, as any author. The rest of this paragraph is the fourth round's text, kept for the record.
+
+Not ruled (Scope: "what to do with author names the app cannot order beyond the Liu Cixin fix"). Until Question 13 is answered the page has no words for it: the row shows the author as the engine files it and asks nothing, and a finished audiobook in such a folder is left alone and says nothing (3.5). If the answer is "ask", it is one more cause of the existing `Author unclear` question, with the sentence `The app can't tell which word is the surname.` and the two orders as its choices. Nothing else on the row would change.
 
 ## 5. Waiting for the online answer
 
@@ -779,10 +825,23 @@ Goes to  Liu Cixin\Remembrance of Earth's Past\2 - The Dark Forest - Liu Cixin.m
 | Automatic block detail (`Waiting for metadata sources; …`) | `Waiting for an online answer. Next try 14:05.` |
 
 - **The asked part follows the book:** `its English title`, `its series`, `its English title and series`. If the engine does not say what is asked: `No online answer yet about this book.`
+- **Amended 2026-11-23, after the fourth-round build (gap 2): the English name of a series the files already name.** Built as `its series`. Not accepted: such a row's Place line shows the series (`… · from the file's tags`), and "no answer about its series" beside it reads as a contradiction. What is asked there is only the name in English, so the part says that. The full set, in the hint of 5.1 and in the note of 5.2:
+
+  | What is asked | The part |
+  |---|---|
+  | the English title | `its English title` |
+  | a series, for a book with none | `its series` |
+  | the English name of a series the files name | `the English name of its series` |
+  | the English title and a series | `its English title and series` |
+  | the English title and the English name of its series | `its English title and series name` |
+  | not said by the engine | `this book` |
 - **The tries.** `Try 2 of 3 at 14:05.` is the number of the next try, the number of tries in all, and the time of the next one. All three are the engine's; none is written into the page. With no time: `Try 2 of 3 is next.` With no numbers the sentence is left out. Read in the build: a book waits for its series at most 3 times in a row (`SERIES_WAIT_LIMIT`), at the time the source gave; whether the wait for a title uses the same number is the engine's (F2).
 - **Only an online wait.** `Waiting for source` is also the status of a book that waits because the library drive answered slowly or the catalog was busy for a minute (read in `automatic_processing.py`). Those keep `Waiting for source` and are not counted in the Waiting item: "an online answer" would be untrue for them.
 - **The hint** sits where every row's hint sits, under the status, in its look. The details panel's Automatic result shows the same status and hint. It is not a question, and the row keeps its ordinary buttons. No `Convert now` (Sergei's answers, Question 5).
 - **Automatic processing stopped.** The tries do not go on, so `Nothing to do.` and a next try time would be untrue. The second hint names the button that starts them. There is no Waiting item then: nothing is waiting to run by itself.
+  - **Amended 2026-11-23, after the fourth-round build (gap 1): the button's own face.** While automatic processing is paused that button reads `Resume automatic processing`, so the hint ends `Press Resume automatic processing to try again.` Otherwise `Press Start automatic processing to try again.` Confirmed as built: a hint must name the button as it reads on screen.
+  - If the engine does not say whether the tries go on, the hint is its first sentence alone (as built).
+- **Amended 2026-11-23, after the fourth-round build (gap 8): one book the engine sends without a title.** The item reads `Waiting for an online answer: 1 book` and has no button: Show in list searches by title, and there is none to search for. Confirmed as built.
 - **State.** This is main work: while a book waits and the tries go on, the state is `Continues by itself`, never a badge (1.1).
 - The Waiting item replaces 0.30.0's `Metadata sources` item (`3 books wait for a source to answer. Next try 14:05.`) for these books. `Next try 14:05.` is left out when the engine has no time.
 - The Automatic block's line replaces `Waiting for metadata sources; saved research retries automatically.` and its two endings (`Next automatic retry check: …`, `Automatic retry time unavailable`). With no time it reads `Waiting for an online answer.` alone. It is used while the books that wait are waiting for an online source; if they wait for something else only (A17), the 0.30.0 line stays.
@@ -800,6 +859,8 @@ Goes to  Liu Cixin\Remembrance of Earth's Past\2 - The Dark Forest - Liu Cixin.m
 - "No answer" (the sources did not reply) and "nothing found" (they replied) are different sentences and are never merged.
 - The note's asked part follows what got no answer, in the words of 5.1: a book whose title was answered and whose series was not reads `No online answer about its series after 3 tries.`
 - The numbers (`3`) are the engine's.
+- **Amended 2026-11-23, after the fourth-round build (gap 3): which number.** The tries the book had when it gave up; if the engine sends only the limit, the limit (for a book that ran out of tries they are the same number). With neither, the row note and the `No online answer` facts are left out: a count the page made up would be worse than no sentence. Confirmed as built.
+- **Amended 2026-11-23, after the fourth-round build (gap 4): `Series: Not established`.** That fact is older than this spec and stays, for every book that has no series: nothing found, a doubtful series dropped, nothing asked. "No line for a missing series" in the table above means no added line, not that this one goes. It is also why a dropped series stays silent: such a book reads `Series: Not established`, exactly as any book with no series. One case only takes its place: a book whose series got no answer within the limit reads `Series: No online answer after 3 tries.` Confirmed as built.
 - Nothing promises a later look-up. If the background look-ups find the names after the book has converted, the book is filed by the rules and shows as 3.3 and 3.4 describe.
 - If he types the missing names in `Edit names` while the book waits, they are his answer. Whether that ends the wait at once is the engine's (F8); the page adds no words for it.
 
@@ -825,7 +886,7 @@ Goes to  Liu Cixin\Remembrance of Earth's Past\2 - The Dark Forest - Liu Cixin.m
 | look-up rows, detail | `1 of 1 book` | `691 of 903 books` |
 | tries tooltip (2.2) | `Each source is asked once for a book.` | `…asked up to 3 times for a book` |
 | tries tooltip, the gap | `, 1 hour apart` | `, 6 hours apart` |
-| the quiet line (3.2; replaced, fourth round) | `1 finished audiobook could not be renamed or moved. It stays where it is.` | `12 finished audiobooks could not be renamed or moved. They stay where they are.` |
+| the quiet line (3.2; replaced, fourth round). **Amended 2026-11-23 (R24): not built; the summary of 3.4a carries the number** | `1 finished audiobook could not be renamed or moved. It stays where it is.` | `12 finished audiobooks could not be renamed or moved. They stay where they are.` |
 | grouped writes waiting (3.3), line 1 | never one: it groups above 5 | `Writing series into finished audiobooks: 290 books` |
 | grouped renames waiting (3.3; fourth round), line 1 | never one: it groups above 5 | `Renaming finished audiobooks: 92 books` |
 | grouped moves waiting (3.3), line 1 | never one: it groups above 5 | `Moving finished audiobooks: 338 books` |
@@ -834,12 +895,13 @@ Goes to  Liu Cixin\Remembrance of Earth's Past\2 - The Dark Forest - Liu Cixin.m
 | the record's summary (3.4) | `Renamed or moved by the app · 1 · 22 Nov, 14:05` | `Renamed or moved by the app · 340 · last 22 Nov, 14:05` |
 | the record, more than 200 | never one | `Showing the newest 200 of 1,240. Find book searches all of them.` |
 | the record, more than 200 match (fourth round) | never one | `Showing the newest 200 of 312 that match.` |
-| the list of 3.4a (fourth round; built only on a yes to Question 14), summary | `Could not be renamed or moved · 1` | `Could not be renamed or moved · 12` |
+| the list of 3.4a (fourth round; **built: R24, 2026-11-23**), summary | `Could not be renamed or moved · 1` | `Could not be renamed or moved · 12` |
 | the list of 3.4a, more than 200 | never one | `Showing 200 of 312.` |
 | same name, destination label | `Both go to` (this book and one other) | `All 3 go to` |
 | same name, sentence | one other book: it is named (4.1). One the engine cannot name: `1 other book would get this file name.` (kept, after the final build, gap 6) | `2 other books would get this file name.` |
 | same name, button (amended after the final build, gap 2) | one other book: `Show the other book` | several: `Show one of the others` |
-| section 5 (amended, fourth round: this version), Waiting item | `Waiting for an online answer: <the book's title>` | `Waiting for an online answer: 3 books` |
+| section 5 (amended, fourth round: this version), Waiting item | `Waiting for an online answer: <the book's title>`; a book sent without a title: `Waiting for an online answer: 1 book` (amended 2026-11-23, gap 8) | `Waiting for an online answer: 3 books` |
+| section 5, the asked part (amended 2026-11-23, gap 2) | no count: one of the six parts of 5.1's table | the same |
 | section 5, the limit | `After 1 try a book converts…`, `No online answer … after 1 try.` | `After 3 tries…`, `…after 3 tries.` |
 | section 5, the next try | no singular: a book that waits has at least a second try | `Try 2 of 3 at 14:05.`, `Try 2 of 2 at 14:05.` |
 
@@ -856,8 +918,8 @@ Not in this spec's list of changes, noted only: the 0.30.0 status part `N need a
 | **Show in list**, on a grouped Waiting item (3.3) | the same; never the variant that ends `Its row has Cancel.` (amended, fourth round) | never | as on any Waiting item |
 | **Show in list**, on the one-book item `Waiting for an online answer: <book>` (5.1; fourth round) | `List this book: sets Status to All and searches for its title.` | never; the several-books item has no button | as on any Waiting item |
 | **Choose folder…**, on a finished audiobook whose rename or move the app has queued (3.3; fourth round: an existing control, a new disabled reason) | enabled: unchanged | `aria-disabled` while the app's own rename or move is queued. Tooltip: `The app is about to move this audiobook. Choose another folder when it has moved.` A rename in place: `The app is about to rename this audiobook. Choose a folder when it is done.` While the move runs: disabled with the 0.30.0 tooltip `Moving the audiobook. Choose another folder when it finishes.`, unchanged | keeps its focus stop, as every `aria-disabled` button here |
-| **Cancel**, on a queued move (0.30.0) | unchanged | not shown on a rename or move the app queued by its rules (3.3; fourth round); shown as before on a move he queued | unchanged |
-| the summary `Could not be renamed or moved · N` (3.4a; fourth round; **built only on a yes to Question 14**) | `Finished audiobooks the app has a new name or folder for and could not use, each with the reason.` | never disabled; hidden at zero | follows the record's summary in tab order; Enter or Space opens and closes |
+| **Cancel**, on a queued move (0.30.0) | unchanged | not shown on a rename or move the app queued by its rules (3.3; fourth round; **ruled 2026-11-23, R26**); shown as before on a move he queued | unchanged |
+| the summary `Could not be renamed or moved · N` (3.4a; fourth round; **built: R24, 2026-11-23**) | `Finished audiobooks the app has a new name or folder for and could not use, each with the reason.` | never disabled; hidden at zero | follows the record's summary in tab order; Enter or Space opens and closes |
 | its list and its **Show in list** buttons (3.4a) | the list: none, `aria-label="Books that could not be renamed or moved"`; the button: `List this book: sets Status to All and searches for its title.` | never | as the record's list and buttons, Escape included |
 | **Show the other book** / `Show one of the others` (was `Show both books`; amended after the final build) | 4.2: `List the other book: sets Status to All and searches for its folder or file name.` | never disabled; not shown when the name is free, when a file with it is on disk, or when the engine sends no name for the other book | class S: in the row's action order after Approve. Class Q (4.2a): last of the row's ordinary buttons, before `Delete book`'s own line |
 
@@ -880,7 +942,11 @@ Not in this spec's list of changes, noted only: the 0.30.0 status part `N need a
   - The notice (3.3a) is a block as wide as the panel; both lines wrap, never an ellipsis; it has no button to place.
   - The Title line and the Place line (4.5) are in the status cell, which no band hides. Each wraps; a long English series name with two origin parts takes two or three lines and pushes the `In` and `Goes to` lines down.
   - The hint of a waiting book (5.1) and the note of 5.2 wrap in the hint's place, as every row hint does.
-  - The list of 3.4a (if built) follows the record's narrow layout: `Now in` and `Would be in` above their paths, the reason under them, Show in list on its own line.
+  - The list of 3.4a (built: R24, 2026-11-23) follows the record's narrow layout: `Now in` and `Would be in` above their paths, the reason under them, Show in list on its own line.
+- **Amended 2026-11-23, after the fourth-round build (gap 10): the select cell in the compact band.** Found while building; not caused by this work. Under 600 px a row is two columns: 40 px for the checkbox, an 8 px gap, then the text. The select cell is drawn 56 px wide there, because the medium band's width outranks the compact band's own. Its box crosses the gap and reaches 8 px into the text column. The checkbox covers nothing, but two boxes on one plane intersect, and the no-overlap rule has no waiver, so it is fixed in this batch.
+  - **Rule: under 600 px the select cell is exactly as wide as its 40 px column.** The 56 px width belongs to the medium band alone (600 to 799 px). The wide layout keeps its 64 px.
+  - Nothing else moves. The checkbox keeps its place and its 8 px on either side; its label, which is the click target, stays at least 24 x 24 px and lies inside the cell; the text column starts where it starts today.
+  - Measured in check 49.
 
 **No element covers another.** By construction, not by measurement: everything new is in normal flow (no absolute, fixed or sticky positioning), so it can only wrap or push. **Amended, third round:** with the dialog withdrawn, this spec adds no overlay at all. States walked through on paper: each of the eight first parts of 1.1 (with `Checking what is left`, amended) with 0, 1, 2 and 5 rows; `Paused` beside a running look-up row; the badge with and without the as-of suffix; the Waiting-for-you block with its one line; the freshness cue and the unread line shown; the quiet line of 3.2 shown and hidden, alone and under an open record; the record closed, open with 1, 200 and 1,240 entries, loading, failed, with `Find book` matching nothing, with long Cyrillic paths, at each width; the Waiting list with 5 and with 338 queued moves and 290 waiting writes (3.3); the same-name row (class S) in the wide, medium and compact bands with Edit names open; a class Q row with its own buttons plus Show the other book, before `Delete book`'s line, in the same three bands; the Place line with a long series name and each origin suffix. Futaba measures the rects (check 12).
 
@@ -892,7 +958,7 @@ Not in this spec's list of changes, noted only: the 0.30.0 status part `N need a
 - **A waiting book's row (5.1):** the status with each of the two hints, three sentences wrapping in the compact band; the same row once `Queued` with the note of 5.2.
 - **A row that used to ask about a series (4.4):** no hint, no inline fields, no `Approve`: the row's ordinary buttons close up and the row is as high as any row that asks nothing.
 - **The details panel (4.4):** the `Sources disagree` block hidden whole, and shown with one remaining question: the `Names` block and the fields under it move up into its place.
-- **The record (3.4)** with a disabled Show in list among enabled ones; with `Showing the newest 200 of 312 that match.`; **the list of 3.4a** (if built) open under an open record, each scrolling inside itself, the quiet line and the help lines pushed down and not covered.
+- **The record (3.4)** with a disabled Show in list among enabled ones; with `Showing the newest 200 of 312 that match.`; **the list of 3.4a** (built: R24, 2026-11-23) open under an open record, each scrolling inside itself, the help lines pushed down and not covered (amended 2026-11-23: there is no quiet line to push).
 
 Futaba measures these rects too (check 12, as amended).
 
@@ -985,11 +1051,36 @@ Added 2026-11-22, fourth round (R20–R22):
 43. **A doubtful series on a book not converted yet (R22, 4.4).** Three books, one for each former question (a number that disagrees with FantLab; a title that only looks like a series name and number; two sources that differ only in the series): none is on the to-do list, none reads `Number unclear` or `Title unclear`, none has a sentence, inline Series or Number fields or `Approve`; none has a Place line; the details panel has no `Sources disagree` block, no `Resolve metadata` and no `Save choices`; each goes on to convert. Positive controls, on the same list: a book with two people credited still reads `Author unclear` with its choices; a title ending in a bitrate still reads `Title unclear`; two sources that differ in the title still show the `Sources disagree` block, without a series question in it.
 44. **Author folders (4.5).** A translated book's author folder is the Latin name, surname first (`Liu Cixin`), on the row and in the `Goes to` path. No new line on the row about the author's name. (What happens to a name the app cannot order is Question 13; until it is answered there is nothing to test.)
 45. **Rename row (3.3).** If the engine sends a rename of a finished audiobook as a job of its own: its row reads `Renaming finished audiobook: <book>` with the step `Writing the new names into the file and renaming it. Audio unchanged.`, it counts as main work (no badge), and one that waits reads `Rename finished audiobook: <book>` with its blocker sentence. If the engine sends no such job, this check does not apply.
-46. **The list of 3.4a.** Only if Question 14 is answered yes: `Could not be renamed or moved · N` is under the record, check 37's line is gone, each entry has `Now in`, `Would be in`, one reason sentence of the table and Show in list, and nothing in it changes a file. If the answer is no or not given: the element is not on the page.
+46. **The list of 3.4a.** Only if Question 14 is answered yes: `Could not be renamed or moved · N` is under the record, check 37's line is gone, each entry has `Now in`, `Would be in`, one reason sentence of the table and Show in list, and nothing in it changes a file. If the answer is no or not given: the element is not on the page. (Amended 2026-11-23, R24: the answer is yes. The list is built and this check applies.)
+
+Added 2026-11-23, after the fourth-round build. Amendments to the fourth round's checks first:
+
+- **Check 37 (R24).** The number is read from the summary `Could not be renamed or moved · N`, not from a line: neither `…could not be renamed or moved. They stay where they are.` nor `Series found for N finished audiobooks…` is on the page. The controls of check 37 hold for the summary's number, and the summary is hidden at zero.
+- **Check 39 (R26).** Ruled; the check stands as written.
+- **Check 40 (gap 1).** With automatic processing paused the hint ends `Press Resume automatic processing to try again.`; stopped and never paused, `Press Start automatic processing to try again.` The button on screen has the same face in each case.
+- **Check 41 (gaps 3, 4).** The number in `…after N tries.` is the tries the book had. A book with no series reads `Series: Not established` in the details panel in every case but one: a series that got no answer within the limit reads `Series: No online answer after N tries.`
+- **Check 42 (gaps 6, 7).** Typing another title in the Title field removes `English title found on …` at once, and restoring the app's title brings it back. A series of unknown origin with an English name from Wikidata ends ` · English name from Wikidata`, with no origin before it. A book approved before 0.31.0 reads `English title found online.`
+- **Check 43 (R25).** Two more books: one that 0.30.0 held with `Series and standalone evidence conflicts`, and one it stopped with `Series membership has conflicting author credits…`. Neither is held or stopped for it, neither shows those words, each has no series and goes on to convert.
+- **Check 44 (R23).** A Latin author name the app cannot put in order is filed as the source wrote it. Its row asks nothing and says nothing about the name.
+
+47. **The asked part (gap 2).** A book whose files name its series and that waits only for the series' English name: its hint reads `No online answer yet about the English name of its series.`, never `…about its series.` With the title asked too: `…about its English title and series name.` A book with no series that waits for one still reads `…about its series.`
+48. **The raw record and the title's own mention (gaps 5, 9).** A book whose series was dropped as doubtful: `Accepted evidence` in its details panel lists the dropped series among the book's facts; no worded line anywhere names it. If that book's row asks something else and the brackets in its title name a series, the row does not carry `The title mentions a series: …`. Positive control: a row that asks something else, with brackets the app could not make a series of and no series dropped, still carries the line.
+49. **The select cell in the compact band (gap 10).** At 599 px and at 400 px, long Cyrillic titles: the select cell's rect is 40 px wide and does not intersect the text cell's rect; the checkbox's label is at least 24 x 24 px and inside the select cell; the element at a point 4 px inside the text column's left edge is the text cell, not the select cell or its label (hit-tested, no mouse). Positive control that the other bands are untouched: at 700 px the select cell is 56 px wide, at 1280 px it is 64 px.
 
 ## Notes for Ender
 
 What the page needs from the engine, in plain words. How is yours.
+
+**Amended 2026-11-23, after the fourth-round build: one small batch.** Four things change in what is built; everything else in your ten gaps is confirmed as built.
+1. Gap 2: the asked part gets two more phrases (5.1's table). `the English name of its series` when only that is asked; `its English title and series name` with the title.
+2. Gap 5: `Accepted evidence` prints the book's facts whole again, the dropped series included (3.5).
+3. Gap 9: `The title mentions a series: …` is not shown on a book whose series was dropped as doubtful (4.4). The page has the fact it needs, on the book's record; if you would rather not send the clue for such a book, that is the same to me.
+4. Gap 10: under 600 px the select cell is as wide as its 40 px column (section 8).
+
+And from Sergei's answers, for the page of 3.2 to 3.4a that is still to build:
+- R24: build the list of 3.4a. The quiet line is not reworded, it goes; the list's summary carries the number. The engine facts are under "For the list of 3.4a" below, no longer conditional.
+- R26: no `Cancel` on a move the app queued, as 3.3 has it.
+- R23 and R25 need nothing more on the page: R23 adds no words, and R25's two stops are already gone in `3d50a93`.
 
 **Section 1**
 - One finished-state value per poll, decided by the engine from live facts: working, paused, continues by itself, waiting for you, background look-ups only, all done; and "not known" while a source is unread. The truth rules are table 1.1 and its bullets.
@@ -1030,7 +1121,7 @@ What the page needs from the engine, in plain words. How is yours.
 *For the rows and items (3.3), fourth round*
 - Whether a rename of a finished audiobook for an English title, an author's name or a series name runs as a job of its own, inside the series row's writing step, or inside the move (F10). If it is its own job: a row kind and a waiting kind for it, with the book and the 0.30.0 blocker, marked as main work. Its words are in 3.3.
 - For each of the three groups (series writes, renames, the app's own moves that wait): the whole number, and the first one's book and blocker. The page groups above 5. The build lists at most 100 waiting writes; the group's number must be the whole count.
-- On a book's row and on a queued move: whether the rename or move is the app's own or one he queued with `Choose folder…`. The page shows no `Cancel` for the app's own and disables `Choose folder…` with its reason while it is queued or running (3.3; Question 16).
+- On a book's row and on a queued move: whether the rename or move is the app's own or one he queued with `Choose folder…`. The page shows no `Cancel` for the app's own and disables `Choose folder…` with its reason while it is queued or running (3.3; Question 16, **answered 2026-11-23, R26: yes**).
 - Confirm two things 3.3 rests on. A folder he chooses for a book after the app has moved it is kept: the rules do not move it back (I read "You chose its folder; left as it is" in `sorting_moves.py`). And a cancelled rule-made move would simply be queued again, which is why `Cancel` is not offered.
 
 *For the notice (3.3a), fourth round*
@@ -1045,7 +1136,7 @@ What the page needs from the engine, in plain words. How is yours.
 - A search over every entry by a text (title, author, either path), newest first, at most 200 back, with the whole number that match. The first 200 without a text come with the whole number of entries, as before.
 - Everything else as the third round's list below.
 
-*For the list of 3.4a, only if Question 14 is answered yes*
+*For the list of 3.4a (amended 2026-11-23, R24: built; it was "only if Question 14 is answered yes")*
 - The books counted in 3.2's number, each with: the book's id, title, author, the path it is at, the path it would have, and the reason as one of the keys of 3.4a's table. The build's plan already carries these for every book it refuses (`book_id`, `title`, `author`, `from_shown`, `to_shown`, `refused_key`); the list wants only the ones 3.2 counts.
 
 *Third round, for the record: the quiet line (3.2)*
@@ -1069,6 +1160,7 @@ What the page needs from the engine, in plain words. How is yours.
 *For a doubtful result (3.5)*
 - Nothing. It must arrive exactly as a book with no series found: settled in the look-up's count, absent from the quiet line's number, and with no field the page could show.
 - **Amended 2026-11-22, fourth round (R21).** A series found on FantLab alone, with a counted number, arrives as any series a source gave: origin `source`, provider FantLab. The page needs no fact that the number was counted.
+- **Amended 2026-11-23, after the fourth-round build (gap 5).** "No field the page could show" was too strict. You keep what was dropped with the book's facts, and that is right: `Accepted evidence` prints those facts whole. No worded line reads it, and the row uses it for one thing only, to leave out the title's own mention (gap 9).
 
 **Section 4**
 - The new hold as its own reason on a row: the shared destination, how many others, and for each other book its id, whether it is a row or a queued book, and a name that tells it apart (its folder or file name, different from this row's).
@@ -1088,13 +1180,13 @@ What the page needs from the engine, in plain words. How is yours.
   - Rows that are on the to-do list with one of these questions when the update is installed must be checked again by themselves, so they stop asking without a press.
   - A series he typed or approved is never doubtful and stays.
   - F9: under which title a book shaped "Series N. Title" is filed once its series is dropped: the whole text as the files have it, or the title part. The page shows whatever you file it under. Today's question proposes the title part; with the series "treated as not found" the whole text is the reading that guesses nothing. Yours to propose.
-  - Read in the build, same kind, not named by R22: a book held with `Series and standalone evidence conflicts`, and the routing stop `Series membership has conflicting author credits. Confirm this book in Edit names.` Whether they follow R22 is Question 15. Until it is answered they stay as built. If you know of others, add them to that question.
+  - Read in the build, same kind, not named by R22: a book held with `Series and standalone evidence conflicts`, and the routing stop `Series membership has conflicting author credits. Confirm this book in Edit names.` Whether they follow R22 is Question 15. Until it is answered they stay as built. If you know of others, add them to that question. **Answered 2026-11-23 (R25): yes, both follow R22.**
 - **Amended 2026-11-22, fourth round (R1, R3): English names on a row (4.5).**
   - Per row, where the title the book is filed under came from: the files, typed by him, or an online source with its name. The Title line shows only for the last.
   - Per row, when the series name shown is an English name taken from a source other than the origin already sent: that source's name. Otherwise nothing.
   - For the details panel's `English title` fact, one of: found (the title), nothing found, no answer after the limit (with the number of tries), typed by him. Today it has found, none and Russian original.
   - F11: what a translated book's series is named when no English name for the series is found. The page prints the name it is sent, with its origin.
-  - For the author: nothing new. What the app does with a Latin name it cannot order is Question 13.
+  - For the author: nothing new. What the app does with a Latin name it cannot order is Question 13. **Answered 2026-11-23 (R23): filed as the source wrote it, nothing said.**
 
 **Section 5** (amended 2026-11-22, fourth round: this version)
 - Per waiting book: what it waits for. Only a wait for an online source gets the new status; a wait for the library drive or for the catalog keeps `Waiting for source` (today all of them are one state with a kind inside).
@@ -1140,7 +1232,7 @@ What the page needs from the engine, in plain words. How is yours.
 - F3. Does the Electron shell take its window title from the page? R13 makes the title part of 0.31.0, so this needs Ender's answer before 1.5 is built. (`desktop/main.js` gives the window the title `Books Arranger` and the page has the same `<title>`; I did not run it.)
 - F5. Closed, third round: it was asked for the withdrawn dialog's body text. The record's help line says only `The audio is never changed.`, which holds either way.
 - F6 (third round). What "found for certain" and "would move again in the next version" mean in the engine are Ender's to propose and Sergei's to approve (Scope, third round). The page needs neither rule, only their results: a book is being changed, is in the quiet line's number, or is neither. **Closed, fourth round: R21 and R22 say what is doubtful, and no book waits for a later version (R20).**
-- F7 (third round). Can a queued automatic move be cancelled from the book's row, and what happens next? (Notes for Ender, Section 3.) **Fourth round: decided for the page (3.3: no `Cancel` on the app's own move; Question 16). Still Ender's to confirm: a cancelled rule-made move would be queued again, and a folder he chooses after the move is kept.**
+- F7 (third round). Can a queued automatic move be cancelled from the book's row, and what happens next? (Notes for Ender, Section 3.) **Fourth round: decided for the page (3.3: no `Cancel` on the app's own move; Question 16). Still Ender's to confirm: a cancelled rule-made move would be queued again, and a folder he chooses after the move is kept.** **Ruled 2026-11-23 (R26): no `Cancel`; the choice he makes after the move is kept.**
 - F4. Whether the series look-up of finished books keeps running after R6's job (Scope: not ruled). If it stops, section 2's series row and item simply never appear. **Fourth round: R6's job is replaced by the automatic pass inside the app; the question, as the Scope words it, is still not ruled.**
 - F8 (fourth round). If he types the missing names in `Edit names` while a book waits for an online answer, does the wait end at once? (5.2)
 - F9 (fourth round). Under which title a book shaped "Series N. Title" is filed once its doubtful series is dropped: the whole text, or the title part. (4.4)
@@ -1167,15 +1259,24 @@ Questions 1 to 12 are closed. The answers, as ruled in the Scope's second round,
 11. Does a book held for English series names hold back `All done`? **Closed by R19 (third round): "Don't move now if the next version will move it." It is simply not moved, and it holds nothing back. Fourth round (R20): no book is held for them any more.**
 12. Should a book that is not converted yet stop asking about a doubtful series, in three places (`Number unclear`; `Title unclear` for a title that looks like a series name and number; `Sources disagree — which is correct?` about a series)? **Yes, and in this version** (R22). Specced in 4.4.
 
+Answered 2026-11-23 (Scope, `9aedf73`); the questions as asked are in the next section:
+
+13. An author's name the app cannot put in order: say nothing, or ask? **Say nothing: filed as the source wrote it** (R23). 4.5.
+14. List the books the app could not rename or move, read-only, each with its reason? **Yes** (R24). 3.4a is built; 3.2's line is not shown.
+15. Do the two other stops about a doubtful series follow R22? **Yes** (R25). 4.4.
+16. No `Cancel` on a move the app queued by its rules? **Yes** (R26). 3.3.
+
 ## Questions for Sergei: open (one word each)
+
+**Amended 2026-11-23, after the fourth-round build: none open.** Questions 13 to 16 below are the fourth round's, kept as they were asked; each is answered above. This round raises no new question.
 
 **Amended 2026-11-22, fourth round (R20–R22).** Four open points. Each says what is built until he answers.
 
-13. **An author's name the app cannot put in order.** A Latin name of two words where the app cannot tell which is the surname. Say nothing and file it as the source wrote it, or ask on the row? I recommend **say nothing**: it is the rule he gave for a doubtful series, and a name filed the wrong way round is corrected once in `Edit names`. If he prefers the question, it is one more `Author unclear` cause with the sentence `The app can't tell which word is the surname.` (4.5). Until he answers: no question and no words; the row shows the author as the engine files it. nothing / ask
-14. **The books the app could not rename or move.** The jobs panel says how many (`12 finished audiobooks could not be renamed or moved. They stay where they are.`). Should it also list them, read-only, each with its reason (`A file with that name is already there.`), under the record of what was moved? I recommend **yes**: a count he cannot open tells him there is something and not what. Nothing in the list asks him or acts on a file. Until he answers: the count line only (3.2); the list is specced and not built (3.4a). yes / no
-15. **Other stops that are about a doubtful series.** R22 named three questions. Reading the build, two more stops are of the same kind: a book held with `Series and standalone evidence conflicts` (one source lists it in a series, another calls it a standalone book), and `Series membership has conflicting author credits. Confirm this book in Edit names.` Same rule for them: no series, the book goes on, nothing is said? I recommend **yes**: it is the same doubt, and each can hold a book back. Until he answers: they stay exactly as built. yes / no
-16. **No Cancel on a move the app queued by its rules.** Today a queued move has `Cancel` on the book's row. For a move the app queued itself, `Cancel` would not last: the rules would queue the move again. So the spec shows no `Cancel` there, and `Choose folder…` works again once the book has moved; a folder he chooses then is kept. OK? I recommend **yes**. Until he answers: built as described (3.3). yes / no
+13. **An author's name the app cannot put in order.** A Latin name of two words where the app cannot tell which is the surname. Say nothing and file it as the source wrote it, or ask on the row? I recommend **say nothing**: it is the rule he gave for a doubtful series, and a name filed the wrong way round is corrected once in `Edit names`. If he prefers the question, it is one more `Author unclear` cause with the sentence `The app can't tell which word is the surname.` (4.5). Until he answers: no question and no words; the row shows the author as the engine files it. nothing / ask. **Answered 2026-11-23: nothing (R23).**
+14. **The books the app could not rename or move.** The jobs panel says how many (`12 finished audiobooks could not be renamed or moved. They stay where they are.`). Should it also list them, read-only, each with its reason (`A file with that name is already there.`), under the record of what was moved? I recommend **yes**: a count he cannot open tells him there is something and not what. Nothing in the list asks him or acts on a file. Until he answers: the count line only (3.2); the list is specced and not built (3.4a). yes / no. **Answered 2026-11-23: yes (R24).**
+15. **Other stops that are about a doubtful series.** R22 named three questions. Reading the build, two more stops are of the same kind: a book held with `Series and standalone evidence conflicts` (one source lists it in a series, another calls it a standalone book), and `Series membership has conflicting author credits. Confirm this book in Edit names.` Same rule for them: no series, the book goes on, nothing is said? I recommend **yes**: it is the same doubt, and each can hold a book back. Until he answers: they stay exactly as built. yes / no. **Answered 2026-11-23: yes (R25).**
+16. **No Cancel on a move the app queued by its rules.** Today a queued move has `Cancel` on the book's row. For a move the app queued itself, `Cancel` would not last: the rules would queue the move again. So the spec shows no `Cancel` there, and `Choose folder…` works again once the book has moved; a folder he chooses then is kept. OK? I recommend **yes**. Until he answers: built as described (3.3). yes / no. **Answered 2026-11-23: yes (R26).**
 
 **Offered, not built** (no answer needed; say the word if wanted):
 - A `Put back` on an entry of the record (3.4), to undo one automatic rename or move. Today the way to correct one is `Choose folder…` on the book's row.
-- Fourth round: the second read-only list that was offered here is Question 14 now.
+- Fourth round: the second read-only list that was offered here is Question 14 now. Amended 2026-11-23: answered yes (R24); it is built (3.4a).
