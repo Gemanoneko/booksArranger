@@ -309,6 +309,26 @@ class GapFill:
                 'review_tries': {'per_source': SOURCE_TRIES, 'min_spacing_seconds': LOOKUP_RETRY_MIN, 'max_spacing_seconds': TRY_SPACING,
                                  'max_wait_seconds': LOOKUP_MAX_WAIT, 'sources': list(LOOKUP_SOURCES)}}
 
+    def unsettled(self):
+        """0.31.0 milestone B: the job ids of the finished books whose detail look-up has not ended (its approval left a
+        field to ask about and the ledger holds no final answer yet). The look-up records the English title of a translated
+        work (R1); the rules rename a finished book only when it has ended, so a title found later never moves the book a
+        second time (ruling R19). A catalog read; nothing is asked."""
+        import publication_reuse
+        final = {row['job_id'] for row in self._rows("SELECT job_id FROM gap_fill WHERE state IN ('found','none')")}
+        found = set()
+        for row in self._rows("SELECT job_id,json_extract(manifest,'$.metadata_facts.gap_search') AS search,json_extract(manifest,'$.task_kind') AS task "
+                              "FROM audio_jobs WHERE state='completed' AND json_extract(manifest,'$.metadata_facts.gap_search.background') IS NOT NULL"):
+            if row['job_id'] in final or row['task'] == publication_reuse.KIND:
+                continue
+            try:
+                search = json.loads(row['search'])
+            except (TypeError, ValueError):
+                continue
+            if background({'metadata_facts': {'gap_search': search}})[0]:
+                found.add(row['job_id'])
+        return found
+
     # ------------------------------------------------------------------ ledger
     def _rows(self, sql, params=()):
         with connect(self.database) as db:

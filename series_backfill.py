@@ -65,7 +65,13 @@ MOVE_WAITS = 'Series found. Moving it into its series folder waits for your appr
 #            him (summary()['moves_waiting'], and on its own as 'writes_held') and listed for approval (sorting_moves).
 #   'allow'  the 0.16.12 behaviour: such a book is written and renamed in its own folder at once.
 # One setting, read at each write (SeriesBackfill.apply). A series folder that is another folder always needed approval.
+# 0.31.0 milestone B (rulings R18 and R20: finished books are renamed and moved by the rules with no approval step). The
+# setting STAYS 'hold': the look-up itself still writes nothing. What changed is who approves. The app's rules do
+# (rule_filing.RuleFiling), one book at a time through the same list Sergei used to approve (sorting_moves.plan: every
+# refusal of that list still applies) and the same approve() below, with record 'approved_by': 'rules'. So a series is
+# written only for a book the list lets through, bound to its manifest and to the exact path the list names.
 WRITE_WITHOUT_APPROVAL = 'hold'
+APPROVAL_KEYS = ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc', 'approved_by')
 WRITE_WAITS = 'Series found. Writing it into the file and renaming it waits for your approval.'
 # The reason the 81 books were held by that bug. Such a book is looked up once more (a lookup only: its file is never touched
 # without approval), so its series is found again under 0.30.0's rules (item 6: the original-language name) and it then
@@ -283,7 +289,10 @@ class SeriesBackfill:
             kept = self.__dict__.get('_summary')
             if kept is not None and kept[0] == finished and (kept[1] is None or kept[1] > now):
                 return dict(kept[2])
-            rows = db.execute("SELECT job_id,state,reason,json_extract(record,'$.next_attempt'),json_extract(record,'$.found') IS NOT NULL,"
+            # 0.31.0 milestone B: an approved write that waits for the queue was deferred with no 'found' of its own (its
+            # series is 'approved_found') and counted as a look-up between tries; it is a write that waits.
+            rows = db.execute("SELECT job_id,state,reason,json_extract(record,'$.next_attempt'),json_extract(record,'$.found') IS NOT NULL "
+                              "OR json_extract(record,'$.move_approved') IS NOT NULL,"
                               "json_extract(record,'$.unreached') IS NOT NULL,json_extract(record,'$.approved_failed') IS NOT NULL FROM series_backfill").fetchall()
         counts = dict.fromkeys(('between_tries', 'due', 'write_waiting', 'writing', 'moves_waiting', 'blocked', 'with_series', 'without', 'gave_up', 'left_alone'), 0)
         writes, nexts, writes_held = [], [], 0
@@ -328,11 +337,12 @@ class SeriesBackfill:
         self.__dict__['_summary'] = (finished, min(nexts) if nexts else None, value)
         return dict(value)
 
-    def approve(self, job_id, found, target):
+    def approve(self, job_id, found, target, by=None):
         """0.30.0 item 2: Sergei approved this book's listed move (sorting_moves). found: the series it is filed under
         ({'name','number','provider','source_url'}, the original-language name, item 6); target: the path he saw. The held
         book is looked at again by the next pass with exactly this series (no new lookup), only while the book's manifest is
-        the one he approved. Raises ValueError when the book is not held for this reason."""
+        the one he approved. Raises ValueError when the book is not held for this reason.
+        by (0.31.0 milestone B): 'rules' when the app's rules approved it (rule_filing), kept as record 'approved_by'."""
         entry = self.entry(job_id)
         rows = self._rows('SELECT manifest FROM audio_jobs WHERE job_id=?', (job_id,))
         if not entry or entry['state'] != 'held' or not rows:
@@ -344,6 +354,9 @@ class SeriesBackfill:
         approved.update({key: copy.deepcopy(value) for key, value in (record.get('series_proof') or {}).items()})
         record.update(move_approved=True, approved_found=approved, approved_target=str(target), approved_binding=encoded(json.loads(rows[0]['manifest']))[1],
                       approved_utc=_stamp())
+        record.pop('approved_by', None)
+        if by:
+            record['approved_by'] = str(by)
         record.pop('next_attempt', None)
         record.pop('follow_up', None)
         record.pop('approved_failed', None)  # a new approval of a move that could not run before
@@ -590,6 +603,27 @@ class SeriesBackfill:
                 return 'Part of a replacement; left as it is'
             if table('kept_files') and db.execute('SELECT 1 FROM kept_files WHERE job_id=?', (job_id,)).fetchone():
                 return 'Files kept at your choice; left as they are'
+        self.settled(job_id)
+        from encoding_policy import AUTOMATIC_PROFILE, LEGACY_PROFILE, PROFILE
+        if output.get('validation', {}).get('profile') not in {PROFILE, LEGACY_PROFILE, AUTOMATIC_PROFILE}:
+            return 'Made by an earlier profile; left as it is'
+        publications = getattr(merge, 'publications', None)
+        if publications is not None:
+            current = publications.publication(jobs if jobs is not None else merge.jobs.status()['jobs'], manifest['candidate_id'])
+            if not current or current.get('kind') != 'original' or current.get('id') != job_id:
+                return 'Has a chapter update or a newer version; left as it is'
+        return ''
+
+    def settled(self, job_id):
+        """Returns when everything the conversion left for this finished book has ended: its source cleanup, its recovery
+        copies, its working files, its source folders, and the step after its conversion. Raises Later while one of them
+        is still to run, Blocked while one is on hold (it waits for Sergei). The series write always asked this (unsafe());
+        since 0.31.0 milestone B the rules ask it before any move of a finished book too (rule_filing), so a book whose
+        files something else still works on is never renamed or moved under it. A catalog read only."""
+        merge = self.merge
+        with connect(self.database) as db:
+            def table(name):
+                return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
             cleanup = db.execute('SELECT state FROM source_cleanup WHERE job_id=?', (job_id,)).fetchone() if table('source_cleanup') else None
             recovery = db.execute('SELECT state FROM recovery_retention WHERE job_id=?', (job_id,)).fetchone() if table('recovery_retention') else None
             storage = db.execute('SELECT state FROM storage_cleanup_jobs WHERE job_id=?', (job_id,)).fetchone() if table('storage_cleanup_jobs') else None
@@ -601,15 +635,42 @@ class SeriesBackfill:
             if any(state and state[0] == 'needs_attention' for state in (cleanup, storage, folders)):
                 raise Blocked(BLOCKED)
             raise Later('Its cleanup is not finished yet')
-        from encoding_policy import AUTOMATIC_PROFILE, LEGACY_PROFILE, PROFILE
-        if output.get('validation', {}).get('profile') not in {PROFILE, LEGACY_PROFILE, AUTOMATIC_PROFILE}:
-            return 'Made by an earlier profile; left as it is'
-        publications = getattr(merge, 'publications', None)
-        if publications is not None:
-            current = publications.publication(jobs if jobs is not None else merge.jobs.status()['jobs'], manifest['candidate_id'])
-            if not current or current.get('kind') != 'original' or current.get('id') != job_id:
-                return 'Has a chapter update or a newer version; left as it is'
-        return ''
+
+    def unsettled(self):
+        """0.31.0 milestone B: the job ids of the finished books whose series look-up has not come to an end: not visited
+        yet, between tries, blocked by a cleanup on hold, or to be looked up once more (candidates()' own tests). The rules
+        file a finished book only when its look-up has ended, so a series found later never moves it a second time (ruling
+        R19: a book moves once). A catalog read: no manifest is parsed, nothing is asked."""
+        import publication_reuse
+        from storage_relocation_native import retained_job_ids
+        entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,reason,record FROM series_backfill')}
+        generation = self._local_generation()
+        retained = retained_job_ids(self.database)
+        rows = self._rows("SELECT job_id,state,output IS NOT NULL AS published,json_extract(manifest,'$.candidate_id') AS candidate,"
+                          "json_extract(manifest,'$.metadata.series') AS series,json_extract(manifest,'$.metadata.title') AS title,"
+                          "json_extract(manifest,'$.metadata.canonical_author') AS author,json_extract(manifest,'$.task_kind') AS task "
+                          "FROM audio_jobs ORDER BY created,job_id")
+        newest = {row['candidate']: row['job_id'] for row in rows}
+        found = set()
+        for row in rows:
+            job_id = row['job_id']
+            if row['state'] != 'completed' or not row['published'] or newest.get(row['candidate']) != job_id or row['task'] == publication_reuse.KIND \
+                    or job_id in retained or row['series'] or not row['title'] or not row['author']:
+                continue
+            entry = entries.get(job_id)
+            if not entry:
+                found.add(job_id)
+                continue
+            state, reason, record = entry['state'], str(entry['reason']), json.loads(entry['record'])
+            if state == 'held':
+                if (reason == OLD_FOLDER_REASON or reason.startswith(REVIEW_REASON)) and not record.get('approved_failed'):
+                    found.add(job_id)
+            elif state == 'none':
+                if not (record.get('lookup_policy') == LOOKUP_POLICY and (generation is None or record.get('local_generation') == generation)):
+                    found.add(job_id)
+            elif state not in FINAL and state not in ACTIVE and state != 'pending' and not record.get('move_approved'):
+                found.add(job_id)  # deferred or blocked; an approved write that waits is work, not a look-up
+        return found
 
     def _cleanup(self, job_id):
         """'held' when one of the book's cleanups is on hold (needs attention), else ''. A catalog read only."""
@@ -704,8 +765,12 @@ class SeriesBackfill:
         return None
 
     def _idle(self):
-        """File changes wait for the book queue, a cleanup and a scan; series lookups do not."""
+        """File changes wait for the book queue, a cleanup and a scan; series lookups do not. 0.31.0 milestone B (F13): they
+        wait for a Pause of the audiobook jobs too (his, or one saved before this launch), as the rules' moves do."""
         merge = self.merge
+        paused = getattr(merge, 'filing_paused', None)
+        if callable(paused) and paused():
+            raise Later('Audiobook jobs are paused', self.clock() + 60)
         jobs = merge.jobs
         if jobs._thread and jobs._thread.is_alive() or merge.cleanup.thread and merge.cleanup.thread.is_alive() or merge.cleanup.current:
             raise Later('A book is being converted or cleaned up', self.clock() + 60)
@@ -733,7 +798,7 @@ class SeriesBackfill:
                   'series_proof': {key:copy.deepcopy(found[key]) for key in ('work_id','series_id','statement_id','work_revision','series_revision','references','numbering_scheme','isbn','series_url','local_identity') if key in found}}
         # His approval travels with the record from the start, so a hold at any step below still says it was approved.
         approved = self.entry(job_id)
-        record.update({key: approved['record'][key] for key in ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc')
+        record.update({key: approved['record'][key] for key in APPROVAL_KEYS
                        if approved and key in approved['record']})
         try:
             # Rulings 69 and 71h: a book Sergei moved to a folder he chose lives where its move says, not at its receipt;
@@ -769,7 +834,7 @@ class SeriesBackfill:
                 planned = getattr(self.merge, 'sorting_target', None)
                 if callable(planned) and os.path.normcase(str(planned(job_id, found) or '')) != os.path.normcase(str(prior.get('approved_target'))):
                     raise Held('The planned place changed since you approved it; look at the list again. Nothing was changed')
-                record.update({key: prior[key] for key in ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc') if key in prior})
+                record.update({key: prior[key] for key in APPROVAL_KEYS if key in prior})
                 record['series_folder'] = str(new.parent)
                 new = old.parent / new.name
                 if new == old:
@@ -788,7 +853,7 @@ class SeriesBackfill:
                 expected = str(planned(job_id, found) or '') if callable(planned) else str(new)
                 if os.path.normcase(expected) != os.path.normcase(str(prior.get('approved_target') or '')):
                     raise Held('The planned place changed since you approved it; look at the list again. Nothing was changed')
-                record.update({key: prior[key] for key in ('move_approved', 'approved_found', 'approved_target', 'approved_binding', 'approved_utc') if key in prior})
+                record.update({key: prior[key] for key in APPROVAL_KEYS if key in prior})
                 if os.path.normcase(os.path.dirname(expected)) != os.path.normcase(str(old.parent)):
                     record['series_folder'] = os.path.dirname(expected)
             temp = old.parent / (TEMP_PREFIX + job_id + '.m4b')
