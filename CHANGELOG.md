@@ -32,6 +32,7 @@
 - After Stop automatic processing, the status line and the window title say Paused at once.
 - A source that only answers with a human check (through DuckDuckGo) counts as nothing found at once, so it no longer holds back All done for 12 hours.
 - Choose folder… pressed at any moment while the app rewrites a book waits until the rewrite ends, then moves the rewritten file to the folder you chose. It never fails as "in use" and never leaves a second copy.
+- Nothing that can never finish holds back All done. A folder that cannot take the book's new name is refused once, with its reason, and an old series hold on a book converted again is no longer counted as a look-up.
 
 ## [v0.30.1] - 2026-11-20
 

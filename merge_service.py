@@ -6497,11 +6497,18 @@ class MergeService:
         except sqlite3.Error as error:
             return {'state':'later','reason':str(error)[:300] or 'The catalog was busy'}
         except ValueError as error:
-            text=str(error)
-            passing=(getattr(error,'code',None)=='unfinished' or text in (book_move.UNFINISHED,'Move was not accepted. Nothing was moved.',
-                                                                          'Books Arranger is closing. Nothing was moved.')
-                     or text.startswith('This audiobook is being moved now'))
-            return {'state':'later' if passing else 'refused','reason':text[:300]}
+            return {'state':'later' if self._passing(error) else 'refused','reason':str(error)[:300]}
+
+    @staticmethod
+    def _passing(error):
+        """Senua's 0.30.0 review, M2 (and 0.31.0 delta, m9, for choice_after_write): whether a refusal of a queued move passes
+        by itself (a move of the book running or waiting for a restart, Books Arranger closing, the queue refusing), so the
+        follow-up asks again; any other refusal lasts (a path too long, a newer version, no publication)."""
+        import book_move
+        text=str(error)
+        return (getattr(error,'code',None)=='unfinished' or text in (book_move.UNFINISHED,'Move was not accepted. Nothing was moved.',
+                                                                    'Books Arranger is closing. Nothing was moved.')
+                or text.startswith('This audiobook is being moved now'))
 
     def choice_after_write(self,job_id,record):
         """0.31.0 ruling R30 (Sergei 2026-11-23): a Choose folder… pressed while the app rewrote this book (its series, or its
@@ -6517,7 +6524,12 @@ class MergeService:
           - stopped at its start because the write had replaced the receipt first (failed 'changed', planned from the old
             receipt after the write was approved): queued again from the book as it is now, to his folder, with his override.
         None when there is no such choice: the follow-up goes on as before. Otherwise {'state': 'none'}: the rules move
-        nothing (the folder is his, R26), and the rules' record ends this book where the write put it."""
+        nothing (the folder is his, R26), and the rules' record ends this book where the write put it.
+        R33: while the write is in hand his move waits (rewriting(), run_move), so it is queued here, never running.
+        R34 (Senua's 0.31.0 delta, m9): a refusal that passes (_passing) is asked again; one that lasts (his folder cannot
+        take the book's new name, a newer version, no publication) is never asked again. His move then fails with its own
+        cause and sentence, as the same press is refused when the name is too long at once (book_move.plan), and the answer
+        is None: the follow-up goes on as without a choice, so the rules' entry ends."""
         import book_move,datetime
         kept={'state':'none','reason':'You chose its folder; left as it is'}
         busy={'state':'later','reason':'This audiobook is being moved now. Choose another folder when it finishes.'}
@@ -6531,25 +6543,34 @@ class MergeService:
             try:return datetime.datetime.fromisoformat(str(text).replace('Z','+00:00'))
             except (TypeError,ValueError):return None
         live=next((move for move in moves if move['state']!='failed'),None)
-        if live is not None:
-            if live['state'] in book_move.ACTIVE or live['state']=='queued' and self._move_running(live['move_id']):return busy
-            if live['state']=='queued' and replaced(live):
-                start=self._publication_location(job_id,live['kind'])
-                with connect(self.inventory.database) as db:
-                    db.execute('BEGIN IMMEDIATE')
-                    # Under the write lock: a Mover takes the same lock before it reads its move (Mover._run).
-                    if self._move_running(live['move_id']):return busy
-                    try:book_move.rebase(db,live['move_id'],start)
-                    except book_move.Refused:pass  # his folder cannot take the new name: his move stands, the rules move nothing
-                self._destination_changed()
-            return kept
-        stopped=next(iter(moves),None)
-        approved,created=moment(record.get('approved_utc')),moment((stopped or {}).get('created_utc'))
-        if stopped is not None and stopped.get('cause')=='changed' and replaced(stopped) and approved is not None and created is not None and created>=approved:
-            start=self._publication_location(job_id,stopped['kind'])
-            self._sorting_move(job_id,os.path.join(stopped['target_folder'],os.path.basename(start['final_path'])),origin='user',override_id=stopped['override_id'])
-            return kept
-        return None
+        try:
+            if live is not None:
+                if live['state'] in book_move.ACTIVE or live['state']=='queued' and self._move_running(live['move_id']):return busy
+                if live['state']=='queued' and replaced(live):
+                    start=self._publication_location(job_id,live['kind'])
+                    with connect(self.inventory.database) as db:
+                        db.execute('BEGIN IMMEDIATE')
+                        # Under the write lock: a Mover takes the same lock before it reads its move (Mover._run).
+                        if self._move_running(live['move_id']):return busy
+                        try:book_move.rebase(db,live['move_id'],start)
+                        except book_move.Refused as refusal:
+                            # Lasting (m9): his folder cannot take the new name. His move fails with that cause and sentence.
+                            book_move._set(db,live['move_id'],'failed',expected='queued',cause=refusal.cause,detail={'reason':str(refusal)[:500]})
+                            live=None
+                    self._destination_changed()
+                    if live is None:return None
+                return kept
+            stopped=next(iter(moves),None)
+            approved,created=moment(record.get('approved_utc')),moment((stopped or {}).get('created_utc'))
+            if stopped is not None and stopped.get('cause')=='changed' and replaced(stopped) and approved is not None and created is not None and created>=approved:
+                start=self._publication_location(job_id,stopped['kind'])
+                self._sorting_move(job_id,os.path.join(stopped['target_folder'],os.path.basename(start['final_path'])),origin='user',override_id=stopped['override_id'])
+                return kept
+            return None
+        except sqlite3.Error as error:
+            return {'state':'later','reason':str(error)[:300] or 'The catalog was busy'}
+        except ValueError as error:
+            return {'state':'later','reason':str(error)[:300]} if self._passing(error) else None
 
     def _sorting_move(self,job_id,target,origin='user',override_id=None):
         """One approved sorting move: the usual verified move (book_move) to target, folder and name. origin: 'user' for

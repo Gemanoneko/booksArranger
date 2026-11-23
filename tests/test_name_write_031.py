@@ -1197,6 +1197,64 @@ class PressDuringWriteTests(MoveWindow, unittest.TestCase):
         return {'move_id': row[0]}
 
 
+class LastingRefusalTests(MoveWindow, unittest.TestCase):
+    """0.31.0 ruling R34 (Sergei 2026-11-23; Senua's 0.31.0 delta review, m9): a refusal of his choice after a write that
+    will never clear (his folder cannot take the book's new name: the path would pass 240 characters) is asked once, never
+    every pass, and does not keep the rules' entry open. His move fails with that cause and its own sentence (as the same
+    press is refused at once when the name is too long), and the follow-up goes on as without a choice."""
+
+    def deep(self, book, new_name):
+        """His folder: the old name fits under it (240 characters), the book's new name does not."""
+        base = book.lib.root / 'Mine '
+        room = 240 - len(str(base)) - 1 - len(new_name) + 1  # one character too long for the new name
+        folder = Path(str(base) + 'x' * room)
+        self.assertLessEqual(len(str(folder / book.path.name)), 240)
+        self.assertGreater(len(str(folder / new_name)), 240)
+        return folder
+
+    def choose(self, book, folder):
+        with connect(book.lib.db) as db:
+            return book_move.plan(db, job_id=book.lib.job_id, kind='base', candidate_id=book.lib.candidate, start=book_move.location(book.resolve()),
+                                  folder=str(folder), root=str(book.lib.root), origin='user', override_id='his')
+
+    def settled(self, book, backfill):
+        entry = backfill.entry(book.lib.job_id)
+        self.assertEqual((entry['state'], entry['record'].get('follow_up_wait'), entry['record']['follow_up']['state']), ('done', None, 'move_queued'),
+                         'recorded once: the rules move it, as without a choice (never "later" every pass)')
+        value = book.filing.tick()
+        book.run_queue()
+        value = book.filing.tick()
+        self.assertEqual((value['left'], value['could_not']), (0, 0), "the rules' entry ended: nothing left, nothing open")
+
+    def test_r34_his_queued_move_that_cannot_take_the_new_name_fails_once_with_its_own_cause(self):
+        book = Book(self, english=None)
+        book.merge.publication_bindings = PublicationBindings(str(book.lib.db))
+        backfill, new = self.series_renamed(book)
+        his = self.choose(book, self.deep(book, new.name))
+        backfill.run_pass()
+        with connect(book.lib.db) as db:
+            row = db.execute('SELECT state,cause,detail FROM book_moves WHERE move_id=?', (his['move_id'],)).fetchone()
+        self.assertEqual((row[0], row[1], json.loads(row[2])['reason']),
+                         ('failed', 'not_writable', "That folder's path is too long for this book's file name. Choose a shorter folder."))
+        self.settled(book, backfill)
+
+    def test_r34_his_stopped_move_that_cannot_be_queued_again_is_not_asked_every_pass(self):
+        book = Book(self, english=None)
+        book.merge.publication_bindings = PublicationBindings(str(book.lib.db))
+        backfill, new = self.series_renamed(book)
+        his = self.choose(book, self.deep(book, new.name))
+        real, stopped = SeriesBackfill._follow_up, []
+
+        def his_move_runs_first(writer, job_id):
+            if not stopped:
+                stopped.append(self.run_move(book, his['move_id']))  # a Mover that did not wait: it meets the rewritten book
+            return real(writer, job_id)
+        with mock.patch.object(SeriesBackfill, '_follow_up', his_move_runs_first):
+            backfill.run_pass()
+        self.assertEqual((stopped[0]['state'], stopped[0]['cause']), ('failed', 'changed'))
+        self.settled(book, backfill)
+
+
 if __name__ == '__main__':
     if sys.argv[1:2] == ['--child']:
         child(sys.argv[2], sys.argv[3])

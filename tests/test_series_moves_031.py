@@ -265,6 +265,35 @@ class PreRuleSeriesTests(unittest.TestCase):
         self.assertEqual((entry['state'], entry['reason'], entry['record']['series']), ('held', series_backfill.MOVE_WAITS, 'Нормальное аномальное'))
         self.assertEqual((backfill.unsettled(), self.planned()), (set(), ('Нормальное аномальное', ['series'])), 'the new answer is filed, never the old one')
 
+    def finished_state(self, backfill):
+        """The engine's finished state (background_work.view, as /api/state sends it) over this look-up's real summary."""
+        from test_background_work import WorkTests, jobs_state
+        from test_finished_state_031 import DETAILS, Lookup
+        case = WorkTests('test_the_brom_case_names_the_whole_queue_and_every_row_has_its_own_id')
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        case.engine.series_backfill = Lookup(backfill.summary())
+        case.engine.gap_fill = Lookup(dict(DETAILS))
+        case.engine.gap_fill.thread = None
+        return case.work(jobs_state())['state']
+
+    def test_r34_a_hold_on_a_job_the_look_up_never_takes_is_not_to_look_up(self):
+        # Ruling R34 (Senua's 0.31.0 delta review, m11, her probe P3): the same 0.30.x hold, on a job that is no longer its
+        # book's current one (the book converted again: a newer job, not finished). The look-up never takes it, so it never
+        # ends; it was counted "to look up" for good and "All done" never showed. Control first: on the current job it is.
+        backfill = self.backfill()
+        self.hold(backfill)
+        self.assertEqual(len(backfill.candidates()), 1)
+        self.assertEqual((backfill.summary()['to_look_up'], self.finished_state(backfill)), (1, 'background_only'), 'control: the current job is to look up')
+        with __import__('scanner').connect(self.lib.db) as db:
+            newer = dict(self.manifest, job_id='newer')
+            db.execute('INSERT INTO audio_jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)', ('newer', json.dumps(newer, ensure_ascii=False), 'h', 'needs attention', 'stopped', None,
+                                                                              '{}', None, '', '2026-10-19T00:00:00', '2026-10-19T00:00:00'))
+        self.assertEqual((backfill.candidates(), backfill.unsettled()), ([], set()), 'never taken again')
+        value = backfill.summary()
+        self.assertEqual((value['to_look_up'], value['left'], value['moves_waiting']), (0, 0, 1), 'not to look up: it counts as it did before 0.31.0')
+        self.assertEqual(self.finished_state(backfill), 'all_done')
+
     def test_a_series_kept_from_a_pass_before_0_31_is_looked_up_again_not_used(self):
         import time
         found = {'name': 'Discworld', 'number': '10', 'provider': 'goodreads', 'source_url': self.OLD['source_url']}

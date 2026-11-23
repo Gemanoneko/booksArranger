@@ -327,14 +327,21 @@ class SeriesBackfill:
                               "json_extract(record,'$.unreached') IS NOT NULL,json_extract(record,'$.approved_failed') IS NOT NULL,"
                               "CASE WHEN state='held' AND reason IN (?,?) THEN record END FROM series_backfill", (MOVE_WAITS, WRITE_WAITS)).fetchall()
         counts = dict.fromkeys(('between_tries', 'due', 'write_waiting', 'writing', 'moves_waiting', 'blocked', 'with_series', 'without', 'gave_up', 'left_alone'), 0)
-        writes, nexts, writes_held = [], [], 0
+        writes, nexts, writes_held, taken = [], [], 0, None
         for job_id, state, reason, next_attempt, found, unreached, failed, waits in rows:
             later = isinstance(next_attempt, (int, float)) and next_attempt > now
             # Senua's 0.31.0 review, M3: a series found before 0.31.0 is looked up again (pre_rule()): due, not a move waiting.
             again = waits is not None and pre_rule(reason, json.loads(waits))
             if state == 'held' and (reason in (MOVE_WAITS, WRITE_WAITS, OLD_FOLDER_REASON) or failed or str(reason).startswith(REVIEW_REASON)):
-                counts['due' if reason == OLD_FOLDER_REASON or str(reason).startswith(REVIEW_REASON) and not failed or again else 'moves_waiting'] += 1
-                writes_held += reason == WRITE_WAITS and not again
+                due = reason == OLD_FOLDER_REASON or str(reason).startswith(REVIEW_REASON) and not failed or again
+                if due:
+                    # R34 (Senua's delta review, m11): only a hold the look-up will take again is "to look up"; one whose job
+                    # is not its book's current, eligible job (converted again, replaced, retained) never is, and counts as
+                    # it did before 0.31.0.
+                    taken = self._look_up_jobs() if taken is None else taken
+                    due = job_id in taken
+                counts['due' if due else 'moves_waiting'] += 1
+                writes_held += reason == WRITE_WAITS and not due
             elif state in ACTIVE or state == 'pending':
                 counts['writing'] += 1
             elif state in WAITING_ON:
@@ -708,22 +715,10 @@ class SeriesBackfill:
         yet, between tries, blocked by a cleanup on hold, or to be looked up once more (candidates()' own tests). The rules
         file a finished book only when its look-up has ended, so a series found later never moves it a second time (ruling
         R19: a book moves once). A catalog read: no manifest is parsed, nothing is asked."""
-        import publication_reuse
-        from storage_relocation_native import retained_job_ids
         entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,reason,record FROM series_backfill')}
         generation = self._local_generation()
-        retained = retained_job_ids(self.database)
-        rows = self._rows("SELECT job_id,state,output IS NOT NULL AS published,json_extract(manifest,'$.candidate_id') AS candidate,"
-                          "json_extract(manifest,'$.metadata.series') AS series,json_extract(manifest,'$.metadata.title') AS title,"
-                          "json_extract(manifest,'$.metadata.canonical_author') AS author,json_extract(manifest,'$.task_kind') AS task "
-                          "FROM audio_jobs ORDER BY created,job_id")
-        newest = {row['candidate']: row['job_id'] for row in rows}
         found = set()
-        for row in rows:
-            job_id = row['job_id']
-            if row['state'] != 'completed' or not row['published'] or newest.get(row['candidate']) != job_id or row['task'] == publication_reuse.KIND \
-                    or job_id in retained or row['series'] or not row['title'] or not row['author']:
-                continue
+        for job_id in self._look_up_jobs():
             entry = entries.get(job_id)
             if not entry:
                 found.add(job_id)
@@ -738,6 +733,22 @@ class SeriesBackfill:
             elif state not in FINAL and state not in ACTIVE and state != 'pending' and not record.get('move_approved'):
                 found.add(job_id)  # deferred or blocked; an approved write that waits is work, not a look-up
         return found
+
+    def _look_up_jobs(self):
+        """The job ids this look-up takes (candidates()' own tests, read from the catalog with no manifest parsed): the
+        newest completed, published job of its book, not an extra-source reuse task, not retained, with a title and an
+        author and no series. unsettled() and summary() (R34: a 0.30.x hold on a job it never takes is not "to look up")."""
+        import publication_reuse
+        from storage_relocation_native import retained_job_ids
+        retained = retained_job_ids(self.database)
+        rows = self._rows("SELECT job_id,state,output IS NOT NULL AS published,json_extract(manifest,'$.candidate_id') AS candidate,"
+                          "json_extract(manifest,'$.metadata.series') AS series,json_extract(manifest,'$.metadata.title') AS title,"
+                          "json_extract(manifest,'$.metadata.canonical_author') AS author,json_extract(manifest,'$.task_kind') AS task "
+                          "FROM audio_jobs ORDER BY created,job_id")
+        newest = {row['candidate']: row['job_id'] for row in rows}
+        return {row['job_id'] for row in rows
+                if row['state'] == 'completed' and row['published'] and newest.get(row['candidate']) == row['job_id'] and row['task'] != publication_reuse.KIND
+                and row['job_id'] not in retained and not row['series'] and row['title'] and row['author']}
 
     def _cleanup(self, job_id):
         """'held' when one of the book's cleanups is on hold (needs attention), else ''. A catalog read only."""
