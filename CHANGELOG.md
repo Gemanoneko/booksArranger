@@ -1,19 +1,27 @@
 # Changelog
 
-## [v0.31.0] - 2026-11-22
+## [v0.31.0] - 2026-11-23
 
 ### Added
 
 - An All done badge and the window title show when nothing is left to do, background look-ups included.
 - Series name and number are read from the file's own tags.
+- A book is looked up online before review. It waits a few tries for the answer, then converts with the names from its files.
+- A translated book is filed under its English title and English series name. Its row says where each came from.
+- Finished audiobooks are renamed and moved by the rules, with no approval step. A notice shows how many are left.
+- "Renamed or moved by the app" lists every such change: where the book was, where it is now, and why.
+- "Could not be renamed or moved" lists the books that stay where they are, each with its reason.
 
 ### Changed
 
 - A volume the app separated is named from its own title tag. So is a file whose title tag reads "Series NN - Title", such as Neuromancer.
 - Two books never share one name. When they would, both are held.
-- The series look-up and the look-up for original titles and author names each end after 3 tries per source.
+- The series look-up and the look-up for English titles and author names each end after 3 tries per source.
 - Background look-ups are named in plain words.
-- In this version the app does not write or move any file of a finished book by itself.
+- A doubtful series is treated as not found. The app no longer asks about a series.
+- A move the app queued has no Cancel. Choose folder… works again once the book has moved.
+- A book whose question was withdrawn no longer shows as Held before Start.
+- An English title changes the file's name and folder. The title inside the file and in the app's list is not changed yet.
 
 ## [v0.30.1] - 2026-11-20
 
