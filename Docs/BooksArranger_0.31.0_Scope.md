@@ -58,6 +58,10 @@ What "could be wrong" means in engine terms, and how the engine tells a book tha
 | R26 | **No Cancel on a move the app queued by its rules.** To override, `Choose folder…` after the book has moved; that choice is kept. | — |
 | R27 | **(2026-11-23) An English rename of a finished book also changes the title inside the file's tags and in the app's list**, not only the file name and folder. | Milestone B's "file name and folder only" |
 | R28 | **(2026-11-23) Pacing of automatic filing approved as built:** two books in hand at a time; three tries, an hour apart, for a move that did not finish. | — |
+| R29 | **(2026-11-23) Senua's Majors M1–M3 are fixed before release.** M3: a series found by 0.30.x is looked up again through 0.31.0's adapters before any retag or move. | — |
+| R30 | **(2026-11-23) A Choose folder… pressed while the app rewrites that book wins: after the rewrite, the book moves to the folder Sergei chose** (option A). The app's follow-up move never cancels his choice. No new wording. | — |
+| R31 | **(2026-11-23) After "Stop automatic processing" the status line and window title say "Paused" at once.** | — |
+| R32 | **(2026-11-23) A source that only answers with a human check (DuckDuckGo-backed) counts as "nothing found" at once**, so it does not hold back "All done". | R9 tries for those sources |
 
 Also on 2026-11-23: no model fallback (Fable only, work waits if the limit is hit); Futaba may launch a packaged 0.31.0 build with visible windows in its own data folder, never the installed copy; the nine leftover `.git` pointer copies in the worktree's scratch were deleted on Sergei's approval.
 
