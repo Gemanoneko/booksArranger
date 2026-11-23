@@ -1786,7 +1786,7 @@ const DECISION_LABELS={decision_names:['Saving names','Save names'],decision_app
   decision_metadata_choices:['Saving choices','Save choices'],decision_file_review:['Saving file review','Save file review']};
 function decisionLabel(key,waiting){return (DECISION_LABELS[key] || ['Saving your answers','Save your answers'])[waiting?1:0];}
 const WORK_LABELS={queue:'Conversion queue',source_folders:'Removing source folders',move:'Moving',move_recovery:'Finishing interrupted moves',start_check:'Checking books before conversion',retry_check:'Checking retry',
-  maintenance:'Checking audiobook before cleanup',finished_check:'Re-checking finished audiobooks',series:'Finding series for finished audiobooks',gap_fill:'Finding English titles and author names',lookup:'Looking up metadata',
+  maintenance:'Checking audiobook before cleanup',finished_check:'Re-checking finished audiobooks',series:'Finding series for finished audiobooks',rename:'Renaming finished audiobook',gap_fill:'Finding English titles and author names',lookup:'Looking up metadata',
   repair_check:'Checking M4B for repair',recovery_delete:'Deleting recovery copies',regroup:'Regrouping split books',scan:'Scanning files',research:'Researching books',discovery:'Automatic processing: finding books',
   source_check:'Checking source folders',drive_check:'Checking drives',chapter_check:'Checking source audio',approve_selected:'Approving selected books',release_selected:'Handing selected books to the app'};
 function workLabel(row){
@@ -1826,6 +1826,8 @@ function workStep(row,finishing){
     case 'finished_check':return prefix('Checking each finished file is still the right one');
     // 0.31.0 (2.1): each step says what happens this second and whether a file changes.
     case 'series':return prefix(row.step==='updating'?'Writing the series into the file and renaming it. Audio unchanged.':'Asking online sources. No file is changed.');
+    // 0.31.0 R27 (3.3): an English title or an author's name written into a finished file (the engine's name write).
+    case 'rename':return prefix('Writing the new names into the file and renaming it. Audio unchanged.');
     case 'gap_fill':return prefix('For books you already approved. Recorded only, no file is changed.');
     case 'lookup':return prefix('Asking metadata sources');
     case 'decisions':return prefix('Applying your answers');
@@ -1965,11 +1967,13 @@ function waitingList(work){
 // audiobooks to file. With more than 5 series writes, or more than 5 of the app's own moves, waiting, one grouped item
 // replaces theirs. Its number is the engine's whole count (work.filing), never the number of items listed: the engine
 // lists only the books in hand. Line 2 names the next book and what blocks it. A move he queued himself with Choose
-// folder… stays its own item. (A rename is part of the book's one move, F10: the engine sends no rename of its own.)
+// folder… stays its own item. R27 (2026-11-23): a rename that writes an English title or an author's name into the file
+// is a job of its own (rename_write items, work.filing.renames_waiting): its group is the third.
 function ownMove(item){return item?.kind==='action' && item.label_key==='move' && item.origin==='rules';}
 function filingGroups(waiting,work,after){
   const filing=work.filing || {};
-  for(const [kind,mine,count,next] of [['filing_writes',item=>item.kind==='series_write',filing.writes_waiting,filing.next_write],['filing_moves',ownMove,filing.moves_waiting,filing.next_move]]){
+  for(const [kind,mine,count,next] of [['filing_writes',item=>item.kind==='series_write',filing.writes_waiting,filing.next_write],
+    ['filing_renames',item=>item.kind==='rename_write',filing.renames_waiting,filing.next_rename],['filing_moves',ownMove,filing.moves_waiting,filing.next_move]]){
     if(!(Number.isInteger(count) && count>5))continue;
     const title=typeof next?.title==='string'?next.title.trim():'',first=waiting.findIndex(mine),rest=waiting.filter(item=>!mine(item));
     const grouped={id:kind,kind,count,next:title,book_id:title && typeof next?.book_id==='string' && next.book_id?next.book_id:null,blocker:next?.blocker || null};
@@ -2019,9 +2023,10 @@ function waitingLines(item,work){
           :tries===1?'Each source is asked once for a book. With no answer, the book is left as it is and the app stops asking.'
           :`Each source is asked up to ${tries} times for a book${apart}. With no answer after that, the book is left as it is and the app stops asking.`];}
     case 'series_write':{const said=blockerSentence(item.blocker,work);return ['Write series into audiobook',subject,said.text,said.tip];}
+    case 'rename_write':{const said=blockerSentence(item.blocker,work);return ['Rename finished audiobook',subject,said.text,said.tip];}
     // 3.3: the grouped items. Line 2: the next book, then what blocks it, else that they run one at a time.
-    case 'filing_writes':case 'filing_moves':{const said=item.blocker?blockerSentence(item.blocker,work):null,next=typeof item.next==='string' && item.next?`Next: ${item.next}. `:'';
-      return [item.kind==='filing_writes'?'Writing series into finished audiobooks':'Moving finished audiobooks',plural(n,'book','books'),next+(said?.text || 'They run one at a time.'),said?.tip];}
+    case 'filing_writes':case 'filing_renames':case 'filing_moves':{const said=item.blocker?blockerSentence(item.blocker,work):null,next=typeof item.next==='string' && item.next?`Next: ${item.next}. `:'';
+      return [{filing_writes:'Writing series into finished audiobooks',filing_renames:'Renaming finished audiobooks',filing_moves:'Moving finished audiobooks'}[item.kind],plural(n,'book','books'),next+(said?.text || 'They run one at a time.'),said?.tip];}
     case 'drive':return ['Drive not answering',subject,'Its books stay on the list. Check that the drive is connected, then press Check again in Library scan controls.'];
     case 'resume':return ['Resume audiobook jobs','','It starts when the pause finishes.'];
     case 'automatic_start':return ['Start automatic processing','',pendingNotice(state?.automatic_processing?.start_pending?.kind) || ''];

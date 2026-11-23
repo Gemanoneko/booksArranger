@@ -246,5 +246,61 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(rule_filing.route(book.plan_item()), 'names', 'control: on')
 
 
+class WorkViewTests(unittest.TestCase):
+    """Item 5, the engine's side: /api/state work carries the rename row while a write of names runs, one rename_write item per
+    book whose write waits (its blocker as a queued action's), the filing counts with renames, and the record's 'written'."""
+
+    def view(self, book, jobs=None):
+        import background_work
+        return background_work.view(SimpleNamespace(merge=book.merge, active_library=''), jobs or {}, {}, {}, False, None)
+
+    def test_the_rename_row_its_waiting_item_and_the_counts(self):
+        import background_work
+        import pause_state
+        book = Book(self)
+        book.filing.tick()  # in hand: approved by the rules
+        with connect(book.lib.db) as db:
+            pause_state.record(db, 'jobs', 'user', 'Audiobook jobs paused')
+        book.writer.run_pass()  # held by the Pause before anything is read: a write that waits
+        book.filing.tick()  # the pass's numbers at the poll after it
+        work = self.view(book)
+        items = [item for item in work['lookups_waiting'] if item['kind'] == 'rename_write']
+        self.assertEqual([(item['subject'], item['book_id'], item['job_id'], item['background']) for item in items], [(book.title, book.lib.candidate, book.lib.job_id, False)])
+        self.assertEqual(items[0]['blocker']['kind'], 'jobs', 'it waits for the queue, as a series write does')
+        filing = work['filing']
+        self.assertEqual((filing['renames_waiting'], filing['renames_running'], filing['left'], filing['next_rename']['title']), (1, 0, 1, book.title))
+        self.assertEqual(filing['next_rename']['blocker']['cause'], 'queue_paused', 'paused: the blocker says so')
+        self.assertEqual(work['pending']['filing'], 1, 'main work: never all done while it waits')
+        self.assertNotIn('rename', [row['kind'] for row in work['rows']], 'no running row while it waits')
+        with connect(book.lib.db) as db:
+            pause_state.clear(db, 'jobs')
+        seen = []
+        real = NameWrite.apply
+
+        def watch(writer, job_id, found=None):
+            seen.append(self.view(book))
+            return real(writer, job_id, found)
+        book.writer.clock = lambda: 2_000_000_000.0
+        with mock.patch.object(NameWrite, 'apply', watch):
+            book.writer.run_pass()
+        rows = [row for row in seen[0]['rows'] if row['kind'] == 'rename']
+        self.assertEqual([(row['id'], row['subject'], row['step'], row['background'], row['done']) for row in rows], [('rename', book.title, 'updating', False, None)])
+        self.assertEqual(seen[0]['state'], 'working', 'a write of names is main work (1.1)')
+        self.assertEqual(background_work.KIND_FACTS['rename'], {'background': False, 'about': 'finished', 'writes_finished_files': True})
+        self.assertEqual(background_work.KIND_FACTS['rename_write'], {'background': False, 'about': 'finished', 'writes_finished_files': True})
+        self.assertNotIn('rename', [row['kind'] for row in self.view(book)['rows']], 'and gone when it is done')
+        self.assertEqual(book.filing.tick()['record']['count'], 1)
+        self.assertEqual(book.filing.record()['entries'][0]['written'], ['title'])
+
+    def test_control_an_engine_without_the_job_sends_neither(self):
+        import background_work
+        book = Book(self)
+        del book.merge.name_write
+        book.filing.tick()
+        work = background_work.view(SimpleNamespace(merge=book.merge, active_library=''), {}, {}, {}, False, None)
+        self.assertEqual(([row for row in work['rows'] if row['kind'] == 'rename'], [i for i in work['lookups_waiting'] if i['kind'] == 'rename_write']), ([], []))
+        self.assertEqual((work['filing']['renames_waiting'], work['filing']['moves_waiting']), (0, 1), 'the 0.31.0 milestone B move, exactly')
+
+
 if __name__ == '__main__':
     unittest.main()

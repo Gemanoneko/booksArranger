@@ -38,10 +38,10 @@ import time
 SCHEMA = 'books-work-v1'
 # Row kinds, top to bottom (Judy 1.5).
 KINDS = ('conversion', 'chapter_check', 'cleanup', 'queue', 'source_folders', 'move', 'move_recovery', 'action', 'bulk',
-         'start_check', 'retry_check', 'maintenance', 'finished_check', 'series', 'gap_fill', 'lookup', 'decisions',
+         'start_check', 'retry_check', 'maintenance', 'finished_check', 'series', 'rename', 'gap_fill', 'lookup', 'decisions',
          'repair_check', 'recovery_delete', 'regroup', 'scan', 'research', 'discovery', 'source_check', 'drive_check')
 WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_retry', 'recovery_delete', 'decisions',
-                 'metadata_sources', 'series_lookup', 'detail_lookup', 'series_write', 'drive', 'resume', 'automatic_start', 'automatic')
+                 'metadata_sources', 'series_lookup', 'detail_lookup', 'series_write', 'rename_write', 'drive', 'resume', 'automatic_start', 'automatic')
 # 0.31.0 (Sergei 2026-11-22, "how do I know the app finished?"; Judy's BooksArranger_0.31.0_UX.md, Notes for Ender). Additive
 # to books-work-v1: every key below is new, and no row, item or counts key changed.
 #
@@ -85,10 +85,15 @@ WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_re
 # 0.31.0 milestone B (rulings R18, R24, R26; Judy's spec 3.2 to 3.4a), additive again to books-work-v1:
 # work['filing']: RuleFiling.summary() (rule_filing.py: finished audiobooks renamed and moved by the rules) plus the two
 #   blockers only a poll can read: {'known', 'left', 'writes_waiting', 'writes_running', 'moves_waiting', 'moves_running',
-#   'renames_waiting' (always 0, F10), 'next_write', 'next_move' ({'job_id', 'book_id', 'title', 'move_id', 'blocker'} or
-#   None), 'could_not', 'record': {'count', 'last_at'}, 'waiting_for_lookup', 'on_hold', 'settling', 'paused', 'tries', 'feed'};
+#   'renames_waiting', 'renames_running' (0.31.0 R27: a write of names, name_write), 'next_write', 'next_move', 'next_rename'
+#   ({'job_id', 'book_id', 'title', 'move_id', 'blocker'} or None), 'could_not', 'record': {'count', 'last_at'},
+#   'waiting_for_lookup', 'on_hold', 'settling', 'paused', 'tries', 'feed'};
 #   None when the engine runs no such pass. 'left' is the notice's number (3.3a); the three grouped Waiting items (3.3) take
 #   their whole counts from writes_waiting, renames_waiting and moves_waiting, never from the listed items.
+# 0.31.0 R27 (Sergei 2026-11-23: an English title or an author's name is written inside the file's tags too), additive: the row
+#   kind 'rename' (Judy 3.3: "Renaming finished audiobook: <book>", step 'updating': the names are written into the file and
+#   it is renamed) and the waiting kind 'rename_write' (one per book whose write of names waits for a job, a cleanup or a
+#   Pause; blocker as a queued action's), in work['lookups_waiting'] beside series_write. Both are main work.
 # work['pending']['filing']: books the rules are renaming or moving now or are about to (None while not counted). They are
 #   main work: the state is 'working' while one runs, else 'continues' (or 'paused'), never 'background_only' or 'all_done'.
 # work['pending']['could_not_file']: the quiet line's number (3.2): books with a certain new name or folder that could not be
@@ -126,7 +131,9 @@ KIND_FACTS = {
     # which is main work: the row's own 'background' is false then). Details: books already approved get their original
     # title and full author name looked up; the answers are recorded and no audiobook is changed.
     'series': _fact('finished', True, True), 'series_lookup': _fact('finished', False, True), 'series_write': _fact('finished', True),
-    'gap_fill': _fact('approved', False, True), 'detail_lookup': _fact('approved', False, True)}
+    'gap_fill': _fact('approved', False, True), 'detail_lookup': _fact('approved', False, True),
+    # 0.31.0 R27: a finished audiobook's new title or author name written into its file (name_write), and one that waits.
+    'rename': _fact('finished', True), 'rename_write': _fact('finished', True)}
 ROW_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'step', 'step_text', 'state', 'done', 'total', 'unit',
             'fraction', 'started', 'count', 'task_kind', 'background', 'origin')
 ITEM_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'blocker', 'ahead', 'at', 'count', 'background', 'origin')
@@ -299,6 +306,11 @@ class Reader:
         if series and series.get('title') and not series.get('pacing'):
             self.rows.append(_row(id='series', kind='series', subject=series['title'], step='updating' if series.get('step') == 'updating' else 'looking_up',
                                   **_amount(series.get('done'), series.get('total'), 'books')))
+        # 0.31.0 R27 (Judy 3.3): a finished book's new names written into its file and the file renamed (name_write).
+        names = self.attr('name_write')
+        renaming = names.status() if names is not None and callable(getattr(names, 'status', None)) else None
+        if isinstance(renaming, dict) and renaming.get('title'):
+            self.rows.append(_row(id='rename', kind='rename', subject=renaming['title'], step='updating'))
         if jobs.get('start_waiting') or admission.get('state') == 'waiting':
             self.waiting.append(_item(id='resume', kind='resume'))
         run = jobs.get('retry_all') if isinstance(jobs.get('retry_all'), dict) else None
@@ -414,11 +426,15 @@ class Reader:
                 at = value.get('next_at')
                 self.lookup_items.append(_item(id=kind, kind=kind, count=value['between_tries'], at=int(at * 1000) if type(at) in (int, float) and at > 0 else None))
         writes = list((self.background.get('series') or {}).get('writes') or [])[:LIST_LIMIT]
-        self.job_titles.update(_titles(self.merge, writes))
-        for job in writes:
-            title, book = self.job_titles.get(job, ('', None))
-            self.lookup_items.append(_item(id='series_write:' + job, kind='series_write', subject=title, book_id=book, job_id=job,
-                                           blocker=explain_one('jobs', {'book_id': book}, self.jobs, merge=self.merge, named=self.job_titles)))
+        # 0.31.0 R27: a write of names that waits for a job, a cleanup or a Pause (name_write.summary()['writes']).
+        names = self.attr('name_write')
+        renames = list((names.summary() or {}).get('writes') or [])[:LIST_LIMIT] if names is not None and callable(getattr(names, 'summary', None)) else []
+        self.job_titles.update(_titles(self.merge, writes + renames))
+        for kind, jobs in (('series_write', writes), ('rename_write', renames)):
+            for job in jobs:
+                title, book = self.job_titles.get(job, ('', None))
+                self.lookup_items.append(_item(id=kind + ':' + job, kind=kind, subject=title, book_id=book, job_id=job,
+                                               blocker=explain_one('jobs', {'book_id': book}, self.jobs, merge=self.merge, named=self.job_titles)))
 
     def filed(self):
         """0.31.0 milestone B: work['filing'], the rules' renames and moves of finished audiobooks (RuleFiling.summary(), kept
@@ -433,12 +449,15 @@ class Reader:
         write = dict(value['next_write']) if isinstance(value.get('next_write'), dict) else None
         if write:
             write['blocker'] = paused or explain_one('jobs', {'book_id': write.get('book_id')}, self.jobs, merge=self.merge, named=self.job_titles)
+        rename = dict(value['next_rename']) if isinstance(value.get('next_rename'), dict) else None
+        if rename:  # 0.31.0 R27: a write of names waits as a series write does
+            rename['blocker'] = paused or explain_one('jobs', {'book_id': rename.get('book_id')}, self.jobs, merge=self.merge, named=self.job_titles)
         move = dict(value['next_move']) if isinstance(value.get('next_move'), dict) else None
         if move:
             queued = next((item for item in self.queue.get('queued_actions') or [] if isinstance(item, dict) and item.get('action') == 'move'
                            and item.get('book_id') == move.get('book_id')), None)
             move['blocker'] = paused or (queued.get('blocker') if queued else None)
-        self.filing = dict(value, next_write=write, next_move=move)
+        self.filing = dict(value, next_write=write, next_move=move, next_rename=rename)
 
     def decisions(self):
         """Saved decisions (names, choices, approvals) the engine applies after accepting them: the one it applies runs, the
