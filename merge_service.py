@@ -320,6 +320,11 @@ class MergeService:
         self.publications.chosen_roots=self._chosen_folders;self.cleanup.chosen_folders=self._chosen_folders
         # Senua's 0.30.0 review, M3: move recovery runs in retained-runtime mode too (a portable installation is always in
         # it); a move of a retained job or through a retained path is left journaled (_start_move_recovery).
+        # 0.31.0 milestone B: the move journal's 'origin' column on a catalog made before it (book_move.ORIGINS).
+        try:
+            import book_move
+            with connect(inventory.database) as db:book_move.migrate(db)
+        except sqlite3.Error:pass  # the first move's own setup adds it
         self._start_move_recovery()
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
@@ -329,6 +334,8 @@ class MergeService:
         self.series_backfill=SeriesBackfill(self,research=self.automatic.research)  # v0.16.12; started with the retention sweep
         from gap_fill import GapFill
         self.gap_fill=GapFill(self)  # 0.22.1: optional fields after approval (research: the automatic pass's); started with series backfill
+        from rule_filing import RuleFiling
+        self.rule_filing=RuleFiling(self)  # 0.31.0 milestone B (R18): finished books renamed and moved by the rules; started with series backfill
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
         self.jobs.on_working_hold=lambda:self.automatic.stop(force=True)
         # Startup (0.22.1, ruling 28): every finished book's location is looked up once, in one catalog snapshot. Each used
@@ -1616,7 +1623,7 @@ class MergeService:
                 self._retention_wake.wait(2 if self._manual_queue() else 60);self._retention_wake.clear()
         self._purge_tried=set()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
-        for name in ('series_backfill','gap_fill'):
+        for name in ('series_backfill','gap_fill','rule_filing'):
             background=self.__dict__.get(name)
             if background is not None:background.start()
 
@@ -5915,7 +5922,7 @@ class MergeService:
         for name in ('_retention_stop','_retention_wake'):
             flag=self.__dict__.get(name)
             if isinstance(flag,threading.Event):flag.set()
-        for name in ('decisions','series_backfill','gap_fill'):
+        for name in ('decisions','series_backfill','gap_fill','rule_filing'):
             worker=self.__dict__.get(name)
             for flag in (getattr(worker,'stop',None),getattr(worker,'wake',None)):
                 if isinstance(flag,threading.Event):flag.set()
@@ -5969,7 +5976,7 @@ class MergeService:
             snapshots=[self.__dict__.get('_status_shared'),*self.__dict__.get('_page_shared',{}).values()]
         for snapshot in snapshots:
             if snapshot is not None:snapshot.close(reads)
-        for name in ('series_backfill','gap_fill'):
+        for name in ('rule_filing','series_backfill','gap_fill'):  # the rules' pass first: it queues nothing more
             background=self.__dict__.get(name)
             if background is not None:self._close_lookups(background,reads)
         for name in ('_repair_stop','_retry_all_stop'):
@@ -6334,7 +6341,7 @@ class MergeService:
             if not finished:return self._destination_answer(id,'cleared')
             computed=self._computed_destination(row,self._job_manifest(job_id))
             if not computed:raise destination_overrides.Refused('changed',"The app can't compute this book's folder now. Nothing was moved.")
-            return self._queue_move(row,finished,start,os.path.dirname(computed),None)
+            return self._queue_move(row,finished,start,os.path.dirname(computed),None,origin='user')
         name=os.path.basename(start['final_path']) if finished else os.path.basename(self._computed_destination(row) or '')
         data_dir=str(Path(self.inventory.database).parent)
         chosen,identity=destination_overrides.validate(folder,sources=self._all_source_roots(),data_dir=data_dir,name=name,probe=self.folder_probe)
@@ -6343,7 +6350,7 @@ class MergeService:
             saved=destination_overrides.choose(db,folder=chosen,identity=identity,book_key=book_key,candidate_id=id,job_id=job_id)
         self._destination_changed()
         if not finished:return self._destination_answer(id,'saved')
-        return self._queue_move(row,finished,start,chosen,saved['override_id'])
+        return self._queue_move(row,finished,start,chosen,saved['override_id'],origin='user')
 
     def _job_manifest(self,job_id):
         with connect(self.inventory.database) as db:
@@ -6369,14 +6376,15 @@ class MergeService:
             if move is None:view['move']=shown[0].get('move')
         return {'outcome':outcome,**view}
 
-    def _queue_move(self,row,finished,start,folder,override_id,name=None):
+    def _queue_move(self,row,finished,start,folder,override_id,name=None,origin=None):
         """Plan the finished book's move (book_move.plan) and queue it; 'unchanged' when it is already in that folder.
-        name: its file name there (0.30.0 sorting moves), else its own."""
+        name: its file name there (0.30.0 sorting moves), else its own. origin (0.31.0 milestone B): who made the move,
+        'rules' or 'user' (book_move.ORIGINS); it is kept on the move and travels with its queued action."""
         import book_move,destination_overrides
         publication,kind,job_id=finished
         root=self._move_root(folder)
         with connect(self.inventory.database) as db:
-            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id,running=self._move_running,name=name)
+            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id,running=self._move_running,name=name,origin=origin)
         if move is None:return self._destination_answer(row['id'],'unchanged')
         title=str(row.get('title_clue') or '')[:200]
         if self.move_requester is not None:
@@ -6448,9 +6456,11 @@ class MergeService:
         with connect(self.inventory.database) as db:
             row=db.execute("SELECT job_id,manifest,output FROM audio_jobs WHERE job_id=? AND state='completed'",(job_id,)).fetchone()
             if row is None:return ''
+            # 0.31.0 milestone B: with the English title the detail look-up recorded, as the list plans it (sorting_moves.plan),
+            # so the path a series write is bound to is the list's own.
             found=sorting_moves.target(db,{'job_id':row[0],'manifest':row[1],'output':row[2]},self._sorting_rules(),getattr(self.inventory,'output_root',None),
                                        {'name':series['name'],'number':str(series['number']),'provider':series.get('provider',''),'source_url':series.get('source_url','')} if series else None,
-                                       placed=placed)
+                                       placed=placed,catalog=sorting_moves.recorded_title(db,row[0]))
         return (found or {}).get('to') or ''
 
     def sorting_follow_up(self,job_id,approved,placed=None):
@@ -6465,7 +6475,11 @@ class MergeService:
             target=self.sorting_target(job_id,placed=placed)
             if not target or os.path.normcase(target)!=os.path.normcase(str(approved)):
                 return {'state':'refused','reason':'The planned place changed since you approved it; the book stays where it is.'}
-            return self._sorting_move(job_id,target)
+            # 0.31.0 milestone B: a write the app's rules approved is followed by the app's own move (no Cancel, R26).
+            backfill=self.__dict__.get('series_backfill')
+            entry=backfill.entry(job_id) if callable(getattr(backfill,'entry',None)) else None
+            ruled=bool(entry and isinstance(entry.get('record'),dict) and entry['record'].get('approved_by')=='rules')
+            return self._sorting_move(job_id,target,**({'origin':'rules'} if ruled else {}))
         except sqlite3.Error as error:
             return {'state':'later','reason':str(error)[:300] or 'The catalog was busy'}
         except ValueError as error:
@@ -6475,8 +6489,9 @@ class MergeService:
                      or text.startswith('This audiobook is being moved now'))
             return {'state':'later' if passing else 'refused','reason':text[:300]}
 
-    def _sorting_move(self,job_id,target):
-        """One approved sorting move: the usual verified move (book_move) to target, folder and name."""
+    def _sorting_move(self,job_id,target,origin='user'):
+        """One approved sorting move: the usual verified move (book_move) to target, folder and name. origin: 'user' for
+        his approval of a listed move, 'rules' when the app's rules made it (rule_filing)."""
         import book_move
         with connect(self.inventory.database) as db:
             found=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
@@ -6486,9 +6501,28 @@ class MergeService:
         if not finished or finished[2]!=job_id or finished[1] not in book_move.KINDS:raise ValueError('This audiobook has a newer version; it was not moved')
         row=self.reviews._row('Audiobooks',identity)
         start=self._publication_location(job_id,finished[1])
-        answer=self._queue_move(row,finished,start,os.path.dirname(target),None,name=os.path.basename(target))
+        answer=self._queue_move(row,finished,start,os.path.dirname(target),None,name=os.path.basename(target),origin=origin)
         move=answer.get('move') or {}
         return {'state':answer.get('outcome'),'move':move}
+
+    # --- 0.31.0 milestone B (R18, R24, R26): finished books renamed and moved by the rules (rule_filing.py) ---
+    def filing_paused(self):
+        """F13: a Pause of the audiobook jobs holds the app's own renames and moves of finished books: the rules' pass, the
+        series writes (series_backfill._idle) and the app's own queued moves (action_queue). His Pause, a safety hold, or one
+        saved before this launch (_jobs_pause_saved); nothing here ends a Pause. An unreadable catalog counts as paused."""
+        return self._jobs_pause_saved()
+
+    def filing_record(self,search='',limit=None):
+        """The record of renames and moves the app made by its rules (Judy 3.4): rule_filing.record. Reads only."""
+        import rule_filing
+        with connect(self.inventory.database) as db:
+            return rule_filing.record(db,getattr(self.inventory,'output_root',None),search,limit or rule_filing.RECORD_LIMIT)
+
+    def filing_could_not(self):
+        """The finished audiobooks the rules could not rename or move, each with its reason key (Judy 3.4a, ruling R24): the
+        last pass's list (RuleFiling.could_not). Reads only."""
+        worker=self.__dict__.get('rule_filing')
+        return worker.could_not() if worker is not None else {'count':0,'known':False,'keys':[],'entries':[]}
 
     def cancel_move(self,move_id):
         """The queued move's Cancel (ActionQueue): True when it had not started."""
@@ -6569,6 +6603,8 @@ class MergeService:
             if identity and identity[2]==final.get('size'):self._validated_outputs[move['job_id']]=tuple(identity)
             else:self._validated_outputs.pop(move['job_id'],None)  # not the bytes the move verified: the next check hashes it
         self._destination_changed()
+        filing=self.__dict__.get('rule_filing')
+        if filing is not None and move['state'] in book_move.TERMINAL:filing.notify()  # the rules' pass puts the next book in hand
 
     def _start_move_recovery(self):
         """In-engine reconciliation of moves a restart interrupted (no startup refusal); only when there are any.
@@ -6617,7 +6653,7 @@ class MergeService:
         start=self._publication_location(job_id,finished[1])
         if destination_overrides.key(os.path.dirname(start['final_path']))==destination_overrides.key(live['folder']):return
         if not destination_overrides.same_identity(live.get('identity'),destination_overrides.current_identity(live['folder'])):return  # fails closed
-        self._queue_move(row,finished,start,live['folder'],live['override_id'])
+        self._queue_move(row,finished,start,live['folder'],live['override_id'],origin='user')
 
     def destination_view(self,rows):
         """Every shown list row: destination_override, output and move (Judy's 0.23.1 spec, sections 15-18). Catalog and

@@ -80,6 +80,20 @@ WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_re
 #   says how its look-up ended per field. Books held for him are looked up by the detail look-up's pass: its summary
 #   (work['background']['gap_fill']) carries 'review' (the review-list rows' own numbers) and 'approved' beside the totals,
 #   and the gap_fill row carries 'about': 'review' or 'approved'.
+# 0.31.0 milestone B (rulings R18, R24, R26; Judy's spec 3.2 to 3.4a), additive again to books-work-v1:
+# work['filing']: RuleFiling.summary() (rule_filing.py: finished audiobooks renamed and moved by the rules) plus the two
+#   blockers only a poll can read: {'known', 'left', 'writes_waiting', 'writes_running', 'moves_waiting', 'moves_running',
+#   'renames_waiting' (always 0, F10), 'next_write', 'next_move' ({'job_id', 'book_id', 'title', 'move_id', 'blocker'} or
+#   None), 'could_not', 'record': {'count', 'last_at'}, 'waiting_for_lookup', 'on_hold', 'settling', 'paused', 'tries', 'feed'};
+#   None when the engine runs no such pass. 'left' is the notice's number (3.3a); the three grouped Waiting items (3.3) take
+#   their whole counts from writes_waiting, renames_waiting and moves_waiting, never from the listed items.
+# work['pending']['filing']: books the rules are renaming or moving now or are about to (None while not counted). They are
+#   main work: the state is 'working' while one runs, else 'continues' (or 'paused'), never 'background_only' or 'all_done'.
+# work['pending']['could_not_file']: the quiet line's number (3.2): books with a certain new name or folder that could not be
+#   given it. It is in no state and no reason. ('moves', the 0.31.0 third-round number, is kept as it was: series the
+#   look-up holds; the page reads 'could_not_file' now.)
+# A move row and a queued move carry 'origin': 'rules' for the app's own (no Cancel on it, R26), 'user' for his, None
+# for a move queued without one.
 STATES = ('unknown', 'working', 'paused', 'continues', 'waiting_for_you', 'background_only', 'all_done')
 BACKGROUND_KINDS = ('series', 'gap_fill', 'series_lookup', 'detail_lookup')
 WAITS_FOR_YOU = ('attention', 'hold', 'drive')
@@ -112,8 +126,8 @@ KIND_FACTS = {
     'series': _fact('finished', True, True), 'series_lookup': _fact('finished', False, True), 'series_write': _fact('finished', True),
     'gap_fill': _fact('approved', False, True), 'detail_lookup': _fact('approved', False, True)}
 ROW_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'step', 'step_text', 'state', 'done', 'total', 'unit',
-            'fraction', 'started', 'count', 'task_kind', 'background')
-ITEM_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'blocker', 'ahead', 'at', 'count', 'background')
+            'fraction', 'started', 'count', 'task_kind', 'background', 'origin')
+ITEM_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'blocker', 'ahead', 'at', 'count', 'background', 'origin')
 CLEANUP_STEPS = {'recovery copies', 'originals', 'temporary', 'folders', 'former outputs', 'verifying replacement', 'retiring former outputs'}
 LIST_LIMIT = 100  # waiting cleanups listed one by one; the counts carry the rest (a NAS backlog can hold hundreds)
 
@@ -309,7 +323,7 @@ class Reader:
                 progress = dict(self.attr('_move_progress') or {})
                 percent = next(iter(progress.values())) if len(progress) == 1 else None
                 self.rows.append(_row(id='move:' + running['id'], kind='move', subject=running.get('title') or '', book_id=running.get('book_id'),
-                                      fraction=percent / 100 if type(percent) in (int, float) and 0 <= percent <= 100 else None,
+                                      origin=running.get('origin'), fraction=percent / 100 if type(percent) in (int, float) and 0 <= percent <= 100 else None,
                                       **_amount(percent, 100, 'percent')))
             else:
                 # 0.30.0 (Futaba's QA A): a press that reports its count (press_progress) has an amount, e.g. an Approve's files.
@@ -320,7 +334,8 @@ class Reader:
         for item in self.queue.get('queued_actions') or []:
             if isinstance(item, dict):
                 self.waiting.append(_item(id='action:' + item['id'], kind='action', label_key=item.get('action'), subject=item.get('title') or '',
-                                          book_id=item.get('book_id'), blocker=item.get('blocker'), ahead=max(0, (item.get('position') or 1) - 1)))
+                                          book_id=item.get('book_id'), blocker=item.get('blocker'), ahead=max(0, (item.get('position') or 1) - 1),
+                                          origin=item.get('origin')))
 
     # ---------------------------------------------------------------- workers outside the jobs queue
     def workers(self):
@@ -397,6 +412,26 @@ class Reader:
             title, book = self.job_titles.get(job, ('', None))
             self.lookup_items.append(_item(id='series_write:' + job, kind='series_write', subject=title, book_id=book, job_id=job,
                                            blocker=explain_one('jobs', {'book_id': book}, self.jobs, merge=self.merge, named=self.job_titles)))
+
+    def filed(self):
+        """0.31.0 milestone B: work['filing'], the rules' renames and moves of finished audiobooks (RuleFiling.summary(), kept
+        from its last pass), with the blocker of the first waiting write and of the first waiting move, read at this poll.
+        Instance attributes only: a stand-in engine has no such pass and reports None."""
+        self.filing = None
+        worker = self.attr('rule_filing')
+        if worker is None or not callable(getattr(worker, 'summary', None)):
+            return
+        value = worker.summary()
+        paused = explain('paused', {}, self.jobs) if value.get('paused') else None
+        write = dict(value['next_write']) if isinstance(value.get('next_write'), dict) else None
+        if write:
+            write['blocker'] = paused or explain_one('jobs', {'book_id': write.get('book_id')}, self.jobs, merge=self.merge, named=self.job_titles)
+        move = dict(value['next_move']) if isinstance(value.get('next_move'), dict) else None
+        if move:
+            queued = next((item for item in self.queue.get('queued_actions') or [] if isinstance(item, dict) and item.get('action') == 'move'
+                           and item.get('book_id') == move.get('book_id')), None)
+            move['blocker'] = paused or (queued.get('blocker') if queued else None)
+        self.filing = dict(value, next_write=write, next_move=move)
 
     def decisions(self):
         """Saved decisions (names, choices, approvals) the engine applies after accepting them: the one it applies runs, the
@@ -597,13 +632,17 @@ def explain_queue(queue, jobs, merge=None):
         item['blocker'] = explain_one(blocker.get('kind'), item, jobs, running, merge, named)
 
 
-def finished_state(rows, waiting, jobs, automatic, background, unread):
+def finished_state(rows, waiting, jobs, automatic, background, unread, filing=None):
     """(pending, state, waits_for_you) of one poll (0.31.0; the keys and the truth rules are at STATES above). rows and
     waiting: this poll's work lists; background: {'series', 'gap_fill'} summaries; unread: sources that could not be read.
     "Main work" is every row and waiting item that is not a background look-up (is_background) or a drive that does not
-    answer, and every series write into a finished file that waits or runs."""
+    answer, and every series write into a finished file that waits or runs. filing (milestone B): work['filing'] or None;
+    a finished audiobook the rules are renaming or moving, or are about to, is main work too."""
     jobs = jobs if isinstance(jobs, dict) else {}
     automatic = automatic if isinstance(automatic, dict) else {}
+    filing = filing if isinstance(filing, dict) else None
+    # Books the rules still have to file: None while their pass has not read its list in this run (never "all done" on a guess).
+    to_file = 0 if filing is None else filing.get('left') if filing.get('known') and type(filing.get('left')) is int else None
     main_rows = [row for row in rows if not is_background(row)]
     running = sum(row['state'] in ('running', 'pausing') for row in main_rows)
     paused = sum(row['state'] == 'paused' for row in main_rows)
@@ -629,7 +668,7 @@ def finished_state(rows, waiting, jobs, automatic, background, unread):
     left['all'] = None if None in (left['series'], left['details']) else left['series'] + left['details']
     looking = any(is_background(row) for row in rows) or bool(left['all'])
     is_paused = jobs.get('state') in ('Paused', 'Pausing') or automatic.get('state') == 'Paused' or paused > 0
-    by_itself = bool(main_waiting or writes or still_checking or jobs.get('timed_retry') or jobs.get('cleanup_active')
+    by_itself = bool(main_waiting or writes or to_file or still_checking or jobs.get('timed_retry') or jobs.get('cleanup_active')
                      or automatic.get('state') in ('Running', 'Stopping') or automatic.get('start_pending') or automatic.get('next_retry_at') is not None)
     if unread:
         state = 'unknown'
@@ -641,15 +680,16 @@ def finished_state(rows, waiting, jobs, automatic, background, unread):
         state = 'continues'
     elif reasons:
         state = 'waiting_for_you'
-    elif left['all'] is None:
-        state = 'unknown'  # a look-up has not counted its books yet: never "all done" on a guess
+    elif left['all'] is None or to_file is None:
+        state = 'unknown'  # a look-up, or the rules' pass, has not counted its books yet: never "all done" on a guess
     elif looking:
         state = 'background_only'
     else:
         state = 'all_done'
     pending = {'any': state != 'all_done', 'running': running, 'paused': paused, 'waiting': len(main_waiting), 'still_checking': still_checking,
                'attention': attention, 'hold': hold, 'moves': moves, 'writes': writes, 'drives': drives, 'lookups': left,
-               'same_name': jobs.get('same_name_total') if type(jobs.get('same_name_total')) is int else 0}
+               'same_name': jobs.get('same_name_total') if type(jobs.get('same_name_total')) is int else 0,
+               'filing': to_file, 'could_not_file': filing.get('could_not') if filing is not None and type(filing.get('could_not')) is int else 0}
     return pending, state, reasons
 
 
@@ -665,6 +705,8 @@ def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo
     reader.attempt('automatic', reader.scan_and_automatic)
     reader.background, reader.lookup_items, reader.before_review = {}, [], {'count': 0, 'next_at': None, 'waiting': [], 'limits': None, 'tries_continue': False}
     reader.attempt('lookups', reader.lookups)
+    reader.filing = None
+    reader.attempt('filing', reader.filed)
     memo = memo if memo is not None else {}
     seen = set()
     for row in reader.rows:
@@ -689,8 +731,9 @@ def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo
     count = lambda key: jobs.get(key) if type(jobs.get(key)) is int else 0
     for entry in [*rows, *reader.waiting, *reader.lookup_items]:
         entry['background'] = is_background(entry)  # the page never guesses which work is "main"
-    pending, state, reasons = finished_state(rows, [item for _n, item in waiting], jobs, automatic, reader.background, reader.unread)
+    pending, state, reasons = finished_state(rows, [item for _n, item in waiting], jobs, automatic, reader.background, reader.unread, reader.filing)
     return {'schema': SCHEMA, 'state': state, 'pending': pending, 'waits_for_you': reasons, 'background': reader.background, 'kinds': KIND_FACTS,
+            'filing': reader.filing,  # 0.31.0 milestone B: finished audiobooks renamed and moved by the rules
             # The look-ups' own waiting items (series_lookup, detail_lookup, series_write), in the item shape. Kept out of
             # 'waiting' so the 0.30.0 page, which has no words for them, draws its list exactly as before; the 0.31.0 page
             # puts them into the Waiting list after metadata_sources and before drive (WAITING_KINDS).

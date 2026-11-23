@@ -51,6 +51,17 @@ KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book', 'loading', 'jo
 # only writes the catalog (Keep as separate books, Scan again, Remove from list, names, a destination, a join, a scan)
 # runs as before, and a press made in this session keeps today's behaviour.
 WAITS_FOR_START = ('retry', 'repair', 'delete', 'copy', 'approve', 'convert', 'cleanup', 'restore', 'move')
+# 0.31.0 milestone B (rulings R18 and R26; F13): a move the app queued by its rules (args 'origin': 'rules', book_move.ORIGINS)
+# waits the same way while a jobs Pause is in force, whether it was saved before this launch or pressed in this session:
+# Sergei pressed nothing to start it, so his Pause holds it. It is parked like a restored press, so a press he makes
+# meanwhile runs as with an empty queue. The page shows no Cancel for such a move (view(): 'origin').
+RULES = 'rules'
+
+
+def held_by_pause(item):
+    """True for a queued action that a jobs Pause in force holds: a restored press that changes files, or the app's own move."""
+    args = item.get('args') if isinstance(item.get('args'), dict) else {}
+    return bool(item.get('restored') and item['action'] in WAITS_FOR_START or item['action'] == 'move' and args.get('origin') == RULES)
 # The presses a library scan holds back (their checks read the catalog the scan regroups), as their routes refused them.
 SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'scan_again', 'copy', 'join')
 # Always queued, even with nothing in the way: their checks (every file probed and hashed) take the time a page must not
@@ -499,6 +510,8 @@ class ActionQueue:
             value['n'] = len(value['parts'])
         if item.get('restored'):
             value['restored'] = True  # 0.30.0: queued before the last restart
+        if item['action'] == 'move' and isinstance(item.get('args'), dict) and item['args'].get('origin'):
+            value['origin'] = item['args']['origin']  # 0.31.0 (R26): 'rules' for the app's own move (no Cancel), else 'user'
         return value
 
     def _prune(self):
@@ -634,10 +647,10 @@ class ActionQueue:
             # they keep their place and their 'paused' blocker while the first other action runs, so a press made in this
             # session behaves as it does today. One catalog read per pass, only while a restored press of that kind waits.
             with self.lock:
-                restored = any(item.get('restored') and item['action'] in WAITS_FOR_START for item in self.items)
+                restored = any(held_by_pause(item) for item in self.items)
             paused = restored and self._paused_for_start()
             with self.lock:
-                parked = {item['id'] for item in self.items if paused and item.get('restored') and item['action'] in WAITS_FOR_START}
+                parked = {item['id'] for item in self.items if paused and held_by_pause(item)}
                 head = next((item for item in self.items if item['id'] not in parked), None)
                 if head is None:
                     for item in self.items:
@@ -696,7 +709,7 @@ class ActionQueue:
         audiobook work also waits for Start while a saved jobs Pause is in force ('paused', WAITS_FOR_START)."""
         args = item.get('args')
         kind = self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item))
-        if kind != 'loading' and item.get('restored') and item['action'] in WAITS_FOR_START and self._paused_for_start():
+        if kind != 'loading' and held_by_pause(item) and self._paused_for_start():
             return 'paused'
         return kind
 

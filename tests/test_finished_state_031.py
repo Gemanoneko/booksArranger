@@ -43,7 +43,8 @@ class FinishedStateTests(WorkTests):
         work = self.state()
         self.assertEqual((work['state'], work['rows'], work['waiting'], work['waits_for_you']), ('all_done', [], [], []))
         self.assertEqual(work['pending'], {'any': False, 'running': 0, 'paused': 0, 'waiting': 0, 'still_checking': 0, 'attention': 0, 'hold': 0, 'moves': 0,
-                                           'writes': 0, 'drives': 0, 'lookups': {'series': 0, 'details': 0, 'all': 0}, 'same_name': 0})
+                                           'writes': 0, 'drives': 0, 'lookups': {'series': 0, 'details': 0, 'all': 0}, 'same_name': 0,
+                                           'filing': 0, 'could_not_file': 0})  # milestone B: the rules' renames and moves, and what they could not move
 
     def test_each_thing_that_is_pending_gives_another_state(self):
         self.lookups()
@@ -210,7 +211,7 @@ class KindFactsTests(unittest.TestCase):
         self.assertEqual(work['schema'], 'books-work-v1')
         self.assertLessEqual({'rows', 'waiting', 'counts', 'snapshot_age_ms', 'refreshing', 'unread'}, set(work))
         self.assertEqual(sorted(set(work) - {'schema', 'rows', 'waiting', 'counts', 'snapshot_age_ms', 'refreshing', 'unread'}),
-                         ['background', 'kinds', 'lookup_before_review', 'lookups_waiting', 'pending', 'state', 'waits_for_you'], 'the keys 0.31.0 adds')
+                         ['background', 'filing', 'kinds', 'lookup_before_review', 'lookups_waiting', 'pending', 'state', 'waits_for_you'], 'the keys 0.31.0 adds')
 
 
 del WorkTests  # only its fixture is reused; its own cases run in test_background_work

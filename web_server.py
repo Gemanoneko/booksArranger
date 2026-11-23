@@ -160,10 +160,13 @@ LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names', '/api/aut
 # the author rules, a delete preview that is not queued) change nothing, so their reply no longer throws away the shared
 # status computation (Handler.response, status_control): under load every panel read restarted it from the beginning.
 READ_ONLY_POSTS = frozenset(LOOKING | {'/api/candidate/routing-preview', '/api/candidate/approve-preview', '/api/candidate/delete-preview',
-                                       '/api/candidate/join-preview','/api/sorting-moves'})
+                                       '/api/candidate/join-preview','/api/sorting-moves','/api/filing/record','/api/filing/could-not'})
 # 0.30.0 sorting moves (Sergei 2026-11-18, items 2, 5 and 6): the planned list (read) and its approval (moves only the books of
 # the exact list Sergei saw, named by its digest). Nothing moves a book in Sorted without that approval.
-SORTING_ROUTES = ('/api/sorting-moves', '/api/sorting-moves/apply')
+SORTING_ROUTES = ('/api/sorting-moves', '/api/sorting-moves/apply',
+                  # 0.31.0 milestone B (R18, R24): the app applies the list itself. Two reads for the page: the record of the
+                  # renames and moves it made (Judy 3.4) and the books it could not rename or move, with reason keys (3.4a).
+                  '/api/filing/record', '/api/filing/could-not')
 def approve_code(text):
     """Each Approve gate its own code (2026-10-26, «Спящие красавицы»: every other refusal read "Approve was not accepted"), so
     the row names the real reason and the next step. Unknown gates answer 'refused' and the row shows the engine's sentence."""
@@ -357,7 +360,8 @@ class BrowserServer(ThreadingHTTPServer):
         # Rulings 69 and 71h: moving a finished book is always a queued action (Cancel while it waits; never stopped half
         # way), whether Sergei pressed it or the book was published before reaching the folder he chose.
         if hasattr(merge,'run_move'):
-            merge.move_requester=lambda move,title:self.actions.enqueue('move',move['candidate_id'],title,{'move_id':move['move_id']},always=True)
+            # 0.31.0 milestone B (R26): the move's origin travels with its queued action ('rules': the app's own, no Cancel).
+            merge.move_requester=lambda move,title:self.actions.enqueue('move',move['candidate_id'],title,{'move_id':move['move_id']}|({'origin':move['origin']} if move.get('origin') else {}),always=True)
         return merge
 
     def _check_sources(self, merge, **options):
@@ -1568,6 +1572,17 @@ class Handler(BaseHTTPRequestHandler):
             # 0.30.0: the books in Sorted the app now files elsewhere (items 2, 5, 6) and those left as they are. Reads only.
             self.shape(data,set())
             self.response(200,self.server.merge.sorting_moves());return
+        if path=='/api/filing/record':
+            # 0.31.0 (Judy 3.4): newest first, at most 200 entries; 'search' looks in every entry (title, author, both paths).
+            self.shape(data,set(),{'search','limit'})
+            search,limit=data.get('search',''),data.get('limit')
+            if not isinstance(search,str) or len(search)>200 or limit is not None and (type(limit) is not int or not 1<=limit<=200):
+                raise ValueError('search is a text of up to 200 characters; limit is 1 to 200')
+            self.response(200,self.server.merge.filing_record(search,limit));return
+        if path=='/api/filing/could-not':
+            # 0.31.0 (Judy 3.4a, R24): the books the rules could not rename or move, each with its reason key. Reads only.
+            self.shape(data,set())
+            self.response(200,self.server.merge.filing_could_not());return
         if path=='/api/sorting-moves/apply':
             # 0.30.0: Sergei's explicit approval of the list he saw (its digest); job_ids narrows it to some of its books.
             self.shape(data,{'digest'},{'job_ids'})
