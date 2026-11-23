@@ -21,7 +21,7 @@
 - A doubtful series is treated as not found. The app no longer asks about a series.
 - A move the app queued has no Cancel. Choose folder… works again once the book has moved.
 - A book whose question was withdrawn no longer shows as Held before Start.
-- An English title changes the file's name and folder. The title inside the file and in the app's list is not changed yet.
+- An English title, or an author's name put in order, is written inside the finished file's tags and into the app's list, not only into its name and folder. The audio is not changed.
 
 ## [v0.30.1] - 2026-11-20
 
