@@ -1647,7 +1647,7 @@ const DECISION_LABELS={decision_names:['Saving names','Save names'],decision_app
   decision_metadata_choices:['Saving choices','Save choices'],decision_file_review:['Saving file review','Save file review']};
 function decisionLabel(key,waiting){return (DECISION_LABELS[key] || ['Saving your answers','Save your answers'])[waiting?1:0];}
 const WORK_LABELS={queue:'Conversion queue',source_folders:'Removing source folders',move:'Moving',move_recovery:'Finishing interrupted moves',start_check:'Checking books before conversion',retry_check:'Checking retry',
-  maintenance:'Checking audiobook before cleanup',finished_check:'Re-checking finished audiobooks',series:'Finding series for finished audiobooks',gap_fill:'Finding original titles and author names',lookup:'Looking up metadata',
+  maintenance:'Checking audiobook before cleanup',finished_check:'Re-checking finished audiobooks',series:'Finding series for finished audiobooks',gap_fill:'Finding English titles and author names',lookup:'Looking up metadata',
   repair_check:'Checking M4B for repair',recovery_delete:'Deleting recovery copies',regroup:'Regrouping split books',scan:'Scanning files',research:'Researching books',discovery:'Automatic processing: finding books',
   source_check:'Checking source folders',drive_check:'Checking drives',chapter_check:'Checking source audio',approve_selected:'Approving selected books',release_selected:'Handing selected books to the app'};
 function workLabel(row){
@@ -1721,15 +1721,13 @@ function workDetail(row,finishing){
   return '';
 }
 // 0.30.0 (Judy 9): a damaged part's repair names its file in the step's tooltip; the manual window's stop and end lines.
-// 0.31.0 (2.1, third round): the series row's tooltip follows one engine fact, whether the app applies a found series by
-// itself (no while the guard is at hold). Neither sentence is about approval: he approves nothing (R18).
-const LOOKUP_TIPS={series:'Finished audiobooks without a series are looked up online, one by one. A series that is found is recorded. No audiobook is renamed or moved.',
-  series_applies:'Finished audiobooks without a series are looked up online, one by one. When author and series are found for certain, the book is filed under them. Otherwise it stays as it is.',
-  gap_fill:'Books approved without an original title or a full author name are looked up online, one by one. The answers are recorded. No audiobook is renamed.'};
-function lookupTip(row){
-  if(row?.kind==='series')return workOf().background?.series?.applies_by_itself===true?LOOKUP_TIPS.series_applies:LOOKUP_TIPS.series;
-  return row?.kind==='gap_fill'?LOOKUP_TIPS.gap_fill:'';
-}
+// 0.31.0 (2.1, fourth round; R20): the series row's tooltip is one sentence, always. The app files a found series by
+// itself in 0.31.0, so the "guard at hold" sentence is withdrawn with that state and the page no longer reads whether the
+// app applies a found series. Nothing in it is about approval: he approves nothing (R18). The detail look-up's tooltip
+// (R1) speaks of this look-up only: a finished audiobook may be renamed afterwards by the rules, which is its own row.
+const LOOKUP_TIPS={series:'Finished audiobooks without a series are looked up online, one by one. When author and series are found for certain, the book is filed under them. Otherwise it stays as it is.',
+  gap_fill:'Books approved without an English title or a full author name are looked up online, one by one. The answers are recorded. This look-up changes no file.'};
+function lookupTip(row){return row?.kind==='series'?LOOKUP_TIPS.series:row?.kind==='gap_fill'?LOOKUP_TIPS.gap_fill:'';}
 function repairTip(row){return row?.kind==='conversion' && row.step==='repairing' && typeof row.step_text==='string' && row.step_text?'Repairing '+row.step_text:'';}
 function partRepairLine(draft){
   const part=draft?.state==='failed'?draft.part_repair:null,file=typeof part?.file==='string'?part.file:'';if(!file)return '';

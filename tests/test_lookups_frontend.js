@@ -46,28 +46,28 @@ let rows=show({rows:[series(),details()]});
 let row=parts(rows[0]);
 assert.equal(row.label+row.subject,'Finding series for finished audiobooks: Тёмный лес');assert.equal(row.step,'Asking online sources. No file is changed.');
 assert.equal(row.detail,'691 of 903 books','done and total are the whole look-up, as the engine sends them');
-// Third round (2.1, check 28): the tooltip follows one engine fact, whether the app applies a found series by itself.
-// The guard is at hold (the fact is false, or not sent): a found series is recorded and nothing is renamed or moved.
-const HOLD_TIP='Finished audiobooks without a series are looked up online, one by one. A series that is found is recorded. No audiobook is renamed or moved.';
-const APPLIES_TIP='Finished audiobooks without a series are looked up online, one by one. When author and series are found for certain, the book is filed under them. Otherwise it stays as it is.';
-assert.equal(row.tip,HOLD_TIP);
-assert.equal(parts(show({rows:[series()],background:{series:{tries,applies_by_itself:false},gap_fill:{tries:null}}})[0]).tip,HOLD_TIP);
-assert.equal(parts(show({rows:[series()],background:{series:{tries,applies_by_itself:true},gap_fill:{tries:null}}})[0]).tip,APPLIES_TIP,'the automatic move is on');
-assert.equal(parts(show({rows:[series({step:'updating'})],background:{series:{tries,applies_by_itself:true},gap_fill:{tries:null}}})[0]).tip,APPLIES_TIP,'the writing step too');
-assert.equal(parts(show({rows:[series()],background:{series:{tries,applies_by_itself:'yes'},gap_fill:{tries:null}}})[0]).tip,HOLD_TIP,'only the engine\'s own true');
-for(const tip of [HOLD_TIP,APPLIES_TIP])assert.doesNotMatch(tip,/approv/,'neither is about approval: he approves nothing (R18)');
+// Fourth round (2.1, check 36; R20): one sentence, always. The app files a found series by itself in 0.31.0, so the
+// "guard at hold" sentence is withdrawn with that state, and the page no longer reads whether the app applies a series.
+const SERIES_TIP='Finished audiobooks without a series are looked up online, one by one. When author and series are found for certain, the book is filed under them. Otherwise it stays as it is.';
+assert.equal(row.tip,SERIES_TIP);
+for(const fact of [false,true,'yes',undefined])assert.equal(parts(show({rows:[series()],background:{series:{tries,applies_by_itself:fact},gap_fill:{tries:null}}})[0]).tip,SERIES_TIP,'whatever the engine says about its guard: '+fact);
+assert.equal(parts(show({rows:[series({step:'updating'})]})[0]).tip,SERIES_TIP,'the writing step too');
+assert.doesNotMatch(SERIES_TIP,/approv/,'it is not about approval: he approves nothing (R18)');
 rows=show({rows:[series(),details()]});row=parts(rows[0]);
 assert.equal(row.bar.value,Math.floor(691/903*100),'determinate');
 row=parts(rows[1]);
-assert.equal(row.label+row.subject,'Finding original titles and author names: Дюна');assert.equal(row.step,'For books you already approved. Recorded only, no file is changed.');
+assert.equal(row.label+row.subject,'Finding English titles and author names: Дюна');assert.equal(row.step,'For books you already approved. Recorded only, no file is changed.');
 assert.equal(row.detail,'40 of 71 books');
-assert.equal(row.tip,'Books approved without an original title or a full author name are looked up online, one by one. The answers are recorded. No audiobook is renamed.');
+// R1: the app looks for the English title (for a book written in Chinese that is not its original one). The last sentence
+// is about this look-up only: a finished audiobook may be renamed afterwards by the rules, which is its own row.
+assert.equal(row.tip,'Books approved without an English title or a full author name are looked up online, one by one. The answers are recorded. This look-up changes no file.');
+assert.ok(row.tip.endsWith('This look-up changes no file.'),'check 36: how the tooltip ends');
 // Writing: the same label, the writing step.
 row=parts(show({rows:[series({step:'updating'})]})[0]);
 assert.equal(row.label,'Finding series for finished audiobooks: ');assert.equal(row.step,'Writing the series into the file and renaming it. Audio unchanged.');
 // The old names are gone from the page.
 const source=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');
-for(const old of ['Metadata: Updating series','Looking up book details','Looking up the series'])assert.ok(!source.includes(old),old);
+for(const old of ['Metadata: Updating series','Looking up book details','Looking up the series','Finding original titles','without an original title','No audiobook is renamed','A series that is found is recorded','applies_by_itself','next version'])assert.ok(!source.includes(old),old);
 // The other look-alike rows keep their names (2.1), so the three no longer read as one job.
 assert.equal(run("workLabel({kind:'research'})"),'Researching books');assert.equal(run("workLabel({kind:'lookup'})"),'Looking up metadata');assert.equal(run("workLabel({kind:'finished_check'})"),'Re-checking finished audiobooks');
 
@@ -89,7 +89,7 @@ assert.equal(get('jobs-wait-block').hidden,false);assert.equal(listed.length,2);
 assert.equal(listed[0].line1,'Finding series for finished audiobooks: 212 books');assert.equal(listed[0].line2,`Waiting for online sources. Next try ${clock}. No file is changed.`);
 assert.equal(listed[0].tip,'Each source is asked up to 3 times for a book, 6 hours apart. With no answer after that, the book is left as it is and the app stops asking.',"the engine's numbers (G8)");
 assert.equal(listed[0].button.hidden,true,'no button');
-assert.equal(listed[1].line1,'Finding original titles and author names: 31 books');assert.equal(listed[1].line2,`Waiting for online sources. Next try ${clock}. No file is changed.`);
+assert.equal(listed[1].line1,'Finding English titles and author names: 31 books');assert.equal(listed[1].line2,`Waiting for online sources. Next try ${clock}. No file is changed.`);
 // R16 (check 19): the detail look-up has the same limit, so its item says the same sentence with its own numbers. The
 // no-limit sentence of the earlier round appears nowhere; an engine that sends no limit gets no tooltip, never a guess.
 assert.equal(listed[1].tip,'','no limit sent for it: no tooltip');
@@ -109,6 +109,9 @@ assert.equal(get('jobs-rows').children.length,0,'between tries there is no runni
 // The next try time is left out when the engine has none; one book reads as one.
 show({lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:1,at:null}]});
 assert.deepEqual([waits()[0].line1,waits()[0].line2],['Finding series for finished audiobooks: 1 book','Waiting for online sources. No file is changed.']);
+// 6.1: the renamed look-up's singulars, in its item and in its row.
+show({lookups_waiting:[{id:'detail_lookup',kind:'detail_lookup',count:1,at:null}]});assert.equal(waits()[0].line1,'Finding English titles and author names: 1 book');
+assert.equal(parts(show({rows:[details({done:1,total:1})]})[0]).label,'Finding English titles and author names: ');assert.equal(run("workDetail({kind:'gap_fill',done:0,total:1,unit:'books'},false)"),'0 of 1 book');
 // A series found whose write is held by a job: the book, the 0.30.0 blocker sentence, Show in list.
 const blocker={kind:'jobs',cause:'conversion',title:'Dune',book_id:'b1',count:null};
 show({state:'working',rows:[conversion()],lookups_waiting:[{id:'series_write:j9',kind:'series_write',subject:'Граф Ноль',book_id:'b9',job_id:'j9',blocker}]},{state:'Running'});
@@ -119,7 +122,7 @@ assert.match(listed[0].line2,/^It runs when Converting: Dune finishes\.$/);asser
 // 4. Their place in the Waiting list is the engine's: after metadata_sources, before drive.
 show({waiting:[{id:'conversions',kind:'conversions',count:2,subject:'Next'},{id:'metadata_sources',kind:'metadata_sources',count:4,at},{id:'drive:Z',kind:'drive',subject:'Z:\\Audiobooks'},{id:'automatic',kind:'automatic',label_key:'automatic_waiting'}],
   lookups_waiting:[{id:'series_lookup',kind:'series_lookup',count:212,at},{id:'detail_lookup',kind:'detail_lookup',count:31,at}]});
-assert.deepEqual(waits().map(item=>item.line1.split(':')[0]),['Waiting to convert','Metadata sources','Finding series for finished audiobooks','Finding original titles and author names','Drive not answering','Automatic processing']);
+assert.deepEqual(waits().map(item=>item.line1.split(':')[0]),['Waiting to convert','Metadata sources','Finding series for finished audiobooks','Finding English titles and author names','Drive not answering','Automatic processing']);
 // An engine that sends none (0.30.0) draws its list as before.
 show({waiting:[{id:'conversions',kind:'conversions',count:2,subject:'Next'}],lookups_waiting:undefined});assert.equal(waits().length,1);
 
