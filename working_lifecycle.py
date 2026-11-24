@@ -747,8 +747,13 @@ class WorkingLifecycle:
                 if not facts_match(path,facts,json.loads(entry['facts']),receipt_class='working-file') or facts['links']!=1 or facts['size']!=entry['size'] or self._hash(handle)!=entry['sha256']:
                     raise BoundaryError('Published snapshot native identity or bytes changed')
                 prepared.append((entry,path,handle))
+            # 0.31.1 (Sergei 2026-11-24, ruling 75a's revisit row): the reference check ran again for every snapshot just before
+            # its removal, and each run reads every reference table (6 s on a 379 MB synthetic catalog): a 1,436-file book took
+            # the recovery cleanup's thread over an hour. It runs once here, for every snapshot this pass removes, after the
+            # hashing and the source proofs and before the first removal; the loop below does no hashing.
+            if prepared:self._published_references(attempt,[str(path) for _,path,_ in prepared])
             for entry,path,handle in prepared:
-                source_proof();self._published(attempt);self._published_references(attempt,[str(path)]);boundary.revalidate()
+                source_proof();self._published(attempt);boundary.revalidate()
                 if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
                 with storage._publication_transaction() as generation_db:
                     if entry['state']=='removal_intended':

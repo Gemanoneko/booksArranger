@@ -65,7 +65,8 @@ class PublishedSnapshotTests(unittest.TestCase):
         if not marker.exists():marker.write_text(packed({'job_id':self.job_id,'manifest':self.manifest}),encoding='utf8')
         directory=parent/attempt;directory.mkdir()
         with generated_artifacts(directory,self.life) as receipts:
-            copy_owned(self.source,directory/'source00000.mp3',self.manifest['sources'][0]['sha256'],threading.Event())
+            for index,item in enumerate(self.manifest['sources']):  # one source unless a case adds more (more_sources)
+                copy_owned(item['path'],directory/('source%05d.mp3'%index),item['sha256'],threading.Event())
             copy_owned(self.cover,directory/'cover.jpg',self.manifest['cover']['sha256'],threading.Event())
             for name,raw in [('checked.m4b',b'failed generated output'),('compatible.m4b',b'failed rewritten output')]+list(extras):
                 plan_generated(directory/name);(directory/name).write_bytes(raw)
@@ -83,7 +84,7 @@ class PublishedSnapshotTests(unittest.TestCase):
         with DirectoryBoundary(self.library,self.library) as boundary:parent_identity=boundary.identities
         validation={'passed':True,'checks':'Output checks passed','profile':AUTOMATIC_PROFILE,'sha256':sha,'size':size,
                     'tags':{'media_type':'2','title':self.manifest['metadata']['title'],'artist':self.manifest['metadata']['canonical_author']},
-                    'source_pcm_frames':[100],'source_pcm_rate':100,'decoded_duration':1,'duration_tolerance':.01,'chapters':[],
+                    'source_pcm_frames':[100]*len(self.manifest['sources']),'source_pcm_rate':100,'decoded_duration':len(self.manifest['sources']),'duration_tolerance':.01,'chapters':[],
                     'staging_artifacts':{'attempt_id':attempt,'files':receipts}}
         output={'job_id':self.job_id,'final_path':str(final),'owned_temp':str(self.library/'absent.partial'),
                 'sha256':sha,'size':size,'parent_identity':parent_identity,'validation':validation}
@@ -100,6 +101,14 @@ class PublishedSnapshotTests(unittest.TestCase):
             self.cleanup_id=self.cleanup.enroll(job,{})
         self.storage.working_files(self.job_id)
         return attempt,stage,output
+
+    def more_sources(self,count):
+        """count more source files in the book, before published(): one snapshot each."""
+        for index in range(1,count+1):
+            path=self.library/('source%d.mp3'%index);path.write_bytes(b'more protected source bytes %d'%index*64);info=path.stat()
+            self.manifest['sources'].append({'path':str(path),'size':info.st_size,'modified':str(info.st_mtime_ns),
+                                             'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
+                                             'fingerprint':{'size':info.st_size,'modified':str(info.st_mtime_ns)}})
 
     def retire_original(self):
         self.cleanup.run(self.cleanup_id)
@@ -200,6 +209,40 @@ class PublishedSnapshotTests(unittest.TestCase):
         self.queue.enqueue(other)
         with self.assertRaises(BoundaryError):self.discharge()
         self.assertTrue((stage/'source00000.mp3').exists())
+
+    def test_one_reference_check_covers_every_snapshot_of_the_book_0_31_1(self):
+        # Sergei 2026-11-24: each snapshot's removal ran the reference check again, and each run reads every reference table
+        # (about 6 s on a 379 MB catalog): a 1,436-file book held the recovery cleanup's thread for over an hour. Now one
+        # check before the hashing (unchanged) and one for all of the book's snapshots before the first removal.
+        self.more_sources(3)
+        attempt,stage,_=self.published()
+        check,calls=self.life._published_references,[]
+        with patch.object(self.life,'_published_references',side_effect=lambda found,paths:(calls.append(list(paths)),check(found,paths))[1]):
+            self.discharge()
+        self.assertEqual(list(stage.iterdir()),[])
+        self.assertEqual(self.life._attempt(self.job_id,attempt)['state'],'retired')
+        self.assertEqual(len(calls),2,'twice per book, never once per snapshot')
+        self.assertEqual(sorted(Path(path).name for path in calls[1]),['source%05d.mp3'%index for index in range(4)])
+        self.assertEqual(self.source.read_bytes(),self.original)
+
+    def test_a_reference_made_while_the_snapshots_are_hashed_keeps_them_0_31_1(self):
+        # The check before the first removal sees a reference written after the first check (while the copies were hashed),
+        # for any snapshot of the book; nothing of the book is removed.
+        self.more_sources(3)
+        attempt,stage,_=self.published()
+        hashed,referenced=self.life._hash,[]
+        def hash_then_reference(handle):
+            if not referenced:
+                referenced.append(True)
+                other=dict(self.manifest,job_id=str(uuid.uuid4()),candidate_id=str(uuid.uuid4()))
+                other['evidence']=[str(stage/'source00003.mp3').replace(chr(92),'/').upper()]
+                self.queue.enqueue(other)
+            return hashed(handle)
+        with patch.object(self.life,'_hash',side_effect=hash_then_reference):
+            with self.assertRaisesRegex(BoundaryError,'another durable dependency: audio_jobs'):self.discharge()
+        self.assertTrue(referenced,'positive control: the reference was written after the first check')
+        self.assertEqual(sorted(path.name for path in stage.glob('source*.mp3')),['source%05d.mp3'%index for index in range(4)])
+        self.assertEqual(self.life._attempt(self.job_id,attempt)['state'],'published_held')
 
     def test_same_name_snapshot_replacement_is_not_adopted(self):
         _,stage,_=self.published();path=stage/'source00000.mp3';raw=path.read_bytes()
