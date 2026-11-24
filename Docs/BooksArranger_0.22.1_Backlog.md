@@ -315,3 +315,7 @@ Sergei explicitly requested logging only: no investigation, implementation, test
 ## Backlog after 0.30.0 (Sergei, 2026-11-20)
 
 - **Distinguish an internal repair error from confirmed audio damage** (Senua m-d2, approved for the next release). If a repair fails inside the app, say the repair could not finish and offer Retry when safe. Reserve “get a new copy” for confirmed damage that cannot be repaired. Cover both manual and automatic conversion, with checks for retryable internal failure and confirmed damage. See [Senua’s review](BooksArranger_CodeReview_v0.30.0_delta_2026-11-20.md).
+
+## Backlog after 0.31.0 (Sergei, 2026-11-24)
+
+- **An occasional Goodreads human check holds back "All done" for about 6 hours** (Futaba 0.31.0 r2 M1, shipped as a known issue). Sergei: "Yes. Next version." Constraint from Senua's 0.31.0 delta3 M7/M8: the fix must not file a book whose series only Goodreads knows with no series for good (the reverted R32 extension did that). See the 0.31.0 Scope R32 and [Senua's delta3](BooksArranger_CodeReview_v0.31.0_delta3_2026-11-24.md).
