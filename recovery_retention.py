@@ -174,8 +174,8 @@ class RecoveryRetention:
         checked keeps no recovery copies either, including a copy that is the only one of an original the cleanup already
         removed (Sergei accepted that). The book must be published (its job completed) and its audiobook verified in full
         now (storage.protected_cleanup); the hold must be exactly that one; then the same proofs as release_unfinished. The
-        hold itself stays: the changed originals are Sergei's and stay where they are, so the book stays in Needs attention
-        under "Original changed since checked" until he presses Keep files, as before. Returns the copies removed."""
+        changed originals are Sergei's and stay where they are; once the copies are gone the book leaves Needs attention by
+        itself, exactly as if kept (Sergei 2026-11-24; MergeService.kept_files). Returns the copies removed."""
         with connect(self.database) as db:
             row=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
             members=[dict(r) for r in db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(row['id'],))] if row else []

@@ -2416,10 +2416,6 @@ class MergeService:
         return order,counts
 
     KEPT_CHANGED=('Original bytes differ from reviewed sources',)  # a content mismatch: keep-case (A)
-    # Judy's stuck-load spec, 9.4 (question to Sergei): once the recovery copies of an "Original changed since checked" book
-    # are released (RecoveryRetention.release_changed), does it leave Needs attention by itself, as if kept? False: it stays
-    # until Keep files is pressed (the spec's default, as built).
-    CHANGED_LEAVES_WHEN_RELEASED=False
 
     def kept_files(self,job_ids=None):
         """Completed books whose files the 0.16.8 rule keeps, as attention entries (Judy's spec section 3):
@@ -2438,9 +2434,11 @@ class MergeService:
                     for job_id,reason in db.execute("SELECT job_id,reason FROM source_cleanup WHERE state='needs_attention'"):
                         if reason in self.KEPT_CHANGED:found[job_id]={'group':'changed','cause':None,'reason':reason}
                 if db.execute("SELECT 1 FROM sqlite_master WHERE name='recovery_retention'").fetchone():
-                    if self.CHANGED_LEAVES_WHEN_RELEASED:
-                        for (job_id,) in db.execute("SELECT job_id FROM recovery_retention WHERE state='deleted'"):
-                            if found.get(job_id,{}).get('group')=='changed':del found[job_id]  # its copies are gone: as if kept
+                    # 0.31.1 (Sergei 2026-11-24, Judy's question 9.4: yes): once the recovery copies of an "Original changed
+                    # since checked" book are released (RecoveryRetention.release_changed), it leaves Needs attention by itself,
+                    # exactly as if kept; its changed original stays where it is.
+                    for (job_id,) in db.execute("SELECT job_id FROM recovery_retention WHERE state='deleted'"):
+                        if found.get(job_id,{}).get('group')=='changed':del found[job_id]
                     for job_id,reason in db.execute("SELECT job_id,reason FROM recovery_retention WHERE state='needs_attention'"):
                         for prefix,cause in ((AUDIOBOOK_MISSING,'missing'),(AUDIOBOOK_UNVERIFIED,'unverified')):
                             if (reason or '').startswith(prefix):found[job_id]={'group':'audiobook','cause':cause,'reason':reason[len(prefix):]}

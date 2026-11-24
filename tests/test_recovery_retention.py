@@ -369,16 +369,15 @@ class PublishedBooksKeepNoCopiesTests(unittest.TestCase):
         with connect(self.db) as db:db.execute("UPDATE source_cleanup SET reason='Download marker native identity differs' WHERE id=?",(self.cleanup_id,))
         with self.assertRaisesRegex(BoundaryError,'Only a cleanup held because an original changed'):self.retention.release_changed(self.job_id)
         self.assertEqual(len(self.copies()),2);self.assertEqual(original.read_bytes(),raw)
-    def test_after_the_release_the_panel_says_deleted_automatically_and_the_entry_stays_by_default(self):
-        # Judy's stuck-load spec, 9.3: the Recovery copies panel says "deleted automatically"; the row stays in Needs attention
-        # until Keep files (the spec's default), or leaves by itself if Sergei answers 9.4 with yes (one switch).
-        self.changed();self.retention.release_changed(self.job_id)
+    def test_after_the_release_the_panel_says_deleted_automatically_and_the_entry_leaves_by_itself(self):
+        # Judy's stuck-load spec, 9.3; Sergei 2026-11-24 (9.4: yes): the Recovery copies panel says "deleted automatically",
+        # and the row leaves Needs attention by itself, exactly as if kept.
+        self.changed();s=KeptFilesTests.merge(self)
+        self.assertEqual(s.kept_files()[self.job_id]['group'],'changed','positive control: listed while its copies exist')
+        self.retention.release_changed(self.job_id)
         status=self.retention.status(self.job_id)
         self.assertEqual((status['state'],status['actor'],status['count']),('deleted','automatic',0))
-        s=KeptFilesTests.merge(self)
-        self.assertEqual(s.kept_files()[self.job_id]['group'],'changed','stays until Keep files')
-        with patch.object(MergeService,'CHANGED_LEAVES_WHEN_RELEASED',True):
-            self.assertNotIn(self.job_id,s.kept_files(),'leaves by itself, as if kept')
+        self.assertNotIn(self.job_id,s.kept_files(),'leaves by itself, as if kept')
     def test_the_sweep_releases_changed_original_copies_once_per_run(self):
         import threading as threads
         s=MergeService.__new__(MergeService);calls=[]
