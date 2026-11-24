@@ -39,16 +39,18 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   // Rows: status, hint, technical detail on hover; Keep files is the only action (no remedy is offered yet).
   context.fixture=[changed,missing,unverified];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
   const trs=get('inventory').children;assert.equal(trs.length,3);
-  for(const tr of trs)assert.equal(statusCell(tr).children[0].textContent,'Recovery copies are kept until you decide.');
+  // Judy's stuck-load spec, 9.2-9.3: each group's own truth; none says "until you decide".
+  assert.deepEqual([...trs].map(tr=>statusCell(tr).children[0].textContent),['The app left this original in place. Recovery copies are not kept.',
+    'Recovery copies are kept until the audiobook is verified.','Recovery copies are kept until the audiobook is verified.']);
   assert.equal(techOf(trs[0]),'Technical detail: '+CHANGED,'the kept reason, not the empty job reason');
   assert.equal(techOf(trs[1]),'Technical detail: The system cannot find the file specified');
   const keep=actionButtons(trs[0])[0];
-  assert.equal(keep.textContent,'Keep files');assert.equal(keep.title,"Keep this book's files and stop flagging it. Nothing is deleted.");
+  assert.equal(keep.textContent,'Keep files');assert.equal(keep.title,"Keep this book's originals and folder as they are, and stop flagging it. It does not keep recovery copies.");
   assert.equal(keep.getAttribute('aria-label'),'Keep files: Title a');assert.ok(keep.className.split(' ').includes('quiet'));assert.equal(keep.disabled,false);
   for(const tr of trs)assert.ok(![...actionButtons(tr)].some(button=>/^(Retry|Repair|Check again|Convert again)$/.test(button.textContent)),'no remedy button and no disabled ghost');
   run('busy=true;controls()');assert.equal(keep.disabled,false,'ruling 35: another press never disables it');assert.notEqual(keep.title,'Another operation is in progress.');run('busy=false;controls()');
 
-  // Keep files: one request (double press ignored), pending copy, then "Files kept at your choice." before the list reloads.
+  // Keep files: one request (double press ignored), pending copy, then "Kept at your choice: originals and folder stay as they are." before the list reloads.
   let answer;keepOverride=()=>new Promise(resolve=>{answer=resolve;});let listGate;inventoryOverride=()=>new Promise(resolve=>{listGate=resolve;});
   const sent=calls.length;keep.handlers.click({stopPropagation(){}});await settle(5);
   assert.equal(keep.textContent,'Keeping…');assert.equal(statusCell(trs[0]).children[0].textContent,'Keeping these files…');assert.equal(keep.getAttribute('aria-disabled'),'true');
@@ -56,7 +58,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   answer({ok:true,status:202,json:async()=>({job_id:'job-a',kept:true})});await settle(10);
   assert.equal(posted('/api/audiobook/keep').length,1,'one request');assert.deepEqual(JSON.parse(posted('/api/audiobook/keep')[0].options.body),{library:'Audiobooks',id:'cand-a',revision:4,job_id:'job-a'});
   assert.ok(!calls.slice(sent).some(call=>call.route==='/api/audiobook/retry'),'Keep files never queues a job');
-  assert.equal(statusCell(trs[0]).children[0].textContent,'Files kept at your choice.');assert.equal(keep.hidden,true,'nothing left to press');
+  assert.equal(statusCell(trs[0]).children[0].textContent,'Kept at your choice: originals and folder stay as they are.');assert.equal(keep.hidden,true,'nothing left to press');
   listGate({ok:true,json:async()=>({rows:[missing,unverified],total:2})});await settle(10);inventoryOverride=null;keepOverride=null;
   assert.equal(get('inventory').children.length,2,'the kept book leaves the filter');
 
@@ -70,16 +72,16 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   context.fixture=[missing];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
   keepOverride=async()=>{throw new TypeError('Failed to fetch');};const keptMissing=keptByChoiceRow('b');inventoryRows=[keptMissing];context.setTimeout=setTimeout;
   actionButtons(get('inventory').children[0])[0].handlers.click({stopPropagation(){}});await settle(60);
-  assert.equal(run('recoveryDisconnected'),false);assert.equal(statusCell(get('inventory').children[0]).children[0].textContent,'Files kept at your choice.');
+  assert.equal(run('recoveryDisconnected'),false);assert.equal(statusCell(get('inventory').children[0]).children[0].textContent,'Kept at your choice: originals and folder stay as they are.');
   assert.ok(![...actionButtons(get('inventory').children[0])].some(button=>button.textContent==='Keep files' && !button.hidden));keepOverride=null;
 
   // A kept book elsewhere: the row says so, the details panel keeps the line, and there is no action to press.
   run('filters.candidates="all";viewControls()');const kept=keptByChoiceRow('k');
   context.fixture=[kept];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
-  assert.equal(statusCell(get('inventory').children[0]).children[0].textContent,'Files kept at your choice.');
+  assert.equal(statusCell(get('inventory').children[0]).children[0].textContent,'Kept at your choice: originals and folder stay as they are.');
   assert.ok(![...actionButtons(get('inventory').children[0])].some(button=>button.textContent==='Keep files'));
   show(kept);run('automaticResultKey=null;renderAutomaticResult(fixture);controls()');
-  assert.equal(get('automatic-result-hint').textContent,'You chose to keep these files.');assert.equal(get('automatic-result-hint').hidden,false);assert.equal(get('retry-block').hidden,true);
+  assert.equal(get('automatic-result-hint').textContent,"You chose to keep this book's originals and folder as they are. This does not keep recovery copies.");assert.equal(get('automatic-result-hint').hidden,false);assert.equal(get('retry-block').hidden,true);
   // The details panel action reads Keep files for a kept-files book.
   show(changed);run('controls()');assert.equal(get('retry-job').textContent,'Keep files');assert.equal(get('retry-block').hidden,false);
   run('filters.candidates="output_attention";viewControls()');

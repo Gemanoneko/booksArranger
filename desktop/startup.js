@@ -5,13 +5,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// What the page reads through the preload: {phase, startedAt, lastLoadMs, exited, portPid}.
+// What the page reads through the preload: {phase, startedAt, lastLoadMs, exited, portPid, loaded, loadedAt}.
+// 0.31.1 (Judy's stuck-load spec, 4.1): loaded and loadedAt (same clock as startedAt) say this launch finished loading, so the
+// page leaves the step view even while the engine's status reads still answer "still updating"; a reloaded window resumes.
 function createStartup({ now = Date.now, lastLoadMs = null } = {}) {
- let value = { phase: 'launching', startedAt: now(), lastLoadMs, exited: null, portPid: null };
+ let value = { phase: 'launching', startedAt: now(), lastLoadMs, exited: null, portPid: null, loaded: false, loadedAt: null };
  return {
   get value() { return { ...value, exited: value.exited ? { ...value.exited } : null }; },
   // Restart engine and Try again start a new launch; "last load took" stays.
-  launch() { value = { phase: 'launching', startedAt: now(), lastLoadMs: value.lastLoadMs, exited: null, portPid: null }; return this.value; },
+  launch() { value = { phase: 'launching', startedAt: now(), lastLoadMs: value.lastLoadMs, exited: null, portPid: null, loaded: false, loadedAt: null }; return this.value; },
   running() { if (value.phase === 'launching') value = { ...value, phase: 'running' }; return this.value; },
   beginAdmission() { value={...value,admission:{state:'pending',phase:'pending',done:0,total:null,startedAt:now(),updatedAt:null,limit_ms:597000}};return this.value; },
   admission(event) {
@@ -29,7 +31,11 @@ function createStartup({ now = Date.now, lastLoadMs = null } = {}) {
    value = { ...value, phase: 'stopped', exited: { code, lastLines: String(lastLines || '') }, portPid: Number.isInteger(portPid) && portPid > 0 ? portPid : null };
    return this.value;
   },
-  loaded(tookMs) { if (Number.isFinite(tookMs) && tookMs >= 0) value = { ...value, lastLoadMs: tookMs }; return this.value; },
+  loaded(tookMs) {
+   if (Number.isFinite(tookMs) && tookMs >= 0) value = { ...value, lastLoadMs: tookMs };
+   if (!value.loaded) value = { ...value, loaded: true, loadedAt: now() };  // the first report of this launch is the time
+   return this.value;
+  },
  };
 }
 

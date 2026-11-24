@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.31.1] - 2026-11-24
+
+### Added
+
+- Restart Books Arranger: a book that stays stuck after loading no longer needs the window closed by hand.
+- Finished books that are missing from the library are removed from the list. Library files are never touched. A safety brake and a drive guard stop the removal if the library looks wrong.
+
+### Changed
+
+- A refused Restart engine now says why.
+- The clean-up after a book loads is fast.
+- A published book keeps no recovery copies. This overrides Keep files.
+- The Keep files wording says what it keeps.
+
+### Fixed
+
+- The app no longer gets stuck after loading.
+- A finished book that was moved or renamed is found again.
+
 ## [v0.31.0] - 2026-11-24
 
 ### Added

@@ -31,15 +31,28 @@ const S = require('../desktop/startup.js');
 test('the startup record: launching, running, stopped once, a new launch keeps the last load', () => {
  let clock = 1000;
  const startup = S.createStartup({ now: () => clock, lastLoadMs: 99000 });
- assert.deepEqual(startup.value, { phase: 'launching', startedAt: 1000, lastLoadMs: 99000, exited: null, portPid: null });
+ assert.deepEqual(startup.value, { phase: 'launching', startedAt: 1000, lastLoadMs: 99000, exited: null, portPid: null, loaded: false, loadedAt: null });
  assert.equal(startup.running().phase, 'running');
  assert.deepEqual(startup.stopped({ code: 1, lastLines: 'RuntimeError: boom', portPid: 4321 }).exited, { code: 1, lastLines: 'RuntimeError: boom' });
  assert.equal(startup.value.portPid, 4321);
  assert.equal(startup.stopped({ code: 0 }).exited.code, 1, 'the first cause stays');
  clock = 5000;
- assert.deepEqual(startup.launch(), { phase: 'launching', startedAt: 5000, lastLoadMs: 99000, exited: null, portPid: null });
+ assert.deepEqual(startup.launch(), { phase: 'launching', startedAt: 5000, lastLoadMs: 99000, exited: null, portPid: null, loaded: false, loadedAt: null });
  assert.equal(startup.loaded(42000).lastLoadMs, 42000);
  assert.equal(startup.loaded(-1).lastLoadMs, 42000);
+});
+
+test('0.31.1: loaded and loadedAt say this launch finished loading (Judy\'s stuck-load spec, 4.1); a new launch clears them', () => {
+ let clock = 1000;
+ const startup = S.createStartup({ now: () => clock, lastLoadMs: 99000 });
+ startup.running(); clock = 281000;
+ assert.deepEqual(startup.loaded(280000), { phase: 'running', startedAt: 1000, lastLoadMs: 280000, exited: null, portPid: null, loaded: true, loadedAt: 281000 });
+ clock = 290000;
+ assert.equal(startup.loaded(280000).loadedAt, 281000, 'the first report of the launch is its time');
+ const timeless = S.createStartup({ now: () => clock, lastLoadMs: 99000 });
+ assert.deepEqual([timeless.loaded(undefined).loaded, timeless.value.loadedAt, timeless.value.lastLoadMs], [true, 290000, 99000], 'loaded without a time still counts');
+ clock = 300000;
+ assert.deepEqual(startup.launch(), { phase: 'launching', startedAt: 300000, lastLoadMs: 280000, exited: null, portPid: null, loaded: false, loadedAt: null });
 });
 
 test('health is ours only with our process and version; another copy means the port is taken', () => {

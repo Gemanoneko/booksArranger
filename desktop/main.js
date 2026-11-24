@@ -89,6 +89,7 @@ const state = {
   win: null,
   tray: null,
   quit: 'none', // none | requested | updating | installing | exiting
+  relaunch: 'none', // 0.31.1 Restart Books Arranger: none | asking (its Quit is being asked) | accepted (a new copy at the exit)
   quitFacts: null, // an accepted Quit's last status facts (quit-watch createQuitProgress): what it still waits for, how long
   ready: false, // the engine answered with our ownership proof
   loaded: false, // ...and reported its catalog loaded (ruling 28): until then Quit is immediate and the strip is up
@@ -381,7 +382,8 @@ async function watchLoad(generation) {
 }
 function engineLoaded(tookMs) {
   state.loaded = true; state.verdict = 'working';
-  if (Number.isFinite(tookMs)) { state.startup.loaded(tookMs); startupKit.saveLastLoad(startupKit.loadTimeFile(app.getPath('userData')), tookMs); }
+  state.startup.loaded(tookMs); // 0.31.1: loaded and loadedAt reach the page (it leaves the step view), with or without a time
+  if (Number.isFinite(tookMs)) startupKit.saveLastLoad(startupKit.loadTimeFile(app.getPath('userData')), tookMs);
   pushStartup(); loadTip('Books Arranger');
   if (pendingSettings) { const save = pendingSettings; pendingSettings = null; save().catch((error) => remember(`\nSettings were not saved: ${error.message}\n`)); }
 }
@@ -414,10 +416,11 @@ function relaunchConfig(config) {
   if (config.catalogMode === 'new' && fs.existsSync(path.join(config.dataDir, 'inventory.sqlite3'))) config = currentConfig = { ...config, catalogMode: 'existing' };
   return config;
 }
+// 0.31.1 (Judy's stuck-load spec, 2.2): {started:true}, or {started:false, reason} for the page's note beside the button. It
+// used to answer false, and the page said nothing.
 async function restartEngine(config) {
-  if (state.loaded || state.quit !== 'none' || state.restarting) return false;
-  const admission=state.startup?.value.admission;
-  if(admission&&admission.state!=='complete'&&(!state.backendExited||admission.verification_required))return false;
+  const refused = restartRefusal();
+  if (refused) return { started: false, reason: refused };
   state.restarting = true;
   config = relaunchConfig(config);
   try {
@@ -426,8 +429,16 @@ async function restartEngine(config) {
     await endLoadingEngine();
     if (state.win && !state.win.isDestroyed()) await state.win.loadURL(state.firstFrame).catch(() => {}); // the old page's token died with its engine
     launchEngine(config, { fresh: false }).catch(() => { /* the strip shows Stopped */ });
-    return true;
+    return { started: true };
   } finally { state.restarting = false; }
+}
+function restartRefusal() {
+  if (state.restarting) return 'restarting';
+  if (state.quit !== 'none') return 'quitting';
+  if (state.loaded) return 'loaded'; // loading finished: there is nothing to restart (the strip no longer offers it)
+  const admission = state.startup?.value.admission;
+  if (admission && admission.state !== 'complete' && (!state.backendExited || admission.verification_required)) return 'admission';
+  return null;
 }
 
 // ── Window and tray ─────────────────────────────────────────────────────────
@@ -530,10 +541,13 @@ function loadTip(tooltip) {
 }
 
 // ── Quit ────────────────────────────────────────────────────────────────────
-async function requestQuit({ confirmed }) {
-  if(state.backendExited)return finishExit(state.backend?.exitCode===0?0:1);
+// relaunch (0.31.1, Restart Books Arranger): the same Quit, then a new copy of the app starts as this one exits (finishExit);
+// accepted() is called once the Quit is under way (never on Cancel).
+async function requestQuit({ confirmed, relaunch = false, accepted = () => {} }) {
+  const accept = () => { if (relaunch) state.relaunch = 'accepted'; accepted(); };
+  if(state.backendExited){accept();return finishExit(state.backend?.exitCode===0?0:1);}
   if (state.quit !== 'none') return;
-  if (!state.loaded) return quitWhileLoading();
+  if (!state.loaded) { accept(); return quitWhileLoading(); }
   let status = null;
   try {
     status = await desktopStatus.get();
@@ -545,7 +559,13 @@ async function requestQuit({ confirmed }) {
   const busy = (status && status.busy) || {};
   if (busy.converting && !confirmed) {
     const title = busy.current_title ? `“${busy.current_title}”` : 'The current book';
-    const choice = await dialog.showMessageBox({
+    // Judy's stuck-load spec, section 6: the relaunch asks the same question, in its own words.
+    const choice = await dialog.showMessageBox(relaunch ? {
+      type: 'question', title: 'Restart Books Arranger',
+      message: 'Restart after the current book?',
+      detail: `${title} finishes converting first, then Books Arranger closes and opens again. Queued books stay queued.`,
+      buttons: ['Restart after this book', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+    } : {
       type: 'question', title: 'Quit Books Arranger',
       message: 'Quit after the current book?',
       detail: `${title} finishes converting first, then Books Arranger closes. Queued books stay queued for next time.`,
@@ -553,7 +573,7 @@ async function requestQuit({ confirmed }) {
     });
     if (choice.response !== 0 || state.quit !== 'none') return;
   }
-  state.quit = 'requested';
+  state.quit = 'requested'; accept();
   refreshTray(busy.converting ? 'Books Arranger — quitting after the current book' : 'Books Arranger — quitting');
   // 0.22.3 (seen on 0.22.1 under load: "Quit could not be confirmed; ownership remains held. Request timed out"): one
   // request that runs out is no refusal. The Quit is sent again until the engine takes it (sendQuit); with no answer at
@@ -667,7 +687,33 @@ function finishExit(code) {
   if (state.quit === 'exiting') return;
   state.quit = 'exiting';
   if (state.tray && !state.tray.isDestroyed()) state.tray.destroy();
+  if (state.relaunch === 'accepted') relaunchOnExit();
   app.exit(code);
+}
+// ── Restart Books Arranger (0.31.1; Sergei 2026-11-24, Judy's stuck-load spec, section 6) ──────────────────────────────
+// The way out once loading has finished but the first status never comes: Quit (the engine stops the way Quit stops it; the
+// book in progress stops safely and converts again next time), then a new copy of the app. Electron's app.relaunch starts
+// it once this process has exited, so the new copy takes the single-instance lock; its window shows without focus at
+// Step 1. Resolves {started:true} as soon as the Quit is under way, {started:false, reason:'cancelled'} when the
+// converting-book question is cancelled, {started:false, reason:'closing'} when a Quit or relaunch is already under way.
+function relaunchApp() {
+  if (state.quit !== 'none' || state.relaunch !== 'none') return Promise.resolve({ started: false, reason: 'closing' });
+  state.relaunch = 'asking';
+  return new Promise((resolve) => {
+    const ended = (value) => { if (state.relaunch === 'asking') state.relaunch = 'none'; resolve(value); };  // after an accept: no-op
+    requestQuit({ confirmed: false, relaunch: true, accepted: () => resolve({ started: true }) })
+      .then(() => ended({ started: false, reason: state.quit !== 'none' ? 'closing' : 'cancelled' }),
+        (error) => { remember('\nRestart Books Arranger: ' + error.message + '\n'); ended({ started: false, error: error.message }); });
+  });
+}
+// The new copy's arguments: this launch's options, without the one-shot commands; shown without taking focus.
+function relaunchArgs(args) {
+  const once = new Set(['--start-hidden', '--show-inactive', '--show', '--quit', '--close-window', '--run-uninstaller', '--uninstall-silent']);
+  return [...args.filter((arg) => !once.has(arg)), '--show-inactive'];
+}
+function relaunchOnExit() {
+  remember('\nRestart Books Arranger: a new copy starts as this one exits.\n');
+  app.relaunch({ args: relaunchArgs(argv) });
 }
 
 async function repeatQuit() {
@@ -849,6 +895,9 @@ ipcMain.handle('books:select',async(event,choice)=>{
 });
 ipcMain.handle('books:quit',async event=>{const source=trustedSender(event);if(source==='setup'){if(state.backend)throw new Error('Catalog is still opening');finishExit(0);return;}return requestQuit({confirmed:false});});
 ipcMain.handle('books:startup',event=>{trustedSender(event);return state.startup?state.startup.value:null;});
+// Restart Books Arranger (0.31.1): the whole app closes and opens again; the page offers it once loading has finished. The
+// relaunch outlives the reply: it answers as soon as the Quit is under way (relaunchApp).
+ipcMain.handle('books:relaunch',async event=>{if(trustedSender(event)!=='app')throw new Error('Restart Books Arranger is unavailable');return relaunchApp();});
 // Restart engine (Stuck) and Try again (Stopped): a new launch from Step 1; only while loading.
 ipcMain.handle('books:restart-engine',async event=>{if(trustedSender(event)!=='app'||!currentConfig)throw new Error('Restart engine is unavailable');return restartEngine(currentConfig);});
 ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await desktopStatus.get();}catch{desktop={phase:'unavailable',idle:false};}}

@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('booksDesktop',Object.freeze({
  copyDiagnostics:(text)=>ipcRenderer.invoke('books:copy-diagnostics',text),
  onStartup:(fn)=>{if(typeof fn!=='function')return;ipcRenderer.on('books:startup',(_event,value)=>fn(value));},
  restartEngine:()=>ipcRenderer.invoke('books:restart-engine'),
+ // 0.31.1 (Judy's stuck-load spec, section 6): Restart Books Arranger, the whole app closes and opens again.
+ relaunchApp:()=>ipcRenderer.invoke('books:relaunch'),
  // Rulings 69 and 70: the Windows folder picker for Choose folder… (a path or null on Cancel; the engine validates it).
  chooseFolder:(request)=>{const value=request&&typeof request==='object'?request:{};const pick=key=>typeof value[key]==='string'?value[key]:undefined;
   return ipcRenderer.invoke('books:choose-folder',{title:pick('title'),defaultPath:pick('defaultPath'),buttonLabel:pick('buttonLabel'),remembered:pick('remembered')});},

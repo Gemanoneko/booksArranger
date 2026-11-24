@@ -237,12 +237,13 @@ def _last_move(db, job_id):
     import book_move
     if not book_move.have(db):
         return None, False
-    rows = db.execute("SELECT state,final_json,override_id FROM book_moves WHERE job_id=? AND state NOT IN ('failed','cancelled') ORDER BY generation", (job_id,)).fetchall()
+    rows = db.execute("SELECT state,final_json,override_id,origin FROM book_moves WHERE job_id=? AND state NOT IN ('failed','cancelled') ORDER BY generation", (job_id,)).fetchall()
     if not rows:
         return None, False
-    state, final, override = rows[-1]
+    state, final, override, origin = rows[-1]
     try:
-        return ((json.loads(final) or {}).get('final_path') or '' if state in book_move.EFFECTIVE and final else ''), not override
+        # 0.31.1: a book Sergei moved by hand (found again, origin 'found') is where he put it, like a folder he chose.
+        return ((json.loads(final) or {}).get('final_path') or '' if state in book_move.EFFECTIVE and final else ''), not override and origin != 'found'
     except (TypeError, ValueError):
         return '', False
 

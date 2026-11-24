@@ -58,14 +58,15 @@ class StartupPublishedCheckTests(unittest.TestCase):
         self.assertEqual(states[self.completed['job_id']][0], 'completed')
         queue.close()
 
-    def test_deferred_check_flags_a_changed_published_book_exactly_like_startup_did(self):
+    def test_deferred_check_keeps_a_changed_published_book_done_0_31_1(self):
+        # Sergei 2026-11-24: a book the app delivered is done; the check is a diagnostic and never flags it (it did before).
         valid = {self.publishing['job_id']}; checked = []
         queue = AudioJobs(self.db, None, lambda m: True, lambda r: checked.append(r['job_id']) or r['job_id'] in valid)
         self.addCleanup(queue.close)
         queue.start_published_check(); queue._verifier.join(5)
         self.assertFalse(queue._verifier.is_alive())
-        self.assertEqual(self.states(queue)[self.completed['job_id']],
-                         ('needs attention', 'Recorded output is missing, changed, or failed validation'))
+        self.assertIn(self.completed['job_id'], checked, 'positive control: the book was checked and failed')
+        self.assertEqual(self.states(queue)[self.completed['job_id']], ('completed', ''))
         before = list(checked)
         queue.start_published_check(); queue._verifier.join(5)  # a later idle pass is allowed to resume
         self.assertFalse(queue._verifier.is_alive())
@@ -240,8 +241,8 @@ class StartCheckTests(unittest.TestCase):
         with patch.object(queue, '_work', lambda: order.append(('worker',))):
             queue.resume(); queue._thread.join(5)
         self.assertEqual(order, [('checked', self.done['job_id']), ('worker',)])
-        self.assertEqual(self.states(queue)[self.done['job_id']],
-                         ('needs attention', 'Recorded output is missing, changed, or failed validation'))
+        # 0.31.1 (Sergei 2026-11-24): still checked before any new work, never flagged (it was before).
+        self.assertEqual(self.states(queue)[self.done['job_id']], ('completed', ''))
         queue.close()
 
 

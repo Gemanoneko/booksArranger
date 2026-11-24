@@ -3,7 +3,8 @@
 // never from total time. Pure, so the page (load strip), the shell (tray tooltip) and the node tests share one copy.
 (function(root){
  // The thresholds live here only (3.4): retune them without touching the copy.
- const THRESHOLDS=Object.freeze({answerWaiting:3000,answerStuck:10000,progressWaiting:10000,progressStuck:30000,sleepGap:5000});
+ const THRESHOLDS=Object.freeze({answerWaiting:3000,answerStuck:10000,progressWaiting:10000,progressStuck:30000,sleepGap:5000,
+  statusWaiting:10000,statusStuck:60000});  // 0.31.1: loaded, the first status not here yet (Judy's stuck-load spec, 1.3)
  const STEPS=Object.freeze({engine:'Starting the engine',catalog:'Opening the catalog',session:'Checking the last session',sources:'Checking source folders',books:'Loading your books'});
  const STEP_COUNT=5;  // 0.29.0: Checking source folders became step 4 of 5
  const UNITS=new Set(['files','books','items']);
@@ -32,7 +33,7 @@
  // The clocks: the last engine answer, and the last progress (the engine reports its age; an age, so a clock change
  // cannot fake progress). A gap of more than 5 s in this clock (sleep, a frozen page) restarts both.
  function createTracker(launchedAt){
-  const t={launchedAt,answerAt:launchedAt,progressAt:launchedAt,lastTick:launchedAt,answered:false,loading:null,
+  const t={launchedAt,answerAt:launchedAt,progressAt:launchedAt,lastTick:launchedAt,answered:false,loading:null,statusAt:null,
    observe(answer,at){
     t.answerAt=at;t.answered=true;
     const loading=answer&&answer.loading;
@@ -44,10 +45,13 @@
    // An answer without a body (a "still updating" 503) is an answer too.
    heard(at){t.answerAt=at;t.answered=true;},
    tick(at){
-    if(at-t.lastTick>THRESHOLDS.sleepGap){t.answerAt=at;t.progressAt=at;}
+    if(at-t.lastTick>THRESHOLDS.sleepGap){t.answerAt=at;t.progressAt=at;if(t.statusAt!==null)t.statusAt=at;}
     t.lastTick=at;
    },
-   restart(at){t.launchedAt=at;t.answerAt=at;t.progressAt=at;t.lastTick=at;t.answered=false;t.loading=null;},
+   // 0.31.1: the shell says loading finished (its loadedAt): the status clock counts from there, so a reloaded window
+   // resumes the same count. The last loading answer is dropped: its step and counts never come back.
+   markLoaded(at){if(t.statusAt===null)t.statusAt=at;t.loading=null;},
+   restart(at){t.launchedAt=at;t.answerAt=at;t.progressAt=at;t.lastTick=at;t.answered=false;t.loading=null;t.statusAt=null;},
   };
   return t;
  }
@@ -88,6 +92,36 @@
    default:return {word:'Working',text:head};
   }
  }
+ // 0.31.1 (Judy's stuck-load spec, section 1): loading finished, the first status has not arrived. Time alone moves this
+ // state (10 s / 60 s since loaded); the engine's answer silence (3 s / 10 s) applies on top; the worse wins.
+ function evaluateLoaded(t,at){
+  const status=Math.max(0,at-(t.statusAt===null?at:t.statusAt)),answer=Math.max(0,at-t.answerAt);
+  const rank=(ms,waiting,stuck)=>ms>=stuck?2:ms>=waiting?1:0;
+  const a=rank(answer,THRESHOLDS.answerWaiting,THRESHOLDS.answerStuck),s=rank(status,THRESHOLDS.statusWaiting,THRESHOLDS.statusStuck);
+  const worst=Math.max(a,s),state=['working','waiting','stuck'][worst],signal=worst&&a>=s?'answer':'status';
+  return {state,quiet:signal==='answer'?answer:status,signal,since:status};
+ }
+ // The state line (1.3); listing: the first status came, the list is on its way.
+ function loadedLine(verdict,{listing=false}={}){
+  if(listing)return {word:'Working',text:'Loading finished. Showing your books.'};
+  const x=duration(verdict.quiet),advice=' Your files are not touched. You can restart Books Arranger to try again.';
+  if(verdict.signal==='answer'){
+   if(verdict.state==='stuck')return {word:'Stuck',text:`Loading finished. The engine hasn't answered for ${x}. It may have stopped responding.${advice}`};
+   if(verdict.state==='waiting')return {word:'Waiting',text:`Loading finished. The engine hasn't answered for ${x}.`};
+  }
+  if(verdict.state==='stuck')return {word:'Stuck',text:`Loading finished, but the library status has not arrived after ${x}. The engine is answering but still says the status is not ready.${advice}`};
+  if(verdict.state==='waiting')return {word:'Waiting',text:`Loading finished. The library status is taking longer than usual (${x}). The engine is still answering.`};
+  return {word:'Working',text:'Loading finished. Preparing the library status.'};
+ }
+ // The detail line (1.3): no launch clock and no "last load took" here.
+ function loadedDetailParts(t,at,tookMs){
+  const parts=[];
+  if(Number.isFinite(tookMs)&&tookMs>=0)parts.push(`loaded in ${duration(tookMs)}`);
+  parts.push(`preparing status ${running(at-(t.statusAt===null?at:t.statusAt))}`);
+  parts.push(t.answered?`engine answered ${Math.floor(Math.max(0,at-t.answerAt)/1000)} s ago`:'no answer from the engine yet');
+  return parts;
+ }
+ function loadedValueText(verdict){return verdict.state==='stuck'?'Loading finished. The library status has not arrived.':'Loading finished. Preparing the library status.';}
  // The detail line (3.3): parts wrap between, never inside.
  function detailParts(t,at,loading,lastLoadMs){
   if(loading?.admission)return [`running ${running(at-loading.startedAt)}`,loading.updatedAt===null?'no check update yet':`check updated ${Math.floor(Math.max(0,at-loading.updatedAt)/1000)} s ago`,`check budget ${duration(loading.limit_ms)}`];
@@ -131,7 +165,8 @@
   const label={records:'Checking installation records',database:'Checking the database',source:'Checking folder access',namespace:'Checking folder access',retained:'Checking retained source files'}[loading.phase]||'Checking installation and data folder…';
   return label+(Number.isFinite(loading.total)&&loading.total>0?` · ${count(loading.done)} of ${count(loading.total)} ${loading.phase==='retained'?'files':'items'}`:'');
  }
- const api=Object.freeze({THRESHOLDS,STEPS,duration,running,stepOf,createTracker,evaluate,stateLine,detailParts,readyLine,fraction,valueText,trayTooltip,loaded,part,admissionPhase});
+ const api=Object.freeze({THRESHOLDS,STEPS,duration,running,stepOf,createTracker,evaluate,stateLine,detailParts,readyLine,fraction,valueText,trayTooltip,loaded,part,admissionPhase,
+  evaluateLoaded,loadedLine,loadedDetailParts,loadedValueText});
  root.booksLoadState=api;
  if(typeof module==='object'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

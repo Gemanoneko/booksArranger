@@ -154,7 +154,9 @@ class MergeHTTPTests(unittest.TestCase):
         for route in ('/api/automatic/start','/api/automatic/stop'):
             self.assertEqual(self.call(route,{},token=False)[0],403)
             self.assertEqual(self.call(route,{'library':'Ebooks'})[0],400)
+        self.merge.recheck_finished_books=Mock()
         self.assertEqual(self.call('/api/automatic/start',{})[0],202);automatic.start.assert_called_once_with(server_closing=False)
+        self.merge.recheck_finished_books.assert_called_once_with()  # 0.31.1 (Futaba's QA, Major 2): a Start checks finished books
         body={'id':ID,'revision':1,'active':True}
         self.assertEqual(self.call('/api/automatic/draft',body)[0],200);automatic.draft.assert_called_once_with(ID,1,True)
         for update in ({'revision':True},{'id':'../escape'},{'path':'Z:/anything'}):self.assertEqual(self.call('/api/automatic/draft',body|update)[0],400)

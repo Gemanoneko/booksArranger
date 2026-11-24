@@ -163,7 +163,25 @@ class ReferenceSearchTests(unittest.TestCase):
         self.assertEqual(search_token('c:/books arranger/'+self.job+'/'+self.attempt+'/source00000.m4b'),self.attempt)
         self.sql('INSERT INTO owned_artifacts VALUES(?,?,?,?,?)',[('x',None,None,None,None),('y',None,None,None,None)],many=True)
         self.assertEqual(self.sql(None,call=lambda db:len(reference_candidates(db,'owned_artifacts',['no-slash']).fetchall())),2)
-        self.assertEqual(self.sql(None,call=lambda db:len(reference_candidates(db,'owned_artifacts',['c:/'+str(i) for i in range(70)],limit=64).fetchall())),2)
+    def test_more_tokens_than_the_limit_are_searched_a_limit_at_a_time_0_31_1(self):
+        # Futaba's 0.31.1 QA, Major 1: past the limit the check read every row of every table in Python (minutes on a large
+        # catalog). The tokens now go limit at a time; a row naming a path of the second batch is still found, and only it.
+        from working_lifecycle import normalized,reference_candidates,search_tokens
+        wanted=[normalized('C:\\Library\\Book Number %03d.m4b'%i) for i in range(70)]
+        self.assertEqual(len(set(search_tokens(wanted))),70,'positive control: a token each, none shared, over the limit')
+        self.sql('INSERT INTO owned_artifacts VALUES(?,?,?,?,?)',[('x',None,None,None,None),('y',None,None,None,None),
+                 ('C:\\LIBRARY\\BOOK NUMBER 069.M4B',None,None,None,None)],many=True)
+        found=self.sql(None,call=lambda db:[dict(r)['path'] for r in reference_candidates(db,'owned_artifacts',wanted,limit=64)])
+        self.assertEqual(found,['C:\\LIBRARY\\BOOK NUMBER 069.M4B'])
+    def test_paths_of_one_attempt_share_one_token_0_31_1(self):
+        # Futaba's 0.31.1 QA, Major 1: any run of a path's token characters finds every row that can hold it, so the attempt
+        # folder's UUID stands for all of its files (hex-named working files gave one token each before).
+        from working_lifecycle import normalized,search_tokens
+        import uuid as uuid_module
+        folder=self.path.rsplit('\\',1)[0]
+        wanted=[normalized(folder+'\\'+name) for name in ['source00000.mp3','checked.m4b']+[uuid_module.uuid4().hex+'.decode-stderr' for _ in range(80)]]
+        self.assertEqual(set(search_tokens(wanted)),{self.attempt})
+        self.assertEqual(search_tokens([normalized('C:\\Library\\x.mp3'),normalized('D:\\Audiobooks\\y.mp3')]),['library','audiobooks'],'short runs are never shared')
     def test_the_check_raises_for_the_same_rows_as_before(self):
         from working_lifecycle import WorkingLifecycle
         life=WorkingLifecycle.__new__(WorkingLifecycle);life.database=self.db

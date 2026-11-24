@@ -59,9 +59,10 @@ async function boot({ setup = false, flags = ['--show-inactive'], lock = true, u
  }
  const app = { isPackaged: true, paths: {}, getVersion: () => VERSION, setPath(name, value) { this.paths[name] = value; }, getPath(name) { return this.paths[name] || profile; },
   requestSingleInstanceLock: () => lock, on: (name, fn) => { appEvents[name] = fn; }, whenReady: () => Promise.resolve(), exit: (code) => log.exits.push(code),
+  relaunch: (options) => (log.relaunches ||= []).push(options),  // 0.31.1: Restart Books Arranger
   // Electron's app.quit(): before-quit first; the quit goes ahead unless a handler prevented it.
   quit() { const event = { prevented: false, preventDefault() { this.prevented = true; } }; log.quits = (log.quits || 0) + 1; if (appEvents['before-quit']) appEvents['before-quit'](event); if (!event.prevented) log.exits.push(0); } };
- const electron = { app, BrowserWindow, Tray, Menu: { buildFromTemplate: (items) => items }, dialog: { showErrorBox: (...args) => log.errors.push(args), showMessageBox: async () => ({ response: 1 }) },
+ const electron = { app, BrowserWindow, Tray, Menu: { buildFromTemplate: (items) => items }, dialog: { showErrorBox: (...args) => log.errors.push(args), showMessageBox: async (options) => { (log.questions ||= []).push(options); return { response: log.answer ?? 1 }; } },
   nativeImage: { createFromPath: () => ({ resize: () => ({}), addRepresentation() {} }) }, session: { defaultSession: { setPermissionRequestHandler(fn) { log.permissionHandler=fn; } } }, shell: { openExternal() {}, showItemInFolder() {} },
   clipboard: { writeText: text=>log.clipboard.push(text) }, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } } };
  const updater = updaterLike ? updaterLike(app) : Object.assign(new EventEmitter(), { setFeedURL() {}, checkForUpdates: async () => ({}) });
@@ -136,6 +137,12 @@ test('the window opens at app ready with the first frame, before the engine answ
   await until(() => fs.existsSync(path.join(t.profile, 'last-load.json')), 6000, 'the load time saved');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.profile, 'last-load.json'), 'utf8')), { lastLoadMs: 41000 });
   assert.equal(t.log.trays[0].tips.at(-1), 'Books Arranger');
+  // 0.31.1 (Judy's stuck-load spec, 4.1-4.2): the page is told loading finished, and a late Restart engine says why it is refused.
+  const loaded = await until(() => t.startups().find((item) => item.loaded), 3000, 'the loaded record pushed');
+  assert.equal(loaded.lastLoadMs, 41000); assert.ok(Number.isFinite(loaded.loadedAt) && loaded.loadedAt >= loaded.startedAt);
+  assert.deepEqual(await t.invoke('books:startup'), loaded, 'a reloaded window reads the same record');
+  assert.deepEqual(await t.invoke('books:restart-engine'), { started: false, reason: 'loaded' });
+  assert.equal(t.log.spawns.length, 1, 'nothing was restarted');
   assert.equal(t.log.errors.length, 0); assert.deepEqual(t.log.exits, []);
  } finally { await t.close(); }
 });
@@ -151,7 +158,7 @@ test('an engine that exits while loading is the strip\'s Stopped, with its last 
   assert.equal(t.log.errors.length, 0, 'no error box'); assert.deepEqual(t.log.exits, [], 'the app stays open');
   assert.equal(t.log.trays[0].tips.at(-1), 'Books Arranger — stopped');
   // Try again: a new launch from Step 1.
-  assert.equal(await t.invoke('books:restart-engine'), true);
+  assert.deepEqual(await t.invoke('books:restart-engine'), { started: true });
   await until(() => t.log.spawns.length === 2, 3000, 'a second launch');
   assert.equal((await t.invoke('books:startup')).phase, 'launching');
   // ...and the new engine is attached when it answers.
@@ -195,7 +202,7 @@ test('Restart engine ends the stuck engine, shows the first frame and launches a
   await until(() => win.loads.includes(`http://127.0.0.1:${t.port}/`), 6000, 'the engine page');
   const before = (await t.invoke('books:startup')).startedAt;
   child.on('stdin-end', () => setTimeout(() => child.finish(0), 50));
-  assert.equal(await t.invoke('books:restart-engine'), true);
+  assert.deepEqual(await t.invoke('books:restart-engine'), { started: true });
   assert.equal(child.stdin.ended, true);
   assert.equal(win.loads.at(-1), t.firstFrame, 'the old page goes with its engine');
   await until(() => t.log.spawns.length === 2, 3000, 'a new launch');
@@ -453,5 +460,44 @@ test('a Quit blocked by a press still running ends when the engine closes by its
   assert.deepEqual(t.log.exits, [0]);
   assert.equal(child.killed, undefined);
   assert.ok(t.log.trays[0].tips.includes('Books Arranger — stopping safely'));
+ } finally { await t.close(); }
+});
+
+// 0.31.1 (Sergei 2026-11-24; Judy's stuck-load spec, section 6): Restart Books Arranger, once loading has finished. The same
+// Quit, then a new copy of the app (Electron's app.relaunch, started at the exit), shown without focus.
+test('Restart Books Arranger: the Quit path, then a new copy without focus; a second press is answered as closing', async () => {
+ const t = await boot({ flags: ['--start-hidden'] });
+ try {
+  const child = await loadedEngine(t);
+  assert.deepEqual(await t.invoke('books:relaunch'), { started: true }, 'no book converting: no question');
+  assert.equal(t.log.questions, undefined);
+  assert.deepEqual(await t.invoke('books:relaunch'), { started: false, reason: 'closing' });
+  await until(() => t.engine.requests.includes('/api/desktop/quit'), 6000, 'the engine told to quit, as Quit does');
+  assert.equal(t.log.relaunches, undefined, 'nothing starts before this copy exits');
+  child.finish(0);
+  await until(() => t.log.exits.length, 6000, 'the exit');
+  assert.deepEqual(t.log.exits, [0]);
+  assert.equal(t.log.relaunches.length, 1);
+  const args = t.log.relaunches[0].args;
+  assert.equal(args.at(-1), '--show-inactive'); assert.ok(!args.includes('--start-hidden'), 'one-shot flags stay behind');
+  assert.ok(args.some((arg) => arg.startsWith('--data-dir=')) && args.some((arg) => arg.startsWith('--port=')), 'this launch\'s options go along');
+ } finally { await t.close(); }
+});
+
+test('Restart Books Arranger while a book converts asks first; Cancel changes nothing', async () => {
+ const t = await boot();
+ try {
+  await loadedEngine(t);
+  t.engine.busy = { converting: true, current_title: 'Дюна' };
+  await sleep(1200);  // past the shell's shared status answer (1 s): the press reads the converting book
+  assert.deepEqual(await t.invoke('books:relaunch'), { started: false, reason: 'cancelled' });
+  const asked = t.log.questions[0];
+  assert.deepEqual([asked.title, asked.message, asked.detail, asked.buttons, asked.defaultId, asked.cancelId],
+   ['Restart Books Arranger', 'Restart after the current book?', '“Дюна” finishes converting first, then Books Arranger closes and opens again. Queued books stay queued.',
+    ['Restart after this book', 'Cancel'], 1, 1]);
+  assert.ok(!t.engine.requests.includes('/api/desktop/quit')); assert.deepEqual(t.log.exits, []); assert.equal(t.log.relaunches, undefined);
+  t.log.answer = 0;
+  assert.deepEqual(await t.invoke('books:relaunch'), { started: true }, 'asked again after a Cancel; this time it goes');
+  assert.equal(t.log.questions.length, 2);
  } finally { await t.close(); }
 });

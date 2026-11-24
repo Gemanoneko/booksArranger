@@ -325,7 +325,9 @@ class SeriesBackfill:
             rows = db.execute("SELECT job_id,state,reason,json_extract(record,'$.next_attempt'),json_extract(record,'$.found') IS NOT NULL "
                               "OR json_extract(record,'$.move_approved') IS NOT NULL,"
                               "json_extract(record,'$.unreached') IS NOT NULL,json_extract(record,'$.approved_failed') IS NOT NULL,"
-                              "CASE WHEN state='held' AND reason IN (?,?) THEN record END FROM series_backfill", (MOVE_WAITS, WRITE_WAITS)).fetchall()
+                              "CASE WHEN state='held' AND reason IN (?,?) THEN record END FROM series_backfill"
+                              # 0.31.1 (Futaba's QA, minor 1): a finished book removed from the list is in no count
+                              " WHERE job_id NOT IN (SELECT job_id FROM audio_jobs WHERE state='removed')", (MOVE_WAITS, WRITE_WAITS)).fetchall()
         counts = dict.fromkeys(('between_tries', 'due', 'write_waiting', 'writing', 'moves_waiting', 'blocked', 'with_series', 'without', 'gave_up', 'left_alone'), 0)
         writes, nexts, writes_held, taken = [], [], 0, None
         for job_id, state, reason, next_attempt, found, unreached, failed, waits in rows:

@@ -5,8 +5,9 @@ checked, the app removes all backups of that book. The 24-hour window is gone: a
 completion time, and sets recorded with the former 24-hour deadline are purged too. Purge verifies the
 output in full first; a missing or unverified output keeps the copies, flagged with the reason.
 
-"Keep files" is permanent (Sergei, 2026-10-18): a book recorded in kept_files is left out of every automatic
-purge until Sergei acts on it again; the manual "Delete recovery copies" is such an action.
+"Keep files" was permanent (Sergei, 2026-10-18). 0.31.1 (Sergei, 2026-11-24): once a book is delivered to Sorted and
+approved, the app keeps no recovery copies of it, and that overrides Keep files: a kept book's copies go through the same
+verified purge as any other's. Keep files still keeps a book's originals and its folder (the held-cleanup sweep, the rules).
 """
 import contextlib
 import hashlib
@@ -108,7 +109,8 @@ class RecoveryRetention:
             except OSError:uncertain=True
         state=row['state'];reason=row['reason']
         source=self._rows('SELECT state FROM source_cleanup WHERE id=?',(row['cleanup_id'],))
-        if not source or source[0]['state']!='completed':uncertain=True;reason='Original-track recovery or cleanup requires attention'
+        released=state=='deleted' and not count and not uncertain  # 0.31.1: an unfinished cleanup's copies released (_release_copies)
+        if (not source or source[0]['state']!='completed') and not released:uncertain=True;reason='Original-track recovery or cleanup requires attention'
         if uncertain:state='needs_attention';reason=reason or 'Recovery copies changed or are unavailable; preserved for attention'
         if state=='deleted' and count:state='needs_attention';reason='Replacement files at a discarded recovery location were preserved'
         eligible=state=='retained' and count==len(members) and bool(count)
@@ -116,16 +118,17 @@ class RecoveryRetention:
         return row|{'state':state,'reason':reason,'eligible':eligible,'count':None if uncertain else count,'bytes':None if uncertain else size,'location':str(self.storage.recovery_root/row['cleanup_id']), 'token':token,'total':len(members),'removed':removed}
 
     def due(self):
-        """Every set not yet deleted: retained, partly deleted, or held. Purge decides; there is no waiting.
-        A book whose files Sergei chose to keep is never due."""
+        """Every set not yet deleted: retained, partly deleted, or held. Purge decides; there is no waiting. 0.31.1: a book
+        whose files Sergei chose to keep is due too (the no-copies rule overrides Keep files for recovery copies)."""
         # A set without a recorded completion cannot prove its deadline: it stays, flagged.
         with connect(self.database) as db:
-            kept=kept_by_choice(db)
             rows=db.execute("SELECT job_id FROM recovery_retention WHERE state IN ('retained','deleting','needs_attention') AND completed_at<>'' ORDER BY completed_at,job_id").fetchall()
-        return [row['job_id'] for row in rows if row['job_id'] not in kept]
+        return [row['job_id'] for row in rows]
 
     def kept(self,job_id):
-        """True once Sergei pressed Keep files for this book: no automatic purge touches it."""
+        """True once Sergei pressed Keep files for this book: its originals and folder stay as they are and it is no longer
+        flagged. Since 0.31.1 (Sergei 2026-11-24: no recovery copies for a published book) its recovery copies are still
+        released by the purge once the audiobook verifies (due)."""
         with connect(self.database) as db:return job_id in kept_by_choice(db,[job_id])
 
     def _set(self,job_id,state,reason='',actor=None):
@@ -134,10 +137,95 @@ class RecoveryRetention:
             if actor is not None:db.execute('UPDATE recovery_retention SET actor=? WHERE job_id=?',(actor,job_id))
             if state=='deleted':db.execute('UPDATE recovery_retention SET deleted_at=? WHERE job_id=?',(self.clock().isoformat(),job_id))
 
+    @contextlib.contextmanager
+    def _owners(self,job_id):
+        """The book's publication for a purge: its output verified in full (storage.protected_cleanup). 0.31.1 (Sergei
+        2026-11-24): a finished book removed from the records because it is gone (finished_removal: its tombstone and the
+        'removed' state) has no output to verify; its own immutable manifest and receipt stand in, and every other proof of
+        the purge is unchanged: the immutable deadline, the originals retired and not replaced (_source_safety), no unknown
+        content in the set's folder, each copy's full hash against the reviewed original and its recorded native identity."""
+        import finished_removal
+        with connect(self.database) as db:
+            gone=finished_removal.removed(db,job_id)
+            row=db.execute('SELECT manifest,output FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone() if gone else None
+        if gone and row and row['output']:
+            yield {'manifest':json.loads(row['manifest']),'parent_output':json.loads(row['output'])}
+            return
+        with self.storage.protected_cleanup(job_id,guard=self.guard) as owners:yield owners
+
+    def release_unfinished(self,job_id):
+        """0.31.1 (Sergei 2026-11-24): the recovery copies of a finished book removed from the records because it is gone
+        (finished_removal), whose source cleanup never finished, go too. App-owned copies only, never an original: each copy
+        is in the set's own folder, which holds nothing unknown; no original's removal or restore is half done (a durable
+        intent waits for its own reconciliation); each present copy's full hash and recorded timestamp match the reviewed
+        original and its recorded native identity matches (storage._prepare, a receipt, then the verified disposition). An
+        original still in its library folder stays where it is. Returns the number of copies removed; a refusal raises and
+        keeps everything."""
+        import finished_removal
+        with connect(self.database) as db:
+            if not finished_removal.removed(db,job_id):raise BoundaryError('Only a removed finished book releases an unfinished cleanup\'s copies')
+            row=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+            members=[dict(r) for r in db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(row['id'],))] if row else []
+        if not row or row['state']=='completed':return 0  # a completed cleanup's copies go through purge()
+        return self._release_copies(job_id,dict(row),members)
+
+    CHANGED_HOLD='Original bytes differ from reviewed sources'  # source_cleanup: an original no longer matches its review
+
+    def release_changed(self,job_id):
+        """0.31.1 (Sergei 2026-11-24): a published book's source cleanup held because an original changed since it was
+        checked keeps no recovery copies either, including a copy that is the only one of an original the cleanup already
+        removed (Sergei accepted that). The book must be published (its job completed) and its audiobook verified in full
+        now (storage.protected_cleanup); the hold must be exactly that one; then the same proofs as release_unfinished. The
+        changed originals are Sergei's and stay where they are; once the copies are gone the book leaves Needs attention by
+        itself, exactly as if kept (Sergei 2026-11-24; MergeService.kept_files). Returns the copies removed."""
+        with connect(self.database) as db:
+            row=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+            members=[dict(r) for r in db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(row['id'],))] if row else []
+        if not row or row['state']!='needs_attention' or row['reason']!=self.CHANGED_HOLD:
+            raise BoundaryError('Only a cleanup held because an original changed releases its copies this way')
+        with self.storage.protected_cleanup(job_id,guard=self.guard):  # published, and its audiobook verified in full now
+            return self._release_copies(job_id,dict(row),members)
+
+    def _release_copies(self,job_id,row,members):
+        """The copies in one unfinished cleanup's own recovery folder, each proven before it goes (release_unfinished,
+        release_changed). Refused while any original's removal or restore is half done, or the folder holds anything unknown."""
+        if any(m['state'] in ('removal_intended','disposition_set','restore_intended') for m in members):
+            raise BoundaryError('An original\'s removal or restore is in progress; recovery copies preserved')
+        intent=json.loads(row['intent']);manifest=intent['manifest']
+        location=ordinary(self.storage.recovery_root/row['id'])
+        try:location.lstat()
+        except FileNotFoundError:return 0
+        removed=0
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(DirectoryBoundary(self.storage.recovery_root.anchor,location))
+            names={Path(m['backup']).name for m in members}
+            if any(p.name not in names for p in location.iterdir()):raise BoundaryError('Unknown recovery content preserved')
+            prepared=[]
+            for source in manifest['sources']:
+                member=next((m for m in members if m['path']==source['path']),None)
+                if member is None:continue  # no copy was ever made of this original
+                path=ordinary(member['backup'])
+                if path.parent!=location:raise BoundaryError('Recovery native correspondence is unavailable')
+                try:path.lstat()
+                except FileNotFoundError:continue
+                item=self.storage._prepare(stack,job_id,'recovery',path,self.storage.recovery_root,(source['sha256'],source['size'],source['modified']))
+                if item:
+                    if member['backup_facts'] and not facts_match(item[0],item[1].facts(),json.loads(member['backup_facts']),receipt_class='recovery-copy'):raise BoundaryError('Recovery native identity changed; replacement preserved')
+                    prepared.append(item)
+            self.storage._dispose(prepared,guard=self.guard);removed=len(prepared)
+        try:location.rmdir()  # the emptied set folder; anything left in it stays
+        except OSError:pass
+        # Recorded as an automatic deletion (Judy's stuck-load spec, 9.3: the Recovery copies panel says "deleted
+        # automatically"). No completion time: never due, and a later sync() leaves the record as it is.
+        with connect(self.database) as db:
+            now=self.clock().isoformat()
+            db.execute("INSERT INTO recovery_retention VALUES(?,?,?,'','','deleted','','automatic',?) ON CONFLICT(job_id) DO UPDATE SET state='deleted',actor='automatic',deleted_at=excluded.deleted_at",
+                       (job_id,row['id'],intent['output']['sha256'],now))
+        return removed
+
     def purge(self,job_id,actor='automatic',confirmation=None):
         persisted=self._rows('SELECT * FROM recovery_retention WHERE job_id=?',(job_id,))
         if persisted and persisted[0]['state']=='deleted':return self.status(job_id)  # idempotent: never twice
-        if actor=='automatic' and self.kept(job_id):return self.status(job_id)  # Keep files: kept until Sergei acts again
         status=self.status(job_id)
         if confirmation is not None and any(status.get(k)!=confirmation.get(k) for k in ('token','count','bytes')):raise ValueError('Recovery copies changed. Review the updated details and try again.')
         if not persisted:raise BoundaryError(status.get('reason') or 'Recovery copies are not eligible')
@@ -145,7 +233,7 @@ class RecoveryRetention:
         # because a copy is already gone is purged too; a missing copy is recorded, never an error.
         row=persisted[0]
         try:
-            with self.storage.protected_cleanup(job_id,guard=self.guard) as owners,contextlib.ExitStack() as stack:
+            with self._owners(job_id) as owners,contextlib.ExitStack() as stack:
                 manifest=owners['manifest'];output=owners['parent_output']
                 if output['sha256']!=row['output_hash']:raise BoundaryError('Retention output identity changed')
                 events=self._rows('SELECT completed_at FROM recovery_completion WHERE cleanup_id=?',(row['cleanup_id'],))

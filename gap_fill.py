@@ -355,7 +355,8 @@ class GapFill:
         for row in self._rows("SELECT job_id,json_extract(manifest,'$.candidate_id') AS candidate FROM audio_jobs ORDER BY created,job_id"):
             newest[row['candidate']] = row['job_id']
         result = []
-        for row in self._rows("SELECT job_id,manifest FROM audio_jobs WHERE json_extract(manifest,'$.metadata_facts.gap_search.background') IS NOT NULL ORDER BY created,job_id"):
+        # 0.31.1: a finished book removed because it is gone (finished_removal) is looked up no more.
+        for row in self._rows("SELECT job_id,manifest FROM audio_jobs WHERE json_extract(manifest,'$.metadata_facts.gap_search.background') IS NOT NULL AND state<>'removed' ORDER BY created,job_id"):
             manifest = json.loads(row['manifest'])
             if __import__('publication_reuse').task(manifest):continue
             if newest.get(manifest.get('candidate_id')) != row['job_id'] or not background(manifest)[0]:

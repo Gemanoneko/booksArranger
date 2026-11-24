@@ -9,7 +9,7 @@ const STATUS={state:'completed',count:52311,checked:0,reused:0,pending:0,errors:
 const JOBS={state:'Paused',queued:0,failed:0,jobs:[],attention_counts:{retry:0},candidate_total:600,not_approved_total:100,approved:500,converted:430};
 const AUTOMATIC={state:'Idle',can_start:true,can_stop:false,research:{researching:0,waiting:0,held:0}};
 
-function harness({protocol='http:',desktop=true}={}){
+function harness({protocol='http:',desktop=true,startup=null}={}){
   const nodes=new Map(),fields=new Map(),listeners={};let clock=1000000;
   function make(id='',tag='div'){
     let text='';const attributes=new Map(),classes=new Set();
@@ -38,9 +38,12 @@ function harness({protocol='http:',desktop=true}={}){
   // M3 (Judy's implementation check): the book list's body is busy while the books part is missing; <body> never is,
   // so the live regions under it (#load-announce) are not held while loading.
   const body=make('body');node('inventory').setAttribute('aria-busy','true');
-  let answer=null,mode='answer',calls={state:0,inventory:0},startupListener=null,restarts=0,copies=[];
-  const shell={copyDiagnostics:async text=>{copies.push(text);return true;},startup:async()=>startupValue,onStartup:fn=>{startupListener=fn;},restartEngine:async()=>{restarts++;return true;}};
-  let startupValue={phase:'launching',startedAt:clock-500,lastLoadMs:99000,exited:null,portPid:null};
+  let answer=null,mode='answer',calls={state:0,inventory:0},startupListener=null,restarts=0,copies=[],restartAnswer={started:true},relaunches=0,relaunchAnswer={started:true};
+  // 0.31.1: the shell answers {started:true} or {started:false, reason} (Judy's stuck-load spec, 2.2); a function throws.
+  const shell={copyDiagnostics:async text=>{copies.push(text);return true;},startup:async()=>startupValue,onStartup:fn=>{startupListener=fn;},
+    restartEngine:async()=>{if(typeof restartAnswer==='function')return restartAnswer();if(restartAnswer.started)restarts++;return restartAnswer;},
+    relaunchApp:async()=>{relaunches++;return typeof relaunchAnswer==='function'?relaunchAnswer():relaunchAnswer;}};
+  let startupValue={phase:'launching',startedAt:clock-500,lastLoadMs:99000,exited:null,portPid:null,loaded:false,loadedAt:null,...(startup?startup(clock):{})};
   const response=(value,ok=true,status=200)=>({ok,status,json:async()=>value});
   class FakeDate extends Date{static now(){return clock;}}
   const context=vm.createContext({console,Date:FakeDate,location:{protocol,origin:'http://127.0.0.1:5212'},window:desktop?{booksDesktop:shell}:{},
@@ -60,7 +63,8 @@ function harness({protocol='http:',desktop=true}={}){
   const press=(target,type='click')=>{const event={type,key:'Enter',target,prevented:false,stopped:false,preventDefault(){this.prevented=true;},stopImmediatePropagation(){this.stopped=true;}};for(const fn of listeners[type] || [])fn(event);return event;};
   return {node,body,context,calls,segments,press,
     get clock(){return clock;},advance(ms){clock+=ms;vm.runInContext('loadTick()',context);},jump(ms){clock+=ms;},
-    set answer(value){answer=value;},set mode(value){mode=value;},
+    set answer(value){answer=value;},set mode(value){mode=value;},set restartAnswer(value){restartAnswer=value;},set relaunchAnswer(value){relaunchAnswer=value;},get relaunches(){return relaunches;},
+    setStartup(value){startupValue={...startupValue,...value};},  // what the shell's record says when the page asks next
     get restarts(){return restarts;},get copies(){return copies;},
     startup(value){startupValue={...startupValue,...value};startupListener?.(startupValue);},
     poll:()=>vm.runInContext('poll()',context),run:code=>vm.runInContext(code,context)};
@@ -150,7 +154,10 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     for(let s=1;s<=31;s++){h.jump(1000);h.answer=answerWith(loading({progress_age_ms:s*1000,restart_safe:false}));await h.poll();h.advance(0);}
     assert.equal(h.node('load-restart').getAttribute('aria-disabled'),'true');
     assert.equal(h.node('load-restart').title,'Not safe right now: the engine is changing the catalog. Wait for it to finish.');
-    await h.node('load-restart').handlers.click();assert.equal(h.restarts,0);assert.equal(h.node('message').textContent,'Not safe right now: the engine is changing the catalog. Wait for it to finish.');
+    await h.node('load-restart').handlers.click();assert.equal(h.restarts,0);
+    // 0.31.1 (Judy's stuck-load spec, 2.2): the inert press answers in the note beside the button, not in #message.
+    assert.equal(h.node('load-note').textContent,'Not safe right now: the engine is changing the catalog. Wait for it to finish.');assert.equal(h.node('load-note').hidden,false);
+    assert.notEqual(h.node('message').textContent,'Not safe right now: the engine is changing the catalog. Wait for it to finish.');
     // N4 (Judy's implementation check): the announcement never offers a Restart engine that is inert.
     assert.equal(h.node('load-announce').textContent,'Loading is stuck. No progress for 30 s. The engine is changing the catalog, so Restart engine waits.');
     // A "still updating" answer is an answer: no engine-quiet line.
@@ -201,5 +208,121 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     h.startup({phase:'stopped',exited:{code:2,lastLines:'new launch error'}});
     assert.match(pre.textContent,/new launch error/);assert.doesNotMatch(pre.textContent,/Status computation is still running/);
   }
+  // 6. 0.31.1 (Sergei 2026-11-24; Judy's stuck-load spec, sections 1 and 5): loaded in 4 min 40 s, then every status read
+  // answered 503 "still updating" for an hour while the strip said "Stuck · Step 5 of 5: Loading your books". Once the shell
+  // says loading finished the strip never shows a step again: it says how long the status has been missing.
+  {
+    const h=harness();await flush();
+    h.answer=answerWith(loading({step:'books',n:5,of:5,done:1149,total:1149,unit:'books'}));await h.poll();await flush();
+    assert.equal(h.node('load-text').textContent,'Step 5 of 5: Loading your books');
+    h.mode='busy';await h.poll();
+    h.startup({phase:'running',loaded:true,loadedAt:h.clock,lastLoadMs:280000});
+    const line=()=>h.node('load-word').textContent+' · '+h.node('load-text').textContent;
+    assert.equal(line(),'Working · Loading finished. Preparing the library status.');
+    assert.equal(h.node('load-detail').textContent,'loaded in 4 min 40 s · preparing status 0:00 · engine answered 0 s ago');
+    assert.equal(h.node('load-announce').textContent,'Loading finished. Preparing the library status.');
+    assert.ok(h.segments.every(segment=>segment.classList.contains('done') && !segment.classList.contains('moving') && !segment.classList.contains('alert')),'every segment done, no stripe');
+    assert.equal(h.node('load-bar').getAttribute('aria-valuenow'),h.node('load-bar').getAttribute('aria-valuemax'));
+    assert.equal(h.node('load-bar').getAttribute('aria-valuetext'),'Loading finished. Preparing the library status.');
+    assert.equal(h.node('load-restart').hidden,true);assert.equal(h.node('load-actions').hidden,true);assert.equal(h.node('load-relaunch').hidden,true);
+    assert.equal(h.node('jobs-status-text').textContent,'Jobs: preparing…');assert.equal(h.node('empty').textContent,'Preparing your books…');
+    assert.equal(h.node('automatic-start-reason').textContent,'Automatic processing can start when the library status is ready.');
+    // Futaba's 0.31.1 QA, minor 2: its tooltip says the same, never "Waiting for the local server" while the engine answers.
+    assert.equal(h.node('start-automatic').title,'Automatic processing can start when the library status is ready.');
+    const sentence='Not yet: Books Arranger is preparing the library status. This works as soon as it is ready.';
+    assert.equal(h.node('library').title,sentence);assert.equal(h.node('filter').title,sentence);
+    h.press(h.node('library'));assert.equal(h.node('message').textContent,sentence,'a press on an inert control says why');
+    for(let s=1;s<=10;s++){h.jump(1000);await h.poll();h.advance(0);}
+    assert.equal(line(),'Waiting · Loading finished. The library status is taking longer than usual (10 s). The engine is still answering.');
+    assert.equal(h.node('load-actions').hidden,true,'no buttons while Waiting');assert.equal(h.node('load-relaunch').hidden,true);assert.doesNotMatch(h.node('load-text').textContent,/Step/);
+    for(let s=11;s<=60;s++){h.jump(1000);await h.poll();h.advance(0);}
+    assert.equal(line(),'Stuck · Loading finished, but the library status has not arrived after 1 min 0 s. The engine is answering but still says the status is not ready. Your files are not touched. You can restart Books Arranger to try again.');
+    assert.ok(h.node('load-strip').classList.contains('alert'),'the line turns --warning');
+    assert.ok(h.segments.every(segment=>segment.classList.contains('done') && !segment.classList.contains('alert')),'the bar stays all done');
+    assert.equal(h.node('load-actions').hidden,false);assert.equal(h.node('load-details').hidden,false);
+    assert.equal(h.node('load-restart').hidden,true,'Restart engine is never offered after loading');assert.equal(h.node('load-retry').hidden,true);
+    assert.equal(h.node('load-detail').textContent,'loaded in 4 min 40 s · preparing status 1:00 · engine answered 0 s ago');
+    assert.equal(h.node('load-announce').textContent,'The library status has not arrived after 1 min 0 s. Restart Books Arranger is available.');
+    assert.equal(h.node('load-relaunch').hidden,false,'Restart Books Arranger, State 1 Stuck only');
+    assert.equal(h.node('jobs-status-text').textContent,'Jobs: not ready yet.');assert.equal(h.node('empty').textContent,'Your books are not ready yet.');
+    assert.equal(h.node('list-skeleton').hidden,true,'skeleton bars removed, as in Stopped');
+    const technical=h.node('load-technical').textContent;
+    assert.match(technical,/^Loading finished: \d{4}-\d\d-\d\dT[\d:.]+Z \(took 4 min 40 s\)$/m);
+    assert.match(technical,/^Library status: not received for 60 s$/m);assert.match(technical,/^Last status reply: Status is still updating; retrying$/m);
+    assert.match(technical,/^Engine answered: 0 s ago$/m);assert.match(technical,/^State: stuck$/m);
+    // The first status answer: Ready, with no step line on the way.
+    h.mode='answer';h.answer=answerWith(loading({step:'done',n:5,of:5,parts:ALL,took_ms:280000}));await h.poll();await flush();await flush();
+    assert.equal(line(),'Ready · Loaded in 4 min 40 s');assert.equal(h.node('load-relaunch').hidden,true);assert.equal(h.node('load-announce').textContent,'Books Arranger is ready.');
+    assert.equal(h.node('library').hasAttribute('data-not-yet'),false);assert.equal(h.node('message').textContent,'','the sentence leaves the message line');
+  }
+  // 7. A window reloaded while it waits comes back to the same wait and the same clock, not to Step 1 (5.5).
+  {
+    const h=harness({startup:clock=>({phase:'running',loaded:true,loadedAt:clock-42000,lastLoadMs:280000})});await flush();
+    assert.equal(h.node('load-word').textContent,'Waiting');
+    assert.equal(h.node('load-text').textContent,'Loading finished. The library status is taking longer than usual (42 s). The engine is still answering.');
+    assert.match(h.node('load-detail').textContent,/preparing status 0:42/);
+  }
+  // 8. Restart engine pressed as loading finishes (5.6): the shell refuses, the note says why under the strip, the strip
+  // shows the true state, focus goes to the Status filter, and "Restarting the engine." is never announced.
+  {
+    const h=harness({protocol:'file:'});await flush();
+    for(let s=0;s<10;s++)h.advance(1000);
+    assert.equal(h.node('load-word').textContent,'Stuck');assert.equal(h.node('load-restart').hidden,false);
+    let focused=null;h.node('filter').focus=()=>{focused='filter';};h.context.document.activeElement=h.node('load-restart');
+    h.restartAnswer={started:false,reason:'loaded'};h.setStartup({phase:'running',loaded:true,loadedAt:h.clock});
+    await h.node('load-restart').handlers.click();await flush();
+    assert.equal(h.restarts,0);
+    assert.equal(h.node('load-note').textContent,'Loading had already finished, so nothing was restarted.');assert.equal(h.node('load-note').hidden,false);
+    assert.match(h.node('load-text').textContent,/^Loading finished\. The engine hasn't answered/,'the true state, re-read from the shell: no step line');
+    assert.equal(h.node('load-restart').hidden,true);assert.equal(focused,'filter');
+    assert.notEqual(h.node('load-announce').textContent,'Restarting the engine.');
+    h.advance(1000);assert.equal(h.node('load-note').hidden,false,'the note stays while the state word stays');
+    h.run('loadHeard()');  // the engine answers again: 1 s since loaded is Working
+    assert.equal(h.node('load-word').textContent,'Working');assert.equal(h.node('load-note').hidden,true,'it goes when the word changes');
+    // Every reason has its note; an unknown or failed call says nothing was restarted, its raw text in Technical details.
+    const notes={restarting:'The engine is already restarting.',quitting:'Books Arranger is closing, so the engine was not restarted.',admission:'Wait for the data folder check to stop before restarting.'};
+    for(const [reason,text] of Object.entries(notes)){
+      const r=harness({protocol:'file:'});await flush();for(let s=0;s<10;s++)r.advance(1000);
+      r.restartAnswer={started:false,reason};await r.node('load-restart').handlers.click();
+      assert.equal(r.node('load-note').textContent,text,reason);assert.equal(r.node('load-word').textContent,'Stuck');
+      await r.node('load-copy').handlers.click();assert.equal(r.node('load-note').hidden,true,'any strip button clears it');
+    }
+    const r=harness({protocol:'file:'});await flush();for(let s=0;s<10;s++)r.advance(1000);
+    r.restartAnswer=()=>{throw new Error('Restart engine is unavailable');};await r.node('load-restart').handlers.click();
+    assert.equal(r.node('load-note').textContent,'Nothing was restarted. Your files are not touched.');
+    r.advance(1000);assert.match(r.node('load-technical').textContent,/^Restart engine: Restart engine is unavailable$/m);
+  }
   console.log('PASS startup: first frame, states from silence, parts withheld, inert controls, Stopped, restart_safe, settle');
+  // 9. Restart Books Arranger (Judy's stuck-load spec, section 6; Sergei 2026-11-24): State 1 Stuck's way out.
+  {
+    const stuckHarness=async()=>{
+      const r=harness();await flush();r.mode='busy';
+      r.startup({phase:'running',loaded:true,loadedAt:r.clock,lastLoadMs:280000});
+      for(let s=1;s<=60;s++){r.jump(1000);await r.poll();r.advance(0);}
+      assert.equal(r.node('load-word').textContent,'Stuck');assert.equal(r.node('load-relaunch').hidden,false);
+      return r;
+    };
+    const h=await stuckHarness(),button=h.node('load-relaunch');
+    assert.equal(h.node('load-restart').hidden,true,'never beside Restart engine');
+    let resolve;h.relaunchAnswer=()=>new Promise(done=>{resolve=done;});
+    const pressed=button.handlers.click();
+    assert.equal(button.textContent,'Restarting…');assert.equal(button.title,'Restarting Books Arranger…');assert.equal(button.getAttribute('aria-disabled'),'true');
+    assert.notEqual(h.node('load-announce').textContent,'Restarting Books Arranger.','announced only once the shell accepts');
+    await button.handlers.click();
+    assert.equal(h.relaunches,1,'a second press asks nothing');assert.equal(h.node('load-note').textContent,'Books Arranger is already closing.');
+    resolve({started:true});await pressed;
+    assert.equal(h.node('load-announce').textContent,'Restarting Books Arranger.');assert.equal(button.getAttribute('aria-disabled'),'true');
+    // Cancel in the shell's converting-book question: the ready face again, no note.
+    const c=await stuckHarness();c.relaunchAnswer={started:false,reason:'cancelled'};await c.node('load-relaunch').handlers.click();
+    assert.equal(c.node('load-relaunch').textContent,'Restart Books Arranger');assert.equal(c.node('load-relaunch').getAttribute('aria-disabled'),'false');
+    assert.equal(c.node('load-relaunch').title,'Close Books Arranger and open it again. Loading starts over. Your files are not touched.');
+    assert.equal(c.node('load-note').hidden,true,'Cancel is no refusal');
+    // Refused: already closing, or a failure (its raw text in Technical details).
+    c.relaunchAnswer={started:false,reason:'closing'};await c.node('load-relaunch').handlers.click();
+    assert.equal(c.node('load-note').textContent,'Books Arranger is already closing.');
+    c.relaunchAnswer=()=>{throw new Error('Restart Books Arranger is unavailable');};await c.node('load-relaunch').handlers.click();
+    assert.equal(c.node('load-note').textContent,'Nothing was restarted. Your files are not touched.');
+    assert.match(c.node('load-technical').textContent,/^Restart Books Arranger: Restart Books Arranger is unavailable$/m);
+  }
+  console.log('PASS startup 0.31.1: loaded while the status is missing, a reloaded wait, a refused Restart engine, Restart Books Arranger');
 })().catch(error=>{console.error(error);process.exitCode=1;});

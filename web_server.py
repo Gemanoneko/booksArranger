@@ -520,11 +520,16 @@ class BrowserServer(ThreadingHTTPServer):
                             loading.checkpoint()
             loading.ready('books')
             loading.checkpoint()
-            # Background work (recovery retention, series and optional-field lookups, the published-book check) starts
-            # once loading ends: it changes the catalog and reads the library share, which the first status needs too.
-            self._start_background()
+            self.inventory.after_scan = self._check_sources_after_scan  # starts nothing: a finished scan runs the check pass
             loading.finish()
-            self._restore_saved_work(merge)
+            # Background work (recovery retention, series and optional-field lookups, the published-book check, the saved
+            # conversions) changes the catalog and reads the library share, which the first status needs too. 0.31.1 (Sergei,
+            # 2026-11-24: loaded in 4 min 40 s, then "Stuck" for over an hour): it started as loading ended, the recovery
+            # cleanup took the engine's one Python core, and the first status after loading never finished, so every page
+            # read answered "still updating" with no earlier answer to give. It now starts once that status has an answer.
+            if self._first_status(loading):
+                self._start_background()
+                self._restore_saved_work(merge)
         except LoadAborted:
             return
         except BaseException as error:
@@ -542,6 +547,26 @@ class BrowserServer(ThreadingHTTPServer):
                 self.closing = True
             threading.Thread(target=self.finish_shutdown, name='books-load-failed', daemon=True).start()
 
+    FIRST_STATUS_HOLD = 600.0  # seconds the background work waits for the first status after loading, at most
+
+    def _first_status(self, loading):
+        """0.31.1: on the loader, after loading: the first status computation (the shared one the page's reads join) runs
+        until it has an answer, so the background work never starts beside it. True: start the background work now (the
+        answer came, the computation failed, or FIRST_STATUS_HOLD passed). False: the engine is closing or was stopped."""
+        deadline = time.monotonic() + self.FIRST_STATUS_HOLD
+        stopped = lambda: self.closing or loading.abort.is_set() or self.merge is None or self.merge.__dict__.get('_closing')
+        while not stopped():
+            try:
+                self.polled_jobs()
+                return True
+            except StatusUnavailable:
+                if time.monotonic() >= deadline:
+                    return not stopped()
+                loading.abort.wait(.05)  # each read already waited for the computation (STATUS_WAIT)
+            except Exception:
+                return not stopped()  # it failed: it no longer needs the engine to itself
+        return False
+
     def _load_catalog(self, loading):
         """Step 2: the catalog's own checks, and the stored book groups brought up to date (a grouping change rebuilds them
         once, after an update: about 12 s on the live catalog). Rebuilding writes the catalog: no restart is offered."""
@@ -555,11 +580,13 @@ class BrowserServer(ThreadingHTTPServer):
 
     def stop_loading(self, timeout=60.0):
         """Quit, a stop or an update while loading: the loader ends at its next checkpoint (a catalog write it began
-        finishes first). Raises TimeoutError, as an inventory worker does, if it has not ended."""
-        if self.loading is None or self.loading.finished:
+        finishes first). Raises TimeoutError, as an inventory worker does, if it has not ended. 0.31.1: a loader still
+        waiting for the first status after loading (_first_status) is stopped and waited for too, so it never starts the
+        background work after the close stopped it."""
+        loader = self.loader
+        if self.loading is None or self.loading.finished and not (loader is not None and loader.is_alive()):
             return
         self.loading.abort.set()
-        loader = self.loader
         if loader is not None and loader is not threading.current_thread():
             loader.join(timeout)
             if loader.is_alive():
@@ -787,6 +814,9 @@ class BrowserServer(ThreadingHTTPServer):
             'needs_you_only': needs_you_only(jobs, automatic, rows, active, queue),
             # 0.30.0 (Sergei 2026-11-18, Judy's spec): every running job and everything waiting (background_work).
             'work': background_work.view(self, jobs, automatic, queue, active, scan, sources.get('library_roots'), self.__dict__.setdefault('_work_started', {})),
+            # 0.31.1 (Judy's stuck-load spec, 8.4): finished books found again after a move by hand, for the status line.
+            **({'relinked': self.merge.relinked_view(), 'removed': self.merge.removed_view(), 'removal_refused': self.merge.removal_refused()}
+               if callable(getattr(self.merge, 'relinked_view', None)) else {}),
             # 0.29.0 item 1 (Judy section 1): each library root's state and the last check pass's report.
             **sources}
 
@@ -1301,6 +1331,9 @@ class Handler(BaseHTTPRequestHandler):
                     current=automatic.status(jobs=self.server.merge.state(),scanning=self.server.scan_active(),server_closing=self.server.closing)
                     self.response(409,{'error':current.get('start_block_reason') or str(error),'automatic_processing':current});return
                 self.server.active_library='Audiobooks'
+                # 0.31.1 (Futaba's QA, Major 2): a Start checks every finished book again, in the background.
+                recheck=getattr(self.server.merge,'recheck_finished_books',None)
+                if callable(recheck):recheck()
             else:value=automatic.stop()
             self.response(202,{'automatic_processing':value});return
         if path=='/api/queue/cancel':

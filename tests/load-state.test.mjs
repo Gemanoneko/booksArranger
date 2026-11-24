@@ -11,7 +11,55 @@ const loading = (extra = {}) => ({ step: 'session', n: 3, of: 4, done: 12400, to
   restart_safe: true, parts: { library: true, status: true, books: false, attention: false, jobs: false }, took_ms: null, ...extra });
 
 test('the thresholds live in one place', () => {
-  assert.deepEqual({ ...L.THRESHOLDS }, { answerWaiting: 3000, answerStuck: 10000, progressWaiting: 10000, progressStuck: 30000, sleepGap: 5000 });
+  assert.deepEqual({ ...L.THRESHOLDS }, { answerWaiting: 3000, answerStuck: 10000, progressWaiting: 10000, progressStuck: 30000, sleepGap: 5000,
+    statusWaiting: 10000, statusStuck: 60000 });
+});
+
+// 0.31.1 (Sergei 2026-11-24; Judy's stuck-load spec, section 1): loading finished (the shell's loadedAt) but the first status
+// has not arrived. Time since loaded moves the state (10 s / 60 s); the engine's answer silence (3 s / 10 s) applies on top.
+test('loaded, the status missing: Working, Waiting at 10 s, Stuck at 60 s; the answer clock on top; no step words', () => {
+  const t = L.createTracker(0);
+  t.observe({ loading: loading({ step: 'books', n: 5, of: 5, done: 1149, total: 1149, unit: 'books' }) }, 1000);
+  t.markLoaded(2000);
+  assert.equal(t.loading, null, 'the last loading answer is dropped');
+  for (let at = 2000; at <= 70000; at += 1000) { t.tick(at); t.heard(at); }  // a 503 every second: answered, status missing
+  assert.deepEqual(L.evaluateLoaded(t, 11999), { state: 'working', quiet: 9999, signal: 'status', since: 9999 });
+  assert.deepEqual(L.loadedLine(L.evaluateLoaded(t, 11999)), { word: 'Working', text: 'Loading finished. Preparing the library status.' });
+  assert.equal(L.evaluateLoaded(t, 12000).state, 'waiting');
+  assert.deepEqual(L.loadedLine(L.evaluateLoaded(t, 25000)),
+    { word: 'Waiting', text: 'Loading finished. The library status is taking longer than usual (23 s). The engine is still answering.' });
+  assert.equal(L.evaluateLoaded(t, 61999).state, 'waiting');
+  const stuck = L.evaluateLoaded(t, 74000);
+  assert.equal(stuck.state, 'stuck');
+  assert.deepEqual(L.loadedLine(stuck), { word: 'Stuck', text: 'Loading finished, but the library status has not arrived after 1 min 12 s. The engine is answering but still says the status is not ready. Your files are not touched. You can restart Books Arranger to try again.' });
+  assert.equal(L.loadedValueText(stuck), 'Loading finished. The library status has not arrived.');
+  assert.equal(L.loadedValueText(L.evaluateLoaded(t, 3000)), 'Loading finished. Preparing the library status.');
+  assert.deepEqual(L.loadedDetailParts(t, 74000, 280000), ['loaded in 4 min 40 s', 'preparing status 1:12', 'engine answered 4 s ago']);
+  assert.deepEqual(L.loadedDetailParts(t, 74000, null), ['preparing status 1:12', 'engine answered 4 s ago'], 'no load time: omitted');
+  assert.deepEqual(L.loadedLine(stuck, { listing: true }), { word: 'Working', text: 'Loading finished. Showing your books.' });
+  for (const at of [3000, 25000, 74000]) assert.doesNotMatch(L.loadedLine(L.evaluateLoaded(t, at)).text, /Step|of 5/);
+});
+
+test('loaded, the engine silent: its own line, the worse of the two signals wins', () => {
+  const t = L.createTracker(0);
+  t.markLoaded(0); t.heard(0);
+  for (let at = 0; at <= 12000; at += 1000) t.tick(at);
+  assert.deepEqual(L.loadedLine(L.evaluateLoaded(t, 4000)), { word: 'Waiting', text: "Loading finished. The engine hasn't answered for 4 s." });
+  assert.deepEqual(L.loadedLine(L.evaluateLoaded(t, 11000)), { word: 'Stuck', text: "Loading finished. The engine hasn't answered for 11 s. It may have stopped responding. Your files are not touched. You can restart Books Arranger to try again." });
+  const fresh = L.createTracker(0); fresh.markLoaded(0);
+  assert.deepEqual(L.loadedDetailParts(fresh, 1000, 5000), ['loaded in 5 s', 'preparing status 0:01', 'no answer from the engine yet']);
+});
+
+test('loaded: a sleep gap restarts the status clock too; a restart clears it', () => {
+  const t = L.createTracker(0);
+  t.markLoaded(0);
+  for (let at = 0; at <= 50000; at += 1000) { t.tick(at); t.heard(at); }
+  t.tick(170000); t.heard(170000);  // the laptop slept for two minutes
+  assert.equal(L.evaluateLoaded(t, 171000).state, 'working');
+  t.markLoaded(5000);
+  assert.equal(t.statusAt, 170000, 'the first loaded time of this launch stays');
+  t.restart(200000);
+  assert.equal(t.statusAt, null);
 });
 
 test('before the first answer the engine-silence row applies from the launch', () => {

@@ -562,32 +562,30 @@ class PublishedVerifierTests(PrivateCatalog):
     def row(self, job):
         return self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?', (job,))[0]
 
-    def test_validation_fault_then_lift_is_rechecked_and_restores_completed(self):
+    def test_validation_fault_never_flags_a_finished_book_and_an_old_flag_goes_0_31_1(self):
+        # 0.31.1 (Sergei 2026-11-24): a book the app delivered is done. A check that faults (the output held open) is a
+        # diagnostic: the book stays completed (it was flagged, then retried after 60 s, before), is checked once per launch,
+        # and a flag this same fault set before 0.31.1 is taken back. Nothing else of the row changes.
         job = self.published()
         original = self.row(job)
-        blocked = [True]
         calls = []
         def validate(record, stop, pace):
             calls.append(record['job_id'])
-            if blocked[0]: raise PermissionError('private held-open output')
-            return True
+            raise PermissionError('private held-open output')
         self.jobs.output_current = validate
-        with patch('audio_jobs.time.monotonic', return_value=1000) as clock:
-            self.run_idle()
-            self.assertEqual(self.row(job)['state'], 'needs attention')
-            self.assertIn('held-open', self.row(job)['reason'])
-            self.run_idle()
-            self.assertEqual(calls, [job], 'bounded retry delay avoids repeated fault probes')
-            blocked[0] = False
-            clock.return_value = 1061
-            self.run_idle()
+        self.run_idle()
+        self.assertEqual(calls, [job], 'positive control: the check ran and faulted')
+        self.assertEqual((self.row(job)['state'], self.row(job)['reason']), ('completed', ''))
+        self.run_idle()
+        self.assertEqual(calls, [job], 'a finished book is checked once per launch')
+        self.jobs._update(job, state='needs attention', reason='private held-open output')  # as the check left it before 0.31.1
+        self.run_idle()
+        self.assertEqual(calls, [job, job])
         current = self.row(job)
-        self.assertEqual(current['state'], 'completed')
-        self.assertEqual(current['reason'], '')
+        self.assertEqual((current['state'], current['reason']), ('completed', ''))
         self.assertEqual(current['output'], original['output'])
         self.assertEqual(current['manifest'], original['manifest'])
         self.assertEqual(current['manifest_hash'], original['manifest_hash'])
-        self.assertEqual(calls, [job, job])
 
     def test_interrupted_idle_pass_resumes_only_the_unchecked_rows(self):
         first, second, third = [self.published() for _ in range(3)]

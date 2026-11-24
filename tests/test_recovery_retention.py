@@ -127,32 +127,19 @@ class KeptFilesTests(unittest.TestCase):
         s,final,raw=self.held(lambda final:final.write_bytes(b'changed'))
         kept=s.kept_files()[self.job_id];self.assertEqual((kept['group'],kept['cause']),('audiobook','unverified'))
         self.assertEqual(self.retention.status(self.job_id)['count'],2)
-    def test_keep_files_is_permanent_until_sergei_acts(self):
+    def test_keep_files_no_longer_keeps_recovery_copies_0_31_1(self):
+        # Sergei 2026-11-24: once a book is delivered and approved the app keeps no recovery copies; that overrides the
+        # 2026-10-18 "Keep files is permanent". A kept book's copies go through the same verified purge as any other's.
         s,final,raw=self.held(lambda final:final.rename(final.with_suffix('.away')))
         self.assertEqual(s.keep_files('Audiobooks',self.candidate,1,self.job_id),{'job_id':self.job_id,'kept':True})
+        self.assertEqual(self.retention.status(self.job_id)['count'],2,'positive control: two copies held')
+        with self.assertRaises(Exception):self.retention.purge(self.job_id,'automatic')
+        self.assertEqual(self.retention.status(self.job_id)['count'],2,'while the audiobook does not verify, nothing goes')
         final.with_suffix('.away').rename(final);self.assertEqual(final.read_bytes(),raw,'the audiobook is back and verifies again')
-        copies=sorted(path.read_bytes() for path in (self.source.root/self.cleanup_id).iterdir());self.assertEqual(len(copies),2)
-        # Every automatic path leaves the kept set alone: the startup sweep's list, the after-conversion purge,
-        # an automatic purge call itself, and the sweep loop.
-        self.assertEqual(self.retention.due(),[])
-        s._purge_recovery_now(self.job_id)
-        self.assertEqual(self.retention.purge(self.job_id,'automatic')['count'],2)
-        import test_backup_rule
-        loop=test_backup_rule.service();loop.recovery=self.retention;loop.inventory=SimpleNamespace(worker=None,database=self.db);loop.jobs._thread=None
-        passed=threading.Event();due=self.retention.due
-        self.retention.due=lambda:(passed.set(),due())[1]
-        try:
-            with test_backup_rule.running(loop):self.assertTrue(passed.wait(10));loop._retention_wake.set();time.sleep(.2)
-        finally:del self.retention.due
-        self.assertEqual(sorted(path.read_bytes() for path in (self.source.root/self.cleanup_id).iterdir()),copies,'kept files survive a verified audiobook')
-        self.assertTrue(self.retention.kept(self.job_id));self.assertNotIn(self.job_id,s.kept_files(),'no longer flagged')
-        # Positive control: the same set without the Keep files record would be purged now.
-        with connect(self.db) as db:db.execute('DELETE FROM kept_files')
-        self.assertEqual(self.retention.due(),[self.job_id])
-        with connect(self.db) as db:db.execute('INSERT INTO kept_files VALUES(?,?)',(self.job_id,'2026-10-18T00:00:00+00:00'))
-        # Sergei acting again: his own Delete recovery copies still removes them.
-        status=self.retention.status(self.job_id)
-        self.assertEqual(self.retention.purge(self.job_id,'manual',{k:status[k] for k in ('token','count','bytes')})['state'],'deleted')
+        self.assertEqual(self.retention.due(),[self.job_id],'a kept book is due')
+        self.assertEqual(self.retention.purge(self.job_id,'automatic')['state'],'deleted')
+        self.assertFalse((self.source.root/self.cleanup_id).exists())
+        self.assertTrue(self.retention.kept(self.job_id),'the Keep files record itself stays (it still keeps originals)')
 
 class TemporaryCleanupTests(unittest.TestCase):
     """v0.16.11 "Storm of the Century": a finished book whose temporary-file cleanup has no record (it read
@@ -256,6 +243,187 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(server.merge_admissions,0);server.scan_active=lambda:True
         with self.assertRaises(ValueError):
             with server.recovery_admission():self.fail('Busy scan admitted')
+
+
+class PublishedBooksKeepNoCopiesTests(unittest.TestCase):
+    """0.31.1 (Sergei 2026-11-24): once a book is delivered to Sorted and approved, the app keeps no recovery copies of it.
+    A published book's copies go once its output is confirmed (the existing purge, which verifies it in full first); a
+    finished book removed from the records because it is gone (finished_removal) has no output to confirm, and its copies
+    go on every other proof of the purge. Nothing goes for a book whose output does not answer, or whose originals are not
+    retired. The sweep takes a few sets per pass, never a whole backlog at once after loading."""
+    setUp=fixture.RetentionTests.setUp
+    tearDown=fixture.RetentionTests.tearDown
+    retire=fixture.RetentionTests.retire
+    ready=RecoveryTests.ready
+    def copies(self):
+        folder=self.source.root/self.cleanup_id
+        return sorted(path.name for path in folder.iterdir()) if folder.exists() else []
+    def remove(self):
+        import finished_removal
+        with connect(self.db) as db:
+            db.execute('BEGIN IMMEDIATE')
+            output=json.loads(db.execute('SELECT output FROM audio_jobs WHERE job_id=?',(self.job_id,)).fetchone()[0])
+            self.assertTrue(finished_removal.remove(db,self.job_id,output,self.output['final_path'],{'missing':True}))
+    def test_a_published_book_with_copies_has_them_released_once_its_output_is_confirmed(self):
+        self.ready();self.assertEqual(len(self.copies()),2,'positive control: two copies held')
+        self.assertEqual(self.retention.purge(self.job_id)['state'],'deleted');self.assertEqual(self.copies(),[])
+        self.assertTrue(Path(self.output['final_path']).exists(),'the delivered book is never touched')
+    def test_an_output_that_does_not_answer_releases_nothing(self):
+        self.ready();final=Path(self.output['final_path']);away=final.with_suffix('.offline');final.rename(away)
+        with self.assertRaises(Exception):self.retention.purge(self.job_id)
+        self.assertEqual(len(self.copies()),2,'kept: the output could not be confirmed')
+    def test_a_book_whose_originals_are_not_retired_keeps_its_copies(self):
+        self.ready()
+        with connect(self.db) as db:db.execute("UPDATE source_cleanup SET state='removing' WHERE id=?",(self.cleanup_id,))
+        with self.assertRaises(Exception):self.retention.purge(self.job_id)
+        self.assertEqual(len(self.copies()),2)
+    def test_a_removed_books_copies_are_released_without_its_output(self):
+        self.ready();Path(self.output['final_path']).unlink()  # Sergei deleted the book
+        with self.assertRaises(Exception):self.retention.purge(self.job_id)
+        self.assertEqual(len(self.copies()),2,'positive control: not removed, nothing goes')
+        self.remove()
+        self.assertEqual(self.retention.purge(self.job_id)['state'],'deleted');self.assertEqual(self.copies(),[])
+    def test_a_removed_book_keeps_every_other_proof_of_the_purge(self):
+        self.ready();Path(self.output['final_path']).unlink();self.remove()
+        extra=self.source.root/self.cleanup_id/'foreign.txt';extra.write_text('preserve')
+        with self.assertRaisesRegex(BoundaryError,'Unknown recovery'):self.retention.purge(self.job_id)
+        self.assertTrue(extra.exists());self.assertEqual(len(self.copies()),3)
+        extra.unlink();backup=next(p for p in (self.source.root/self.cleanup_id).iterdir());raw=backup.read_bytes();backup.write_bytes(b'x'*len(raw))
+        with self.assertRaises(Exception):self.retention.purge(self.job_id)
+        self.assertEqual(backup.read_bytes(),b'x'*len(raw),"a copy that is not the original's content is kept")
+    def unfinished(self):
+        """The source cleanup stopped before it finished: held, one original still in place (its copy only verified)."""
+        self.ready()
+        members=self.retention._rows('SELECT * FROM cleanup_members WHERE cleanup_id=?',(self.cleanup_id,))
+        first=members[0];backup=Path(first['backup']);original=Path(first['path'])
+        original.write_bytes(backup.read_bytes())  # as if never removed
+        with connect(self.db) as db:
+            db.execute("UPDATE source_cleanup SET state='needs_attention',reason='Held before it finished' WHERE id=?",(self.cleanup_id,))
+            db.execute("UPDATE cleanup_members SET state='backup_verified' WHERE cleanup_id=? AND path=?",(self.cleanup_id,first['path']))
+            db.execute("DELETE FROM recovery_retention WHERE job_id=?",(self.job_id,))
+        return original,original.read_bytes()
+    def test_a_removed_books_copies_go_even_when_its_source_cleanup_never_finished(self):
+        original,raw=self.unfinished()
+        with self.assertRaisesRegex(BoundaryError,'Only a removed finished book'):self.retention.release_unfinished(self.job_id)
+        self.assertEqual(len(self.copies()),2,'positive control: not removed, nothing goes')
+        Path(self.output['final_path']).unlink();self.remove()
+        self.assertEqual(self.retention.release_unfinished(self.job_id),2)
+        self.assertEqual(self.copies(),[]);self.assertFalse((self.source.root/self.cleanup_id).exists())
+        self.assertEqual(original.read_bytes(),raw,'an original still in the library stays where it is')
+    def test_an_unfinished_cleanup_with_an_intent_or_unknown_content_keeps_its_copies(self):
+        original,raw=self.unfinished();Path(self.output['final_path']).unlink();self.remove()
+        extra=self.source.root/self.cleanup_id/'foreign.txt';extra.write_text('preserve')
+        with self.assertRaisesRegex(BoundaryError,'Unknown recovery'):self.retention.release_unfinished(self.job_id)
+        extra.unlink()
+        with connect(self.db) as db:db.execute("UPDATE cleanup_members SET state='removal_intended' WHERE cleanup_id=? AND path=?",(self.cleanup_id,str(original)))
+        with self.assertRaisesRegex(BoundaryError,'in progress'):self.retention.release_unfinished(self.job_id)
+        self.assertEqual(len(self.copies()),2);self.assertEqual(original.read_bytes(),raw)
+    def test_the_sweep_releases_a_removed_books_leftovers_once(self):
+        import merge_service,threading as threads
+        s=MergeService.__new__(MergeService);calls=[]
+        s.inventory=SimpleNamespace(database=self.db);s.operation_lock=threads.RLock();s.storage_cleanup='storage'
+        s.working=SimpleNamespace(discharge_removed=lambda job_id,storage:calls.append(('working',job_id)) or 1)
+        s.recovery=SimpleNamespace(release_unfinished=lambda job_id:calls.append(('recovery',job_id)) or 2)
+        with patch('sys.stderr'):
+            s._release_removed_leftovers()
+            self.assertEqual(calls,[],'nothing is removed: nothing to release')
+            self.ready()
+            with connect(self.db) as db:db.execute("UPDATE source_cleanup SET state='needs_attention' WHERE id=?",(self.cleanup_id,))
+            Path(self.output['final_path']).unlink();self.remove()
+            s._release_removed_leftovers();s._release_removed_leftovers()
+        self.assertEqual(calls,[('recovery',self.job_id)],'its unfinished cleanup\'s copies, once per run')
+    def test_the_sweep_leaves_a_retained_runs_removed_book_alone(self):
+        # Senua m4 (the Brief's 0.30.0 item A): a retained run's job keeps its leftovers; the sweep never asks.
+        import threading as threads
+        s=MergeService.__new__(MergeService);calls=[]
+        s.inventory=SimpleNamespace(database=self.db);s.operation_lock=threads.RLock();s.storage_cleanup='storage'
+        s.working=SimpleNamespace(discharge_removed=lambda job_id,storage:calls.append(('working',job_id)) or 1)
+        s.recovery=SimpleNamespace(release_unfinished=lambda job_id:calls.append(('recovery',job_id)) or 2)
+        s._retained_cleanup_job=lambda job_id:job_id==self.job_id
+        self.ready()
+        with connect(self.db) as db:db.execute("UPDATE source_cleanup SET state='needs_attention' WHERE id=?",(self.cleanup_id,))
+        Path(self.output['final_path']).unlink();self.remove()
+        with patch('sys.stderr'):s._release_removed_leftovers()
+        self.assertEqual(calls,[])
+        s._retained_cleanup_job=lambda job_id:False
+        with patch('sys.stderr'):s._release_removed_leftovers()
+        self.assertEqual(calls,[('recovery',self.job_id)],'positive control: released once not retained')
+    def test_the_sweep_leaves_a_retained_runs_changed_original_copies_alone(self):
+        import threading as threads
+        s=MergeService.__new__(MergeService);calls=[]
+        s.inventory=SimpleNamespace(database=self.db);s.operation_lock=threads.RLock()
+        s.recovery=SimpleNamespace(storage=self.storage,release_changed=lambda job_id:calls.append(job_id) or 2)
+        s._retained_cleanup_job=lambda job_id:True
+        self.changed()
+        with patch('sys.stderr'):s._release_changed_copies()
+        self.assertEqual(calls,[])
+        s._retained_cleanup_job=lambda job_id:False
+        with patch('sys.stderr'):s._release_changed_copies()
+        self.assertEqual(calls,[self.job_id],'positive control')
+    def changed(self,kept=False):
+        """A published book's source cleanup held because an original changed since it was checked: one original back in
+        place with other bytes (its copy only verified), the other already removed (its copy the only one)."""
+        self.ready()
+        members=self.retention._rows('SELECT * FROM cleanup_members WHERE cleanup_id=? ORDER BY path',(self.cleanup_id,))
+        first=members[0];original=Path(first['path']);original.write_bytes(b'changed by Sergei'+Path(first['backup']).read_bytes()[17:])
+        from recovery_retention import RecoveryRetention
+        with connect(self.db) as db:
+            db.execute("UPDATE source_cleanup SET state='needs_attention',reason=? WHERE id=?",(RecoveryRetention.CHANGED_HOLD,self.cleanup_id))
+            db.execute("UPDATE cleanup_members SET state='backup_verified' WHERE cleanup_id=? AND path=?",(self.cleanup_id,first['path']))
+            db.execute('DELETE FROM recovery_retention WHERE job_id=?',(self.job_id,))  # a held cleanup has no retention set
+            if kept:
+                db.execute('CREATE TABLE IF NOT EXISTS kept_files(job_id TEXT PRIMARY KEY,kept_at TEXT NOT NULL)')
+                db.execute('INSERT INTO kept_files VALUES(?,?)',(self.job_id,'2026-10-18T00:00:00+00:00'))
+        return original,original.read_bytes()
+    def test_a_changed_original_cleanup_releases_its_copies_once_the_audiobook_verifies(self):
+        # Sergei 2026-11-24: no recovery copies for a published book, also under "Original changed since checked", also a
+        # copy that is the only one of an original the cleanup already removed (he accepted that). Keep files does not stop it.
+        original,raw=self.changed(kept=True)
+        self.assertEqual(len(self.copies()),2,'positive control: two copies held')
+        self.assertEqual(self.retention.release_changed(self.job_id),2)
+        self.assertEqual(self.copies(),[]);self.assertEqual(original.read_bytes(),raw,'the changed original is Sergei\'s and stays')
+        self.assertTrue(Path(self.output['final_path']).exists(),'the delivered book is never touched')
+        row=self.retention._rows('SELECT state,reason FROM source_cleanup WHERE id=?',(self.cleanup_id,))[0]
+        self.assertEqual((row['state'],row['reason']),('needs_attention','Original bytes differ from reviewed sources'),'the hold, and its Needs attention entry, stay')
+    def test_a_changed_original_cleanup_keeps_its_copies_while_the_audiobook_does_not_verify(self):
+        original,raw=self.changed();final=Path(self.output['final_path']);final.rename(final.with_suffix('.offline'))
+        with self.assertRaises(Exception):self.retention.release_changed(self.job_id)
+        self.assertEqual(len(self.copies()),2)
+    def test_a_changed_original_cleanup_keeps_its_copies_on_unknown_content_or_another_hold(self):
+        original,raw=self.changed()
+        extra=self.source.root/self.cleanup_id/'foreign.txt';extra.write_text('preserve')
+        with self.assertRaisesRegex(BoundaryError,'Unknown recovery'):self.retention.release_changed(self.job_id)
+        extra.unlink()
+        with connect(self.db) as db:db.execute("UPDATE source_cleanup SET reason='Download marker native identity differs' WHERE id=?",(self.cleanup_id,))
+        with self.assertRaisesRegex(BoundaryError,'Only a cleanup held because an original changed'):self.retention.release_changed(self.job_id)
+        self.assertEqual(len(self.copies()),2);self.assertEqual(original.read_bytes(),raw)
+    def test_after_the_release_the_panel_says_deleted_automatically_and_the_entry_leaves_by_itself(self):
+        # Judy's stuck-load spec, 9.3; Sergei 2026-11-24 (9.4: yes): the Recovery copies panel says "deleted automatically",
+        # and the row leaves Needs attention by itself, exactly as if kept.
+        self.changed();s=KeptFilesTests.merge(self)
+        self.assertEqual(s.kept_files()[self.job_id]['group'],'changed','positive control: listed while its copies exist')
+        self.retention.release_changed(self.job_id)
+        status=self.retention.status(self.job_id)
+        self.assertEqual((status['state'],status['actor'],status['count']),('deleted','automatic',0))
+        self.assertNotIn(self.job_id,s.kept_files(),'leaves by itself, as if kept')
+    def test_the_sweep_releases_changed_original_copies_once_per_run(self):
+        import threading as threads
+        s=MergeService.__new__(MergeService);calls=[]
+        s.inventory=SimpleNamespace(database=self.db);s.operation_lock=threads.RLock()
+        s.recovery=SimpleNamespace(storage=self.storage,release_changed=lambda job_id:calls.append(job_id) or 2)
+        with patch('sys.stderr'):
+            s._release_changed_copies();self.assertEqual(calls,[],'nothing held: nothing to release')
+            self.changed()
+            s._release_changed_copies();s._release_changed_copies()
+        self.assertEqual(calls,[self.job_id])
+    def test_the_sweep_takes_a_few_sets_per_pass(self):
+        import merge_service
+        s=MergeService.__new__(MergeService);due=['job-%d'%n for n in range(7)]
+        s.recovery=SimpleNamespace(due=lambda:list(due));s._retained_cleanup_job=lambda job_id:False
+        selected,backlog=s._recovery_batch(None)
+        self.assertEqual((selected,backlog),(due[:merge_service.RECOVERY_BATCH],True))
+        self.assertEqual(s._recovery_batch(('manual-job','scope')),(['manual-job'],False),'a press of Delete recovery copies goes alone')
+        due[:]=due[:2];self.assertEqual(s._recovery_batch(None),(due,False))
 
 
 # 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
