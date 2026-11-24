@@ -26,10 +26,11 @@ AREA.mkdir(parents=True, exist_ok=True)
 class SlowMerge:
     """A catalog service whose construction waits for the test, reporting each finished book like MergeService."""
 
-    def __init__(self, inventory, cache, progress=None, gate=None, books=3, fail=None):
+    def __init__(self, inventory, cache, progress=None, gate=None, books=3, fail=None, first_status=None):
         self.inventory = inventory
         self.closed = False
         self.started = []
+        self.first_status = first_status  # 0.31.1: an Event; until it is set the polled status is "still updating"
         for done in range(books):
             if progress is not None:
                 progress(done, books)
@@ -39,10 +40,14 @@ class SlowMerge:
         if progress is not None:
             progress(books, books)
 
-    def status_snapshot(self):
+    def state(self):
         return {'state': 'Paused', 'queued': 0, 'jobs': [], 'attention_counts': {'retry': 0}}
 
-    state = status_snapshot
+    def status_snapshot(self):
+        if self.first_status is not None and not self.first_status.wait(.2):
+            from merge_service import StatusUnavailable
+            raise StatusUnavailable('Status computation is still running')
+        return self.state()
 
     def cached_page(self, limit, offset, search, status, group=None):
         return {'rows': [], 'total': 0}
@@ -153,12 +158,49 @@ class LoadingServerTests(unittest.TestCase):
         self.assertEqual(state['loading']['parts'], dict.fromkeys(web_server.LOAD_PARTS, True))
         self.assertIsInstance(state['loading']['took_ms'], int)
         self.assertEqual(state['audiobook_jobs']['state'], 'Paused')
-        # Background work starts once loading ends, never before the first status.
-        self.assertEqual(self.server.merge.started, ['retention', 'published'])
+        # Background work starts once loading ends, never before the first status (0.31.1: once that status has an answer).
+        self.wait_for(lambda: self.server.merge.started == ['retention', 'published'])
         # The shell reads the completed load's time from the desktop status, to show it as "last load took" next start.
         self.assertEqual(DesktopControl(self.server).status()['loading']['took_ms'], state['loading']['took_ms'])
         status, _ = self.call('GET', '/api/inventory?library=Audiobooks&view=candidates&status=converted')
         self.assertEqual(status, 200)
+
+    def test_background_work_waits_for_the_first_status_after_loading_0_31_1(self):
+        # Sergei 2026-11-24: loaded in 4 min 40 s, then "Stuck" for over an hour. The recovery cleanup started as loading
+        # ended and took the engine's one Python core; the first status after loading never finished, so every read
+        # answered "still updating". Nothing in the background starts until that status has an answer.
+        first = threading.Event()
+        self.serve(first_status=first)
+        self.gate.set()
+        self.wait_for(lambda: self.server.loading.finished)
+        status, answer = self.call('GET', '/api/state?library=Audiobooks')
+        self.assertEqual((status, answer), (503, {'error': 'Status is still updating; retrying'}))
+        time.sleep(.5)  # the loader polls the status about every 0.25 s here
+        self.assertEqual(self.server.merge.started, [], 'nothing starts beside the first status')
+        self.assertTrue(self.server.loader.is_alive(), 'the loader holds the background work')
+        first.set()
+        self.wait_for(lambda: self.server.merge.started == ['retention', 'published'])
+        status, state = self.call('GET', '/api/state?library=Audiobooks')
+        self.assertEqual((status, state['audiobook_jobs']['state']), (200, 'Paused'))
+        self.server.loader.join(5)
+        self.assertFalse(self.server.loader.is_alive())
+
+    def test_a_quit_before_the_first_status_starts_no_background_work_0_31_1(self):
+        first = threading.Event()
+        self.serve(first_status=first)
+        self.gate.set()
+        self.wait_for(lambda: self.server.loading.finished)
+        self.assertTrue(self.server.loader.is_alive())
+        merge = self.server.merge
+        # The close every Quit, safe stop and update ends with (DesktopControl's _shutdown): it stops the held loader first.
+        self.server.finish_shutdown()
+        self.assertFalse(self.server.loader.is_alive(), 'the close waited for the held loader')
+        first.set()  # an answer after the close starts nothing either
+        time.sleep(.3)
+        self.assertEqual(merge.started, [])
+        self.assertTrue(merge.closed)
+        self.server.server_close()
+        self.server = None  # already shut down
 
     def test_rebuilding_stale_groups_is_the_catalog_step_and_offers_no_restart(self):
         import catalog_contention
