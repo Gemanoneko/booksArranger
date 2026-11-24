@@ -1,6 +1,8 @@
 # Changelog
 
-## [v0.31.1] - 2026-11-24
+## [v0.31.2] - 2026-11-24
+
+v0.31.1 was tagged but never published. This release carries its changes.
 
 ### Added
 
