@@ -311,3 +311,7 @@ Sergei explicitly requested logging only: no investigation, implementation, test
   - Waiting on Sergei's review: about 230 (Author unclear 56, Source membership uncertain 40, Playback order 23, no author 28, etc.). Damaged sources 10. Needs a scan: «Усадьба Сфинкса», «Змееловы. Исцеление» (added after the 22 Oct scan).
   - **Sergei (2026-11-18):** fixes 1–7 all go into 0.30.0. Author folders use the Latin, surname-first form (`Rowling J. K`, the current style). Series names use the original language. The 30-hour limit is still open.
   - **Sergei (2026-11-18, later):** remove the 30-hour limit. Also: keep working through to the 0.30.0 release overnight.
+
+## Backlog after 0.30.0 (Sergei, 2026-11-20)
+
+- **Distinguish an internal repair error from confirmed audio damage** (Senua m-d2, approved for the next release). If a repair fails inside the app, say the repair could not finish and offer Retry when safe. Reserve “get a new copy” for confirmed damage that cannot be repaired. Cover both manual and automatic conversion, with checks for retryable internal failure and confirmed damage. See [Senua’s review](BooksArranger_CodeReview_v0.30.0_delta_2026-11-20.md).
