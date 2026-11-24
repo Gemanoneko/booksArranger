@@ -35,6 +35,8 @@
 - Choose folder… no longer waits for Start, for a conversion to end or for the app's next ten-minute check when a Quit or a crash cut a rewrite of the book short. A rewrite cut short is finished or undone about two minutes after the next start, even under Pause, and the move then runs. A move that waits for its own book no longer holds up actions queued for other books.
 - A rewrite that finishes while the app checks unfinished moves at startup is kept when a Choose folder… waits for it. It was thrown away, and the book moved as it was.
 - Choose folder… pressed during a rewrite is no longer cancelled by the app's own move when a check of the book fails for a moment. The app asks again at its next check.
+- A book the app rewrote (its series, English title or author's name written into the file) stays in Audiobook Ready after its rename or move, with Now in, Choose folder… and its place in the converted count. It read as Pending, from its source folder, even after a restart. 0.30's approved series moves did the same.
+- Goodreads' own human check now counts as nothing found at once, like DuckDuckGo's, so it no longer holds back All done for 6 hours. Goodreads not answering still counts as a try.
 - Nothing that can never finish holds back All done. A folder that cannot take the book's new name is refused once, with its reason, and an old series hold on a book converted again is no longer counted as a look-up.
 
 ## [v0.30.1] - 2026-11-20
