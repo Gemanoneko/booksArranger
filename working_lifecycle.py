@@ -777,6 +777,77 @@ class WorkingLifecycle:
                 self._file_state(entry,'removed' if entry['state']=='disposition_set' else 'absent_after_intent')
             self._set_attempt(self._attempt(attempt['job_id'],attempt['attempt_id']),state='retired' if all_removed else 'published_held',reason='' if all_removed else 'Published generated-file cleanup has remaining obligations')
 
+    def discharge_removed(self, job_id, storage):
+        """0.31.1 (Sergei 2026-11-24): a finished book removed from the records because it is gone (finished_removal) keeps
+        no working files. Its published attempt's files in its own staging folder go (source snapshots, and generated
+        files StorageCleanup did not take), on the native proofs of a published discharge: the ownership marker, only known
+        members, the recorded producer receipt for each (one link, native identity, size, full hash), no other durable
+        reference. The proofs a book that is gone can no longer give (its output, its originals' survival) are not asked.
+        Only paths inside this job's staging folder; never a source or library file. Returns the files removed."""
+        import finished_removal
+        with self._locks_guard:lock=self._locks.setdefault(job_id,threading.RLock())
+        with lock:
+            with connect(self.database) as db:
+                if not finished_removal.removed(db,job_id):raise BoundaryError('Only a removed finished book releases its working files this way')
+            removed=0
+            for attempt in self._rows("SELECT * FROM working_attempts WHERE job_id=? AND state IN ('published','published_held')",(job_id,)):
+                removed+=self._discharge_removed(attempt,storage)
+            return removed
+
+    def _discharge_removed(self, attempt, storage):
+        self.guard()
+        rows=self._rows('SELECT * FROM audio_jobs WHERE job_id=?',(attempt['job_id'],))
+        if len(rows)!=1:raise BoundaryError('Removed job is unavailable')
+        row=rows[0];manifest=json.loads(attempt['manifest'])
+        if row['state']!='removed' or row['attempt_id']!=attempt['attempt_id'] or row['manifest_hash']!=attempt['manifest_hash'] or json.loads(row['manifest'])!=manifest or digest(manifest)!=attempt['manifest_hash'] or attempt['producer']!='closed':
+            raise BoundaryError('Removed book\'s working attempt changed')
+        entries=self._files(attempt['job_id'],attempt['attempt_id'])
+        stage=self.stage_root/attempt['job_id']/attempt['attempt_id']
+        self._published_references(attempt,[entry['path'] for entry in entries])
+        removed=0
+        with contextlib.ExitStack() as stack:
+            present=os.path.lexists(stage)
+            boundary=stack.enter_context(DirectoryBoundary(stage.anchor,stage)) if present else None
+            if present:
+                marker=stack.enter_context(VerifiedFile(stage.parent/'ownership.json'))
+                if marker.facts()['size']>16*1024*1024 or json.loads(b''.join(marker.chunks()))!={'job_id':attempt['job_id'],'manifest':manifest}:
+                    raise BoundaryError('Removed book\'s staging ownership changed')
+                known={entry['name'] for entry in entries}
+                with os.scandir(stage) as names:
+                    if any(item.name not in known or not item.is_file(follow_symlinks=False) for item in names):
+                        raise BoundaryError('Unknown working member preserved')
+            prepared=[]
+            for entry in entries:
+                path=ordinary(entry['path'])
+                if path.parent!=stage or path.name!=entry['name']:raise BoundaryError('Working retirement path changed')
+                if entry['state'] in TERMINAL or entry['state']=='creation_intended':
+                    if os.path.lexists(path):raise BoundaryError('A working name that was never captured, or was replaced, is kept')
+                    continue
+                receipt=storage._known(path)
+                if receipt and receipt['state'] not in {'removed','absent_after_intent'}:
+                    raise BoundaryError('Temporary-file cleanup owns this working file; preserved')  # its own path finishes it
+                if not os.path.lexists(path):
+                    if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
+                    self._file_state(entry,'removed' if entry['state']=='disposition_set' else 'absent_after_intent')
+                    continue
+                handle=stack.enter_context(VerifiedFile(path,delete=True))
+                facts=handle.facts();single_stream(path)
+                if facts['links']!=1 or not facts_match(path,facts,json.loads(entry['facts']),receipt_class='working-file') or facts['size']!=entry['size'] or self._hash(handle)!=entry['sha256']:
+                    raise BoundaryError('Working file native identity or bytes changed; preserved')
+                prepared.append((entry,path,handle))
+            for entry,path,handle in prepared:
+                self.guard();boundary.revalidate()
+                if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
+                if entry['state']=='removal_intended':
+                    handle.dispose();entry=self._file_state(entry,'disposition_set')
+                elif entry['state']=='disposition_set':handle.dispose()
+                else:raise BoundaryError('Working retirement state is invalid')
+                handle.__exit__(None,None,None)
+                if os.path.lexists(path):raise BoundaryError('Disposed working name still exists or was replaced')
+                self._file_state(entry,'removed');removed+=1
+        self._set_attempt(self._attempt(attempt['job_id'],attempt['attempt_id']),state='retired',reason='Removed finished book: working files released')
+        return removed
+
     def _legacy_prior(self, row):
         """A prior attempt with no ownership receipt (legacy) must have left its folder absent or empty."""
         prior_id=row.get('attempt_id')

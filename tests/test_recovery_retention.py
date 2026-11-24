@@ -127,32 +127,19 @@ class KeptFilesTests(unittest.TestCase):
         s,final,raw=self.held(lambda final:final.write_bytes(b'changed'))
         kept=s.kept_files()[self.job_id];self.assertEqual((kept['group'],kept['cause']),('audiobook','unverified'))
         self.assertEqual(self.retention.status(self.job_id)['count'],2)
-    def test_keep_files_is_permanent_until_sergei_acts(self):
+    def test_keep_files_no_longer_keeps_recovery_copies_0_31_1(self):
+        # Sergei 2026-11-24: once a book is delivered and approved the app keeps no recovery copies; that overrides the
+        # 2026-10-18 "Keep files is permanent". A kept book's copies go through the same verified purge as any other's.
         s,final,raw=self.held(lambda final:final.rename(final.with_suffix('.away')))
         self.assertEqual(s.keep_files('Audiobooks',self.candidate,1,self.job_id),{'job_id':self.job_id,'kept':True})
+        self.assertEqual(self.retention.status(self.job_id)['count'],2,'positive control: two copies held')
+        with self.assertRaises(Exception):self.retention.purge(self.job_id,'automatic')
+        self.assertEqual(self.retention.status(self.job_id)['count'],2,'while the audiobook does not verify, nothing goes')
         final.with_suffix('.away').rename(final);self.assertEqual(final.read_bytes(),raw,'the audiobook is back and verifies again')
-        copies=sorted(path.read_bytes() for path in (self.source.root/self.cleanup_id).iterdir());self.assertEqual(len(copies),2)
-        # Every automatic path leaves the kept set alone: the startup sweep's list, the after-conversion purge,
-        # an automatic purge call itself, and the sweep loop.
-        self.assertEqual(self.retention.due(),[])
-        s._purge_recovery_now(self.job_id)
-        self.assertEqual(self.retention.purge(self.job_id,'automatic')['count'],2)
-        import test_backup_rule
-        loop=test_backup_rule.service();loop.recovery=self.retention;loop.inventory=SimpleNamespace(worker=None,database=self.db);loop.jobs._thread=None
-        passed=threading.Event();due=self.retention.due
-        self.retention.due=lambda:(passed.set(),due())[1]
-        try:
-            with test_backup_rule.running(loop):self.assertTrue(passed.wait(10));loop._retention_wake.set();time.sleep(.2)
-        finally:del self.retention.due
-        self.assertEqual(sorted(path.read_bytes() for path in (self.source.root/self.cleanup_id).iterdir()),copies,'kept files survive a verified audiobook')
-        self.assertTrue(self.retention.kept(self.job_id));self.assertNotIn(self.job_id,s.kept_files(),'no longer flagged')
-        # Positive control: the same set without the Keep files record would be purged now.
-        with connect(self.db) as db:db.execute('DELETE FROM kept_files')
-        self.assertEqual(self.retention.due(),[self.job_id])
-        with connect(self.db) as db:db.execute('INSERT INTO kept_files VALUES(?,?)',(self.job_id,'2026-10-18T00:00:00+00:00'))
-        # Sergei acting again: his own Delete recovery copies still removes them.
-        status=self.retention.status(self.job_id)
-        self.assertEqual(self.retention.purge(self.job_id,'manual',{k:status[k] for k in ('token','count','bytes')})['state'],'deleted')
+        self.assertEqual(self.retention.due(),[self.job_id],'a kept book is due')
+        self.assertEqual(self.retention.purge(self.job_id,'automatic')['state'],'deleted')
+        self.assertFalse((self.source.root/self.cleanup_id).exists())
+        self.assertTrue(self.retention.kept(self.job_id),'the Keep files record itself stays (it still keeps originals)')
 
 class TemporaryCleanupTests(unittest.TestCase):
     """v0.16.11 "Storm of the Century": a finished book whose temporary-file cleanup has no record (it read
@@ -304,6 +291,47 @@ class PublishedBooksKeepNoCopiesTests(unittest.TestCase):
         extra.unlink();backup=next(p for p in (self.source.root/self.cleanup_id).iterdir());raw=backup.read_bytes();backup.write_bytes(b'x'*len(raw))
         with self.assertRaises(Exception):self.retention.purge(self.job_id)
         self.assertEqual(backup.read_bytes(),b'x'*len(raw),"a copy that is not the original's content is kept")
+    def unfinished(self):
+        """The source cleanup stopped before it finished: held, one original still in place (its copy only verified)."""
+        self.ready()
+        members=self.retention._rows('SELECT * FROM cleanup_members WHERE cleanup_id=?',(self.cleanup_id,))
+        first=members[0];backup=Path(first['backup']);original=Path(first['path'])
+        original.write_bytes(backup.read_bytes())  # as if never removed
+        with connect(self.db) as db:
+            db.execute("UPDATE source_cleanup SET state='needs_attention',reason='Held before it finished' WHERE id=?",(self.cleanup_id,))
+            db.execute("UPDATE cleanup_members SET state='backup_verified' WHERE cleanup_id=? AND path=?",(self.cleanup_id,first['path']))
+            db.execute("DELETE FROM recovery_retention WHERE job_id=?",(self.job_id,))
+        return original,original.read_bytes()
+    def test_a_removed_books_copies_go_even_when_its_source_cleanup_never_finished(self):
+        original,raw=self.unfinished()
+        with self.assertRaisesRegex(BoundaryError,'Only a removed finished book'):self.retention.release_unfinished(self.job_id)
+        self.assertEqual(len(self.copies()),2,'positive control: not removed, nothing goes')
+        Path(self.output['final_path']).unlink();self.remove()
+        self.assertEqual(self.retention.release_unfinished(self.job_id),2)
+        self.assertEqual(self.copies(),[]);self.assertFalse((self.source.root/self.cleanup_id).exists())
+        self.assertEqual(original.read_bytes(),raw,'an original still in the library stays where it is')
+    def test_an_unfinished_cleanup_with_an_intent_or_unknown_content_keeps_its_copies(self):
+        original,raw=self.unfinished();Path(self.output['final_path']).unlink();self.remove()
+        extra=self.source.root/self.cleanup_id/'foreign.txt';extra.write_text('preserve')
+        with self.assertRaisesRegex(BoundaryError,'Unknown recovery'):self.retention.release_unfinished(self.job_id)
+        extra.unlink()
+        with connect(self.db) as db:db.execute("UPDATE cleanup_members SET state='removal_intended' WHERE cleanup_id=? AND path=?",(self.cleanup_id,str(original)))
+        with self.assertRaisesRegex(BoundaryError,'in progress'):self.retention.release_unfinished(self.job_id)
+        self.assertEqual(len(self.copies()),2);self.assertEqual(original.read_bytes(),raw)
+    def test_the_sweep_releases_a_removed_books_leftovers_once(self):
+        import merge_service,threading as threads
+        s=MergeService.__new__(MergeService);calls=[]
+        s.inventory=SimpleNamespace(database=self.db);s.operation_lock=threads.RLock();s.storage_cleanup='storage'
+        s.working=SimpleNamespace(discharge_removed=lambda job_id,storage:calls.append(('working',job_id)) or 1)
+        s.recovery=SimpleNamespace(release_unfinished=lambda job_id:calls.append(('recovery',job_id)) or 2)
+        with patch('sys.stderr'):
+            s._release_removed_leftovers()
+            self.assertEqual(calls,[],'nothing is removed: nothing to release')
+            self.ready()
+            with connect(self.db) as db:db.execute("UPDATE source_cleanup SET state='needs_attention' WHERE id=?",(self.cleanup_id,))
+            Path(self.output['final_path']).unlink();self.remove()
+            s._release_removed_leftovers();s._release_removed_leftovers()
+        self.assertEqual(calls,[('recovery',self.job_id)],'its unfinished cleanup\'s copies, once per run')
     def test_the_sweep_takes_a_few_sets_per_pass(self):
         import merge_service
         s=MergeService.__new__(MergeService);due=['job-%d'%n for n in range(7)]

@@ -1646,6 +1646,7 @@ class MergeService:
                                 finally:self._post_current=None
                         if manual:self._manual_recovery=None
                         self._purge_replacement_recoveries()
+                        self._release_removed_leftovers()
                         self._finish_held_cleanups(cleanup_generation)
                         self._finish_temporary_cleanups()
                         self.jobs.start_published_check()
@@ -1679,7 +1680,6 @@ class MergeService:
         try:
             self.recovery.sync()
             if not self.recovery._rows("SELECT 1 FROM recovery_retention WHERE job_id=? AND state IN ('retained','deleting','needs_attention')",(job_id,)):return
-            if self.recovery.kept(job_id):return  # Keep files: kept until Sergei acts again
             self._post_current=(job_id,'temporary')
             with _PURGE_LOCK:self.recovery.purge(job_id,'automatic')
         except InterruptedError:pass  # resumed by the next sweep
@@ -1688,15 +1688,41 @@ class MergeService:
             except Exception:pass
         finally:self._post_current=None
 
+    def _release_removed_leftovers(self):
+        """0.31.1 (Sergei 2026-11-24): a finished book removed from the records because it is gone keeps nothing the app made:
+        its working files (WorkingLifecycle.discharge_removed) and the recovery copies of a source cleanup that never
+        finished (RecoveryRetention.release_unfinished; a finished cleanup's copies go through purge()). Verified paths only;
+        a refusal keeps the files, logs once and is tried once per run; RECOVERY_BATCH books per pass."""
+        import finished_removal
+        database=getattr(getattr(self,'inventory',None),'database',None)
+        if not database:return  # no catalog (a stand-in): nothing was removed
+        try:
+            with connect(database) as db:
+                gone=sorted(finished_removal.removed_jobs(db))
+                if not gone:return
+                staged={r[0] for r in db.execute("SELECT DISTINCT job_id FROM working_attempts WHERE state IN ('published','published_held')")} if db.execute("SELECT 1 FROM sqlite_master WHERE name='working_attempts'").fetchone() else set()
+                unfinished={r[0] for r in db.execute("SELECT job_id FROM source_cleanup WHERE state<>'completed'")} if db.execute("SELECT 1 FROM sqlite_master WHERE name='source_cleanup'").fetchone() else set()
+        except (sqlite3.Error,OSError):return
+        todo=[job_id for job_id in gone if (job_id in staged or job_id in unfinished) and self._cleanup_due(('removed',job_id))][:RECOVERY_BATCH]
+        for job_id in todo:
+            try:
+                with self.operation_lock,_PURGE_LOCK:
+                    files=self.working.discharge_removed(job_id,self.storage_cleanup) if job_id in staged else 0
+                    copies=self.recovery.release_unfinished(job_id) if job_id in unfinished else 0
+                if files or copies:self._removal_log('Removed finished book: %d working file(s) and %d recovery cop%s released (job %s)'%(files,copies,'y' if copies==1 else 'ies',job_id))
+                with _WORKING_LOCK:self.__dict__.setdefault('_purge_tried',set()).add(('removed',job_id))  # done for this run
+            except InterruptedError:return
+            except Exception as error:
+                self._cleanup_failed(('removed',job_id),error)
+                self._removal_log('A removed finished book\'s leftovers were kept: '+(str(error) or type(error).__name__)+' (job '+job_id+')')
+
     def _purge_replacement_recoveries(self):
         """Recovery copies of retired former outputs, once the replacement is verified (same rule)."""
         if not hasattr(self,'replacements'):return
         relations=[relation for relation in self.replacements.rows() if relation['state']=='completed' and
                    not self._retained_relation(relation) and self._cleanup_due(relation['id'])]
-        try:kept=self._kept_by_choice([relation['replacement_job_id'] for relation in relations]) if relations else set()
-        except (sqlite3.Error,AttributeError):return  # the Keep files record is unreadable: nothing is purged this pass
+        # 0.31.1 (Sergei 2026-11-24): no recovery copies for a published book, Keep files included.
         for relation in relations:
-            if relation['replacement_job_id'] in kept:continue  # Keep files: kept until Sergei acts again
             try:
                 with self.operation_lock:
                     if not self._retained_relation(relation):self.retirement.purge_recoveries(relation)

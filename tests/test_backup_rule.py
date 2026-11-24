@@ -105,14 +105,15 @@ class HeldCleanupTests(unittest.TestCase):
         s._kept_by_choice = Mock(side_effect=sqlite3.OperationalError('database is locked'))
         s._finish_held_cleanups(); s.cleanup.resume.assert_not_called()
 
-    def test_replacement_recoveries_of_a_kept_book_stay(self):
+    def test_replacement_recoveries_of_a_kept_book_go_too_0_31_1(self):
+        # Sergei 2026-11-24: no recovery copies for a published book; it overrides Keep files (they stayed before).
         s = service(); s._purge_tried = set(); s.retirement = SimpleNamespace(purge_recoveries=Mock(return_value=0))
         s.replacements = SimpleNamespace(rows=lambda: [{'id': 'r1', 'state': 'completed', 'replacement_job_id': 'j1'},
                                                        {'id': 'r2', 'state': 'completed', 'replacement_job_id': 'j2'}])
         s._kept_by_choice = lambda job_ids: {'j2'}
         s._retained_relation = lambda relation: False  # this stub has no catalog; the Keep files rule is what is tested
         s._purge_replacement_recoveries()
-        self.assertEqual([call.args[0]['id'] for call in s.retirement.purge_recoveries.call_args_list], ['r1'])
+        self.assertEqual([call.args[0]['id'] for call in s.retirement.purge_recoveries.call_args_list], ['r1', 'r2'])
 
     def test_they_wait_while_a_book_converts(self):
         s = started(service()); s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set()

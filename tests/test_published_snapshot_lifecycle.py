@@ -244,6 +244,37 @@ class PublishedSnapshotTests(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in stage.glob('source*.mp3')),['source%05d.mp3'%index for index in range(4)])
         self.assertEqual(self.life._attempt(self.job_id,attempt)['state'],'published_held')
 
+    def removed(self):
+        """Sergei deleted the finished book; the published-book check removed it from the records (finished_removal)."""
+        import finished_removal
+        output=json.loads(self.queue._rows('SELECT output FROM audio_jobs WHERE job_id=?',(self.job_id,))[0]['output'])
+        Path(output['final_path']).unlink()
+        with connect(self.db) as db:
+            db.execute('BEGIN IMMEDIATE')
+            self.assertTrue(finished_removal.remove(db,self.job_id,output,output['final_path'],{'missing':True}))
+
+    def test_a_removed_books_working_files_are_released_0_31_1(self):
+        # Sergei 2026-11-24: a removed finished book keeps nothing the app made; the original is never touched.
+        attempt,stage,_=self.published()
+        with self.assertRaisesRegex(BoundaryError,'Only a removed finished book'):self.life.discharge_removed(self.job_id,self.storage)
+        self.assertTrue((stage/'source00000.mp3').exists(),'positive control: a book that is not removed keeps them')
+        self.removed()
+        self.assertEqual(self.life.discharge_removed(self.job_id,self.storage),1)
+        self.assertEqual(list(stage.iterdir()),[])
+        self.assertEqual(self.life._attempt(self.job_id,attempt)['state'],'retired')
+        self.assertEqual(self.source.read_bytes(),self.original,'the original in the library is untouched')
+        self.assertEqual(self.life.discharge_removed(self.job_id,self.storage),0,'once')
+
+    def test_a_removed_books_unknown_or_changed_working_files_are_kept_0_31_1(self):
+        attempt,stage,_=self.published();self.removed()
+        (stage/'personal.flac').write_bytes(b'not produced')
+        with self.assertRaisesRegex(BoundaryError,'Unknown working member'):self.life.discharge_removed(self.job_id,self.storage)
+        self.assertTrue((stage/'source00000.mp3').exists())
+        (stage/'personal.flac').unlink();snapshot=stage/'source00000.mp3';raw=snapshot.read_bytes()
+        snapshot.unlink();snapshot.write_bytes(b'x'*len(raw))  # another file at its name
+        with self.assertRaises(BoundaryError):self.life.discharge_removed(self.job_id,self.storage)
+        self.assertEqual(snapshot.read_bytes(),b'x'*len(raw))
+
     def test_same_name_snapshot_replacement_is_not_adopted(self):
         _,stage,_=self.published();path=stage/'source00000.mp3';raw=path.read_bytes()
         path.unlink();path.write_bytes(raw)
