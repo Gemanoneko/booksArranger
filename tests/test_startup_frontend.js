@@ -227,6 +227,8 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     assert.equal(h.node('load-restart').hidden,true);assert.equal(h.node('load-actions').hidden,true);assert.equal(h.node('load-relaunch').hidden,true);
     assert.equal(h.node('jobs-status-text').textContent,'Jobs: preparing…');assert.equal(h.node('empty').textContent,'Preparing your books…');
     assert.equal(h.node('automatic-start-reason').textContent,'Automatic processing can start when the library status is ready.');
+    // Futaba's 0.31.1 QA, minor 2: its tooltip says the same, never "Waiting for the local server" while the engine answers.
+    assert.equal(h.node('start-automatic').title,'Automatic processing can start when the library status is ready.');
     const sentence='Not yet: Books Arranger is preparing the library status. This works as soon as it is ready.';
     assert.equal(h.node('library').title,sentence);assert.equal(h.node('filter').title,sentence);
     h.press(h.node('library'));assert.equal(h.node('message').textContent,sentence,'a press on an inert control says why');

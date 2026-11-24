@@ -126,7 +126,9 @@ class RecoveryRetention:
         return [row['job_id'] for row in rows]
 
     def kept(self,job_id):
-        """True once Sergei pressed Keep files for this book: no automatic purge touches it."""
+        """True once Sergei pressed Keep files for this book: its originals and folder stay as they are and it is no longer
+        flagged. Since 0.31.1 (Sergei 2026-11-24: no recovery copies for a published book) its recovery copies are still
+        released by the purge once the audiobook verifies (due)."""
         with connect(self.database) as db:return job_id in kept_by_choice(db,[job_id])
 
     def _set(self,job_id,state,reason='',actor=None):

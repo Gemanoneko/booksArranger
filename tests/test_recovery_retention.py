@@ -332,6 +332,34 @@ class PublishedBooksKeepNoCopiesTests(unittest.TestCase):
             Path(self.output['final_path']).unlink();self.remove()
             s._release_removed_leftovers();s._release_removed_leftovers()
         self.assertEqual(calls,[('recovery',self.job_id)],'its unfinished cleanup\'s copies, once per run')
+    def test_the_sweep_leaves_a_retained_runs_removed_book_alone(self):
+        # Senua m4 (the Brief's 0.30.0 item A): a retained run's job keeps its leftovers; the sweep never asks.
+        import threading as threads
+        s=MergeService.__new__(MergeService);calls=[]
+        s.inventory=SimpleNamespace(database=self.db);s.operation_lock=threads.RLock();s.storage_cleanup='storage'
+        s.working=SimpleNamespace(discharge_removed=lambda job_id,storage:calls.append(('working',job_id)) or 1)
+        s.recovery=SimpleNamespace(release_unfinished=lambda job_id:calls.append(('recovery',job_id)) or 2)
+        s._retained_cleanup_job=lambda job_id:job_id==self.job_id
+        self.ready()
+        with connect(self.db) as db:db.execute("UPDATE source_cleanup SET state='needs_attention' WHERE id=?",(self.cleanup_id,))
+        Path(self.output['final_path']).unlink();self.remove()
+        with patch('sys.stderr'):s._release_removed_leftovers()
+        self.assertEqual(calls,[])
+        s._retained_cleanup_job=lambda job_id:False
+        with patch('sys.stderr'):s._release_removed_leftovers()
+        self.assertEqual(calls,[('recovery',self.job_id)],'positive control: released once not retained')
+    def test_the_sweep_leaves_a_retained_runs_changed_original_copies_alone(self):
+        import threading as threads
+        s=MergeService.__new__(MergeService);calls=[]
+        s.inventory=SimpleNamespace(database=self.db);s.operation_lock=threads.RLock()
+        s.recovery=SimpleNamespace(storage=self.storage,release_changed=lambda job_id:calls.append(job_id) or 2)
+        s._retained_cleanup_job=lambda job_id:True
+        self.changed()
+        with patch('sys.stderr'):s._release_changed_copies()
+        self.assertEqual(calls,[])
+        s._retained_cleanup_job=lambda job_id:False
+        with patch('sys.stderr'):s._release_changed_copies()
+        self.assertEqual(calls,[self.job_id],'positive control')
     def changed(self,kept=False):
         """A published book's source cleanup held because an original changed since it was checked: one original back in
         place with other bytes (its copy only verified), the other already removed (its copy the only one)."""

@@ -232,8 +232,11 @@ console.log('PASS 0.31.0 finished state: three badges, no bare Nothing running, 
   assert.match(get('jobs-status-text').textContent,/^Last confirmed — /);
   run('recoveryDisconnected=false');
   const at=run('new Date(2026,10,22,14,5).toISOString()');
-  context.relinkRow={relinked:{at,was:'Z:\Audiobooks Sorted\Сборники\Book.m4b',now:'Z:\Audiobooks Sorted\Сборники\Серия\Book.m4b'}};
-  assert.equal(run('relinkedDetail(relinkRow)'),'Technical detail: Found again after a move outside the app (22 Nov, 14:05). Was in Z:\Audiobooks Sorted\Сборники\Book.m4b. Now in Z:\Audiobooks Sorted\Сборники\Серия\Book.m4b. Matched by name, file ID, size and hash.');
+  context.relinkRow={relinked:{at,was:'Z:\\Audiobooks Sorted\\Сборники\\Book.m4b',now:'Z:\\Audiobooks Sorted\\Сборники\\Серия\\Book.m4b'}};
+  assert.equal(run('relinkedDetail(relinkRow)'),'Technical detail: Found again after a move outside the app (22 Nov, 14:05). Was in Z:\\Audiobooks Sorted\\Сборники\\Book.m4b. Now in Z:\\Audiobooks Sorted\\Сборники\\Серия\\Book.m4b. Matched by name, file ID, size and hash.');
+  // Senua M2: a book renamed by hand was matched by its file ID, size and hash; the line does not claim its name.
+  context.renamedRow={relinked:{at,was:'Z:\\Audiobooks Sorted\\Серия\\Typo Titel.m4b',now:'Z:\\Audiobooks Sorted\\Серия\\Fixed Title.m4b'}};
+  assert.match(run('relinkedDetail(renamedRow)'),/Now in Z:\\Audiobooks Sorted\\Серия\\Fixed Title\.m4b\. Matched by file ID, size and hash\.$/);
   assert.equal(run('relinkedDetail({relinked:null})'),'');
 }
 console.log('PASS 0.31.1 relinked books: the status line part, its 10 minutes, Last confirmed, the book\'s Technical details');
@@ -245,11 +248,11 @@ console.log('PASS 0.31.1 relinked books: the status line part, its 10 minutes, L
   const line=(relinked,removed,refused=false)=>{Object.assign(context.fixture,{relinked,removed,removal_refused:refused});run('renderJobs()');return get('jobs-status-text').textContent;};
   show({state:'all_done',pending:pending({any:false})});
   const base=' · 0 need attention · 1510 converted out of 1510 approved books';
-  assert.equal(line(null,{count:1,last_age_ms:0}),base+' · 1 missing book removed from the list, no files touched');
-  assert.equal(line(null,{count:4,last_age_ms:3599999}),base+' · 4 missing books removed from the list, no files touched');
+  assert.equal(line(null,{count:1,last_age_ms:0}),base+' · 1 missing book removed from the list, library files untouched');
+  assert.equal(line(null,{count:4,last_age_ms:3599999}),base+' · 4 missing books removed from the list, library files untouched');
   assert.equal(line(null,{count:4,last_age_ms:3600000}),base,'gone an hour after the latest removal');
-  assert.equal(line({count:2,last_age_ms:0},{count:1,last_age_ms:0}),base+' · 2 moved books found, new locations saved · 1 missing book removed from the list, no files touched','found first, removed second');
-  assert.equal(line(null,{count:1200,last_age_ms:5}),base+` · ${(1200).toLocaleString()} missing books removed from the list, no files touched`);
+  assert.equal(line({count:2,last_age_ms:0},{count:1,last_age_ms:0}),base+' · 2 moved books found, new locations saved · 1 missing book removed from the list, library files untouched','found first, removed second');
+  assert.equal(line(null,{count:1200,last_age_ms:5}),base+` · ${(1200).toLocaleString()} missing books removed from the list, library files untouched`);
   const note=get('jobs-removal-note');
   line(null,null,true);
   assert.equal(note.textContent,'Missing books were not removed. Check that the library drive is connected.');assert.equal(note.hidden,false);

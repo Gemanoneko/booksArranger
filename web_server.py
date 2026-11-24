@@ -1331,6 +1331,9 @@ class Handler(BaseHTTPRequestHandler):
                     current=automatic.status(jobs=self.server.merge.state(),scanning=self.server.scan_active(),server_closing=self.server.closing)
                     self.response(409,{'error':current.get('start_block_reason') or str(error),'automatic_processing':current});return
                 self.server.active_library='Audiobooks'
+                # 0.31.1 (Futaba's QA, Major 2): a Start checks every finished book again, in the background.
+                recheck=getattr(self.server.merge,'recheck_finished_books',None)
+                if callable(recheck):recheck()
             else:value=automatic.stop()
             self.response(202,{'automatic_processing':value});return
         if path=='/api/queue/cancel':

@@ -33,9 +33,10 @@ INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd
 STATUS_MAX_AGE=1.0 # Seconds after a status computation STARTED during which polling readers may reuse it.
 STATUS_WAIT=4.0 # Seconds a reader waits on another thread's computation; below the desktop shell's 5 s request timeout.
 RELINK_SHOW_MS=600000  # 0.31.1 (Judy's stuck-load spec, 8.1): finished books found again show in the status line this long
-RELINK_INDEX_SECONDS=300.0  # 0.31.1: one complete listing of the output folder serves every missing book of a pass this long
+RELINK_INDEX_SECONDS=300.0  # 0.31.1: one listing of the output folder (complete or not) serves every missing book this long
 REMOVAL_SHOW_MS=3600000  # 0.31.1 (Judy's stuck-load spec, 8.1): finished books removed from the list show this long
-REMOVAL_BRAKE=10  # 0.31.1: more finished books missing than this in one pass removes none (the drive, not the books)
+REMOVAL_BRAKE=10  # 0.31.1: more finished books missing than this in one pass removes none (the drive, not the books); so does
+# three or more missing that are over half of all finished books (MergeService._remove_missing)
 RECOVERY_BATCH=3  # 0.31.1: recovery sets the sweep releases per pass; the next batch follows after RECOVERY_PAUSE
 RECOVERY_PAUSE=20  # seconds
 STALE_WAIT=0.5 # Seconds a poll waits for a newer status when an earlier answer exists; then it gets that answer.
@@ -275,6 +276,7 @@ class MergeService:
         self.jobs.output_current=self._output_current;self.jobs.verify_pace=self._pacer
         self.jobs.relink=self._relink_found  # 0.31.1: a finished book moved by hand is found again, never flagged
         self.jobs.remove_missing=self._remove_missing  # 0.31.1: one proven gone is removed from the records
+        self.jobs.pass_done=self._relink_pass_done  # 0.31.1: the found books' count and its time start when the pass finishes
         self.jobs.background_stop=_Flag(lambda:bool(self.__dict__.get('_maintenance_paused') or self.__dict__.get('_foreground_waiters',0) or self.__dict__.get('_closing') or self.draining or self.inventory.worker and self.inventory.worker.is_alive() or self._worker_active() or self.__dict__.get('_update_hold') is not None and self._update_hold.is_set()))
         self.retirement.stop=self.jobs._stop
         self.jobs.pending_postprocessing=self._pending_replacement_postprocessing
@@ -651,7 +653,13 @@ class MergeService:
                 try:
                     stat=Path(effective['final_path']).stat()
                     current=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)==self._validated_outputs.get(job['job_id'])
-                except (OSError,KeyError,ValueError,TypeError):pass
+                except OSError:
+                    # 0.31.1 (Futaba's QA, minor 3): a finished book whose file is not where the app has it (moved by hand and
+                    # not found yet, deleted and not removed yet, or its removal refused: the drive away) stays as it was, in
+                    # every list and total, until the published-book check finds it again or removes it. A refusal changes
+                    # nothing. As it was: converted when its file was verified before (this launch's last full check).
+                    current=job['job_id'] in self._validated_outputs
+                except (KeyError,ValueError,TypeError):pass
                 if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE},binding,location_envelope=location_envelope,retry_binding=retry_binding,
                                   rewrites=rewrites.get(job['job_id'])):converted.add(identity)
             return {'approved':len(approved),'converted':len(converted),'converted_ids':converted,'candidate_total':len(candidate_ids),'not_approved_total':len(candidate_ids-set(approved))}
@@ -1160,7 +1168,9 @@ class MergeService:
         """Admit pending work promptly. Finished-book checks belong to idle maintenance.
 
         The requested job still verifies its own exact inputs and destination. A Start
-        never hashes unrelated completed books under the foreground operation lock.
+        never hashes unrelated completed books under the foreground operation lock. 0.31.1: a pressed Start (Resume
+        audiobook jobs, Start automatic processing) asks the background published-book check to look at every finished
+        book again (recheck_finished_books), so a book moved by hand is found then.
         pressed=False: a start no press made (the restart restore and the run it restored). Until Sergei's first own
         start in this launch, it leaves every cleanup that was already waiting alone (Senua R-M2, the NAS backlog).
         0.30.0: inside restored_press (a queued action saved before a restart) it starts nothing.
@@ -1657,8 +1667,9 @@ class MergeService:
                     except (InterruptedError,ValueError,OSError):pass
                 # A queued deletion is looked at again every 2 s, so it runs right after the scan or cleanup it waited for.
                 # 0.31.1: while a removal pass was refused (the drive away), the next check comes RECOVERY_PAUSE later, so the
-                # page's "Missing books were not removed…" goes within about 40 s of the drive answering again.
-                self._retention_wake.wait(2 if self._manual_queue() else RECOVERY_PAUSE if backlog or self.removal_refused() else 60);self._retention_wake.clear()
+                # page's "Missing books were not removed…" goes within about 40 s of the drive answering again; so does a
+                # Start's check of every finished book that could not start yet (the queue was still busy).
+                self._retention_wake.wait(2 if self._manual_queue() else RECOVERY_PAUSE if backlog or self.removal_refused() or self._recheck_waits() else 60);self._retention_wake.clear()
         self._purge_tried=set()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
         for name in ('series_backfill','name_write','gap_fill','rule_filing'):
@@ -1693,7 +1704,8 @@ class MergeService:
         """0.31.1 (Sergei 2026-11-24): a finished book removed from the records because it is gone keeps nothing the app made:
         its working files (WorkingLifecycle.discharge_removed) and the recovery copies of a source cleanup that never
         finished (RecoveryRetention.release_unfinished; a finished cleanup's copies go through purge()). Verified paths only;
-        a refusal keeps the files, logs once and is tried once per run; RECOVERY_BATCH books per pass."""
+        a refusal keeps the files, logs once and is tried once per run; RECOVERY_BATCH books per pass. A retained run's job is
+        left alone (the Brief's 0.30.0 item A; Senua m4)."""
         import finished_removal
         database=getattr(getattr(self,'inventory',None),'database',None)
         if not database:return  # no catalog (a stand-in): nothing was removed
@@ -1704,7 +1716,7 @@ class MergeService:
                 staged={r[0] for r in db.execute("SELECT DISTINCT job_id FROM working_attempts WHERE state IN ('published','published_held')")} if db.execute("SELECT 1 FROM sqlite_master WHERE name='working_attempts'").fetchone() else set()
                 unfinished={r[0] for r in db.execute("SELECT job_id FROM source_cleanup WHERE state<>'completed'")} if db.execute("SELECT 1 FROM sqlite_master WHERE name='source_cleanup'").fetchone() else set()
         except (sqlite3.Error,OSError):return
-        todo=[job_id for job_id in gone if (job_id in staged or job_id in unfinished) and self._cleanup_due(('removed',job_id))][:RECOVERY_BATCH]
+        todo=[job_id for job_id in gone if (job_id in staged or job_id in unfinished) and self._cleanup_due(('removed',job_id)) and not self._retained_cleanup_job(job_id)][:RECOVERY_BATCH]
         for job_id in todo:
             try:
                 with self.operation_lock,_PURGE_LOCK:
@@ -1721,7 +1733,8 @@ class MergeService:
         """0.31.1 (Sergei 2026-11-24): the recovery copies of a published book whose source cleanup is held because an
         original changed since it was checked go too (RecoveryRetention.release_changed: its audiobook verified in full,
         each copy proven). The Needs attention entry stays (the changed originals are Sergei's). Once per run, at most
-        RECOVERY_BATCH books per pass, in the recovery sweep after the first status; a refusal keeps everything and logs."""
+        RECOVERY_BATCH books per pass, in the recovery sweep after the first status; a refusal keeps everything and logs. A
+        retained run's job is left alone (the Brief's 0.30.0 item A; Senua m4)."""
         database=getattr(getattr(self,'inventory',None),'database',None)
         if not database:return
         try:
@@ -1732,7 +1745,7 @@ class MergeService:
         except (sqlite3.Error,OSError):return
         root=getattr(getattr(self,'recovery',None),'storage',None)
         root=getattr(root,'recovery_root',None)
-        todo=[row for row in rows if self._cleanup_due(('changed',row['job_id'])) and (root is None or os.path.lexists(Path(root)/row['id']))][:RECOVERY_BATCH]
+        todo=[row for row in rows if self._cleanup_due(('changed',row['job_id'])) and not self._retained_cleanup_job(row['job_id']) and (root is None or os.path.lexists(Path(root)/row['id']))][:RECOVERY_BATCH]
         for row in todo:
             job_id=row['job_id']
             try:
@@ -2459,8 +2472,10 @@ class MergeService:
         with connect(self.inventory.database) as db:return kept_by_choice(db,job_ids)
 
     def keep_files(self,library,identity,revision,job_id):
-        """Keep files: this book's kept files stop being flagged and no automatic purge touches them again
-        (recovery_retention.kept_by_choice). Nothing is deleted and no job is queued."""
+        """Keep files: this book's originals and folder stay as they are and stop being flagged
+        (recovery_retention.kept_by_choice). Nothing is deleted and no job is queued here. Since 0.31.1 (Sergei 2026-11-24:
+        no recovery copies for a published book) it does not keep recovery copies: the sweep still releases them once the
+        audiobook verifies (RecoveryRetention.due)."""
         from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
         from recovery_retention import KEPT_FILES_TABLE
         if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
@@ -2806,10 +2821,26 @@ class MergeService:
     def resume_press(self):
         """Resume audiobook jobs (the toolbar): the queue's start, or, while a Pause or an earlier start is still settling,
         the start kept and made when it settles (start_when_settled; ruling 35)."""
+        self.recheck_finished_books()  # 0.31.1 (Futaba's QA, Major 2): a Start finds the books moved by hand
         try:return self.resume()
         except StartRefused as error:
             if error.start_state!='busy':raise
         return self.state()|{'start_admission':self.start_when_settled()}
+
+    def recheck_finished_books(self):
+        """0.31.1 (Futaba's QA, Major 2; Sergei: a moved book is found "at the next launch or Start"): a Start's press asks
+        the published-book check to look at every finished book again (AudioJobs.recheck_published) and wakes the sweep that
+        starts it. It runs in the background once the queue is idle (a Start never checks finished books under its own lock):
+        within about a minute when nothing converts; when the conversions end otherwise."""
+        jobs=self.__dict__.get('jobs')
+        if jobs is not None and hasattr(jobs,'recheck_published'):jobs.recheck_published()
+        wake=self.__dict__.get('_retention_wake')
+        if wake is not None:wake.set()
+
+    def _recheck_waits(self):
+        jobs=self.__dict__.get('jobs')
+        try:return bool(jobs is not None and hasattr(jobs,'published_recheck_waiting') and jobs.published_recheck_waiting())
+        except Exception:return False
 
     def _record_start_failure(self,error):
         if getattr(error,'start_state',None)=='busy' and not self.draining and not self.__dict__.get('_closing'):
@@ -5945,19 +5976,25 @@ class MergeService:
     # ── 0.31.1 (Sergei 2026-11-24): a finished book moved by hand is found again; one that is gone is removed ─────────
     def _relink_found(self, record, stop=None, pace=None):
         """The published-book check could not confirm this finished book (AudioJobs._published_done). When its file is gone
-        from where the app last had it, the output folder is searched for it: every .m4b of the same name in any folder
-        under the output root (one complete listing, reused by the pass), the file ID and size the app last recorded for it
-        (cheap metadata), then its full SHA-256 against the receipt, on a held handle. Exactly one such file: its location is
-        recorded as a completed move of origin 'found' (book_move.found), so every later step uses it, and its identity is
-        remembered as after a full check; True. A name alone is never enough (refused, never guessed).
+        from where the app last had it, the output folder is searched for it (one listing of every folder under the output
+        root, with names and sizes, reused by the pass): every .m4b of the same name, and every .m4b of the same size that
+        has the file ID the app last recorded for it (a book renamed by hand, anywhere under the root: Sergei 2026-11-24,
+        Senua M2). Each is checked for that file ID and size (cheap metadata), then its full SHA-256 against the receipt, on a
+        held handle. Exactly one such file: its location is recorded as a completed move of origin 'found' (book_move.found),
+        so every later step uses it, and its identity is remembered as after a full check; True. A name alone is never
+        enough (refused, never guessed). The status line counts it when the pass finishes (_relink_pass_done).
 
-        No file of its name anywhere: a dict for the pass to decide on (AudioJobs._verify_rows, _remove_missing):
-        {'missing': True, ...} when its absence is proven (the output folder answered with content, every folder under it
-        was listed, and the folders of its recorded path were listed down to the one it is gone from), else
+        Never looked for and never removed (False, one log line) while the app's own records hold the book: a retained run's
+        job, a move of it that has not finished, a replacement link (_removal_hold: Senua M1 and m4).
+
+        No file of its name and none with its file ID anywhere: a dict for the pass to decide on (AudioJobs._verify_rows,
+        _remove_missing): {'missing': True, ...} when its absence is proven (the output folder answered with content, every
+        folder under it was listed, and the folders of its recorded path were listed down to the one it is gone from), else
         {'missing': False, 'why': ...} when something did not answer (the drive away, asleep or slow, a folder that could not
-        be listed): nothing is removed in that pass. False in every other case (it is there; a file of its name is
-        elsewhere but not proven to be it; it was not in the output folder), and the book stays as it is."""
-        import book_move,unicodedata
+        be listed): nothing is removed in that pass. False in every other case (it is there; a file of its name, or one of its
+        size when no file ID was recorded to tell, is elsewhere but not proven to be it; it was not in the output folder), and
+        the book stays as it is."""
+        import book_move
         try:
             if not isinstance(record,dict) or not all(isinstance(record.get(k),str) and record[k] for k in ('job_id','final_path','sha256')) or type(record.get('size')) is not int:
                 return False
@@ -5967,6 +6004,9 @@ class MergeService:
             if os.path.lexists(old):return False  # it is there: changed or unreadable, never looked for elsewhere
         except InterruptedError:raise
         except (ValueError,OSError,KeyError,TypeError,sqlite3.Error):return False
+        held=self._removal_hold(record['job_id'])
+        if held:
+            self._relink_log('not at its recorded path; left as it is: '+held,old);return False
         output_root=getattr(self.inventory,'output_root',None)
         if not output_root:return False
         root=ordinary(output_root)
@@ -5979,23 +6019,22 @@ class MergeService:
         if not complete:
             self._relink_log('not at its recorded path; a folder in the output folder could not be listed',old)
             return {'missing':False,'why':'output folder not listed completely'}
-        same=[path for path in index.get(unicodedata.normalize('NFC',old.name).casefold(),()) if book_move.key(path)!=book_move.key(old)]
-        if not same:
-            proof=self._absence_proof(root,old,stop)
-            if proof is None:
-                self._relink_log('not at its recorded path; its folder did not answer',old)
-                return {'missing':False,'why':'recorded folder unavailable'}
-            if proof is False:return False  # not in the output folder: never removed
-            return {'missing':True,'recorded':str(old),'gone_from':proof,'searched':str(root)}
+        names,sized=self._namesakes(index,old,effective['size'])
+        if not names and not sized:return self._missing(root,old,stop)
         known=self._known_identity(old,effective['sha256'])  # [dev, ino, size, mtime] at its last full check, if any
         native=effective.get('identity')
         if not (isinstance(known,list) and len(known)>=2) and not native:
-            self._relink_log('not at its recorded path; a file of its name is elsewhere but no file ID was recorded to prove it',old);return False
-        matches=self._relink_matches(root,same,old,effective,known,native,stop,pace)
+            self._relink_log('not at its recorded path; a file of its name or size is elsewhere but no file ID was recorded to prove it',old);return False
+        renamed=self._with_recorded_id(sized,known,native,stop)
+        if renamed is None:
+            self._relink_log('not at its recorded path; a file of its size elsewhere could not be read',old);return False
+        if not names and not renamed:return self._missing(root,old,stop)  # its file ID is under no name in the output folder
+        matches=self._relink_matches(root,names+renamed,old,effective,known,native,stop,pace)
         if len(matches)!=1:
-            self._relink_log('not at its recorded path; a file of its name is elsewhere but not proven to be it' if not matches else 'not at its recorded path; %d files match it, none chosen'%len(matches),old)
+            self._relink_log('not at its recorded path; a file of its name or file ID is elsewhere but not proven to be it' if not matches else 'not at its recorded path; %d files match it, none chosen'%len(matches),old)
             return False
         found=matches[0];stat_identity=found.pop('stat_identity')
+        same_name=self._name_key(found['final_path'])==self._name_key(old)
         try:
             with connect(self.inventory.database) as db:
                 db.execute('BEGIN IMMEDIATE')
@@ -6007,22 +6046,73 @@ class MergeService:
                 job=db.execute("SELECT json_extract(manifest,'$.candidate_id') FROM audio_jobs WHERE job_id=?",(record['job_id'],)).fetchone()
                 if not job or not job[0]:return False
                 book_move.found(db,job_id=record['job_id'],kind=kind,candidate_id=job[0],start=effective,final=found,
-                                proof={'found':{'matched':['name','file_id','size','sha256'],'file_id':list(known[:2]) if isinstance(known,list) else None,
+                                proof={'found':{'matched':(['name'] if same_name else [])+['file_id','size','sha256'],'file_id':list(known[:2]) if isinstance(known,list) else None,
                                                 'native_identity':list(native) if native else None,'searched':str(output_root)}})
         except (sqlite3.Error,ValueError,KeyError) as error:
             self._relink_log('found again but its new location could not be recorded ('+(str(error) or type(error).__name__)+')',old);return False
         self._remember_identity(dict(found,job_id=record['job_id']),stat_identity)  # the hash above was a full check
-        with _WORKING_LOCK:
-            last=self.__dict__.get('_relinked_last');at=time.monotonic()
-            count=1 if last is None or (at-last)*1000>=RELINK_SHOW_MS else self.__dict__.get('_relinked_count',0)+1
-            self._relinked_count,self._relinked_last=count,at
-        self._relink_log('found again after a move outside the app; now '+found['final_path'],old)
+        with _WORKING_LOCK:self._relinked_pending=self.__dict__.get('_relinked_pending',0)+1  # counted when the pass finishes
+        self._relink_log(('found again after a move outside the app; now ' if same_name else 'found again after a rename outside the app; now ')+found['final_path'],old)
         return True
 
+    def _removal_hold(self, job_id):
+        """Why the app's own records hold this finished book where they have it, or '' (Senua M1 and m4, Sergei 2026-11-24):
+        a retained run's job (the Brief's 0.30.0 item A: every background pass leaves it alone), a move of it that has not
+        finished, a replacement link (finished_removal.blocked). Such a book is never looked for and never removed; records
+        that cannot be read hold it too. The removal reads finished_removal.blocked again in its own transaction."""
+        import finished_removal
+        if self._retained_cleanup_job(job_id):return 'a retained run keeps it'
+        try:
+            with connect(self.inventory.database) as db:return finished_removal.blocked(db,job_id) or ''
+        except (sqlite3.Error,OSError,ValueError,AttributeError):return 'its records could not be read'
+
+    @staticmethod
+    def _name_key(path):
+        import unicodedata
+        return unicodedata.normalize('NFC',os.path.basename(str(path))).casefold()
+
+    def _namesakes(self, index, old, size):
+        """(the paths of its name, the other paths of its size) in an output listing (_output_files), its recorded path left out."""
+        import book_move
+        here=book_move.key(old)
+        names=[path for path in index['names'].get(self._name_key(old),()) if book_move.key(path)!=here]
+        taken={book_move.key(path) for path in names}
+        return names,[path for path in index['sizes'].get(size,()) if book_move.key(path)!=here and book_move.key(path) not in taken]
+
+    @staticmethod
+    def _with_recorded_id(paths, known, native, stop=None):
+        """The paths (files of the book's size elsewhere under the output root) that have the file ID recorded for the book:
+        os.stat's [dev, ino] as verified_outputs keeps it, else the native identity on a held handle (Senua M2: a rename
+        keeps the file ID). None when one of them could not be read: it may be the book, so nothing is proven. Only the
+        files of its size are looked at, so a listing costs no call per file. The caller has a recorded file ID."""
+        stat_id=list(known[:2]) if isinstance(known,list) and len(known)>=2 else None
+        found=[]
+        for path in paths:
+            if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
+            try:
+                if stat_id is not None:
+                    info=os.stat(path,follow_symlinks=False)
+                    if [info.st_dev,info.st_ino]==stat_id:found.append(path)
+                else:
+                    with VerifiedFile(ordinary(path)) as handle:
+                        if list(handle.facts()['identity'])==list(native):found.append(path)
+            except FileNotFoundError:continue  # gone since the listing: not where the book is now
+            except (OSError,ValueError):return None
+        return found
+
+    def _missing(self, root, old, stop=None):
+        """The pass's verdict on a book of which no file is anywhere under root (_relink_found): its absence proven, or not now."""
+        proof=self._absence_proof(root,old,stop)
+        if proof is None:
+            self._relink_log('not at its recorded path; its folder did not answer',old)
+            return {'missing':False,'why':'recorded folder unavailable'}
+        if proof is False:return False  # not in the output folder: never removed
+        return {'missing':True,'recorded':str(old),'gone_from':proof,'searched':str(root)}
+
     def _relink_matches(self, root, paths, old, effective, known, native, stop=None, pace=None):
-        """The files among paths (same name, under root) that are this book: a regular file of its size with the file ID
-        recorded for it (os.stat's, as verified_outputs keeps it, and the native identity when the record has one), then on a
-        held handle in a checked folder chain: one link, the size, the full SHA-256."""
+        """The files among paths (its name, or its size and file ID, under root) that are this book: a regular file of its
+        size with the file ID recorded for it (os.stat's, as verified_outputs keeps it, and the native identity when the
+        record has one), then on a held handle in a checked folder chain: one link, the size, the full SHA-256."""
         import stat as stat_module
         found=[]
         for path in paths:
@@ -6045,20 +6135,22 @@ class MergeService:
         return found
 
     def _output_files(self, root, stop=None, fresh=False):
-        """({NFC case-folded file name: [paths]} of the .m4b files in every folder under root, complete). Links, junctions,
-        hidden and system folders and recycle bins are not entered (a book in a recycle bin was deleted). The root must
-        answer with content (an empty listing is a failed mount until proven otherwise): else OSError. complete is False when
-        any folder could not be listed: nothing may be removed on such a listing. A complete listing is reused for
-        RELINK_INDEX_SECONDS (one listing serves a whole pass); an incomplete one never. fresh: list now, whatever is kept
-        (a removal never relies on a listing older than its pass: a book moved since must be found, never removed)."""
+        """({'names': {NFC case-folded file name: [paths]}, 'sizes': {size: [paths]}} of the .m4b files in every folder under
+        root, complete). The sizes come with the listing (no call per file). Links, junctions, hidden and system folders and
+        recycle bins are not entered (a book in a recycle bin was deleted). The root must answer with content (an empty
+        listing is a failed mount until proven otherwise): else OSError. complete is False when any folder could not be
+        listed: nothing may be removed on such a listing. A listing, complete or not, is reused for RELINK_INDEX_SECONDS: one
+        listing serves a whole pass and the passes that retry soon after (Senua m2: a folder that stays unlistable is listed
+        again every few minutes, never once per missing book per pass). fresh: list now, whatever is kept (a removal never
+        relies on a listing older than its pass: a book moved since must be found, never removed)."""
         import unicodedata,book_move
         with _WORKING_LOCK:
             kept=self.__dict__.get('_relink_index')
-            if not fresh and kept and kept[0]==book_move.key(root) and 0<=time.monotonic()-kept[1]<RELINK_INDEX_SECONDS:return kept[2],True
+            if not fresh and kept and kept[0]==book_move.key(root) and 0<=time.monotonic()-kept[1]<RELINK_INDEX_SECONDS:return kept[2],kept[3]
         if not os.path.isdir(root):raise OSError('The output folder is not available')
         with os.scandir(root) as probe:
             if next(probe,None) is None:raise OSError('The output folder answered with nothing in it')
-        index={};pending=[str(root)];complete=True
+        names={};sizes={};pending=[str(root)];complete=True
         while pending:
             if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
             folder=pending.pop()
@@ -6074,10 +6166,12 @@ class MergeService:
                         if entry.name[:1] in '#@.$' or attributes&0x6:continue  # #recycle, @eaDir, .Trash, $RECYCLE.BIN; hidden, system
                         pending.append(entry.path)
                     elif entry.name.lower().endswith('.m4b') and entry.is_file(follow_symlinks=False):
-                        index.setdefault(unicodedata.normalize('NFC',entry.name).casefold(),[]).append(entry.path)
+                        size=entry.stat(follow_symlinks=False).st_size  # from the listing itself on Windows
+                        names.setdefault(unicodedata.normalize('NFC',entry.name).casefold(),[]).append(entry.path)
+                        sizes.setdefault(size,[]).append(entry.path)
                 except OSError:complete=False
-        if complete:
-            with _WORKING_LOCK:self._relink_index=(book_move.key(root),time.monotonic(),index)
+        index={'names':names,'sizes':sizes}
+        with _WORKING_LOCK:self._relink_index=(book_move.key(root),time.monotonic(),index,complete)
         return index,complete
 
     @staticmethod
@@ -6105,53 +6199,66 @@ class MergeService:
             current=current/part
         return None
 
+    def _finished_total(self):
+        """Every finished book in the catalog (a receipt, not removed): what the removal brake's share is taken of."""
+        try:
+            with connect(self.inventory.database) as db:
+                return db.execute("SELECT count(*) FROM audio_jobs WHERE state IN ('completed','needs attention') AND output IS NOT NULL").fetchone()[0]
+        except (sqlite3.Error,OSError,AttributeError):return 0
+
     def _remove_missing(self, missing, unprovable, checked, stop=None):
         """AudioJobs' end of a complete background pass (Sergei 2026-11-24): the finished books proven missing are removed from
-        the records (finished_removal: a tombstone and the 'removed' state; catalog only, no file is touched), each proven
-        gone again just before. Nothing is removed, and the page says to check the library drive (removal_refused), when
-        anything in the pass could not be proven (unprovable), when more than REMOVAL_BRAKE finished books are missing at
-        once, or when three or more are missing and they are over half of the books the pass checked: the drive, not the
-        books. A pass that removes or has nothing to remove clears that line. The recovery sweep then releases the removed
-        books' recovery copies (RecoveryRetention.purge)."""
+        the records (finished_removal: a tombstone and the 'removed' state), each proven gone again just before. No library or
+        source file is touched; the recovery sweep then deletes the book's own recovery copies and working files
+        (RecoveryRetention.purge, release_unfinished; WorkingLifecycle.discharge_removed). A book the app's own records hold
+        (_removal_hold: a retained run's job, an unfinished move, a replacement link) is never removed. Nothing is removed,
+        and the page says to check the library drive (removal_refused), when anything in the pass could not be proven
+        (unprovable), when more than REMOVAL_BRAKE finished books are missing at once, or when three or more are missing and
+        they are over half of all the catalog's finished books (Senua m1: not of the books this pass looked at, which after
+        the launch pass are only the unconfirmed ones): the drive, not the books. A pass that removes or has nothing to
+        remove clears that line."""
         import finished_removal
         reason=None
         if unprovable:reason='%d finished book(s) could not be checked (%s)'%(len(unprovable),', '.join(sorted({p.get('why','') for _,_,p in unprovable})))
-        elif len(missing)>REMOVAL_BRAKE or len(missing)>=3 and len(missing)*2>checked:reason='%d of %d finished books checked are missing at once'%(len(missing),checked)
+        elif missing:
+            total=max(checked,self._finished_total())
+            if len(missing)>REMOVAL_BRAKE or len(missing)>=3 and len(missing)*2>total:reason='%d of %d finished books are missing at once'%(len(missing),total)
         if reason:
-            with _WORKING_LOCK:self._removal_refused=True
-            self._removal_log('Missing finished books were not removed: '+reason+'. Check that the library drive is connected.')
+            self._refuse_removal('Missing finished books were not removed: '+reason+'. Check that the library drive is connected.')
             return 0
         if not missing:
-            with _WORKING_LOCK:self._removal_refused=False
+            with _WORKING_LOCK:self._removal_refused=False;self._refusal_logged=None
             return 0
-        import unicodedata,book_move
         removed=0
         output_root=getattr(self.inventory,'output_root',None)
         root=ordinary(output_root) if output_root else None
         try:
-            # One listing taken now, after the whole pass: a book moved by hand since the pass's listing is never removed.
+            # One listing taken now, after the whole pass: a book moved or renamed by hand since the pass's listing is never removed.
             index,complete=self._output_files(root,stop,fresh=True) if root is not None else ({},False)
         except InterruptedError:raise
         except (OSError,ValueError):index,complete={},False
         if not complete:
-            with _WORKING_LOCK:self._removal_refused=True
-            self._removal_log('Missing finished books were not removed: the output folder could not be listed completely. Check that the library drive is connected.')
+            self._refuse_removal('Missing finished books were not removed: the output folder could not be listed completely. Check that the library drive is connected.')
             return 0
         for row,record,proof in missing:
             if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
+            if self._removal_hold(row['job_id']):continue  # the app's own records hold it: never removed
             try:
                 bindings=getattr(self,'publication_bindings',None)
                 effective=bindings.current(record)[0] if bindings else copy.deepcopy(record)
                 old=ordinary(effective['final_path'])
                 if str(old)!=proof.get('recorded') or root is None or os.path.lexists(old):continue
-                if any(book_move.key(path)!=book_move.key(old) for path in index.get(unicodedata.normalize('NFC',old.name).casefold(),())):
-                    continue  # a file of its name is in the output folder now: looked for again next pass, never removed
+                names,sized=self._namesakes(index,old,effective['size'])
+                if names:continue  # a file of its name is in the output folder now: looked for again next pass, never removed
+                if sized:
+                    known=self._known_identity(old,effective['sha256']);native=effective.get('identity')
+                    if not (isinstance(known,list) and len(known)>=2) and not native:continue  # nothing to tell a file of its size from it
+                    if self._with_recorded_id(sized,known,native,stop)!=[]:continue  # renamed meanwhile, or unreadable: next pass
                 again=self._absence_proof(root,old,stop)
             except InterruptedError:raise
             except (ValueError,OSError,KeyError,TypeError,sqlite3.Error):continue
             if again is None:
-                with _WORKING_LOCK:self._removal_refused=True
-                self._removal_log('Missing finished books were not removed: a folder stopped answering. Check that the library drive is connected.')
+                self._refuse_removal('Missing finished books were not removed: a folder stopped answering. Check that the library drive is connected.')
                 break
             if not again:continue
             try:
@@ -6163,9 +6270,9 @@ class MergeService:
                 removed+=1
                 with _WORKING_LOCK:self.__dict__.setdefault('_purge_tried',set()).discard(row['job_id'])  # its copies: tried again now
                 title=str((json.loads(row['manifest']).get('metadata') or {}).get('title') or '')
-                self._removal_log('Finished book removed from the list (not found; no files touched): '+title+' (was '+str(old)+')')
+                self._removal_log('Finished book removed from the list (not found; library and source files untouched): '+title+' (was '+str(old)+')')
         else:
-            with _WORKING_LOCK:self._removal_refused=False
+            with _WORKING_LOCK:self._removal_refused=False;self._refusal_logged=None
         if removed:
             with _WORKING_LOCK:
                 last=self.__dict__.get('_removed_last');at=time.monotonic()
@@ -6177,11 +6284,37 @@ class MergeService:
             if wake is not None:wake.set()  # their recovery copies go now
         return removed
 
-    @staticmethod
-    def _relink_log(what,path):
-        """One line in the engine's own log (Judy's spec, 8.3: never sent to the page)."""
+    def _relink_pass_done(self):
+        """AudioJobs' end of a published-book pass (after launch, or a Start's check): the books found again in it join the
+        status line's count now, and its time starts now (Judy's spec, 8.1: the clock starts when the pass that found the
+        books finishes). A later pass within RELINK_SHOW_MS adds to the count; after it the count starts again."""
+        with _WORKING_LOCK:
+            pending=self.__dict__.get('_relinked_pending',0)
+            if not pending:return
+            last=self.__dict__.get('_relinked_last');at=time.monotonic()
+            self._relinked_count=(0 if last is None or (at-last)*1000>=RELINK_SHOW_MS else self.__dict__.get('_relinked_count',0))+pending
+            self._relinked_last,self._relinked_pending=at,0
+        invalidate=getattr(self,'invalidate_status',None)
+        if callable(invalidate):invalidate()
+
+    def _refuse_removal(self, line):
+        """A removal pass that removed nothing: the page's line (removal_refused) and one log line, written again only when
+        it says something else (Futaba's QA, minor 3: every retry, 20 s apart, logged it again, about 4,000 lines a day)."""
+        with _WORKING_LOCK:
+            self._removal_refused=True
+            again=self.__dict__.get('_refusal_logged')==line;self._refusal_logged=line
+        if not again:self._removal_log(line)
+
+    def _relink_log(self,what,path):
+        """One line in the engine's own log (Judy's spec, 8.3: never sent to the page), once per book while it says the same
+        (Futaba's QA, minor 3: a book looked at again every 20 s logged the same line each time)."""
         import sys
-        try:print('Books Arranger: published-book check: finished book '+what+' (was '+str(path)+')',file=sys.stderr,flush=True)
+        line='Books Arranger: published-book check: finished book '+what+' (was '+str(path)+')'
+        with _WORKING_LOCK:
+            said=self.__dict__.setdefault('_relink_said',{})
+            if said.get(str(path))==what:return
+            said[str(path)]=what
+        try:print(line,file=sys.stderr,flush=True)
         except Exception:pass
 
     @staticmethod

@@ -396,6 +396,7 @@ const NOT_YET_LIBRARY='Not yet: Books Arranger is still loading. You can switch 
 const NOT_SAFE='Not safe right now: the engine is changing the catalog. Wait for it to finish.';
 // 0.31.1 (Judy's stuck-load spec, section 3): every control that waits, once the shell says loading finished.
 const NOT_YET_PREPARING='Not yet: Books Arranger is preparing the library status. This works as soon as it is ready.';
+const AUTOMATIC_PREPARING='Automatic processing can start when the library status is ready.';  // section 3.5's line
 // 2.2: a refused Restart engine (or Try again) answers beside the button, by the shell's reason.
 const ADMISSION_WAIT='Wait for the data folder check to stop before restarting.';
 const RESTART_NOTES={loaded:'Loading had already finished, so nothing was restarted.',restarting:'The engine is already restarting.',
@@ -576,7 +577,8 @@ function loadPlaceholders(){
   if(!(state && partReady('status')))setText('status',`Library status: ${word}`);
   if(!(state && partReady('jobs'))){
     setText('automatic-status',`Automatic processing: ${word}`);setText('research-status',`Research: ${word}`);
-    setText('automatic-start-reason',loadStopped()?'':preparing?'Automatic processing can start when the library status is ready.':'Automatic processing can start when loading finishes.');$('automatic-start-reason').hidden=loadStopped();
+    setText('automatic-start-reason',loadStopped()?'':preparing?AUTOMATIC_PREPARING:'Automatic processing can start when loading finishes.');$('automatic-start-reason').hidden=loadStopped();
+    if(preparing && !loadStopped())$('start-automatic').title=AUTOMATIC_PREPARING;  // Futaba's 0.31.1 QA, minor 2: its tooltip too
     // 0.31.0 (1.1): the status parts are in #jobs-status-text; no badge until the jobs part has loaded.
     setText('jobs-status-text',`Jobs: ${word}`);renderBadge(null);setText('book-candidate-counts',`Book candidates: ${word}`);
     $('jobs-idle').hidden=true;
@@ -1458,7 +1460,7 @@ function relinkedPart(relinked){
 }
 function removedPart(removed){
   const count=burstCount(removed,REMOVAL_SHOW_MS);
-  return count?`${plural(count,'missing book','missing books')} removed from the list, no files touched`:'';
+  return count?`${plural(count,'missing book','missing books')} removed from the list, library files untouched`:'';
 }
 function statusParts(jobs,work,shown,counts,asOf,badge=null,relinked=null,removed=null){
   const c=work.counts,n=key=>Number.isInteger(c?.[key]) && c[key]>0?c[key]:0,paused=n('cleanups_paused'),waiting=n('cleanups_waiting');
@@ -3335,6 +3337,8 @@ function renderAutomaticEligibility(){
   $('start-automatic').setAttribute('aria-label',verb+' automatic processing');
   let reason='';
   if(ended)reason=verb+' is unavailable: the local server is stopping or stopped.';
+  // 0.31.1 (Futaba's QA, minor 2): loading has finished and the engine answers; only the library status is still missing.
+  else if(loadingActive && loadedByShell() && !(state && partReady('jobs')))reason=AUTOMATIC_PREPARING;
   else if(recoveryDisconnected || typeof automatic?.can_start!=='boolean')reason=verb+' availability is unknown. Waiting for the local server.';
   else if(automaticRequest==='start')reason=verb+' requested. Waiting for the app to respond.';
   else if(draftLeaseFailure || (manualDraftLease?.active && !manualDraftLease.confirmed))reason='';
@@ -3677,8 +3681,10 @@ function rawReasons(row){return (row?.automatic?.reasons || []).filter(reason=>t
 function relinkedDetail(row){
   const found=row?.relinked,at=new Date(found?.at || '');
   if(!found || typeof found.was!=='string' || typeof found.now!=='string' || !found.now || Number.isNaN(at.getTime()))return '';
-  const two=n=>String(n).padStart(2,'0');
-  return `Technical detail: Found again after a move outside the app (${at.getDate()} ${MONTHS[at.getMonth()]}, ${two(at.getHours())}:${two(at.getMinutes())}). Was in ${found.was}. Now in ${found.now}. Matched by name, file ID, size and hash.`;
+  const two=n=>String(n).padStart(2,'0'),name=path=>path.split(/[\\/]/).pop().normalize('NFC').toLowerCase();
+  // A book renamed by hand (Senua M2) was matched by its file ID, size and hash, not by its name.
+  const matched=name(found.was)===name(found.now)?'name, file ID, size and hash':'file ID, size and hash';
+  return `Technical detail: Found again after a move outside the app (${at.getDate()} ${MONTHS[at.getMonth()]}, ${two(at.getHours())}:${two(at.getMinutes())}). Was in ${found.was}. Now in ${found.now}. Matched by ${matched}.`;
 }
 function technicalText(row){
   const chapter=chapterDiagnostic(row),corrected=row.audiobook_ready===true && Array.isArray(row.chapter_corrections) && row.chapter_corrections.length;

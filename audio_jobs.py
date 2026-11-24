@@ -528,6 +528,7 @@ class AudioJobs:
         self._verifier = None
         self.background_stop = None
         self._published_seen={};self._published_retry_at={}
+        self._recheck_waiting=False  # 0.31.1 (Futaba's QA, Major 2): a Start asked for every finished book to be checked again
         # Optional routine check output_current(record, stop, pace): unchanged verified file identity, else a
         # full interruptible hash. Without it, routine checks use output_validator (always a full check).
         self.output_current = None
@@ -539,6 +540,9 @@ class AudioJobs:
         # the pass could not prove anything (unprovable: the output folder unreachable or not searched completely) or too
         # many are missing at once (finished_removal; MergeService._remove_missing).
         self.remove_missing = None
+        # 0.31.1 (Judy's stuck-load spec, 8.1): pass_done(), optional: a published-book pass (background, or a Start's check)
+        # finished; the books found again in it are counted from now (MergeService._relink_pass_done).
+        self.pass_done = None
         self._pass = threading.local()
         self.verify_pace = None
         self._resuming = False
@@ -645,7 +649,7 @@ class AudioJobs:
         routine=True (startup re-check, Start) uses the cheap identity check when available and treats
         an exact authorized former-output retirement as history. A stop is raised, never a verdict.
         """
-        if routine and row['state']=='completed':
+        if routine and row['state'] in ('completed','needs attention'):  # Senua m4: a retained 'needs attention' book too
             from storage_relocation_native import retained_job
             if retained_job(self.database,row['job_id']):return None
         journal = json.loads(row["journal"])
@@ -719,6 +723,19 @@ class AudioJobs:
             self._verify_stop.clear()
             self._verifier = threading.Thread(target=self._verify_published, name="BooksArrangerPublishedCheck", daemon=True)
             self._verifier.start()
+            self._recheck_waiting = False
+
+    def recheck_published(self):
+        """0.31.1 (Futaba's QA, Major 2): a Start checks every finished book again. This launch's confirmations are forgotten,
+        so the next background pass (start_published_check: it runs once the queue is idle, never under the Start's own
+        lock) looks at each book again: one moved or renamed by hand since is found, one that is gone is removed at its end,
+        as at launch. Nothing is checked here."""
+        with self._lock:
+            self._published_seen.clear();self._published_retry_at.clear();self._recheck_waiting=True
+
+    def published_recheck_waiting(self):
+        """True from a Start's recheck_published until the background pass it asked for has started."""
+        return bool(self._recheck_waiting)
 
     def _verify_published(self):
         try:
@@ -739,19 +756,28 @@ class AudioJobs:
 
     def _verify_rows(self, rows):
         stop=_Any(self._verify_stop,self.background_stop) if self.background_stop is not None else self._verify_stop
-        self._pass.missing=[]
         try:
-            if not self._verify_each(rows, stop):return  # stopped: nothing is removed after a stop
-            collected=self._pass.missing
+            self._pass.missing=[]
+            try:
+                if not self._verify_each(rows, stop):return  # stopped: nothing is removed after a stop
+                collected=self._pass.missing
+            finally:
+                self._pass.missing=None
+            remove=self.remove_missing
+            if callable(remove) and rows:
+                missing=[(row,record,proof) for row,record,proof in collected if proof.get('missing')]
+                unprovable=[(row,record,proof) for row,record,proof in collected if not proof.get('missing')]
+                try:remove(missing,unprovable,len(rows),stop)
+                except InterruptedError:return
+                except Exception:pass  # a removal that failed changes nothing; the books are checked again next pass
         finally:
-            self._pass.missing=None
-        remove=self.remove_missing
-        if callable(remove) and rows:
-            missing=[(row,record,proof) for row,record,proof in collected if proof.get('missing')]
-            unprovable=[(row,record,proof) for row,record,proof in collected if not proof.get('missing')]
-            try:remove(missing,unprovable,len(rows),stop)
-            except InterruptedError:return
-            except Exception:pass  # a removal that failed changes nothing; the books are checked again next pass
+            self._pass_finished()
+
+    def _pass_finished(self):
+        done=self.pass_done
+        if callable(done):
+            try:done()
+            except Exception:pass  # the status line's count only
 
     def _verify_each(self, rows, stop):
         """The check of each row; False when a stop ended the pass. A row found missing or unprovable (collected for
@@ -1354,6 +1380,7 @@ class AudioJobs:
         finally:
             with self._lock:
                 self._resuming=False;self._resuming_token=None;self._check_progress=None
+            if settle:self._pass_finished()  # a Start's check is a pass too: the books it found are counted from now
         return answer('started')
 
     def _save_run_intent(self, active):
