@@ -2409,8 +2409,10 @@ function retryKey(row){const job=row?.kind==='candidate'?row.creation?.job:null;
 // Repair (Attention spec section 2) is the same control with another label, tooltip and endpoint.
 const rowActions={cleanup:{kind:'cleanup',label:'Retry cleanup',pending:'Checking cleanup…',note:'Cleanup retry requested. Waiting for the app to respond.',ready:'Recheck this audiobook, its recovery copies and original files, then continue removing originals only if all checks pass.',endpoint:'/api/audiobook/cleanup/retry',refused:'Cleanup retry was not accepted. Check the status above.'},queued:{kind:'queued',label:'Queued',pending:'Queued',note:'',ready:'',endpoint:null,refused:''},retry:{kind:'retry',label:'Retry',pending:'Checking…',note:'Checking this book…',ready:retryReady,endpoint:'/api/audiobook/retry',refused:'Retry was not accepted. Check the status above.'},
   repair:{kind:'repair',label:'Repair',pending:'Repairing…',note:'Repairing this book…',ready:'Patch the damage found in this book, then queue its audiobook job.',endpoint:'/api/audiobook/repair',refused:'Repair was not accepted. Check the status above.'},
-  // Keep files (spec section 3): the kept recovery copies stop being flagged. Nothing is deleted, no job runs.
-  keep:{kind:'keep',label:'Keep files',pending:'Keeping…',note:'Keeping these files…',ready:"Keep this book's files and stop flagging it. Nothing is deleted.",endpoint:'/api/audiobook/keep',refused:'Keep files was not accepted. Check the status above.'},
+  // Keep files (spec section 3; Judy's stuck-load spec, section 9): the book stops being flagged and its originals and folder
+  // stay as they are. The press deletes nothing and starts no job; since 0.31.1 (Sergei 2026-11-24) its recovery copies still
+  // go once the audiobook is verified (the no-recovery-copies rule overrides Keep files).
+  keep:{kind:'keep',label:'Keep files',pending:'Keeping…',note:'Keeping these files…',ready:"Keep this book's originals and folder as they are, and stop flagging it. Recovery copies still go once the audiobook is verified.",endpoint:'/api/audiobook/keep',refused:'Keep files was not accepted. Check the status above.'},
   // Start over (follow-ups 2-4): in the Retry slot of a "review changed" row. The combined press and the release discard
   // a saved review, so they confirm first. Nothing else on the row moves.
   startover:{kind:'startover',label:'Start over',pending:'Starting over…',note:'Setting this job aside…',ready:"Set this failed job aside and send the book back to automatic processing. Starts automatic processing if it isn't running. Nothing is deleted.",endpoint:'/api/audiobook/startover',refused:'Start over was not accepted. Check the status above.'},
@@ -2496,7 +2498,7 @@ function sourceChangedText(attention){
 }
 const CLEARS_FIRST={retry:['Clear the leftover working files, then check this book again and queue its audiobook job.','Clearing working files, then checking this book…',' Retry clears leftover working files first.'],
   repair:['Clear the leftover working files, patch the damage found in this book, then queue its audiobook job.','Clearing working files, then repairing this book…',' Repair clears leftover working files first.']};
-const KEPT_HINT='Files kept at your choice.';
+const KEPT_HINT='Kept at your choice: originals and folder stay as they are.';
 function keptGroup(attention){return attention?.group==='changed' || attention?.group==='audiobook';}
 function rowAction(row){
   const job=row?.kind==='candidate'?row.creation?.job:null;
@@ -3471,8 +3473,8 @@ function recordingFacts(row){
 }
 const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],space:['Stopped — not enough disk space','Free up disk space, then retry.'],repair:['Damaged — can repair',''],
   unsupported:["Can't convert — M4B feature unsupported",'Nothing to do for now.'],other:['Stopped — see details','The conversion stopped. Select the row to read the technical message.'],
-  changed:['Original changed since checked','Recovery copies are kept until you decide.'],missing:['Audiobook missing','Recovery copies are kept until you decide.'],
-  unverified:['Audiobook not verified','Recovery copies are kept until you decide.']};
+  changed:['Original changed since checked','Recovery copies are kept until the audiobook is verified.'],missing:['Audiobook missing','Recovery copies are kept until the audiobook is verified.'],
+  unverified:['Audiobook not verified','Recovery copies are kept until the audiobook is verified.']};
 // A refused Retry or Repair (RefusedRetry spec, 2026-10-19). The server sends a typed cause and fix; these are the
 // words. Behaviour comes from the fix, copy from the cause, never from the server's English reason. A missing or
 // unknown cause reads as 'unknown', whose fix is 'update'.
@@ -3872,7 +3874,7 @@ function renderAutomaticResult(row){
   const attention=rowState(row),kept=!attention && row.creation?.job?.kept===true;
   // 0.31.0 (Judy 5.1): the panel shows the same status and hint as the row of a book that waits for its online answer.
   const waitNote=!attention && !kept?lookupNote(row):'';
-  setText('automatic-result-hint',attention?attention.hint+(attention.clause || ''):kept?'You chose to keep these files.':waitNote);$('automatic-result-hint').hidden=!attention?.hint && !kept && !waitNote;
+  setText('automatic-result-hint',attention?attention.hint+(attention.clause || ''):kept?"You chose to keep this book's originals and folder as they are. Recovery copies are not kept: they go once the audiobook is verified.":waitNote);$('automatic-result-hint').hidden=!attention?.hint && !kept && !waitNote;
   $('automatic-result-hint').classList?.toggle?.('retry-refused',!!attention?.warn);
   // After Repair: a permanent line and one bullet per patch; the technical note is the last line.
   const repaired=row.creation?.job?.repaired,patched=Array.isArray(repaired?.patched)?repaired.patched:[];

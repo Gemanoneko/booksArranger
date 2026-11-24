@@ -691,6 +691,10 @@ class AudioJobs:
         if collected is not None and isinstance(found, dict):
             # Proven missing (found: its proof) or unprovable this pass; the pass decides at its end (_verify_rows).
             collected.append((row, record, found))
+        elif isinstance(found, dict):
+            # A Start's check (resume) finds moved books but removes nothing: the next background pass, a minute later at
+            # most, looks at this book again (it is no longer counted as checked) and removes it at its end.
+            self._published_seen.pop(row["job_id"], None)
         if row["state"] == "needs attention" and row["reason"] == reason:
             return {"state": "completed", "stage": "completed", "reason": ""}
         return None

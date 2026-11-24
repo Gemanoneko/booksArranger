@@ -279,6 +279,21 @@ class RelinkFoundTests(unittest.TestCase):
         self.assertEqual(self.row(gone['job_id'])['state'], 'removed')
         self.assertEqual((self.service.relinked_view()['count'], self.service.removed_view()['count']), (1, 1))
 
+    def test_a_book_a_start_finds_missing_is_removed_by_the_next_background_pass(self):
+        # Judy's 8.5 (amended): confirmed books are not checked again mid-session; a Start checks them all, finds moved books
+        # itself and hands a missing one to the next background pass, which removes it at its end.
+        item, record = self.book('Author', 'Later.m4b', b'later bytes' * 60, flagged=False)
+        self.book('Author', 'Stays.m4b', b'stays bytes' * 60, flagged=False)
+        self.check()  # the launch pass confirms both
+        self.assertIn(item['job_id'], self.queue._published_seen)
+        os.unlink(record['final_path'])  # deleted mid-session
+        self.again()
+        self.assertEqual(self.state(item['job_id']), ('completed', ''), 'mid-session nothing changes')
+        self.assertIsNone(self.queue._settle(self.row(item['job_id']), True), "a Start's check removes nothing itself")
+        self.assertNotIn(item['job_id'], self.queue._published_seen)
+        self.again()
+        self.assertEqual(self.row(item['job_id'])['state'], 'removed', 'the next background pass removes it')
+
     def test_a_found_book_is_where_sergei_put_it_for_the_rules_and_its_row(self):
         import book_move
         import sorting_moves
