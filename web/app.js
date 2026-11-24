@@ -82,7 +82,7 @@ function viewControls(){
   $('view').value=view;
   $('filter').replaceChildren();
   // Before the library part arrives the Status filter has one option, "Loading…" ("Not loaded" when Stopped), 3.5.
-  if(LS && loadingActive && !(state && partReady('library'))){const option=document.createElement('option');option.textContent=loadStopped()?'Not loaded':'Loading…';$('filter').append(option);}
+  if(LS && loadingActive && !(state && partReady('library'))){const option=document.createElement('option');option.textContent=loadStopped()?'Not loaded':loadedByShell()?(loadedStuck?'Not ready':'Preparing…'):'Loading…';$('filter').append(option);}
   else for(const [value,label] of filterOptions[view]){const option=document.createElement('option');option.value=value;option.textContent=label;if(FILTER_TITLES[value])option.title=FILTER_TITLES[value];$('filter').append(option);}
   $('filter').value=filters[view];
   $('filter').title=FILTER_TITLES[filters[view]] || 'Filter the saved results in this library.';
@@ -394,13 +394,35 @@ const NOT_YET='Not yet: Books Arranger is still loading. This works when loading
 const NOT_YET_BOOKS='Not yet: your books are still loading. This works as soon as they appear.';
 const NOT_YET_LIBRARY='Not yet: Books Arranger is still loading. You can switch library when loading finishes.';
 const NOT_SAFE='Not safe right now: the engine is changing the catalog. Wait for it to finish.';
+// 0.31.1 (Judy's stuck-load spec, section 3): every control that waits, once the shell says loading finished.
+const NOT_YET_PREPARING='Not yet: Books Arranger is preparing the library status. This works as soon as it is ready.';
+// 2.2: a refused Restart engine (or Try again) answers beside the button, by the shell's reason.
+const ADMISSION_WAIT='Wait for the data folder check to stop before restarting.';
+const RESTART_NOTES={loaded:'Loading had already finished, so nothing was restarted.',restarting:'The engine is already restarting.',
+  quitting:'Books Arranger is closing, so the engine was not restarted.',admission:ADMISSION_WAIT,unsafe:NOT_SAFE};
+const RESTART_UNKNOWN='Nothing was restarted. Your files are not touched.';
+// Section 6 (Sergei 2026-11-24): Restart Books Arranger, the way out of State 1's Stuck. Its faces, tooltips and notes.
+const RELAUNCH_FACE='Restart Books Arranger',RELAUNCH_BUSY_FACE='Restarting…';
+const RELAUNCH_TITLE='Close Books Arranger and open it again. Loading starts over. Your files are not touched.',RELAUNCH_BUSY_TITLE='Restarting Books Arranger…';
+const RELAUNCH_CLOSING='Books Arranger is already closing.';
+let relaunchBusy=false;
+let loadNoteWord=null,restartError='',lastStatusReply='',loadedStuck=false;
 let loadingActive=!!LS,loadTracker=LS?LS.createTracker(Date.now()):null,loadAnswer=null,shellStartup=null,loadVerdict='working',loadStep='',loadReadyMs=null;
 let stoppedTechnical=null;
-const notYetSentences=new Set([NOT_YET,NOT_YET_BOOKS,NOT_YET_LIBRARY,NOT_SAFE]);
+const notYetSentences=new Set([NOT_YET,NOT_YET_BOOKS,NOT_YET_LIBRARY,NOT_SAFE,NOT_YET_PREPARING]);
 // A part of the engine's answer that has arrived (an engine without a loading object has them all).
 function partReady(name,answer=state){return !LS || (!!answer && LS.part(answer,name));}
 function booksOnScreen(){return !loadingActive || partReady('books');}
 function loadStopped(){return !!shellStartup && shellStartup.phase==='stopped';}
+// 0.31.1 (Judy's stuck-load spec, section 1): the shell says this launch finished loading. From then on the strip never shows a
+// step again: it waits for the first status answer ("Loaded, preparing the library status"), then settles as before.
+function loadedByShell(){return !!LS && !!shellStartup?.loaded && Number.isFinite(shellStartup.loadedAt) && !loadStopped();}
+// The note under the strip's buttons (2.2): it stays until the state word changes, Ready settles or a strip button is pressed.
+function loadNote(text=''){
+  const note=$('load-note');if(!note)return;
+  if(note.textContent!==text)note.textContent=text;note.hidden=!text;
+  loadNoteWord=text?$('load-word').textContent:null;
+}
 function announceLoad(text){const node=$('load-announce');if(!node)return;node.textContent='';node.textContent=text;}
 // The shell's record (desktop): launch time, exit, port, last load. A new launch (Restart engine) restarts the clocks.
 function applyStartup(value){
@@ -410,6 +432,12 @@ function applyStartup(value){
   if(fresh)stoppedTechnical=null;
   if(fresh && value.phase==='launching')loadTracker.restart(value.startedAt);
   else if(fresh)loadTracker.launchedAt=value.startedAt;
+  if(loadingActive && value.loaded && Number.isFinite(value.loadedAt) && loadTracker.statusAt===null && value.phase!=='stopped'){
+    // 1.1: the last loading answer goes now, so its step and counts ("1,149 of 1,149 books") cannot come back.
+    loadTracker.markLoaded(value.loadedAt);loadAnswer=null;
+    announceLoad('Loading finished. Preparing the library status.');
+    gateLoading();  // section 3: what still waits says so in this state's own sentence
+  }
   if(value.admission&&value.admission.state!=='complete'){
     const a=value.admission;
     loadAnswer={...a,admission:true,step:'admission',n:1,of:4,unit:'items',restart_safe:false,progress_age_ms:Math.max(0,a.updatedAt-a.progressAt)};
@@ -422,7 +450,7 @@ function applyStartup(value){
 function observeLoad(answer){
   if(!LS || !loadingActive)return;
   loadTracker.observe(answer,Date.now());
-  loadAnswer=answer?.loading && typeof answer.loading==='object'?answer.loading:null;
+  loadAnswer=loadedByShell()?null:answer?.loading && typeof answer.loading==='object'?answer.loading:null;
   renderLoad();  // refresh() settles, once the first list is on screen too
 }
 function loadHeard(){if(LS && loadingActive){loadTracker.heard(Date.now());renderLoad();}}
@@ -437,13 +465,56 @@ function loadTechnical(verdict){
   lines.push(`State: ${verdict.state}${loadAnswer?.restart_safe===false?(loadAnswer.admission?' (data folder check has not stopped)':' (the engine is changing the catalog)'):''}`);
   if(loadAnswer?.error)lines.push('Engine: '+loadAnswer.error);
   if(shellStartup?.exited){lines.push(`Engine exit code: ${shellStartup.exited.code ?? 'unknown'}`);if(shellStartup.exited.lastLines)lines.push('Last engine output:\n'+shellStartup.exited.lastLines);}
+  if(restartError)lines.push(restartError);
   return lines.join('\n');
+}
+// Technical details while the first status after loading is missing (1.5): the raw engine text lives only here.
+function loadedTechnical(verdict){
+  const now=Date.now(),took=shellStartup?.lastLoadMs,lines=[];
+  lines.push(`Loading finished: ${new Date(shellStartup.loadedAt).toISOString()}${Number.isFinite(took)?` (took ${LS.duration(took)})`:''}`);
+  lines.push(`Library status: not received for ${Math.floor(verdict.since/1000)} s`);
+  lines.push(`Last status reply: ${lastStatusReply || 'none yet'}`);
+  lines.push(`Engine answered: ${loadTracker.answered?Math.floor(Math.max(0,now-loadTracker.answerAt)/1000)+' s ago':'never'}`);
+  lines.push(`State: ${verdict.state}`);
+  if(restartError)lines.push(restartError);
+  return lines.join('\n');
+}
+// The strip in State 1 (1.2): every segment done, no stripe, no alert segment; the state line carries the warning.
+function renderLoaded(){
+  const now=Date.now(),listing=!!state && LS.loaded(state),verdict=LS.evaluateLoaded(loadTracker,now),line=LS.loadedLine(verdict,{listing});
+  const stuck=!listing && verdict.state==='stuck',active=globalThis.document?.activeElement;
+  const restartFocused=active===$('load-restart') || active===$('load-relaunch') && !stuck;
+  setText('load-word',line.word);setText('load-text',line.text);
+  if(loadNoteWord!==null && loadNoteWord!==line.word)loadNote();
+  if($('load-admission')){$('load-admission').hidden=true;setText('load-admission','');}
+  $('load-strip').classList?.toggle('alert',stuck);
+  for(const segment of [...(document.querySelectorAll?.('#load-bar .load-segment') || [])]){
+    segment.classList?.add('done');segment.classList?.remove('moving');segment.classList?.remove('alert');
+    const fill=segment.firstElementChild || segment.firstChild;if(fill?.style)fill.style.width='';
+  }
+  const bar=$('load-bar'),of=String(LS.stepOf(null).of);
+  bar.setAttribute('aria-valuemax',of);bar.setAttribute('aria-valuenow',of);bar.setAttribute('aria-valuetext',LS.loadedValueText(listing?{state:'working'}:verdict));
+  const detail=LS.loadedDetailParts(loadTracker,now,shellStartup?.lastLoadMs),detailText=detail.join(' · ');
+  if($('load-detail').dataset?.text!==detailText){$('load-detail').replaceChildren(...detail.flatMap((part,i)=>i?[' · ',node('span',part)]:[node('span',part)]));if($('load-detail').dataset)$('load-detail').dataset.text=detailText;}
+  $('load-detail').hidden=false;$('load-detail').title='';$('load-detail').removeAttribute?.('aria-description');
+  // 2.1: no Restart engine after loading (the shell refuses it); Copy details and Technical details at the warning only.
+  $('load-actions').hidden=!stuck;$('load-details').hidden=!stuck;$('load-restart').hidden=true;$('load-retry').hidden=true;
+  if($('load-relaunch'))$('load-relaunch').hidden=!(stuck && shellApi?.relaunchApp);  // section 6: State 1 Stuck only
+  if(restartFocused)$('filter').focus?.({preventScroll:true});  // the standing fallback (3.7)
+  if(stuck)setText('load-technical',loadedTechnical(verdict));
+  // Announcements (1.5): Stuck only; Waiting is not announced, and no "moving again" before the first status.
+  if(stuck && loadVerdict!=='stuck')announceLoad(`The library status has not arrived after ${LS.duration(verdict.since)}.${shellApi?.relaunchApp?' Restart Books Arranger is available.':''}`);
+  loadVerdict=listing?'working':verdict.state;
+  // 1.4: the placeholders' word follows the warning ("preparing…", then "not ready yet.").
+  if(stuck!==loadedStuck){loadedStuck=stuck;loadPlaceholders();viewControls();}
 }
 function renderLoad(){
   if(!LS || !loadingActive || !$('load-strip'))return;
+  if(loadedByShell())return renderLoaded();
   const now=Date.now(),stopped=loadStopped(),verdict=LS.evaluate(loadTracker,now,{stopped});
   const loading=loadAnswer?.admission?loadAnswer:loadTracker.answered?loadAnswer:null,step=LS.stepOf(loading),line=LS.stateLine(verdict,loading,{portPid:shellStartup?.portPid});
   setText('load-word',line.word);setText('load-text',line.text);
+  if(loadNoteWord!==null && loadNoteWord!==line.word)loadNote();
   const admission=loading?.admission===true;
   if($('load-admission')){
     $('load-admission').hidden=!admission;
@@ -471,12 +542,13 @@ function renderLoad(){
   $('load-actions').hidden=!actions;$('load-details').hidden=!actions;
   // Restart engine and Try again are the shell's (desktop); browser mode keeps Copy details only (Judy 3.4).
   $('load-restart').hidden=!(stuck && !stopped && shellApi);$('load-retry').hidden=!(stopped && shellApi);
+  if($('load-relaunch'))$('load-relaunch').hidden=true;  // section 6: only once the shell says loading finished
   const unsafe=loading?.restart_safe===false;
   $('load-restart').setAttribute('aria-disabled',unsafe?'true':'false');$('load-restart').title=unsafe?NOT_SAFE:'Stop the engine and start it again. Loading starts over. Your files are not touched.';
   if(admission){
-    $('load-restart').title='Wait for the data folder check to stop before restarting.';
+    $('load-restart').title=ADMISSION_WAIT;
     $('load-retry').setAttribute('aria-disabled',stopped&&!loading.verification_required?'false':'true');
-    $('load-retry').title=stopped&&!loading.verification_required?'Start the data folder check again.':'Wait for the data folder check to stop before restarting.';
+    $('load-retry').title=stopped&&!loading.verification_required?'Start the data folder check again.':ADMISSION_WAIT;
     $('load-copy').title='Copy the data folder check details to the clipboard.';
   }else{$('load-retry').setAttribute('aria-disabled','false');$('load-retry').title='Start the engine again.';}
   if(actions){
@@ -496,16 +568,17 @@ function renderLoad(){
   }
 }
 // Placeholders (Judy 3.5): "loading…" while loading, "not loaded" when Stopped. Never a number for a missing part.
+function placeholderWord(){return loadStopped()?'not loaded.':loadedByShell()?(loadedStuck?'not ready yet.':'preparing…'):'loading…';}
 function loadPlaceholders(){
   if(!LS || !loadingActive)return;
-  const word=loadStopped()?'not loaded.':'loading…',library=state && partReady('library'),books=partReady('books');
+  const word=placeholderWord(),library=state && partReady('library'),books=partReady('books'),preparing=loadedByShell();
   if(!library){setText('root',`Source folders: ${word}`);viewControls();}
   if(!(state && partReady('status')))setText('status',`Library status: ${word}`);
   if(!(state && partReady('jobs'))){
     setText('automatic-status',`Automatic processing: ${word}`);setText('research-status',`Research: ${word}`);
-    setText('automatic-start-reason',loadStopped()?'':'Automatic processing can start when loading finishes.');$('automatic-start-reason').hidden=loadStopped();
+    setText('automatic-start-reason',loadStopped()?'':preparing?'Automatic processing can start when the library status is ready.':'Automatic processing can start when loading finishes.');$('automatic-start-reason').hidden=loadStopped();
     // 0.31.0 (1.1): the status parts are in #jobs-status-text; no badge until the jobs part has loaded.
-    setText('jobs-status-text',loadStopped()?'Jobs: not loaded.':'Jobs: loading…');renderBadge(null);setText('book-candidate-counts',loadStopped()?'Book candidates: not loaded.':'Book candidates: loading…');
+    setText('jobs-status-text',`Jobs: ${word}`);renderBadge(null);setText('book-candidate-counts',`Book candidates: ${word}`);
     $('jobs-idle').hidden=true;
     // Futaba's 0.22.1 QA, m-7: the panel itself was hidden until the jobs part came, so these lines never showed (3.5:
     // the Audiobook jobs panel is shown at its reserved height with them).
@@ -514,8 +587,8 @@ function loadPlaceholders(){
   const attention=view==='candidates' && filters.candidates==='output_attention' && !(state && partReady('attention'));
   $('attention-loading').hidden=!attention;if(attention)setText('attention-loading',`Output needs attention: ${word}`);
   if(!books){
-    const text=loadStopped()?'Your books are not loaded.':'Loading your books…';
-    setText('empty',text);$('empty').hidden=false;setText('page',text);$('list-skeleton').hidden=loadStopped();
+    const text=loadStopped()?'Your books are not loaded.':preparing?(loadedStuck?'Your books are not ready yet.':'Preparing your books…'):'Loading your books…';
+    setText('empty',text);$('empty').hidden=false;setText('page',text);$('list-skeleton').hidden=loadStopped() || preparing && loadedStuck;
     // M3 (Judy's implementation check): the list's body is busy while its part is on its way, never <body>, which would
     // hold the live regions under it (#load-announce). The first list render clears it, as after a filter change.
     if(loadStopped())$('inventory').removeAttribute?.('aria-busy');else $('inventory').setAttribute?.('aria-busy','true');
@@ -526,6 +599,7 @@ function settleLoad(tookMs){
   if(!LS || !loadingActive)return;
   loadingActive=false;loadReadyMs=Number.isFinite(tookMs)?tookMs:null;
   const strip=$('load-strip'),focused=strip?.contains?.(globalThis.document?.activeElement);
+  loadNote();if($('load-relaunch'))$('load-relaunch').hidden=true;
   ungateAll();
   if(notYetSentences.has($('message').textContent))message();
   $('attention-loading').hidden=true;$('list-skeleton').hidden=true;
@@ -562,14 +636,14 @@ function gate(element,sentence){
 function lookingOnly(element){return /^(View metadata|Open folder|Open source folder|Open book folder|Source folders)\b/.test(element.getAttribute?.('aria-label') || element.textContent || '');}
 function gateLoading(){
   if(!LS || !loadingActive)return;
-  const books=booksOnScreen();
-  gate($('library'),NOT_YET_LIBRARY);
-  for(const id of LOOKING_CONTROLS)gate($(id),books?'':NOT_YET_BOOKS);
+  const books=booksOnScreen(),preparing=loadedByShell();
+  gate($('library'),preparing?NOT_YET_PREPARING:NOT_YET_LIBRARY);
+  for(const id of LOOKING_CONTROLS)gate($(id),books?'':preparing?NOT_YET_PREPARING:NOT_YET_BOOKS);
   // Ruling 35 (Sergei 2026-10-26): changing presses are accepted while loading. The toolbar's wait in this page (later())
   // and run when loading finishes; a row's go to the engine, which queues them until it has loaded. Only what cannot work
   // before the books are on screen stays inert: switching library, and the list's own controls.
   for(const element of globalThis.document?.querySelectorAll?.('#inventory button,#inventory input,#details button,#details input,#details select,#details textarea') || [])
-    if(lookingOnly(element))gate(element,books?'':NOT_YET_BOOKS);
+    if(lookingOnly(element))gate(element,books?'':preparing?NOT_YET_PREPARING:NOT_YET_BOOKS);
 }
 function ungateAll(){for(const element of globalThis.document?.querySelectorAll?.('[data-not-yet]') || [])gate(element,'');}
 // A press on an inert control is answered in the message line; focus does not move (3.6).
@@ -587,14 +661,43 @@ async function copyDiagnosticText(text){
   return clipboard.writeText(text);
 }
 async function restartFromStrip(button){
-  if(button.getAttribute('aria-disabled')==='true'){message(button.title);return;}
-  announceLoad('Restarting the engine.');
-  try{await shellApi?.restartEngine?.();}catch(error){message(error.message);}
+  loadNote();
+  if(button.getAttribute('aria-disabled')==='true'){loadNote(button.title);return;}  // the inert press answers beside it too
+  let answer;
+  try{answer=await shellApi?.restartEngine?.();}catch(error){answer={started:false,error:String(error?.message || error)};}
+  if(answer===true || answer?.started===true){restartError='';announceLoad('Restarting the engine.');return;}
+  // The shell refused: re-read its record at once, so the strip shows the true state with the note beneath (2.2).
+  restartError=answer?.error?'Restart engine: '+answer.error:'';
+  const note=RESTART_NOTES[answer?.reason] || RESTART_UNKNOWN;
+  try{const value=await shellApi?.startup?.();if(value)applyStartup(value);}catch{}
+  loadNote(note);
+}
+// Section 6: Restart Books Arranger. No question from the page (the shell asks only while a book converts); the busy face at
+// the press, the announcement once the shell accepts, a refusal answered in the note; Cancel is no refusal.
+function relaunchFace(busy){
+  const button=$('load-relaunch');if(!button)return;relaunchBusy=busy;
+  button.textContent=busy?RELAUNCH_BUSY_FACE:RELAUNCH_FACE;button.title=busy?RELAUNCH_BUSY_TITLE:RELAUNCH_TITLE;
+  button.setAttribute('aria-disabled',busy?'true':'false');
+}
+async function relaunchFromStrip(){
+  loadNote();
+  if(relaunchBusy){loadNote(RELAUNCH_CLOSING);return;}  // a second press while the first is under way
+  relaunchFace(true);
+  let answer;
+  try{answer=await shellApi?.relaunchApp?.();}catch(error){answer={started:false,error:String(error?.message || error)};}
+  if(answer?.started===true){restartError='';announceLoad('Restarting Books Arranger.');return;}
+  relaunchFace(false);
+  if(answer?.reason==='cancelled')return;  // Cancel in the shell's question changes nothing
+  restartError=answer?.error?'Restart Books Arranger: '+answer.error:'';
+  loadNote(answer?.reason==='closing'?RELAUNCH_CLOSING:RESTART_UNKNOWN);
+  if(restartError)renderLoad();  // its raw text in Technical details
 }
 if(LS && $('load-strip')){
+  $('load-relaunch')?.addEventListener('click',()=>relaunchFromStrip());
   $('load-restart').addEventListener('click',()=>restartFromStrip($('load-restart')));
   $('load-retry').addEventListener('click',()=>restartFromStrip($('load-retry')));
   $('load-copy').addEventListener('click',async()=>{
+    loadNote();
     try{await copyDiagnosticText($('load-technical').textContent || '');setText('load-copy-status','Copied.');}
     catch{setText('load-copy-status',"Couldn't copy. Select the text and press Ctrl+C.");}
   });
@@ -1087,7 +1190,9 @@ async function refresh(force=false) {
   const early=force && booksOnScreen()?loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,true):null;
   early?.catch(()=>{});
   const stateSent=Date.now();
-  const current=await request(`/api/state?library=${encodeURIComponent(library)}`,undefined,STATE_TIMEOUT);  // ruling 75a: a time limit
+  let current;
+  try{current=await request(`/api/state?library=${encodeURIComponent(library)}`,undefined,STATE_TIMEOUT);}  // ruling 75a: a time limit
+  catch(error){if(error?.httpStatus)lastStatusReply=String(error.message || '');throw error;}  // shown in State 1's details
   deletedCounts(current,stateSent);  // Judy 0.22.2 section 5: a status from before a delete still counts that book
   leavingCounts(current);  // 0.29.0 item 3: a row kept under his cursor still counts until it leaves
   observeLoad(current);  // any answer counts, whatever happens to it below (Judy 3.4)
