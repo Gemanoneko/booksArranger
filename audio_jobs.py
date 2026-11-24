@@ -735,7 +735,7 @@ class AudioJobs:
 
     def published_recheck_waiting(self):
         """True from a Start's recheck_published until the background pass it asked for has started."""
-        return bool(self._recheck_waiting)
+        return bool(getattr(self, "_recheck_waiting", False))
 
     def _verify_published(self):
         try:
@@ -774,7 +774,7 @@ class AudioJobs:
             self._pass_finished()
 
     def _pass_finished(self):
-        done=self.pass_done
+        done=getattr(self, "pass_done", None)  # a queue built without __init__ (a test stand-in) has none
         if callable(done):
             try:done()
             except Exception:pass  # the status line's count only
