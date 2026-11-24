@@ -1427,9 +1427,12 @@ function renderJobs(){
   const shown=shownRows(work,now);
   // 0.31.0 (1.2, 1.3): the badge is the first thing in #jobs-status, the parts follow it. No badge while the last answer is
   // only "last confirmed" (the engine is not answering now). From 30 s the as-of time follows the badge as plain text.
-  const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge,stale?null:state?.relinked);
+  const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge,stale?null:state?.relinked,stale?null:state?.removed);
   renderBadge(badge);renderWindowTitle(windowTitleState(jobs,work,shown,badge,stale));
   text('jobs-status-text',(stale?'Last confirmed — ':'')+(badge?(asOf?asOf:'')+(parts.length?' · ':''):'')+parts.join(' · '));
+  // 0.31.1 (Judy's stuck-load spec, 8.3): the engine's last removal pass was refused; never under "Last confirmed —".
+  const removalNote=$('jobs-removal-note');
+  if(removalNote){const note=!stale && state?.removal_refused===true?REMOVAL_REFUSED:'';if(removalNote.textContent!==note)removalNote.textContent=note;removalNote.hidden=!note;}
   renderActivities(shown,jobs,unread,asOf);renderWaitingList(work);renderHold(heldRows(jobs));renderFiling(work);renderFreshness(now);renderUnread(unread);renderSourceCheck();
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
@@ -1441,13 +1444,23 @@ function renderJobs(){
 // The status line (sections 1.3, 3 and 4): what runs, then the split counts. Three numbers, three phrases: books waiting to
 // convert, cleanups paused or waiting, actions waiting (work.counts); jobs.queued is never read (it adds them together).
 // 0.31.1 (Judy's stuck-load spec, 8.1): finished books moved by hand and found again, for 10 minutes after the latest find.
-const RELINK_SHOW_MS=600000;
-function relinkedPart(relinked){
-  const count=Number.isInteger(relinked?.count) && relinked.count>0?relinked.count:0,age=Number(relinked?.last_age_ms);
-  if(!count || !Number.isFinite(age) || age>=RELINK_SHOW_MS)return '';
-  return `${plural(count,'moved book','moved books')} found, new location${count===1?'':'s'} saved`;
+// Finished books removed from the list because they are gone: for an hour after the latest removal; the line under it says
+// when the engine refused to remove (8.3).
+const RELINK_SHOW_MS=600000,REMOVAL_SHOW_MS=3600000;
+const REMOVAL_REFUSED='Missing books were not removed. Check that the library drive is connected.';
+function burstCount(burst,showMs){
+  const count=Number.isInteger(burst?.count) && burst.count>0?burst.count:0,age=Number(burst?.last_age_ms);
+  return !count || !Number.isFinite(age) || age>=showMs?0:count;
 }
-function statusParts(jobs,work,shown,counts,asOf,badge=null,relinked=null){
+function relinkedPart(relinked){
+  const count=burstCount(relinked,RELINK_SHOW_MS);
+  return count?`${plural(count,'moved book','moved books')} found, new location${count===1?'':'s'} saved`:'';
+}
+function removedPart(removed){
+  const count=burstCount(removed,REMOVAL_SHOW_MS);
+  return count?`${plural(count,'missing book','missing books')} removed from the list, no files touched`:'';
+}
+function statusParts(jobs,work,shown,counts,asOf,badge=null,relinked=null,removed=null){
   const c=work.counts,n=key=>Number.isInteger(c?.[key]) && c[key]>0?c[key]:0,paused=n('cleanups_paused'),waiting=n('cleanups_waiting');
   const cleanup=paused && waiting?`Cleanup paused for ${plural(paused,'book','books')}, waiting for ${waiting.toLocaleString()}`:paused?`Cleanup paused for ${plural(paused,'book','books')}`:waiting?`Cleanup waiting for ${plural(waiting,'book','books')}`:'';
   // 0.31.0 (1.3): the badge or the first part; "N on hold" its own part after it when nothing runs; the background
@@ -1461,7 +1474,7 @@ function statusParts(jobs,work,shown,counts,asOf,badge=null,relinked=null){
     n('actions_waiting')?plural(n('actions_waiting'),'action','actions')+' waiting':'',`${attentionTotal(jobs)} need attention`,
     counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books${badge?'':asOf}`:'Approved book progress unavailable',
     n('retry_checks_waiting')?`${n('retry_checks_waiting')} waiting for retry checks`:'',
-    lookups?`${plural(lookups,'background look-up','background look-ups')} left`:'',relinkedPart(relinked)].filter(Boolean);
+    lookups?`${plural(lookups,'background look-up','background look-ups')} left`:'',relinkedPart(relinked),removedPart(removed)].filter(Boolean);
 }
 // 0.29.0 (Sergei 2026-11-17; Judy section 7): the jobs line starts with what is running, in plain words; a held item is never
 // counted as running; the queue worker's own momentary state word ("Running") is not shown. 0.30.0 (section 1.3): two or more

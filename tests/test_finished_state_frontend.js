@@ -237,3 +237,29 @@ console.log('PASS 0.31.0 finished state: three badges, no bare Nothing running, 
   assert.equal(run('relinkedDetail({relinked:null})'),'');
 }
 console.log('PASS 0.31.1 relinked books: the status line part, its 10 minutes, Last confirmed, the book\'s Technical details');
+// 0.31.1 (Sergei 2026-11-24; Judy's stuck-load spec, 8.1 and 8.3): finished books that are gone are removed from the list. The
+// removed part follows the found part, each with its own count and time (an hour for removals); a refused removal pass says
+// so under the line, calmly, until a pass completes normally; nothing of either under "Last confirmed —".
+{
+  reset();
+  const line=(relinked,removed,refused=false)=>{Object.assign(context.fixture,{relinked,removed,removal_refused:refused});run('renderJobs()');return get('jobs-status-text').textContent;};
+  show({state:'all_done',pending:pending({any:false})});
+  const base=' · 0 need attention · 1510 converted out of 1510 approved books';
+  assert.equal(line(null,{count:1,last_age_ms:0}),base+' · 1 missing book removed from the list, no files touched');
+  assert.equal(line(null,{count:4,last_age_ms:3599999}),base+' · 4 missing books removed from the list, no files touched');
+  assert.equal(line(null,{count:4,last_age_ms:3600000}),base,'gone an hour after the latest removal');
+  assert.equal(line({count:2,last_age_ms:0},{count:1,last_age_ms:0}),base+' · 2 moved books found, new locations saved · 1 missing book removed from the list, no files touched','found first, removed second');
+  assert.equal(line(null,{count:1200,last_age_ms:5}),base+` · ${(1200).toLocaleString()} missing books removed from the list, no files touched`);
+  const note=get('jobs-removal-note');
+  line(null,null,true);
+  assert.equal(note.textContent,'Missing books were not removed. Check that the library drive is connected.');assert.equal(note.hidden,false);
+  line(null,null,false);assert.equal(note.hidden,true,'it goes at the next normal pass');assert.equal(note.textContent,'');
+  run('recoveryDisconnected=true');
+  assert.doesNotMatch(line({count:2,last_age_ms:0},{count:1,last_age_ms:0},true),/moved book|missing book/,'no part under Last confirmed');
+  assert.equal(note.hidden,true,'and no refusal line');
+  run('recoveryDisconnected=false');
+  const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
+  assert.match(html,/<p id="jobs-status"[^>]*>.*?<\/p><p id="jobs-removal-note" role="status" hidden><\/p><p id="book-candidate-counts">/,'under the status line, above the candidate counts');
+  assert.match(fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8'),/#jobs-removal-note\{font-size:15px;font-weight:normal;color:var\(--text\)\}/);
+}
+console.log('PASS 0.31.1 removed books: the removed part and its hour, both parts in order, the refusal line, Last confirmed, markup');

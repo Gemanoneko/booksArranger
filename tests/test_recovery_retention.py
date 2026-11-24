@@ -258,6 +258,62 @@ class AdmissionTests(unittest.TestCase):
             with server.recovery_admission():self.fail('Busy scan admitted')
 
 
+class PublishedBooksKeepNoCopiesTests(unittest.TestCase):
+    """0.31.1 (Sergei 2026-11-24): once a book is delivered to Sorted and approved, the app keeps no recovery copies of it.
+    A published book's copies go once its output is confirmed (the existing purge, which verifies it in full first); a
+    finished book removed from the records because it is gone (finished_removal) has no output to confirm, and its copies
+    go on every other proof of the purge. Nothing goes for a book whose output does not answer, or whose originals are not
+    retired. The sweep takes a few sets per pass, never a whole backlog at once after loading."""
+    setUp=fixture.RetentionTests.setUp
+    tearDown=fixture.RetentionTests.tearDown
+    retire=fixture.RetentionTests.retire
+    ready=RecoveryTests.ready
+    def copies(self):
+        folder=self.source.root/self.cleanup_id
+        return sorted(path.name for path in folder.iterdir()) if folder.exists() else []
+    def remove(self):
+        import finished_removal
+        with connect(self.db) as db:
+            db.execute('BEGIN IMMEDIATE')
+            output=json.loads(db.execute('SELECT output FROM audio_jobs WHERE job_id=?',(self.job_id,)).fetchone()[0])
+            self.assertTrue(finished_removal.remove(db,self.job_id,output,self.output['final_path'],{'missing':True}))
+    def test_a_published_book_with_copies_has_them_released_once_its_output_is_confirmed(self):
+        self.ready();self.assertEqual(len(self.copies()),2,'positive control: two copies held')
+        self.assertEqual(self.retention.purge(self.job_id)['state'],'deleted');self.assertEqual(self.copies(),[])
+        self.assertTrue(Path(self.output['final_path']).exists(),'the delivered book is never touched')
+    def test_an_output_that_does_not_answer_releases_nothing(self):
+        self.ready();final=Path(self.output['final_path']);away=final.with_suffix('.offline');final.rename(away)
+        with self.assertRaises(Exception):self.retention.purge(self.job_id)
+        self.assertEqual(len(self.copies()),2,'kept: the output could not be confirmed')
+    def test_a_book_whose_originals_are_not_retired_keeps_its_copies(self):
+        self.ready()
+        with connect(self.db) as db:db.execute("UPDATE source_cleanup SET state='removing' WHERE id=?",(self.cleanup_id,))
+        with self.assertRaises(Exception):self.retention.purge(self.job_id)
+        self.assertEqual(len(self.copies()),2)
+    def test_a_removed_books_copies_are_released_without_its_output(self):
+        self.ready();Path(self.output['final_path']).unlink()  # Sergei deleted the book
+        with self.assertRaises(Exception):self.retention.purge(self.job_id)
+        self.assertEqual(len(self.copies()),2,'positive control: not removed, nothing goes')
+        self.remove()
+        self.assertEqual(self.retention.purge(self.job_id)['state'],'deleted');self.assertEqual(self.copies(),[])
+    def test_a_removed_book_keeps_every_other_proof_of_the_purge(self):
+        self.ready();Path(self.output['final_path']).unlink();self.remove()
+        extra=self.source.root/self.cleanup_id/'foreign.txt';extra.write_text('preserve')
+        with self.assertRaisesRegex(BoundaryError,'Unknown recovery'):self.retention.purge(self.job_id)
+        self.assertTrue(extra.exists());self.assertEqual(len(self.copies()),3)
+        extra.unlink();backup=next(p for p in (self.source.root/self.cleanup_id).iterdir());raw=backup.read_bytes();backup.write_bytes(b'x'*len(raw))
+        with self.assertRaises(Exception):self.retention.purge(self.job_id)
+        self.assertEqual(backup.read_bytes(),b'x'*len(raw),"a copy that is not the original's content is kept")
+    def test_the_sweep_takes_a_few_sets_per_pass(self):
+        import merge_service
+        s=MergeService.__new__(MergeService);due=['job-%d'%n for n in range(7)]
+        s.recovery=SimpleNamespace(due=lambda:list(due));s._retained_cleanup_job=lambda job_id:False
+        selected,backlog=s._recovery_batch(None)
+        self.assertEqual((selected,backlog),(due[:merge_service.RECOVERY_BATCH],True))
+        self.assertEqual(s._recovery_batch(('manual-job','scope')),(['manual-job'],False),'a press of Delete recovery copies goes alone')
+        due[:]=due[:2];self.assertEqual(s._recovery_batch(None),(due,False))
+
+
 # 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
 def setUpModule():
     global _sorted_fixture

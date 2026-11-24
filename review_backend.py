@@ -447,6 +447,8 @@ class CandidateReviewService:
             # book with a job is never among them, so a converted book stays in the converted list. 0.30.0 (Sergei,
             # Futaba O-r3-1): the Held and Candidate changed filters too.
             hidden=__import__('source_presence').hidden(db) if status in HIDES_GONE else set()
+            # 0.31.1 (Sergei 2026-11-24): a finished book removed because it is gone is in no list, whatever the filter.
+            hidden|=__import__('finished_removal').removed_candidates(db)
         self.page_local.jobs={};job_rows=None;attention={}
         if self.jobs and hasattr(self.jobs,'jobs'):
             job_rows=self.jobs.jobs.status()['jobs']

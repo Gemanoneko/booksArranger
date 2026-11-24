@@ -134,6 +134,22 @@ class RecoveryRetention:
             if actor is not None:db.execute('UPDATE recovery_retention SET actor=? WHERE job_id=?',(actor,job_id))
             if state=='deleted':db.execute('UPDATE recovery_retention SET deleted_at=? WHERE job_id=?',(self.clock().isoformat(),job_id))
 
+    @contextlib.contextmanager
+    def _owners(self,job_id):
+        """The book's publication for a purge: its output verified in full (storage.protected_cleanup). 0.31.1 (Sergei
+        2026-11-24): a finished book removed from the records because it is gone (finished_removal: its tombstone and the
+        'removed' state) has no output to verify; its own immutable manifest and receipt stand in, and every other proof of
+        the purge is unchanged: the immutable deadline, the originals retired and not replaced (_source_safety), no unknown
+        content in the set's folder, each copy's full hash against the reviewed original and its recorded native identity."""
+        import finished_removal
+        with connect(self.database) as db:
+            gone=finished_removal.removed(db,job_id)
+            row=db.execute('SELECT manifest,output FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone() if gone else None
+        if gone and row and row['output']:
+            yield {'manifest':json.loads(row['manifest']),'parent_output':json.loads(row['output'])}
+            return
+        with self.storage.protected_cleanup(job_id,guard=self.guard) as owners:yield owners
+
     def purge(self,job_id,actor='automatic',confirmation=None):
         persisted=self._rows('SELECT * FROM recovery_retention WHERE job_id=?',(job_id,))
         if persisted and persisted[0]['state']=='deleted':return self.status(job_id)  # idempotent: never twice
@@ -145,7 +161,7 @@ class RecoveryRetention:
         # because a copy is already gone is purged too; a missing copy is recorded, never an error.
         row=persisted[0]
         try:
-            with self.storage.protected_cleanup(job_id,guard=self.guard) as owners,contextlib.ExitStack() as stack:
+            with self._owners(job_id) as owners,contextlib.ExitStack() as stack:
                 manifest=owners['manifest'];output=owners['parent_output']
                 if output['sha256']!=row['output_hash']:raise BoundaryError('Retention output identity changed')
                 events=self._rows('SELECT completed_at FROM recovery_completion WHERE cleanup_id=?',(row['cleanup_id'],))

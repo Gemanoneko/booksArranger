@@ -534,6 +534,12 @@ class AudioJobs:
         # 0.31.1 (Sergei 2026-11-24): relink(record, stop, pace), optional: a finished book missing from where the app last
         # had it is looked for under the output folder and, found exactly once, its new location recorded; True then.
         self.relink = None
+        # 0.31.1 (Sergei 2026-11-24): remove_missing(missing, unprovable, checked, stop), optional: at the end of a complete
+        # background pass, the finished books proven missing ([(row, record, proof)]) are removed from the records unless
+        # the pass could not prove anything (unprovable: the output folder unreachable or not searched completely) or too
+        # many are missing at once (finished_removal; MergeService._remove_missing).
+        self.remove_missing = None
+        self._pass = threading.local()
         self.verify_pace = None
         self._resuming = False
         # Books checked of total while a finished-book check runs (after launch, or at Start); None otherwise.
@@ -672,7 +678,8 @@ class AudioJobs:
         again at its new place. Otherwise nothing changes (relink logs one line), and a flag this same check set before
         0.31.1 (the row's reason is this failure) is taken back. A stop is raised, never a verdict."""
         relink = self.relink
-        if callable(relink) and relink(copy.deepcopy(record), stop, pace) is True:
+        found = relink(copy.deepcopy(record), stop, pace) if callable(relink) else None
+        if found is True:
             try:
                 self._check_output(record, True, stop, pace)
                 return None if row["state"] == "completed" else {"state": "completed", "stage": "completed", "reason": ""}
@@ -680,6 +687,10 @@ class AudioJobs:
                 raise
             except Exception as exc:
                 reason = str(exc) or type(exc).__name__
+        collected = getattr(self._pass, 'missing', None)
+        if collected is not None and isinstance(found, dict):
+            # Proven missing (found: its proof) or unprovable this pass; the pass decides at its end (_verify_rows).
+            collected.append((row, record, found))
         if row["state"] == "needs attention" and row["reason"] == reason:
             return {"state": "completed", "stage": "completed", "reason": ""}
         return None
@@ -724,29 +735,53 @@ class AudioJobs:
 
     def _verify_rows(self, rows):
         stop=_Any(self._verify_stop,self.background_stop) if self.background_stop is not None else self._verify_stop
+        self._pass.missing=[]
+        try:
+            if not self._verify_each(rows, stop):return  # stopped: nothing is removed after a stop
+            collected=self._pass.missing
+        finally:
+            self._pass.missing=None
+        remove=self.remove_missing
+        if callable(remove) and rows:
+            missing=[(row,record,proof) for row,record,proof in collected if proof.get('missing')]
+            unprovable=[(row,record,proof) for row,record,proof in collected if not proof.get('missing')]
+            try:remove(missing,unprovable,len(rows),stop)
+            except InterruptedError:return
+            except Exception:pass  # a removal that failed changes nothing; the books are checked again next pass
+
+    def _verify_each(self, rows, stop):
+        """The check of each row; False when a stop ended the pass. A row found missing or unprovable (collected for
+        _verify_rows) is not marked checked: it is looked at again by a later pass, a minute later."""
         for index, row in enumerate(rows):
             if stop.is_set():
-                return
+                return False
             with self._lock:
                 if not self._resuming:
                     started = self._check_progress['started'] if self._check_progress and self._check_progress['kind'] == 'background' else _epoch_ms()
                     self._check_progress = {'kind': 'background', 'completed': index, 'total': len(rows), 'started': started}
             try:
+                before=len(self._pass.missing)
                 change = self._settle(row, True, stop, self.verify_pace)
+                if len(self._pass.missing)>before:
+                    self._published_retry_at[row['job_id']]=time.monotonic()+20  # removed at the pass's end, or looked at again soon
+                    if change:
+                        with self._lock:self._apply_unchanged([(row, change)])
+                    continue
                 if not change:
                     self._published_seen[row['job_id']]=self._published_stamp(row)
                     self._published_retry_at.pop(row['job_id'],None)
                     continue
                 with self._lock:
                     if stop.is_set():
-                        return
+                        return False
                     self._apply_unchanged([(row, change)])
                     if change.get('state')=='needs attention':self._published_retry_at[row['job_id']]=time.monotonic()+60
                     else:self._published_retry_at.pop(row['job_id'],None)
             except InterruptedError:
-                return  # resume() or close() took over; nothing is written after a stop.
+                return False  # resume() or close() took over; nothing is written after a stop.
             except Exception:
                 continue  # resume() repeats this exact check before any new work
+        return True
 
     def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None,retry_context=None,decision=None,decision_rules=None,manual_context=None):
         """Freeze JSON-safe authoritative server manifest. Never HTTP path input."""
@@ -1382,7 +1417,8 @@ class AudioJobs:
         with self._db() as db:
             waiting_requests=m4b_readmission.pending_count(db)
             reserved=active_keys(db)
-            rows=[dict(row) for row in db.execute("SELECT * FROM audio_jobs WHERE " + CURRENT + " ORDER BY created, job_id")]
+            # 0.31.1: a removed finished book (finished_removal) is in no list and no count.
+            rows=[dict(row) for row in db.execute("SELECT * FROM audio_jobs WHERE " + CURRENT + " AND state<>'removed' ORDER BY created, job_id")]
         if reserved:
             def held(row):
                 if row['state'] != 'pending':return False
