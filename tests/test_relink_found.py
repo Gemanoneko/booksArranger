@@ -371,6 +371,45 @@ class RelinkFoundTests(unittest.TestCase):
         self.assertEqual(self.row(unknown['job_id'])['state'], 'completed')
         self.assertIn('a file of its name or size is elsewhere but no file ID was recorded', self.log.getvalue())
 
+    def test_a_book_in_a_folder_the_search_skips_is_never_removed_0_31_1(self):
+        # Senua r2-m1 (Sergei 2026-11-24: those folders stay unsearched): ".hack__Sign\Vol 1.m4b" renamed in place to
+        # "Volume 1.m4b" was removed, the search never entering the dot-folder to find it. A book whose recorded path runs
+        # through such a folder (a name starting with ".", "#", "@" or "$", or a hidden or system folder) is never removed.
+        import ctypes
+        dotted, record = self.book('.hack__Sign', 'Vol 1.m4b', b'dot folder bytes' * 60, flagged=False)
+        hidden, kept = self.book('Hidden Series', 'Book.m4b', b'hidden folder by' * 61, flagged=False)
+        self.assertTrue(ctypes.windll.kernel32.SetFileAttributesW(str(self.sorted / 'Hidden Series'), 0x2), 'fixture: the folder is hidden')
+        gone, lost = self.book('Author', 'Gone.m4b', b'truly gone bytes' * 62, flagged=False)
+        for _ in range(3):
+            self.book('Shelf', 'Stays %s.m4b' % uuid.uuid4().hex[:6], os.urandom(700), flagged=False)
+        os.replace(record['final_path'], Path(record['final_path']).with_name('Volume 1.m4b'))  # renamed in place
+        os.replace(kept['final_path'], Path(kept['final_path']).with_name('Book, renamed.m4b'))
+        os.unlink(lost['final_path'])
+        self.check()
+        self.assertEqual(self.state(dotted['job_id']), ('completed', ''), 'never removed')
+        self.assertEqual(self.state(hidden['job_id']), ('completed', ''), 'never removed')
+        self.assertEqual(self.row(gone['job_id'])['state'], 'removed', 'positive control: a book gone from a searched folder is removed')
+        self.assertIn('in a folder the search does not enter, so it is never removed', self.log.getvalue())
+        self.assertTrue((self.sorted / '.hack__Sign' / 'Volume 1.m4b').exists() and (self.sorted / 'Hidden Series' / 'Book, renamed.m4b').exists())
+        proof = {'missing': True, 'recorded': record['final_path']}  # and the removal's own re-proof refuses it too
+        self.assertEqual(self.service._remove_missing([(self.row(dotted['job_id']), record, proof)], [], 7), 0)
+        self.assertEqual(self.state(dotted['job_id']), ('completed', ''))
+
+    def test_a_start_keeps_the_sweep_at_its_minute_while_the_queue_converts_0_31_1(self):
+        # Senua r2-m2: a Start's check waits for an idle queue; the 20 s rhythm is for that wait only while the queue is idle.
+        import threading
+        from types import SimpleNamespace
+        waiting = SimpleNamespace(published_recheck_waiting=lambda: True, _thread=None)
+        self.service.jobs = waiting
+        self.assertTrue(self.service._recheck_waits(), 'idle: the sweep comes 20 s apart until the check starts')
+        busy = threading.Event(); worker = threading.Thread(target=busy.wait); worker.start(); self.addCleanup(lambda: (busy.set(), worker.join(5)))
+        waiting._thread = worker
+        self.assertFalse(self.service._recheck_waits(), 'converting: the sweep keeps its 60 s rhythm')
+        busy.set(); worker.join(5)
+        self.assertTrue(self.service._recheck_waits(), 'the queue is idle again')
+        waiting.published_recheck_waiting = lambda: False
+        self.assertFalse(self.service._recheck_waits(), 'nothing waits')
+
     def test_a_book_the_app_was_moving_is_never_looked_for_and_never_removed_0_31_1(self):
         # Senua M1: a rules move whose rename happened but whose commit did not ('rename_intent'): the file is under its new
         # name, the record still at the old one. The app's own journal says why: the book is left as it is.

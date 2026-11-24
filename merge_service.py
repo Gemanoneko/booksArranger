@@ -35,6 +35,8 @@ STATUS_WAIT=4.0 # Seconds a reader waits on another thread's computation; below 
 RELINK_SHOW_MS=600000  # 0.31.1 (Judy's stuck-load spec, 8.1): finished books found again show in the status line this long
 RELINK_INDEX_SECONDS=300.0  # 0.31.1: one listing of the output folder (complete or not) serves every missing book this long
 REMOVAL_SHOW_MS=3600000  # 0.31.1 (Judy's stuck-load spec, 8.1): finished books removed from the list show this long
+SKIPPED_FOLDER='#@.$'  # 0.31.1: folders the output search never enters (#recycle, @eaDir, .Trash, $RECYCLE.BIN, .hack ...)
+HIDDEN_OR_SYSTEM=0x6  # and hidden or system folders (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)
 REMOVAL_BRAKE=10  # 0.31.1: more finished books missing than this in one pass removes none (the drive, not the books); so does
 # three or more missing that are over half of all finished books (MergeService._remove_missing)
 RECOVERY_BATCH=3  # 0.31.1: recovery sets the sweep releases per pass; the next batch follows after RECOVERY_PAUSE
@@ -2838,8 +2840,15 @@ class MergeService:
         if wake is not None:wake.set()
 
     def _recheck_waits(self):
+        """True while a Start's check of every finished book waits to start and the queue is idle: the sweep then comes
+        RECOVERY_PAUSE apart, so the check starts soon. While the queue converts the check cannot start, and the sweep keeps
+        its 60 s rhythm (Senua r2-m2: it ran every 20 s for a whole conversion run, three times the background catalog work
+        on the engine's one Python core)."""
         jobs=self.__dict__.get('jobs')
-        try:return bool(jobs is not None and hasattr(jobs,'published_recheck_waiting') and jobs.published_recheck_waiting())
+        try:
+            if jobs is None or not hasattr(jobs,'published_recheck_waiting') or not jobs.published_recheck_waiting():return False
+            worker=getattr(jobs,'_thread',None)
+            return not (worker is not None and worker.is_alive())
         except Exception:return False
 
     def _record_start_failure(self,error):
@@ -5992,8 +6001,8 @@ class MergeService:
         folder under it was listed, and the folders of its recorded path were listed down to the one it is gone from), else
         {'missing': False, 'why': ...} when something did not answer (the drive away, asleep or slow, a folder that could not
         be listed): nothing is removed in that pass. False in every other case (it is there; a file of its name, or one of its
-        size when no file ID was recorded to tell, is elsewhere but not proven to be it; it was not in the output folder), and
-        the book stays as it is."""
+        size when no file ID was recorded to tell, is elsewhere but not proven to be it; it was not in the output folder; its
+        recorded path runs through a folder the search never enters: _absence_proof), and the book stays as it is."""
         import book_move
         try:
             if not isinstance(record,dict) or not all(isinstance(record.get(k),str) and record[k] for k in ('job_id','final_path','sha256')) or type(record.get('size')) is not int:
@@ -6106,7 +6115,11 @@ class MergeService:
         if proof is None:
             self._relink_log('not at its recorded path; its folder did not answer',old)
             return {'missing':False,'why':'recorded folder unavailable'}
-        if proof is False:return False  # not in the output folder: never removed
+        if proof is False:
+            try:old.relative_to(root)
+            except ValueError:return False  # not in the output folder: never removed
+            self._relink_log('not at its recorded path; it was in a folder the search does not enter, so it is never removed',old)
+            return False
         return {'missing':True,'recorded':str(old),'gone_from':proof,'searched':str(root)}
 
     def _relink_matches(self, root, paths, old, effective, known, native, stop=None, pace=None):
@@ -6163,7 +6176,7 @@ class MergeService:
                     if entry.is_symlink() or getattr(entry,'is_junction',lambda:False)():continue
                     if entry.is_dir(follow_symlinks=False):
                         attributes=getattr(entry.stat(follow_symlinks=False),'st_file_attributes',0)
-                        if entry.name[:1] in '#@.$' or attributes&0x6:continue  # #recycle, @eaDir, .Trash, $RECYCLE.BIN; hidden, system
+                        if entry.name[:1] in SKIPPED_FOLDER or attributes&HIDDEN_OR_SYSTEM:continue  # #recycle, @eaDir, .Trash, $RECYCLE.BIN; hidden, system
                         pending.append(entry.path)
                     elif entry.name.lower().endswith('.m4b') and entry.is_file(follow_symlinks=False):
                         size=entry.stat(follow_symlinks=False).st_size  # from the listing itself on Windows
@@ -6178,11 +6191,15 @@ class MergeService:
     def _absence_proof(root, old, stop=None):
         """Where the book is proven gone: the folder (root or one under it, on its recorded path) whose complete listing has
         no entry of the next name on that path. None when a folder on the way could not be listed (unreachable, asleep,
-        slow, denied): nothing is proven. False when the recorded path is not under root (never removed)."""
+        slow, denied): nothing is proven. False when the recorded path is not under root, or runs through a folder the
+        search never enters (a name starting with SKIPPED_FOLDER's characters, or a hidden or system folder: Senua r2-m1,
+        Sergei 2026-11-24: such folders stay unsearched, so a book renamed or moved inside one is never proven gone): never
+        removed."""
         import unicodedata,book_move
         try:parts=old.relative_to(root).parts
         except ValueError:return False
         if not parts:return False
+        if any(part[:1] in SKIPPED_FOLDER for part in parts[:-1]):return False
         current=root
         for index,part in enumerate(parts):
             if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
@@ -6195,6 +6212,7 @@ class MergeService:
             if index==len(parts)-1:return None  # listed, yet not there a moment ago: nothing is proven
             try:
                 if entry.is_symlink() or getattr(entry,'is_junction',lambda:False)() or not entry.is_dir(follow_symlinks=False):return None
+                if getattr(entry.stat(follow_symlinks=False),'st_file_attributes',0)&HIDDEN_OR_SYSTEM:return False  # never searched
             except OSError:return None
             current=current/part
         return None
