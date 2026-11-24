@@ -117,9 +117,6 @@ HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab
 # Ruling R32 (Sergei 2026-11-23): the search the publisher and Litres sources go through; its human check counts as
 # "nothing found" at once (SeriesBackfill.lookup). A human check from any other host is still a try (R9).
 HUMAN_CHECK_HOST = 'html.duckduckgo.com'
-# 0.31.0 M1 (Futaba's QA round 2, as R32): Goodreads' own human check (its web firewall's challenge,
-# public_research.waf_challenge) counts as "nothing found" for Goodreads at once too.
-HUMAN_CHECK_HOSTS = (HUMAN_CHECK_HOST, 'www.goodreads.com')
 
 
 class Held(ValueError):
@@ -831,10 +828,9 @@ class SeriesBackfill:
                 if verdict:
                     memory[name].update(doubt=verdict['why'], dropped=series_certainty.dropped(verdict))
             except ResearchWait as wait:
-                if wait.reason == CHALLENGE_REASON and wait.source in HUMAN_CHECK_HOSTS and name in HOST_SOURCES[wait.source]:
+                if wait.reason == CHALLENGE_REASON and wait.source == HUMAN_CHECK_HOST and name in HOST_SOURCES[HUMAN_CHECK_HOST]:
                     # Ruling R32 (Sergei 2026-11-23): a source that only answers with a human check (the two that go through
                     # DuckDuckGo) counts as "nothing found" at once, never a try: it held "All done" back for 12 hours or more.
-                    # 0.31.0 M1: Goodreads' own human check too (it held All done back for 6 hours or more).
                     memory[name] = {'answer': 'none', 'at': now, 'reason': str(wait.reason)[:200]}
                     continue
                 closed(name, {'source': wait.source, 'reason': wait.reason, 'retry_at': wait.retry_at, 'kind': wait.kind, 'scope': wait.scope},
