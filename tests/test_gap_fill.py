@@ -97,6 +97,179 @@ class GapFillTests(Base):
         self.fill.run_pass(); self.assertEqual(self.fill.entry(job_id)['state'], 'none')
         self.assertEqual(self.fill.candidates(), [])
 
+
+class Scripted:
+    """A research whose fill_gaps answers from a script, one answer per call, and records what it was told to skip."""
+    def __init__(self, *answers):
+        self.answers = list(answers); self.skipped = []
+
+    def fill_gaps(self, ask, gaps, stop, budget, skip=()):
+        self.skipped.append(tuple(skip))
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer, {'sources': []}
+
+
+def answer(closed=(), asked=('fantlab', 'wikidata'), kind='source_unavailable', retry=None, catalog=None, unfilled=None):
+    """found, as PublicResearch.fill_gaps returns it: the sources asked, the ones closed (each with its wait), what is left."""
+    closures = [{'source': name, 'reason': name + ' did not answer', 'retry_at': retry, 'kind': kind, 'scope': 'host'} for name in closed]
+    found = {'closed': list(closed), 'asked': list(asked), 'closures': closures, 'unfilled': ['original_title'] if unfilled is None else list(unfilled),
+             'wait': dict(closures[0]) if closures else None}
+    if catalog:
+        found['catalog'] = catalog; found['unfilled'] = [] if unfilled is None else list(unfilled)
+    return found
+
+
+class BoundedTriesTests(Base):
+    """R16 (Sergei 2026-11-22): the look-up for original titles and author names gets the series look-up's limit. A book
+    whose source never answered was deferred again without end, so the look-up never ended and All done never showed."""
+
+    def scripted(self, *answers):
+        self.research = Scripted(*answers)
+        self.fill = GapFill(SimpleNamespace(inventory=SimpleNamespace(database=str(self.database))), research=self.research, clock=lambda: self.now[0])
+        return self.job(manifest('book-1'))
+
+    def later(self, job_id):
+        """The clock moves to the book's next try; returns how long that was."""
+        at = self.fill.entry(job_id)['record']['next_attempt']
+        waited = at - self.now[0]; self.now[0] = at + 1
+        return waited
+
+    def test_the_numbers_are_the_series_lookups_own(self):
+        import series_backfill
+        self.assertEqual((gap_fill.SOURCE_TRIES, gap_fill.TRY_SPACING, gap_fill.FAILURE_TRIES), (series_backfill.SOURCE_TRIES, series_backfill.TRY_SPACING, series_backfill.FAILURE_TRIES))
+        self.assertEqual((gap_fill.SOURCE_TRIES, gap_fill.TRY_SPACING), (3, 6 * 3600), 'R9: 3 per source, 6 hours apart')
+        self.assertEqual(self.fill.summary()['tries'], {'per_source': 3, 'spacing_seconds': 21600, 'failures': 3}, "what the Waiting item's tooltip prints")
+
+    def test_sources_that_never_answer_are_given_up_after_three_tries_and_the_book_is_settled(self):
+        # The real research on closed sites (FantLab and Wikidata answer 503 for ever), the reported shape.
+        self.sources.closed = {'api.fantlab.ru', 'www.wikidata.org'}
+        job_id = self.job(manifest('book-1'))
+        waits = []
+        for attempt in (1, 2):
+            self.fill.run_pass()
+            entry = self.fill.entry(job_id)
+            self.assertEqual((entry['state'], {name: state['tries'] for name, state in entry['record']['sources'].items()}), ('deferred', {'fantlab': attempt, 'wikidata': attempt}))
+            self.assertEqual(self.fill.candidates(), [], 'not before its next try')
+            value = self.fill.summary()
+            self.assertEqual((value['left'], value['between_tries'], value['next_at'], value['done']), (1, 1, entry['record']['next_attempt'], 0), 'a Waiting item with its next try')
+            waits.append(self.later(job_id))
+        self.assertTrue(all(wait >= gap_fill.TRY_SPACING for wait in waits), waits)
+        self.fill.run_pass()
+        entry = self.fill.entry(job_id)
+        self.assertEqual((entry['state'], entry['record']['unreached'], 'next_attempt' in entry['record']), ('none', ['fantlab', 'wikidata'], False))
+        self.assertEqual(entry['reason'], gap_fill.UNREACHED + 'fantlab, wikidata')
+        value = self.fill.summary()
+        self.assertEqual((value['left'], value['between_tries'], value['next_at'], value['done'], value['total'], value['gave_up']), (0, 0, None, 1, 1, 1),
+                         'the look-up has an end: nothing is left, so All done can show')
+        asked = len(self.sources.calls)
+        self.now[0] += 30 * 86400; self.fill.run_pass()
+        self.assertEqual((self.fill.candidates(), len(self.sources.calls)), ([], asked), 'settled: never asked again')
+
+    def test_a_source_that_answers_on_a_later_try_fills_the_book(self):
+        self.sources.closed = {'api.fantlab.ru', 'www.wikidata.org'}
+        job_id = self.job(manifest('book-1'))
+        self.fill.run_pass(); self.later(job_id)
+        self.sources.closed = set(); self.client.__dict__.pop('_paused', None)
+        self.fill.run_pass()
+        entry = self.fill.entry(job_id)
+        self.assertEqual((entry['state'], entry['record']['found']['catalog']['original_title']), ('found', 'The Eye of God'))
+        self.assertNotIn('unreached', entry['record'])
+
+    def test_the_apps_own_limit_and_a_busy_catalog_are_no_try(self):
+        soon = self.now[0] + 1200
+        limited = [answer(closed=['fantlab'], asked=['fantlab'], kind=kind, retry=soon) for kind in ('app_limit', 'catalog_busy', 'app_limit', 'app_limit', 'app_limit')]
+        job_id = self.scripted(*limited, answer(asked=['fantlab'], catalog={'original_title': 'The Eye of God', 'language': 'en'}))
+        for _ in limited:
+            self.fill.run_pass()
+            entry = self.fill.entry(job_id)
+            self.assertEqual((entry['state'], entry['record']['sources']['fantlab'].get('tries', 0), entry['record']['next_attempt']), ('deferred', 0, soon),
+                             'it waits for the limit and goes on where it stopped, not six hours')
+            self.now[0] = soon + 1; soon = self.now[0] + 1200
+            for item in self.research.answers[:1]:
+                for closure in item['closures']: closure['retry_at'] = soon
+        self.fill.run_pass()
+        self.assertEqual(self.fill.entry(job_id)['state'], 'found', 'five waits for the app\'s own limit never gave the source up')
+
+    def test_a_source_that_answered_is_not_asked_about_that_book_again(self):
+        job_id = self.scripted(answer(closed=['wikidata']), answer(closed=['wikidata'], asked=['wikidata']), answer(closed=['wikidata'], asked=['wikidata']))
+        self.fill.run_pass()
+        sources = self.fill.entry(job_id)['record']['sources']
+        self.assertEqual((sources['fantlab'], sources['wikidata']['tries']), ({'answered': True, 'at': self.now[0]}, 1))
+        self.later(job_id); self.fill.run_pass()
+        self.later(job_id); self.fill.run_pass()
+        self.assertEqual(self.research.skipped, [(), ('fantlab',), ('fantlab',)], 'FantLab answered at the first try: only Wikidata is asked after that')
+        entry = self.fill.entry(job_id)
+        self.assertEqual((entry['state'], entry['record']['unreached']), ('none', ['wikidata']))
+
+    def test_a_source_closed_for_a_field_another_source_filled_costs_no_try(self):
+        # PublicResearch drops such a source from 'closed' (it serves no unfilled field): the book is found, nothing is counted.
+        found = answer(asked=['fantlab', 'wikidata'], catalog={'original_title': 'The Eye of God', 'language': 'en'})
+        found['closures'] = [{'source': 'wikidata', 'reason': 'x', 'retry_at': None, 'kind': 'source_unavailable', 'scope': 'host'}]
+        job_id = self.scripted(found)
+        self.fill.run_pass()
+        entry = self.fill.entry(job_id)
+        self.assertEqual((entry['state'], entry['record']['sources']), ('found', {'fantlab': {'answered': True, 'at': self.now[0]}}))
+
+    def test_what_was_found_is_kept_while_another_field_waits_and_when_its_source_is_given_up(self):
+        first = dict(answer(closed=['openlibrary'], asked=['fantlab', 'openlibrary'], unfilled=['author_full']))
+        first['catalog'] = {'original_title': 'The Eye of God', 'language': 'en'}
+        again = lambda: dict(answer(closed=['openlibrary'], asked=['openlibrary'], unfilled=['author_full']), catalog={'original_title': 'The Eye of God', 'language': 'en'})
+        job_id = self.scripted(first, again(), again())
+        self.fill.run_pass()
+        entry = self.fill.entry(job_id)
+        self.assertEqual((entry['state'], entry['record']['partial'], entry['record']['found']['catalog']['language']), ('deferred', True, 'en'))
+        for _ in range(2):
+            self.later(job_id); self.fill.run_pass()
+        entry = self.fill.entry(job_id)
+        self.assertEqual((entry['state'], entry['record']['found']['catalog']['language'], entry['record']['unreached']), ('found', 'en', ['openlibrary']),
+                         'settled with what was confirmed; the source that never answered is named')
+        self.assertEqual(self.research.skipped, [(), ('fantlab',), ('fantlab',)])
+
+    def test_a_lookup_that_cannot_finish_is_tried_three_times_six_hours_apart_then_settled(self):
+        job_id = self.scripted(RuntimeError('boom'), RuntimeError('boom'), RuntimeError('boom again'))
+        for failures in (1, 2):
+            self.fill.run_pass()
+            entry = self.fill.entry(job_id)
+            self.assertEqual((entry['state'], entry['record']['failures'], entry['record']['next_attempt']), ('deferred', failures, self.now[0] + gap_fill.TRY_SPACING))
+            self.assertEqual(self.fill.candidates(), [], 'it was tried again at every pass, ten minutes apart, without end')
+            self.later(job_id)
+        self.fill.run_pass()
+        entry = self.fill.entry(job_id)
+        self.assertEqual((entry['state'], entry['record']['gave_up'], entry['reason']), ('none', True, gap_fill.FAILED % 3 + 'boom again'))
+        self.assertEqual((self.fill.candidates(), self.fill.summary()['gave_up'], self.fill.summary()['left']), ([], 1, 0))
+
+    def test_the_limit_is_the_modules_number_not_a_literal(self):
+        with mock.patch.object(gap_fill, 'SOURCE_TRIES', 2):
+            job_id = self.scripted(answer(closed=['fantlab'], asked=['fantlab']), answer(closed=['fantlab'], asked=['fantlab']))
+            self.assertEqual(self.fill.summary()['tries']['per_source'], 2)
+            self.fill.run_pass(); self.assertEqual(self.fill.entry(job_id)['state'], 'deferred')
+            self.later(job_id); self.fill.run_pass()
+            self.assertEqual(self.fill.entry(job_id)['state'], 'none', 'given up at the second try')
+
+    def test_a_book_deferred_before_this_rule_goes_on_and_ends_too(self):
+        # The four rows deferred on the copy of the live catalog (2026-11-22) carry a wait and no per-source memory.
+        job_id = self.scripted(*[answer(closed=['fantlab'], asked=['fantlab']) for _ in range(3)])
+        old = {'lookup_policy': gap_fill.LOOKUP_POLICY, 'gaps': ['original_title'], 'unfilled': ['original_title'], 'found': {}, 'next_attempt': self.now[0] - 1,
+               'wait': {'source': 'api.fantlab.ru', 'reason': 'Public source cooling down', 'retry_at': self.now[0] - 1, 'kind': 'source_pause'}}
+        self.fill._set(job_id, 'book-1', 'deferred', 'Public source cooling down', old)
+        for _ in range(3):
+            self.assertEqual([job for job, _ in self.fill.candidates()], [job_id])
+            self.fill.run_pass()
+            if self.fill.entry(job_id)['state'] == 'deferred': self.later(job_id)
+        self.assertEqual((self.fill.entry(job_id)['state'], self.research.answers), ('none', []), 'three more tries at most')
+
+    def test_a_research_that_names_no_closure_is_still_bounded(self):
+        # A stand-in (or an older research) answers only 'closed' and its one 'wait': each closed source gets the try.
+        plain = lambda: {'closed': ['fantlab'], 'unfilled': ['original_title'], 'wait': {'source': 'api.fantlab.ru', 'reason': 'closed', 'retry_at': None, 'kind': 'source_unavailable'}}
+        job_id = self.scripted(plain(), plain(), plain())
+        for _ in range(3):
+            self.fill.run_pass()
+            if self.fill.entry(job_id)['state'] == 'deferred': self.later(job_id)
+        self.assertEqual((self.fill.entry(job_id)['state'], self.fill.entry(job_id)['record']['unreached']), ('none', ['fantlab']))
+
+
 class ServiceTests(ApproveFixture):
     def test_the_app_starts_the_pass_with_series_backfill_on_the_automatic_research_and_stops_it_on_close(self):
         import contextlib

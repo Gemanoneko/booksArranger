@@ -299,7 +299,7 @@ class EditNamesTests(ApproveFixture):
         current=self.service.reviews._row('Audiobooks',row['id']);editor=self.service.names_editor(current['id'],current['revision'])
         self.assertEqual({key:editor['fields'][key]['proposal'] for key in values},values)
         preview=self.service.approval_preview(current['id'],current['revision'],names={})
-        self.assertEqual(preview['place'],{'series':'My series','number':'3','universe':'My universe','collection':False})
+        self.assertEqual(preview['place'],{'series':'My series','number':'3','universe':'My universe','collection':False,'origin':'entered'})  # 0.31.0 (Judy 4.3): the Place line's origin
         self.assertEqual(Path(preview['absolute']).parent,chosen)
         self.assertEqual(Path(preview['absolute']).name,'My series - 3 - My entered title - Private author.m4b')
         with connect(self.inv.database) as db:choice=destination_overrides.live(db,book_key=entered_names.book_key(current))
@@ -312,7 +312,7 @@ class EditNamesTests(ApproveFixture):
         self.service.names_save(row['id'],row['revision'],{'title':'Сейф №1','series':'Протоколы SCP','number':'1'})
         self.assertEqual(self.preview('1')['path'],str(Path('Сборники')/'Протоколы SCP'/'Протоколы SCP - 1 - Сейф №1 - Разные авторы.m4b'))
         listed=self.row('1')
-        self.assertEqual(listed['place'],{'universe':'','series':'Протоколы SCP','number':'1','collection':True})
+        self.assertEqual(listed['place'],{'universe':'','series':'Протоколы SCP','number':'1','collection':True,'origin':'entered'})  # 0.31.0 (Judy 4.3)
         self.assertEqual(listed['entered'],['title','series','number'])
         editor=self.service.names_editor(listed['id'],listed['revision'])
         self.assertIn('Протоколы SCP',editor['series'],'the pick-list offers the series once saved')
@@ -334,7 +334,7 @@ class EditNamesTests(ApproveFixture):
     def test_approve_with_the_editor_open_saves_the_names_and_the_job_carries_them(self):
         self.scp();row=self.row('2');names={'series':'Протоколы SCP','number':'2'}
         preview=self.service.approval_preview(row['id'],row['revision'],title='Сейф №2',names=names)
-        self.assertEqual(preview['place'],{'universe':'','series':'Протоколы SCP','number':'2','collection':True})
+        self.assertEqual(preview['place'],{'universe':'','series':'Протоколы SCP','number':'2','collection':True,'origin':'entered'})  # 0.31.0 (Judy 4.3)
         approved=self.service.approve_book(row['id'],row['revision'],title='Сейф №2',path=preview['path'],names=names);self.start_and_wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
         self.assertEqual(Path(job['output']['final_path']),self.sorted/'Сборники'/'Протоколы SCP'/'Протоколы SCP - 2 - Сейф №2 - Разные авторы.m4b')

@@ -29,7 +29,7 @@ export const OUR_TEMP_PREFIXES=Object.freeze(['n-','sr','ds','do','bm','case-','
  'cleanup-','controls-','current-package-','durable-decisions-','git-alias-','installer-snapshot-','move-integration-source-',
  'move-integration-target-','mp3-staging-','multisource-','nas-dispose-','nas-removal-','owned-','package-retention-','progress-',
  'producer-core-','publication-native-','relocation-source-','relocation-target-','retention-','selected-temp-','uninstall-launch-',
- 'zone-','installation-paths-','lock-pin-','portable-paths-','qa-entry-','c-drive-guard-']);
+ 'zone-','installation-paths-','lock-pin-','portable-paths-','qa-entry-','c-drive-guard-','filing-']);
 const escape=text=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const SHAPED=new RegExp('^(?:'+OUR_TEMP_PREFIXES.map(escape).join('|')+')(?:[a-z0-9_]{8}|[A-Za-z0-9]{6})','u');
 // Names only Books Arranger uses, whatever follows: Books Arranger, books-*, ba-*/BA-*, BASF-*, codex-books-*. (SQLite's

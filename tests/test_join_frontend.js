@@ -194,7 +194,8 @@ const joinButton=get('join-selected'),dialogText=()=>get('join-effects').childre
   assert.equal(joinHintOf(trOf('part-1')).hidden,true,'no waiting line');assert.equal(joinCancelOf(trOf('part-1')).hidden,true,'no Cancel for an instant');
   run('queueState={queued:'+JSON.stringify([{...IDLE,blocker:{kind:'scan',cause:'scan'}}])+',running:null};controls()');
   assert.equal(joinHintOf(trOf('part-1')).textContent,'Join queued: «Впусти меня», 2 books. It runs when the library scan finishes. Stop scanning to run it sooner.','positive control: a real blocker is said');
-  const waitingOf=item=>run('waitingList('+JSON.stringify({waiting:[item],counts:{}})+').length');
+  // 0.31.0: the page's own work view also carries the look-ups between tries (workView's lookups; none here).
+  const waitingOf=item=>run('waitingList('+JSON.stringify({waiting:[item],counts:{},lookups:[]})+').length');
   assert.equal(waitingOf({id:'action:join-2',kind:'action',label_key:'join',subject:'Впусти меня',book_id:'part-1',blocker:null,ahead:0}),0,'no Waiting item');
   assert.equal(waitingOf({id:'action:join-2',kind:'action',label_key:'join',subject:'Впусти меня',book_id:'part-1',blocker:{kind:'scan',cause:'scan'},ahead:0}),1);
   assert.equal(run('queueHint('+JSON.stringify(partRow(5))+')'),null);

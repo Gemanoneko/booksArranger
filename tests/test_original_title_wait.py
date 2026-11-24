@@ -75,14 +75,13 @@ class SeriesQuestionAfterTheAuthorTests(ApproveFixture):
             return {'state': 'found', 'name': 'James Rollins', 'source_url': 'https://fantlab.ru/autor1', 'title': ''}
         with patch.object(research, '_author_latin', side_effect=latin):
             result = research.lookup(dict(row, _manual_metadata_sources=[]), str(self.audio), threading.Event())
-        self.assertEqual([title for title, _ in calls], ['Карта костей'], 'ruling 39 looks the author up first, once')
+        # R22 (Sergei 2026-11-22): the title is no longer split for a series nothing confirms, so the lookup is asked
+        # with the name as the files give it; it tries the part after the number too (its `also`, in the engine).
+        self.assertEqual([title for title, _ in calls], ['Отряд Сигма 2. Карта костей'], 'ruling 39 looks the author up first, once')
         self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'), 'Rollins James', 'and learns his name')
-        self.assertEqual((result['ask']['why'], result['ask']['fields']['author']['proposal']), ('title_series', 'Rollins James'), 'then the series is asked')
-        self.service.automatic._record(row, 'Held', dict(result, until_change=True), None)
-        approved = self.service.approve_book(row['id'], row['revision']); self.start_and_wait()
-        job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
-        self.assertEqual(job['state'], 'completed', job)
-        self.assertEqual(Path(job['output']['final_path']), self.sorted / 'Rollins James' / 'Отряд Сигма' / 'Отряд Сигма - 2 - Карта костей - Rollins James.m4b')
+        # The series question that came next is withdrawn: no question, the name as it is, no series.
+        self.assertEqual((result['reasons'], result.get('ask')), ([], None))
+        self.assertEqual((result['review']['canonical_author'], result['review']['title'], result['review']['series']), ('Rollins James', 'Отряд Сигма 2. Карта костей', ''))
 
 
 class Ruling49Tests(ApproveFixture):
@@ -202,6 +201,21 @@ class EnglishSpellingAnswerTests(ApproveFixture):
         self.assertEqual(lookup.call_count, 0, 'never looked up again')
         self.assertEqual((result['ask']['kind'], result['ask']['why']), ('author_unclear', 'english_spelling'), 'asked once instead')
         self.assertEqual(self.rules(), [('same_as', 'Westerfeld Scott', 'assistant')], 'nothing new learned')
+
+# 0.31.0 step 2 (rulings R2 and R5): these fixtures predate the look-up before review, and their sources are closed or
+# cannot be reached. Under R2 such a book now waits a few tries for them, which is not what this suite tests; the
+# look-up has its own tests (test_lookup_before_review_031). tests/original_title_fixture.py.
+_no_lookup_before_review = None
+
+
+def setUpModule():
+    global _no_lookup_before_review
+    from original_title_fixture import no_lookup
+    _no_lookup_before_review = no_lookup()
+
+
+def tearDownModule():
+    _no_lookup_before_review.stop()
 
 
 if __name__ == '__main__':

@@ -51,6 +51,17 @@ KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book', 'loading', 'jo
 # only writes the catalog (Keep as separate books, Scan again, Remove from list, names, a destination, a join, a scan)
 # runs as before, and a press made in this session keeps today's behaviour.
 WAITS_FOR_START = ('retry', 'repair', 'delete', 'copy', 'approve', 'convert', 'cleanup', 'restore', 'move')
+# 0.31.0 milestone B (rulings R18 and R26; F13): a move the app queued by its rules (args 'origin': 'rules', book_move.ORIGINS)
+# waits the same way while a jobs Pause is in force, whether it was saved before this launch or pressed in this session:
+# Sergei pressed nothing to start it, so his Pause holds it. It is parked like a restored press, so a press he makes
+# meanwhile runs as with an empty queue. The page shows no Cancel for such a move (view(): 'origin').
+RULES = 'rules'
+
+
+def held_by_pause(item):
+    """True for a queued action that a jobs Pause in force holds: a restored press that changes files, or the app's own move."""
+    args = item.get('args') if isinstance(item.get('args'), dict) else {}
+    return bool(item.get('restored') and item['action'] in WAITS_FOR_START or item['action'] == 'move' and args.get('origin') == RULES)
 # The presses a library scan holds back (their checks read the catalog the scan regroups), as their routes refused them.
 SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'scan_again', 'copy', 'join')
 # Always queued, even with nothing in the way: their checks (every file probed and hashed) take the time a page must not
@@ -196,12 +207,13 @@ class ActionQueue:
         self.restored = False
 
     # ------------------------------------------------------------------ what an action waits for
-    def blocker(self, action, book_id, held=0, job_id=None, parts=None):
+    def blocker(self, action, book_id, held=0, job_id=None, parts=None, move_id=None):
         """The kind that keeps this action from running now, or None. Reads only: the loading flag, a thread probe, the scan
         flag, the Retry all run and, for Delete, the book's own jobs and research row. held: the control admissions the
         caller holds itself (the worker holds one while it runs an action: run_queued passes 1). job_id: the audiobook job
         the action is for (its args' job_id); a cleanup action's own source cleanup never blocks it. parts: a join's books
-        (0.30.0 item D): it waits ('book') while one of them converts or its retry check runs, never aborting it."""
+        (0.30.0 item D): it waits ('book') while one of them converts or its retry check runs, never aborting it. move_id: a
+        move action's own move (0.31.0 R33: it waits, 'book', while the app writes that book, MergeService.rewriting)."""
         server = self.server
         loading = getattr(server, 'loading', None)
         if loading is not None and not loading.finished or getattr(server, 'merge', None) is None:
@@ -262,6 +274,15 @@ class ActionQueue:
             import book_delete
             if book_delete.processing(merge, book_id):
                 return 'book'
+            # R33 (Sergei 2026-11-23): a move of a book the app is writing (its series or its names) runs after that write,
+            # never beside it; run_move checks the same once more as it starts.
+            rewriting = getattr(merge, 'rewriting', None)
+            if move_id and callable(rewriting):
+                try:
+                    if rewriting(move_id):
+                        return 'book'
+                except Exception:
+                    return 'book'  # not known: it waits rather than meet a write
             cleanup = getattr(merge, 'cleanup', None)
             alive = lambda thread: thread is not None and thread.is_alive()
             if cleanup is not None and (alive(getattr(cleanup, 'thread', None)) or getattr(cleanup, 'current', None)):
@@ -299,7 +320,11 @@ class ActionQueue:
         waiting = self._unparked()
         if self.items and not waiting:
             return None  # only restored presses parked for Start (R2-1): a press made now runs as with an empty queue
-        return (waiting[0]['blocker'] or 'operation') if waiting else 'operation'  # behind a head that waits for nothing: the head
+        # R35 (Senua's 0.31.0 delta 2, M6): a move that waits for its own book holds no one; what is ahead is the next action.
+        waiting = [item for item in waiting if not (item['action'] == 'move' and item.get('blocker') == 'book')]
+        if not waiting:
+            return None
+        return waiting[0]['blocker'] or 'operation'  # behind a head that waits for nothing: the head
 
     def _unparked(self):
         """The waiting actions not parked for Start (blocker 'paused': a restored press under a saved Pause, R2-1)."""
@@ -314,7 +339,8 @@ class ActionQueue:
         if action not in ACTIONS:
             raise ValueError('Only Retry, Repair and Delete book are queued')
         pressed = {'action': action, 'book_id': book_id, 'args': args}
-        kind = self.blocker(action, book_id, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(pressed))
+        kind = self.blocker(action, book_id, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(pressed),
+                            move_id=args.get('move_id') if isinstance(args, dict) else None)
         with self.lock:
             if self.closed or self.server.closing:
                 raise ValueError('Server is shutting down')
@@ -499,6 +525,8 @@ class ActionQueue:
             value['n'] = len(value['parts'])
         if item.get('restored'):
             value['restored'] = True  # 0.30.0: queued before the last restart
+        if item['action'] == 'move' and isinstance(item.get('args'), dict) and item['args'].get('origin'):
+            value['origin'] = item['args']['origin']  # 0.31.0 (R26): 'rules' for the app's own move (no Cancel), else 'user'
         return value
 
     def _prune(self):
@@ -634,30 +662,51 @@ class ActionQueue:
             # they keep their place and their 'paused' blocker while the first other action runs, so a press made in this
             # session behaves as it does today. One catalog read per pass, only while a restored press of that kind waits.
             with self.lock:
-                restored = any(item.get('restored') and item['action'] in WAITS_FOR_START for item in self.items)
+                restored = any(held_by_pause(item) for item in self.items)
             paused = restored and self._paused_for_start()
             with self.lock:
-                parked = {item['id'] for item in self.items if paused and item.get('restored') and item['action'] in WAITS_FOR_START}
-                head = next((item for item in self.items if item['id'] not in parked), None)
-                if head is None:
+                parked = {item['id'] for item in self.items if paused and held_by_pause(item)}
+                order = [item for item in self.items if item['id'] not in parked]
+                if not order:
                     for item in self.items:
                         item['blocker'] = 'paused'
                     self.changed.wait(self.poll)
                     continue
-            kind = self.item_blocker(head)
+            # R35 (Sergei 2026-11-23; Senua's 0.31.0 delta 2, M6): a move that waits only for its own book ('book': that book
+            # converts, or the app writes it) keeps its place and holds no other book's action: the first action after it
+            # that nothing holds runs. An action of the same book (a join with it) stays behind it.
+            head, kind, waiting, held_books = None, None, set(), set()
+            for item in order:
+                if held_books & ({item['book_id']} | set(parts_of(item))):
+                    waiting.add(item['id'])
+                    continue
+                kind = self.item_blocker(item)
+                if kind == 'book' and item['action'] == 'move':
+                    waiting.add(item['id'])
+                    held_books.add(item['book_id'])
+                    continue
+                head = item
+                break
             with self.lock:
                 if self.closed:
                     return
+                if head is None:
+                    for item in self.items:
+                        item['blocker'] = 'paused' if item['id'] in parked else 'book'
+                    self.changed.wait(self.poll)
+                    continue
                 if head not in self.items:
                     continue  # cancelled meanwhile
                 if kind is not None:
                     for item in self.items:
-                        item['blocker'] = 'paused' if item['id'] in parked else kind
+                        item['blocker'] = 'paused' if item['id'] in parked else 'book' if item['id'] in waiting else kind
                     self.changed.wait(self.poll)
                     continue
                 for item in self.items:
                     if item['id'] in parked:
                         item['blocker'] = 'paused'
+                    elif item['id'] in waiting:
+                        item['blocker'] = 'book'
                 self.items.remove(head)
                 self.running = head
             self._persist()  # it runs now: an action is never run twice after a crash
@@ -695,8 +744,9 @@ class ActionQueue:
         """blocker() for a queued action, with the job its args name; a restored press that changes files or queues
         audiobook work also waits for Start while a saved jobs Pause is in force ('paused', WAITS_FOR_START)."""
         args = item.get('args')
-        kind = self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item))
-        if kind != 'loading' and item.get('restored') and item['action'] in WAITS_FOR_START and self._paused_for_start():
+        kind = self.blocker(item['action'], item['book_id'], held=held, job_id=args.get('job_id') if isinstance(args, dict) else None, parts=parts_of(item),
+                            move_id=args.get('move_id') if isinstance(args, dict) else None)
+        if kind != 'loading' and held_by_pause(item) and self._paused_for_start():
             return 'paused'
         return kind
 

@@ -55,7 +55,13 @@ ENVELOPE = 'books-book-move-envelope-v1'
 TABLE = ('CREATE TABLE IF NOT EXISTS book_moves(move_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, kind TEXT NOT NULL, candidate_id TEXT NOT NULL,'
          ' generation INTEGER NOT NULL, state TEXT NOT NULL, strategy TEXT, target_folder TEXT NOT NULL, target_root TEXT NOT NULL,'
          ' target_path TEXT NOT NULL, from_json TEXT NOT NULL, final_json TEXT, temp_path TEXT, cause TEXT, detail TEXT, progress INTEGER,'
-         ' override_id TEXT, created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL, UNIQUE(job_id,kind,generation))')
+         ' override_id TEXT, created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL, origin TEXT, UNIQUE(job_id,kind,generation))')
+# 0.31.0 milestone B (rulings R18 and R26; Judy's spec 3.3 and 3.4): who made a move. 'rules': the app queued it by its rules
+# (MergeService.rule_filing: no Cancel on the row, listed in the record of renames and moves); 'user': Sergei did (Choose
+# folder…, Use computed folder, the folder chosen before the book was published, or his approval of a listed move). NULL:
+# a move made before 0.31.0. One nullable column, added to an existing table by setup() (migrate): a version before
+# 0.31.0 names its columns when it writes a move and reads a move by name, so it runs on the migrated table unchanged.
+ORIGINS = ('rules', 'user')
 EVENTS = ('CREATE TABLE IF NOT EXISTS book_move_events(event_id INTEGER PRIMARY KEY AUTOINCREMENT, move_id TEXT NOT NULL,'
           ' from_state TEXT, to_state TEXT NOT NULL, proof_json TEXT, created_utc TEXT NOT NULL)')
 INDEXES = ('CREATE INDEX IF NOT EXISTS book_moves_by_job ON book_moves(job_id,kind,generation)',
@@ -73,6 +79,11 @@ class Refused(ValueError):
         super().__init__(message)
         self.cause = cause
         self.code = cause
+
+
+class WaitsForWrite(Exception):
+    """0.31.0 ruling R33: the app is writing this move's book (its series or its names): the move waits until that write
+    has ended, and nothing ran (MergeService.run_move; the action queue keeps the action and runs it then)."""
 
 
 class Unsettled(Exception):
@@ -157,8 +168,17 @@ def stamp():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def migrate(db):
+    """The 0.31.0 column on a table made before it (see ORIGINS). True when it added the column."""
+    if not have(db) or any(row[1] == 'origin' for row in db.execute('PRAGMA table_info(book_moves)')):
+        return False
+    db.execute('ALTER TABLE book_moves ADD COLUMN origin TEXT')
+    return True
+
+
 def setup(db):
     db.execute(TABLE)
+    migrate(db)
     db.execute(EVENTS)
     for statement in INDEXES:
         db.execute(statement)
@@ -294,13 +314,57 @@ def current(db, job_id, kind):
     return {'move_id': record[0], 'generation': record[1]} if record else None
 
 
-def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None, name=None):
+def begun(db, job_id, running=None):
+    """Senua's 0.31.0 review, M1 and M2: whether a move of this book has begun, asked by a writer about to replace the book's
+    receipt (the write of names and the series write, inside their catalog transaction: SeriesBackfill._no_move_begun).
+    A move past 'queued' that did not fail or get cancelled has begun. So has a 'queued' one that running(move_id) says is
+    being run now: the Mover resolves the book and hashes the held file while its journal still reads 'queued' (its first
+    journal write comes after the hash), so 'queued' alone is not "not begun". running: None reads every queued move as not
+    begun. Either way the Mover itself stops a move whose book was rewritten before its first journal write
+    (Mover._still_at_start), so a receipt is never replaced under a move that goes on."""
+    if not have(db):
+        return False
+    for move_id, state in db.execute("SELECT move_id,state FROM book_moves WHERE job_id=? AND state NOT IN ('failed','cancelled')", (job_id,)).fetchall():
+        if state != 'queued' or running is not None and running(move_id):
+            return True
+    return False
+
+
+def rebase(db, move_id, start):
+    """0.31.0 ruling R30 (Sergei 2026-11-23): a Choose folder… pressed while the app rewrote that book (its series or its
+    names) wins. The rewrite gave the book a new receipt (a new name in its own folder), so his move, queued from the
+    receipt the rewrite replaced, would stop at its start with nothing moved. It is re-pointed in place instead: it starts
+    from where the book is now (start) and goes to the folder he chose under the book's name now. The same move: its id,
+    the queued action that runs it, his override and who made it; an event records the change. Only a queued move; the
+    caller makes sure nothing runs it, under a write transaction (MergeService.choice_after_write; Mover._run reads its
+    move only after taking the write lock). Returns the move, or None when the book is in his folder already (the move is
+    then cancelled: nothing is left to do)."""
+    move = load(db, move_id)
+    if move is None or move['state'] != 'queued':
+        raise ValueError('Move state changed')
+    start = location(start)
+    target = os.path.join(os.path.normpath(move['target_folder']), ntpath.basename(start['final_path']))
+    if key(target) == key(start['final_path']):
+        _set(db, move_id, 'cancelled', expected='queued', detail={'reason': 'already in the chosen folder'})
+        return None
+    if len(target) > 240:
+        raise Refused('not_writable', "That folder's path is too long for this book's file name. Choose a shorter folder.")
+    db.execute('UPDATE book_moves SET from_json=?,target_path=?,updated_utc=? WHERE move_id=? AND state=?',
+               (json.dumps(start, ensure_ascii=False, sort_keys=True), target, stamp(), move_id, 'queued'))
+    _event(db, move_id, 'queued', 'queued', {'rebased': {'was': {'start': move['from'], 'target': move['target_path']}, 'start': start, 'target': target}})
+    return load(db, move_id)
+
+
+def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None, name=None, origin=None):
     """Queue one move of the book from its current location (start) into folder. None when it is already there (no-op).
     A queued move of the same book is superseded; a move already running is refused. running(move_id): whether that
     journaled move is running now (None: assume it is); one that is not waits for a restart (ruling 73k: 'unfinished').
     name: the file name in folder (0.30.0, the sorting moves Sergei approves: the author or series name changes with the
-    folder); None keeps the book's own name. The same verified move either way (only the target path differs)."""
+    folder); None keeps the book's own name. The same verified move either way (only the target path differs).
+    origin: who made the move, one of ORIGINS (None: not said)."""
     setup(db)
+    if origin is not None and origin not in ORIGINS:
+        raise ValueError('Unknown move origin')
     if kind not in KINDS:
         raise Refused('changed', 'This audiobook cannot be moved: it is a chapter update of another file.')
     start = location(start)
@@ -322,11 +386,11 @@ def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=Non
     generation = (db.execute('SELECT coalesce(max(generation),0) FROM book_moves WHERE job_id=? AND kind=?', (job_id, kind)).fetchone()[0] or 0) + 1
     move_id = str(uuid.uuid4())
     now = stamp()
-    db.execute('INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,strategy,target_folder,target_root,target_path,from_json,final_json,temp_path,cause,detail,progress,override_id,created_utc,updated_utc)'
-               ' VALUES(?,?,?,?,?,?,NULL,?,?,?,?,NULL,NULL,NULL,NULL,NULL,?,?,?)',
+    db.execute('INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,strategy,target_folder,target_root,target_path,from_json,final_json,temp_path,cause,detail,progress,override_id,created_utc,updated_utc,origin)'
+               ' VALUES(?,?,?,?,?,?,NULL,?,?,?,?,NULL,NULL,NULL,NULL,NULL,?,?,?,?)',
                (move_id, job_id, kind, candidate_id, generation, 'queued', os.path.normpath(folder), str(root), target,
-                json.dumps(start, ensure_ascii=False, sort_keys=True), override_id, now, now))
-    _event(db, move_id, None, 'queued', {'start': start, 'target': target})
+                json.dumps(start, ensure_ascii=False, sort_keys=True), override_id, now, now, origin))
+    _event(db, move_id, None, 'queued', {'start': start, 'target': target} | ({'origin': origin} if origin else {}))
     return load(db, move_id)
 
 
@@ -384,7 +448,10 @@ def view(move, unfinished=None):
     line = {'state': state, 'target': move['target_path'], 'folder': move['target_folder'], 'name': ntpath.basename(move['target_path']),
             'old_folder': ntpath.dirname(start.get('final_path') or ''), 'progress': move.get('progress') if state == 'moving' else None,
             'cause': cause, 'message': str(detail.get('reason') or '') if cause == 'unsafe' else '',
-            'move_id': move['move_id']}
+            'move_id': move['move_id'],
+            # 0.31.0 (R26): 'rules' for a move the app queued by its rules (the page shows no Cancel for it), else 'user'
+            # or None (made before 0.31.0).
+            'origin': move.get('origin') if move.get('origin') in ORIGINS else None}
     if state == 'unfinished':
         line['detail'] = str(unfinished.get('detail') or '')[:500]
     return line
@@ -510,15 +577,21 @@ class Mover:
         raise Unfinished(_unfinished_cause(last), _raw(last), seen, error) from error
 
     def _run(self, move):
+        # Senua's 0.31.0 review, M1: a writer's catalog transaction already under way ends before the book is read. A writer
+        # asks book_move.begun() inside its own write transaction, which reads this move as begun from the moment
+        # MergeService.run_move registered it; one that asked before that has committed once this write lock is ours, so
+        # the location read below is the one it recorded and the move stops here, before the file is held.
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+        # 0.31.0 ruling R30: the move as it is now. His queued Choose folder… is re-pointed after a rewrite of the book
+        # (rebase(), under the same kind of write lock, only while nothing runs it), so it starts from where it points now.
+        move = self._load(move['move_id'])
+        if move is None or move['state'] != 'queued':
+            return  # taken back meanwhile (Cancel, a newer choice): nothing ran
         start = move['from']
         target = move['target_path']
         folder = move['target_folder']
-        try:
-            now = location(self.resolve(move['job_id'], move['kind']))
-        except (ValueError, OSError, KeyError) as error:
-            raise Failed('source_missing', str(error))
-        if not same_location(now, start):
-            raise Failed('changed', 'The audiobook is not where this move was planned from')
+        self._still_at_start(move, start)
         import destination_overrides
         holder = next((source for source in self.sources() or () if source and destination_overrides.inside(folder, source)), None)
         if holder:
@@ -577,6 +650,20 @@ class Mover:
             if settled:
                 self._after_old_closed(move)  # only after a normal end: a fault (a crash) leaves the journal to recovery
 
+    def _still_at_start(self, move, start):
+        """The book is still where this move was planned from (its effective location now: receipt, relocation, moves).
+        Asked at the start, and again right after the move's first journal write out of 'queued' (Senua's 0.31.0 review,
+        M1 and M2): a writer that replaced the book's receipt before that write committed read the move as not begun
+        (book_move.begun), and the move then stops with nothing moved. Its chain would otherwise start from a receipt that
+        is no longer the book's, and the book would read as unavailable. From that write on, every writer reads the move as
+        begun and leaves the receipt as it is."""
+        try:
+            now = location(self.resolve(move['job_id'], move['kind']))
+        except (ValueError, OSError, KeyError) as error:
+            raise Failed('source_missing', str(error))
+        if not same_location(now, start):
+            raise Failed('changed', 'The audiobook is not where this move was planned from')
+
     def _hash(self, held, move, size, offset, share):
         import hashlib
         value = hashlib.sha256()
@@ -598,6 +685,7 @@ class Mover:
         self._write(move['move_id'], 'rename_intent', expected='queued', strategy='rename',
                     proof={'old': start, 'old_native': facts, 'target': str(target)})
         self.fault('rename_intent')
+        self._still_at_start(move, start)  # nothing renamed yet: a 'changed' failure here moved nothing
         refused = None
         try:
             with DirectoryBoundary(target_root, target.parent, rename_destination=True) as destination:
@@ -646,6 +734,8 @@ class Mover:
             proof['rename_refused'] = refused
         self._write(move['move_id'], 'copy_intent', expected=expected, strategy='copy', temp=str(temp), proof=proof)
         self.fault('copy_intent')
+        if expected == 'queued':
+            self._still_at_start(move, start)  # the temporary is not made yet: a 'changed' failure here moved nothing
         import hashlib
         try:
             with DirectoryBoundary(target_root, target.parent) as destination:

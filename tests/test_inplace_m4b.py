@@ -1194,12 +1194,17 @@ def connect_db(path):
 
 # 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
 def setUpModule():
-    global _sorted_fixture
+    global _sorted_fixture, _no_lookup_before_review
     from sorted_fixture import patch_merge_service
     _sorted_fixture = patch_merge_service()
+    # 0.31.0 step 2: this suite's sources cannot be reached; under R2 a book would wait a few tries for them, which is
+    # not what it tests (tests/original_title_fixture.py; the look-up has its own tests).
+    from original_title_fixture import no_lookup
+    _no_lookup_before_review = no_lookup()
 
 
 def tearDownModule():
+    _no_lookup_before_review.stop()
     _sorted_fixture.stop()
 
 if __name__ == '__main__':

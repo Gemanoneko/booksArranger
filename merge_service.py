@@ -320,6 +320,11 @@ class MergeService:
         self.publications.chosen_roots=self._chosen_folders;self.cleanup.chosen_folders=self._chosen_folders
         # Senua's 0.30.0 review, M3: move recovery runs in retained-runtime mode too (a portable installation is always in
         # it); a move of a retained job or through a retained path is left journaled (_start_move_recovery).
+        # 0.31.0 milestone B: the move journal's 'origin' column on a catalog made before it (book_move.ORIGINS).
+        try:
+            import book_move
+            with connect(inventory.database) as db:book_move.migrate(db)
+        except sqlite3.Error:pass  # the first move's own setup adds it
         self._start_move_recovery()
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
@@ -327,8 +332,12 @@ class MergeService:
         self.automatic.on_change=self.invalidate_status  # a pending start that fires, changes kind or ends shows on the next poll
         from series_backfill import SeriesBackfill
         self.series_backfill=SeriesBackfill(self,research=self.automatic.research)  # v0.16.12; started with the retention sweep
+        from name_write import NameWrite
+        self.name_write=NameWrite(self)  # 0.31.0 R27: an English title or author name written into a finished file (rule_filing approves); started with series backfill
         from gap_fill import GapFill
         self.gap_fill=GapFill(self)  # 0.22.1: optional fields after approval (research: the automatic pass's); started with series backfill
+        from rule_filing import RuleFiling
+        self.rule_filing=RuleFiling(self)  # 0.31.0 milestone B (R18): finished books renamed and moved by the rules; started with series backfill
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
         self.jobs.on_working_hold=lambda:self.automatic.stop(force=True)
         # Startup (0.22.1, ruling 28): every finished book's location is looked up once, in one catalog snapshot. Each used
@@ -611,6 +620,14 @@ class MergeService:
                         retry_binding=retry_intent.guard(db,job['manifest'],proof['approved_manifest'],proof['target_root'])
                     observed.append((job,relation,binding,effective,location_envelope,retry_binding))
                 self._lookups=kept
+                # 0.31.0 B1: the writes into finished files the catalog recorded, read in this snapshot (completed_book's
+                # placed_by_write: a rewritten book's receipt names its renamed file, not the planned path).
+                rewrites={}
+                for table in ('series_backfill','name_writes'):
+                    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone():continue
+                    for job_id,new_path,new_sha256,folder in db.execute("SELECT job_id,json_extract(record,'$.new_path'),json_extract(record,'$.new_sha256'),"
+                                                                         "json_extract(record,'$.series_folder') FROM "+table+" WHERE state IN ('cataloged','done') AND json_valid(record)"):
+                        rewrites.setdefault(job_id,[]).append((new_path,new_sha256,folder))
             # DB committed/closed before every filesystem callback.
             approved={identity:(row,ctx) for identity,(row,ctx) in catalog_approved.items()
                       if any((self.reviews.cache/(ctx['cover_id']+suffix)).is_file() for suffix in ('.png','.jpg'))}
@@ -625,7 +642,8 @@ class MergeService:
                     stat=Path(effective['final_path']).stat()
                     current=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)==self._validated_outputs.get(job['job_id'])
                 except (OSError,KeyError,ValueError,TypeError):pass
-                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE},binding,location_envelope=location_envelope,retry_binding=retry_binding):converted.add(identity)
+                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE},binding,location_envelope=location_envelope,retry_binding=retry_binding,
+                                  rewrites=rewrites.get(job['job_id'])):converted.add(identity)
             return {'approved':len(approved),'converted':len(converted),'converted_ids':converted,'candidate_total':len(candidate_ids),'not_approved_total':len(candidate_ids-set(approved))}
         finally:self._progress_lock.release()
 
@@ -873,7 +891,10 @@ class MergeService:
             'approved_total':totals['approved'],'converted_total':totals['converted'],'candidate_total':totals.get('candidate_total'),'not_approved_total':totals.get('not_approved_total'),'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
             'current_media_failure':copy.deepcopy(current_media),
             'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
-            'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable}
+            'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable,
+            # 0.31.0 step 1c: the to-do rows held because another book would get their name (counted under name_taken
+            # above; this is how many of that chip's books are of this kind).
+            'same_name_total':sum(1 for entry in needs.values() if (entry.get('hold') or {}).get('kind')=='same_destination')}
 
     # The fields of state() that say what runs now. The live read (live_jobs) gives exactly these, fresh on every poll.
     LIVE_FIELDS=('state','queued','failed','pause','start_admission','queue_work','current_job_origin','current_title','current_task_kind',
@@ -1613,7 +1634,7 @@ class MergeService:
                 self._retention_wake.wait(2 if self._manual_queue() else 60);self._retention_wake.clear()
         self._purge_tried=set()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
-        for name in ('series_backfill','gap_fill'):
+        for name in ('series_backfill','name_write','gap_fill','rule_filing'):
             background=self.__dict__.get(name)
             if background is not None:background.start()
 
@@ -2939,7 +2960,7 @@ class MergeService:
             # marks its files missing (Senua S-M2), and stays off after that scan changes its fingerprint (Futaba M-3).
             source_gone=__import__('source_presence').still_gone(db,have)
         import todo_causes,local_identity
-        from public_research import RESEARCH_VERSION
+        from public_research import RESEARCH_VERSION,needs_local_recheck
         found={};coverage=dict(self.NO_COVERAGE)
         for identity,(revision,fingerprint) in current.items():
             if identity in jobs:coverage['with_job']+=1;continue  # queued, converting, converted or a stopped job (listed as Stopped)
@@ -2969,12 +2990,19 @@ class MergeService:
                 found[identity]={'group':'other','reasons':reasons,'ask':None};continue
             if exact and any('already exists at this path' in r for r in reasons):
                 found[identity]={'group':'name_taken','reasons':reasons,'ask':None};continue
+            if exact and isinstance(hold,dict) and hold.get('kind')=='same_destination':
+                # 0.31.0 step 1c: another row plans this name or a waiting book has it. Listed and counted under Name taken
+                # (the same question: this name cannot be used); 'hold' tells the two apart and names the other books.
+                found[identity]={'group':'name_taken','reasons':reasons,'ask':None,'hold':hold};continue
             # Senua's 0.22.0 review, G5 (rulings 10 and 5): a held book with a reason is listed whether or not it waits for a
             # change (a refusal at the approval step is retried on a timer and was never listed). Still checking: a record
             # from an older research version (researched once more after an update) or one a newer author rule decides (G6:
             # only the books whose credits or folders the rule names; every other row stays listed).
             version=result.get('research_version')
             if version and version!=RESEARCH_VERSION:coverage['still_checking']+=1;continue
+            # 0.31.0 step 1d: a held book of the two shapes the step 1 local rules change is read once more from its files
+            # before it is asked about again (its old question may no longer hold): Still checking until then.
+            if needs_local_recheck(result):coverage['still_checking']+=1;continue
             if 'rules_generation' in result and (result.get('rules_generation') or '')!=generation and (rules is None or not hasattr(rules,'changed_for') or rules.changed_for(result)):
                 coverage['still_checking']+=1;continue
             if result.get('ask'):
@@ -3024,6 +3052,13 @@ class MergeService:
                  'fields':ask.get('fields') or {},'candidates':ask.get('candidates') or [],
                  # 0.22.1: an odd-name question is approved on its own row only, never in bulk (Judy 11.4, item 2).
                  'odd_name':ask.get('odd_name') is True}
+        # 0.31.0 (Judy's spec 4.1, amended G9): why the engine itself holds this row, apart from destination.shared, which
+        # every row carries whose name another book also has. Only a row held for the clash alone (kind same_destination)
+        # reads "Same name as another book"; its recorded other books word the sentence when the live check names none.
+        held=entry.get('hold') if isinstance(entry.get('hold'),dict) else {}
+        payload['hold']={'kind':str(held.get('kind') or '')}
+        if held.get('kind')=='same_destination':
+            payload['hold'].update(count=int(held.get('count') or 0),others=[dict(other) for other in held.get('others') or [] if isinstance(other,dict)])
         if isinstance(ask.get('volume'),dict):
             # Ruling 74b ("Number unclear"): the title's number, the source's number and the source's provider, for the
             # row's sentence (the page names the provider's site); Series, Number and Title come in fields.
@@ -3052,8 +3087,15 @@ class MergeService:
         if entry['group']!='files_missing' or payload['missing']['present']:
             try:
                 preview=self.approval_preview(row['id'],row['revision'])
-                payload['destination']={'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
+                payload['destination']={'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason'],
+                                        # 0.31.0 step 1c: the other books that would get this name (destination_clash hold), else None.
+                                        'shared':preview.get('shared')}
                 shown_series=preview.get('series')
+                # 0.31.0 (Judy 4.5; R1): where the title Approve files this book under came from, on the question itself.
+                # A row that asks something else has no record of its own yet, so its Title line ("English title found
+                # on …") had no fact to read: 'rule' 'english' with 'origin' 'source' says the English title a source
+                # gave replaced the files' own (title_origin()). Absent when the preview does not say.
+                if isinstance(preview.get('title_origin'),dict):payload['title_origin']=dict(preview['title_origin'])
                 # The proposals are the values Approve uses (local_identity.shown): a suspected reader is never proposed
                 # as the author (ruling 14), and an empty author files the book under Без автора.
                 from organization import NO_AUTHOR
@@ -3552,6 +3594,111 @@ class MergeService:
         path=self._chosen_display(row,preview.get('path') or '')
         return (self._shown_path(path,output_root) if path else ''),path,('' if path else preview.get('reason',''))
 
+    @staticmethod
+    def series_origin(result):
+        """0.31.0 (Judy's spec 4.3, ruling R4): where a result's series and number came from, as keys the page words:
+        {'origin': 'tags' (the files' own tags) | 'title_tag' (R15: the text of one file's title tag alone, "Series NN -
+        Title") | 'file_name' (the series before the number in the file name) | 'brackets' (the series a name mentions in
+        brackets, «Солнце и Замок (Книга Нового Солнца #3)»: the album tag, the title tag or the folder's name, and the
+        record does not keep which, so it is never 'tags'; Judy 4.3 as amended after the final build, gap 5) | 'folders'
+        (his folder structure, or the folder's name) | 'entered' (by him) | 'source' (an online source, with 'provider'
+        and 'source_url') | 'unknown', 'title_from_title_tag': the title is the file's own title tag}. A row never says a
+        series came from somewhere it did not (Judy 4.3 as amended with his answers): an origin the record does not
+        prove is 'unknown'."""
+        agreed=(result.get('local_agreement') or (result.get('metadata_facts') or {}).get('local_agreement') or {}) if isinstance(result,dict) else {}
+        series=agreed.get('series') if isinstance(agreed.get('series'),dict) else {}
+        kinds=[str(source.get('kind') or '') for source in series.get('sources') or [] if isinstance(source,dict)]
+        title=agreed.get('title') if isinstance(agreed.get('title'),dict) else {}
+        own_title=any(isinstance(s,dict) and s.get('kind')=='embedded' and s.get('field')=='title' for s in title.get('sources') or [])
+        found={'origin':'unknown','title_from_title_tag':own_title}
+        source=((result.get('metadata_facts') or {}).get('series_source') or {}) if isinstance(result,dict) else {}
+        if series.get('state')=='entered' or 'entered by you' in kinds:found['origin']='entered'
+        elif 'folder structure' in kinds:found['origin']='folders'
+        elif series.get('value') and any(isinstance(s,dict) and str(s.get('kind') or '').startswith('the title (tag') and s.get('field')=='title' for s in series.get('sources') or []):
+            found['origin']='title_tag'  # R15: nothing but the title tag's own text names it
+        elif series.get('value') and 'brackets in the name' in kinds:
+            found['origin']='brackets'  # gap 5: the brackets rule reads two tags and the folder's name; "its tags" may be untrue
+        elif series.get('value') and (series.get('basis')=='tag' or 'embedded' in kinds or any(kind.startswith('the title (tag') for kind in kinds)):
+            found['origin']='tags'
+        elif series.get('value') and 'the title (file_name)' in kinds:found['origin']='file_name'
+        elif series.get('value') and 'the title (folder_name)' in kinds:found['origin']='folders'
+        elif source.get('provider') and source['provider'] not in ('local','entered'):
+            found.update(origin='source',provider=str(source['provider']),source_url=str(source.get('url') or source.get('source_url') or ''))
+            # 0.31.0 (A6), additive: where the number came from ('source'; 'counted' by the app from FantLab's cycle order;
+            # 'names' or 'tags': the book's own) and which naming rule named the series ('english', 'russian_original',
+            # 'no_english_name', 'unknown_language': canonical_names.series_name).
+            for key in ('number_from','name_rule'):
+                if source.get(key):found[key]=str(source[key])
+        # 0.31.0 (A6, Judy 4.5): the source of the series' English name, only where it is another source than the origin
+        # above (the files' own series named in English from Wikidata; FantLab's series with Wikidata's English name).
+        if source.get('name_provider') and found['origin']!='entered' and source['name_provider']!=found.get('provider'):
+            found['name_from']=str(source['name_provider'])
+        return found
+
+    @staticmethod
+    def title_origin(result):
+        """0.31.0 (A6): where a result's title came from, as keys the page words: {'origin': 'entered' (by him) | 'source'
+        (an online source named it, with 'provider' and 'source_url') | 'files' (the title the files give) | 'unknown',
+        'rule': the title rule's own answer (canonical_names.TITLE_RULES: 'english', 'russian_original',
+        'no_english_title' = a translation no source names in English, 'unknown_language', 'his'), 'split': the title is
+        the part after the series and number of the files' name, which a source confirmed}. A result made before
+        0.31.0 has no such record: 'unknown'."""
+        facts=(result.get('metadata_facts') or {}) if isinstance(result,dict) else {}
+        source=facts.get('title_source') if isinstance(facts.get('title_source'),dict) else None
+        agreed=(result.get('local_agreement') or facts.get('local_agreement') or {}) if isinstance(result,dict) else {}
+        title=agreed.get('title') if isinstance(agreed.get('title'),dict) else {}
+        if title.get('state') in ('entered','approved'):return {'origin':'entered','rule':'his','split':False}
+        if source is None:return {'origin':'unknown','rule':'','split':False}
+        found={'origin':'source' if source.get('rule') in ('english','russian_original') and source.get('provider') else 'files','rule':str(source.get('rule') or ''),'split':bool(source.get('split'))}
+        if found['origin']=='source':found.update(provider=str(source['provider']),source_url=str(source.get('url') or ''))
+        return found
+
+    @staticmethod
+    def series_dropped(result):
+        """0.31.0 (A6, rulings R18, R21 and R22): the doubtful series that were dropped for this book, [{'provider', 'name',
+        'number', 'why', 'source_url'}] ('why' is one of series_certainty.WHY), [] for none. A dropped series is treated
+        as not found: the book has no series because of it, and nobody is asked."""
+        facts=(result.get('metadata_facts') or {}) if isinstance(result,dict) else {}
+        search=facts.get('gap_search') if isinstance(facts.get('gap_search'),dict) else {}
+        found=[dict(item) for item in search.get('series_doubt') or [] if isinstance(item,dict)]
+        lookup=result.get('lookup') if isinstance(result,dict) and isinstance(result.get('lookup'),dict) else {}
+        return found or [dict(item) for item in lookup.get('doubtful') or [] if isinstance(item,dict)]
+
+    # --- 0.31.0 step 1c (Sergei 2026-11-22): two books never share one destination (destination_clash).
+    def _planned_note(self,row,path,names=None):
+        """Note the name this current row plans (its "Goes to" with nothing typed, or its researched review), in memory
+        only: a read never writes the catalog. names: {'title','author'} for the other row's line."""
+        import destination_clash
+        planned=self.__dict__.setdefault('_planned',{})
+        if len(planned)>=20000:planned.clear()
+        if not path:planned.pop(row['id'],None);return
+        names=names if isinstance(names,dict) else {}
+        planned[row['id']]={'revision':row['revision'],'fingerprint':row['fingerprint'],'key':destination_clash.key(path),
+                            'name':destination_clash.name_of([m['path'] for m in row.get('members') or []]),
+                            'title':str(names.get('title') or ''),'author':str(names.get('author') or '')}
+
+    def note_planned(self,row,result):
+        """Automatic processing recorded this row's research: a result with a review plans a name (noted); one that got its
+        job no longer needs a note (the job's destination is read from the catalog)."""
+        if not isinstance(result,dict) or not isinstance(result.get('review'),dict) or result.get('job_id'):
+            if isinstance(result,dict) and result.get('job_id'):self.__dict__.setdefault('_planned',{}).pop(row['id'],None)
+            return
+        try:_relative,path,_reason=self._approval_destination(row,result)
+        except (ValueError,KeyError,TypeError,AttributeError,OSError):return
+        self._planned_note(row,path,{'title':result['review'].get('title'),'author':result['review'].get('canonical_author') or result['review'].get('author')})
+
+    def _destination_shared(self,row,path,relative=''):
+        """The same_destination hold when another current row plans this path or a book waiting to convert has it, else
+        None. Catalog reads only; an unreadable catalog answers None (the disk check and the publication itself still
+        never overwrite)."""
+        import destination_clash
+        try:
+            with connect(self.inventory.database) as db:
+                # Only a different book clashes: a job that converts nothing but this row's own files is one of its pieces.
+                others=destination_clash.queued(db,path,row['id'],[m.get('path') for m in row.get('members') or []])+destination_clash.rows(db,path,row['id'],self.__dict__.get('_planned'))
+        except (sqlite3.Error,OSError,ValueError,TypeError):return None
+        return destination_clash.hold(path,relative,others)
+
     def routing_preview(self,id,revision,review):
         """The panel's "Unsaved destination preview" for a book (Senua's 0.22.3 review, m14). Ruling 40: a book's names are
         edited on its row only, so the six name fields are the ones its Goes to line files with (research and Edit names),
@@ -3578,14 +3725,30 @@ class MergeService:
         approval=result['approval']
         answer={'path':relative,'absolute':path,'taken':bool(path and os.path.lexists(path)),
                 'title':approval['title'],'author':approval['author'],'collection':approval['collection'],'reason':reason}
+        # 0.31.0 step 1c: the name is also taken when another row plans it or a book waiting to convert has it
+        # (destination_clash): 'shared' is that hold (the destination, how many others, each other book), else None. The
+        # name the row itself shows (nothing typed) is noted, so the other row sees this one too.
+        if path and title is None and author is None and names is None:self._planned_note(row,path,approval)
+        answer['shared']=self._destination_shared(row,path,relative) if path else None
         # The series Approve files this book in (Judy 0.23.1 section 8.4; 2026-10-29, Tolkien: «Властелин Колец» 1).
         review=result.get('review') or {}
         if str(review.get('series') or '').strip() and str(review.get('number') or '').strip():
             answer['series']={'name':str(review['series']).strip(),'number':str(review['number']).strip()}
+            answer['series'].update(self.series_origin(result))  # 0.31.0 (Judy 4.3): where the series and number came from
+        # 0.31.0 (A6), additive: where the title came from, a doubtful series that was dropped, and the record of the
+        # book's look-up before review (what is asked, the tries and their limit, the next try, how each field ended).
+        answer['title_origin']=self.title_origin(result)
+        answer['series_dropped']=self.series_dropped(result)
+        if isinstance(result.get('lookup'),dict):answer['lookup']={key:result['lookup'].get(key) for key in ('asked','fields','tries','limit','next_at','waiting','ended','visits','until','nothing')}
         from tolkien_trilogy import author_world,DECISION
         if author_world(review,result.get('metadata_facts')):answer['names_decision']=DECISION
         if names is not None:
             answer['place']=self._place(result.get('review') or {})
+            # 0.31.0 (Judy 4.3): the Place line says where the series and number came from; the open editor's line too.
+            if answer.get('series') and answer['place'].get('series'):
+                # 'name_from' (0.31.0, Judy 4.5): the source of the series' English name where it is not the origin's own,
+                # on the preview's place and so on the Edit names editor's place too (it is the preview's).
+                answer['place'].update({key:answer['series'][key] for key in ('origin','provider','name_from') if key in answer['series']})
             values=dict(names)
             if title is not None:values['title']=title
             if author is not None:values['author']=author
@@ -4484,6 +4647,12 @@ class MergeService:
         # in build_manifest stays (and the publication itself never overwrites).
         _relative,destination,_reason=self._approval_destination(row,result)
         if destination and os.path.lexists(destination) and not self._recording_review(row,result,threading.Event()):raise ValueError('An audiobook already exists at this path; nothing was overwritten')
+        # 0.31.0 step 1c: nor when another row plans this name or a book waiting to convert has it (a late clash: the row
+        # showed it free). Refused with its own code (same_name) and the other books; nothing is written.
+        shared=self._destination_shared(row,destination,_relative) if destination else None
+        if shared:
+            import destination_clash
+            raise destination_clash.Shared(shared)
         approval=result['approval']
         files=[m['path'] for m in sorted(row['members'],key=lambda m:m.get('order') or 0) if include is None or m['path'] in include]
         ctx=self.reviews._context(row)
@@ -4613,6 +4782,16 @@ class MergeService:
         import shutil
         if stop.is_set():raise InterruptedError()
         if result.get('reasons') or not result.get('work') or not result.get('review'):raise ValueError('Book identity uncertain')
+        if approved_by is None:
+            # 0.31.0 step 1c: automatic filing never queues a book under a name another row plans or a waiting book has.
+            # Held with the same_destination reason and the other books (automatic processing records the hold and tries
+            # again by itself); Sergei's own Approve was checked before it came here (approve_book).
+            try:planned_relative,planned_path,_=self._approval_destination(row,result)
+            except (ValueError,KeyError,TypeError,AttributeError,OSError):planned_relative,planned_path='',''
+            shared=self._destination_shared(row,planned_path,planned_relative) if planned_path else None
+            if shared:
+                import destination_clash
+                raise destination_clash.Shared(shared)
         # Local agreement (Sergei decision 2026-10-12) replaces the fetched credit only for
         # identity; it is re-derived from the current sources below. Media, publication,
         # retirement and recovery checks are unchanged.
@@ -5761,7 +5940,7 @@ class MergeService:
         for name in ('_retention_stop','_retention_wake'):
             flag=self.__dict__.get(name)
             if isinstance(flag,threading.Event):flag.set()
-        for name in ('decisions','series_backfill','gap_fill'):
+        for name in ('decisions','series_backfill','name_write','gap_fill','rule_filing'):
             worker=self.__dict__.get(name)
             for flag in (getattr(worker,'stop',None),getattr(worker,'wake',None)):
                 if isinstance(flag,threading.Event):flag.set()
@@ -5815,7 +5994,7 @@ class MergeService:
             snapshots=[self.__dict__.get('_status_shared'),*self.__dict__.get('_page_shared',{}).values()]
         for snapshot in snapshots:
             if snapshot is not None:snapshot.close(reads)
-        for name in ('series_backfill','gap_fill'):
+        for name in ('rule_filing','series_backfill','name_write','gap_fill'):  # the rules' pass first: it queues nothing more
             background=self.__dict__.get(name)
             if background is not None:self._close_lookups(background,reads)
         for name in ('_repair_stop','_retry_all_stop'):
@@ -6180,7 +6359,7 @@ class MergeService:
             if not finished:return self._destination_answer(id,'cleared')
             computed=self._computed_destination(row,self._job_manifest(job_id))
             if not computed:raise destination_overrides.Refused('changed',"The app can't compute this book's folder now. Nothing was moved.")
-            return self._queue_move(row,finished,start,os.path.dirname(computed),None)
+            return self._queue_move(row,finished,start,os.path.dirname(computed),None,origin='user')
         name=os.path.basename(start['final_path']) if finished else os.path.basename(self._computed_destination(row) or '')
         data_dir=str(Path(self.inventory.database).parent)
         chosen,identity=destination_overrides.validate(folder,sources=self._all_source_roots(),data_dir=data_dir,name=name,probe=self.folder_probe)
@@ -6189,7 +6368,7 @@ class MergeService:
             saved=destination_overrides.choose(db,folder=chosen,identity=identity,book_key=book_key,candidate_id=id,job_id=job_id)
         self._destination_changed()
         if not finished:return self._destination_answer(id,'saved')
-        return self._queue_move(row,finished,start,chosen,saved['override_id'])
+        return self._queue_move(row,finished,start,chosen,saved['override_id'],origin='user')
 
     def _job_manifest(self,job_id):
         with connect(self.inventory.database) as db:
@@ -6215,14 +6394,15 @@ class MergeService:
             if move is None:view['move']=shown[0].get('move')
         return {'outcome':outcome,**view}
 
-    def _queue_move(self,row,finished,start,folder,override_id,name=None):
+    def _queue_move(self,row,finished,start,folder,override_id,name=None,origin=None):
         """Plan the finished book's move (book_move.plan) and queue it; 'unchanged' when it is already in that folder.
-        name: its file name there (0.30.0 sorting moves), else its own."""
+        name: its file name there (0.30.0 sorting moves), else its own. origin (0.31.0 milestone B): who made the move,
+        'rules' or 'user' (book_move.ORIGINS); it is kept on the move and travels with its queued action."""
         import book_move,destination_overrides
         publication,kind,job_id=finished
         root=self._move_root(folder)
         with connect(self.inventory.database) as db:
-            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id,running=self._move_running,name=name)
+            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id,running=self._move_running,name=name,origin=origin)
         if move is None:return self._destination_answer(row['id'],'unchanged')
         title=str(row.get('title_clue') or '')[:200]
         if self.move_requester is not None:
@@ -6231,7 +6411,8 @@ class MergeService:
                 with connect(self.inventory.database) as db:book_move.cancel(db,move['move_id'])
                 raise destination_overrides.Refused('changed','Move was not accepted. Nothing was moved.') from None
             return self._destination_answer(row['id'],'move_queued',dict(book_move.view(move),queue=queued))
-        done=self.run_move(move['move_id'])
+        try:done=self.run_move(move['move_id'])
+        except book_move.WaitsForWrite:done=book_move.view(move)  # R33: queued; the write of its book comes first
         return self._destination_answer(row['id'],'move_queued',done)
 
     # --- 0.30.0 sorting moves (Sergei 2026-11-18, items 2, 5 and 6): books in Sorted the app now files elsewhere. Planned
@@ -6280,6 +6461,12 @@ class MergeService:
             if job_id in listed:continue
             results.append({'job_id':job_id,'state':'refused','reason':refusals[job_id]} if job_id in refusals else
                            {'job_id':job_id,'state':'not_listed','reason':'Not in the list'})
+        # 0.31.0 step 4d (Judy 3.5): each answer is 'accepted' or 'refused', a refusal with a reason key the page words
+        # (sorting_moves.reason_key; 'not_listed' for a book the list does not hold).
+        for result in results:
+            refused=result.get('state') in ('refused','failed','cancelled','not_listed')
+            result['code']='refused' if refused else 'accepted'
+            if refused:result['reason_key']='not_listed' if result['state']=='not_listed' else sorting_moves.reason_key(result.get('reason'))
         return {'digest':digest,'results':results}
 
     def sorting_target(self,job_id,series=None,placed=None):
@@ -6288,9 +6475,11 @@ class MergeService:
         with connect(self.inventory.database) as db:
             row=db.execute("SELECT job_id,manifest,output FROM audio_jobs WHERE job_id=? AND state='completed'",(job_id,)).fetchone()
             if row is None:return ''
+            # 0.31.0 milestone B: with the English title the detail look-up recorded, as the list plans it (sorting_moves.plan),
+            # so the path a series write is bound to is the list's own.
             found=sorting_moves.target(db,{'job_id':row[0],'manifest':row[1],'output':row[2]},self._sorting_rules(),getattr(self.inventory,'output_root',None),
                                        {'name':series['name'],'number':str(series['number']),'provider':series.get('provider',''),'source_url':series.get('source_url','')} if series else None,
-                                       placed=placed)
+                                       placed=placed,catalog=sorting_moves.recorded_title(db,row[0]))
         return (found or {}).get('to') or ''
 
     def sorting_follow_up(self,job_id,approved,placed=None):
@@ -6305,18 +6494,114 @@ class MergeService:
             target=self.sorting_target(job_id,placed=placed)
             if not target or os.path.normcase(target)!=os.path.normcase(str(approved)):
                 return {'state':'refused','reason':'The planned place changed since you approved it; the book stays where it is.'}
-            return self._sorting_move(job_id,target)
+            # 0.31.0 milestone B: a write the app's rules approved is followed by the app's own move (no Cancel, R26).
+            # 0.31.0 R27: so is the move after a write of names (name_write), the other kind of write the rules approve.
+            ruled=False
+            for name in ('series_backfill','name_write'):
+                ledger=self.__dict__.get(name)
+                entry=ledger.entry(job_id) if callable(getattr(ledger,'entry',None)) else None
+                ruled=ruled or bool(entry and isinstance(entry.get('record'),dict) and entry['record'].get('approved_by')=='rules'
+                                    and (placed is None or os.path.normcase(str(entry['record'].get('new_path') or ''))==os.path.normcase(str(placed))))
+            return self._sorting_move(job_id,target,**({'origin':'rules'} if ruled else {}))
         except sqlite3.Error as error:
             return {'state':'later','reason':str(error)[:300] or 'The catalog was busy'}
         except ValueError as error:
-            text=str(error)
-            passing=(getattr(error,'code',None)=='unfinished' or text in (book_move.UNFINISHED,'Move was not accepted. Nothing was moved.',
-                                                                          'Books Arranger is closing. Nothing was moved.')
-                     or text.startswith('This audiobook is being moved now'))
-            return {'state':'later' if passing else 'refused','reason':text[:300]}
+            return {'state':'later' if self._passing(error) else 'refused','reason':str(error)[:300]}
 
-    def _sorting_move(self,job_id,target):
-        """One approved sorting move: the usual verified move (book_move) to target, folder and name."""
+    @staticmethod
+    def _passing(error):
+        """Senua's 0.30.0 review, M2 (and 0.31.0 delta, m9, for choice_after_write): whether a refusal of a queued move passes
+        by itself (a move of the book running or waiting for a restart, Books Arranger closing, the queue refusing), so the
+        follow-up asks again; any other refusal lasts (a path too long, a newer version, no publication)."""
+        import book_move
+        text=str(error)
+        return (getattr(error,'code',None)=='unfinished' or text in (book_move.UNFINISHED,'Move was not accepted. Nothing was moved.',
+                                                                    'Books Arranger is closing. Nothing was moved.')
+                or text.startswith('This audiobook is being moved now'))
+
+    def choice_after_write(self,job_id,record):
+        """0.31.0 ruling R30 (Sergei 2026-11-23): a Choose folder… pressed while the app rewrote this book (its series, or its
+        names: record is that write's ledger record) wins, and the app's own follow-up move never cancels it (book_move.plan
+        supersedes a queued move). Asked by the write's follow-up (SeriesBackfill._follow_up) before anything else, for a
+        write in the book's own folder too. His choice is a move of the book with his override (Choose folder…); the newest
+        one that was not taken back decides:
+          - queued from the receipt the write replaced (record old_path/old_sha256): it would stop at its start with nothing
+            moved, so it is re-pointed in place to start from the book as the write left it and go to his folder under the
+            book's new name (book_move.rebase; the queued action he already has runs it);
+          - queued from the book as it is now, or done: it stands as it is;
+          - running or unfinished: {'state': 'later'}, asked again at the next pass;
+          - stopped at its start because the write had replaced the receipt first (failed 'changed', planned from the old
+            receipt after the write was approved): queued again from the book as it is now, to his folder, with his override.
+        None when there is no such choice: the follow-up goes on as before. Otherwise {'state': 'none'}: the rules move
+        nothing (the folder is his, R26), and the rules' record ends this book where the write put it.
+        R33: while the write is in hand his move waits (rewriting(), run_move), so it is queued here, never running.
+        R34 (Senua's 0.31.0 delta, m9) and R35 (delta 2, m14): a refusal that lasts (_lasting: his folder cannot take the
+        book's new name, a newer version, no publication) is never asked again; any other is 'later', asked again. On one
+        that lasts his move fails with its own cause and sentence, as the same press is refused when the name is too long at
+        once (book_move.plan), and the answer is None: the follow-up goes on as without a choice, so the rules' entry ends."""
+        import book_move,datetime
+        kept={'state':'none','reason':'You chose its folder; left as it is'}
+        busy={'state':'later','reason':'This audiobook is being moved now. Choose another folder when it finishes.'}
+        with connect(self.inventory.database) as db:
+            if not book_move.have(db):return None
+            moves=[book_move._row(row) for row in db.execute("SELECT * FROM book_moves WHERE job_id=? AND override_id IS NOT NULL AND state!='cancelled' ORDER BY generation DESC",(job_id,))]
+        def replaced(move):
+            start=move.get('from') or {}
+            return bool(record.get('old_path')) and book_move.key(start.get('final_path') or '')==book_move.key(record['old_path']) and start.get('sha256')==record.get('old_sha256')
+        def moment(text):
+            try:return datetime.datetime.fromisoformat(str(text).replace('Z','+00:00'))
+            except (TypeError,ValueError):return None
+        live=next((move for move in moves if move['state']!='failed'),None)
+        try:
+            if live is not None:
+                if live['state'] in book_move.ACTIVE or live['state']=='queued' and self._move_running(live['move_id']):return busy
+                if live['state']=='queued' and replaced(live):
+                    start=self._publication_location(job_id,live['kind'])
+                    with connect(self.inventory.database) as db:
+                        db.execute('BEGIN IMMEDIATE')
+                        # Under the write lock: a Mover takes the same lock before it reads its move (Mover._run).
+                        if self._move_running(live['move_id']):return busy
+                        try:book_move.rebase(db,live['move_id'],start)
+                        except book_move.Refused as refusal:
+                            if not self._lasting(refusal):raise
+                            # Lasting (m9): his folder cannot take the new name. His move fails with that cause and sentence.
+                            book_move._set(db,live['move_id'],'failed',expected='queued',cause=refusal.cause,detail={'reason':str(refusal)[:500]})
+                            live=None
+                    self._destination_changed()
+                    if live is None:return None
+                return kept
+            stopped=next(iter(moves),None)
+            approved,created=moment(record.get('approved_utc')),moment((stopped or {}).get('created_utc'))
+            if stopped is not None and stopped.get('cause')=='changed' and replaced(stopped) and approved is not None and created is not None and created>=approved:
+                start=self._publication_location(job_id,stopped['kind'])
+                self._sorting_move(job_id,os.path.join(stopped['target_folder'],os.path.basename(start['final_path'])),origin='user',override_id=stopped['override_id'])
+                return kept
+            return None
+        except sqlite3.Error as error:
+            return {'state':'later','reason':str(error)[:300] or 'The catalog was busy'}
+        except ValueError as error:
+            # R35 (Senua's 0.31.0 delta 2, m14): only a refusal that never clears is lasting; any other is asked again.
+            return None if self._lasting(error) else {'state':'later','reason':str(error)[:300]}
+
+    @staticmethod
+    def _lasting(error):
+        """R35 (Senua's 0.31.0 delta 2, m14): the refusals of re-pointing his move, or queuing it again, that never clear by
+        themselves: his folder cannot take the book's new name (book_move.Refused 'not_writable', the 240-character path),
+        a book or a name no move can take (book_move.plan: a chapter update, a name that is no audiobook file's), a newer
+        version of the book, no completed publication, a job no longer in the catalog. Any other (a publication generation
+        that changed during the read, a move whose state changed meanwhile, a move of the book running or waiting for a
+        restart, a busy queue, Books Arranger closing) is asked again."""
+        import book_move
+        if isinstance(error,book_move.Refused):
+            return error.cause=='not_writable' or error.cause=='changed' and str(error) in (
+                'This audiobook cannot be moved: it is a chapter update of another file.','This audiobook cannot be moved under that name.')
+        return str(error) in ('This audiobook has a newer version; it was not moved','The audiobook has no completed publication',
+                              'The audiobook is not in the catalog')
+
+    def _sorting_move(self,job_id,target,origin='user',override_id=None):
+        """One approved sorting move: the usual verified move (book_move) to target, folder and name. origin: 'user' for
+        his approval of a listed move, 'rules' when the app's rules made it (rule_filing). override_id (0.31.0 R30): his
+        Choose folder… choice the move carries (choice_after_write), else none."""
         import book_move
         with connect(self.inventory.database) as db:
             found=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
@@ -6326,9 +6611,28 @@ class MergeService:
         if not finished or finished[2]!=job_id or finished[1] not in book_move.KINDS:raise ValueError('This audiobook has a newer version; it was not moved')
         row=self.reviews._row('Audiobooks',identity)
         start=self._publication_location(job_id,finished[1])
-        answer=self._queue_move(row,finished,start,os.path.dirname(target),None,name=os.path.basename(target))
+        answer=self._queue_move(row,finished,start,os.path.dirname(target),override_id,name=os.path.basename(target),origin=origin)
         move=answer.get('move') or {}
         return {'state':answer.get('outcome'),'move':move}
+
+    # --- 0.31.0 milestone B (R18, R24, R26): finished books renamed and moved by the rules (rule_filing.py) ---
+    def filing_paused(self):
+        """F13: a Pause of the audiobook jobs holds the app's own renames and moves of finished books: the rules' pass, the
+        series writes (series_backfill._idle) and the app's own queued moves (action_queue). His Pause, a safety hold, or one
+        saved before this launch (_jobs_pause_saved); nothing here ends a Pause. An unreadable catalog counts as paused."""
+        return self._jobs_pause_saved()
+
+    def filing_record(self,search='',limit=None):
+        """The record of renames and moves the app made by its rules (Judy 3.4): rule_filing.record. Reads only."""
+        import rule_filing
+        with connect(self.inventory.database) as db:
+            return rule_filing.record(db,getattr(self.inventory,'output_root',None),search,limit or rule_filing.RECORD_LIMIT)
+
+    def filing_could_not(self):
+        """The finished audiobooks the rules could not rename or move, each with its reason key (Judy 3.4a, ruling R24): the
+        last pass's list (RuleFiling.could_not). Reads only."""
+        worker=self.__dict__.get('rule_filing')
+        return worker.could_not() if worker is not None else {'count':0,'known':False,'keys':[],'entries':[]}
 
     def cancel_move(self,move_id):
         """The queued move's Cancel (ActionQueue): True when it had not started."""
@@ -6344,16 +6648,75 @@ class MergeService:
                                output_root=getattr(self.inventory,'output_root',None),same_volume=self.move_same_volume or book_move.default_same_volume,
                                fault=self.move_fault,progress=report,remove_folder=book_delete._remove_folder,protected_roots=lambda:configured)
 
+    # The two ledgers of a write into a finished file, and the engine attribute that holds each writer.
+    WRITE_LEDGERS=(('series_backfill','series_backfill'),('name_writes','name_write'))
+
+    def _writes_of(self,move_id):
+        """[(writer, job id, state, follow-up still to record)] for each write of the book this move is of."""
+        import book_move
+        found=[]
+        with connect(self.inventory.database) as db:
+            if not book_move.have(db):return found
+            row=db.execute('SELECT job_id FROM book_moves WHERE move_id=?',(move_id,)).fetchone()
+            if row is None:return found
+            for table,attr in self.WRITE_LEDGERS:
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone():continue
+                entry=db.execute("SELECT state,json_extract(record,'$.move_approved'),json_extract(record,'$.follow_up') IS NOT NULL FROM "+table+" WHERE job_id=?",(row[0],)).fetchone()
+                if entry:found.append((attr,row[0],entry[0],entry[0]=='done' and bool(entry[1]) and not entry[2]))
+        return found
+
+    def rewriting(self,move_id):
+        """0.31.0 ruling R33 (Sergei 2026-11-23): whether the app is writing the book this move is of (its series or its
+        names): being written, renamed or recorded. A move of that book waits for the write (the action queue's blocker
+        'book', and run_move): it never meets the write's held file ("in use") nor runs beside it, and the write's follow-up
+        re-points it to the rewritten file (R30). R35 (Senua's 0.31.0 delta 2, M6): a write whose file work has ended
+        ('done') holds no move, even before its follow-up is recorded (run_move records it, _follow_up_now)."""
+        import series_backfill
+        return any(state in series_backfill.ACTIVE for _attr,_job,state,_pending in self._writes_of(move_id))
+
+    def _follow_up_now(self,move_id):
+        """R35 (Senua's 0.31.0 delta 2, M6): a write of this move's book has ended ('done') and its follow-up is still to be
+        recorded: after a Quit at its end the writer's pass records it only once the app is idle and not paused (a saved
+        Pause waits for Start). It is recorded now, before the move is registered as running, so choice_after_write
+        re-points this move to the rewritten file (R30) and the move runs at once. Not again from inside a follow-up (one that
+        queues and runs a move itself, with no action queue). Returns the writes it read before that, as (writer, job id) to
+        state, or None when it did not look."""
+        if self.__dict__.get('_following_up'):return None
+        self.__dict__['_following_up']=True
+        try:
+            writes=self._writes_of(move_id)
+            for attr,job_id,_state,pending in writes:
+                writer=self.__dict__.get(attr)
+                if pending and writer is not None and callable(getattr(writer,'_follow_up',None)):writer._follow_up(job_id)
+            return {(attr,job_id):state for attr,job_id,state,_pending in writes}
+        finally:
+            self.__dict__['_following_up']=False
+
     @operation
     def run_move(self,move_id):
         """Run one queued move now (the action queue's runner). Returns the row's move line: 'unfinished' (ruling 73k) when
-        its retries ran out, the move journaled with both files kept for recovery at the next start."""
+        its retries ran out, the move journaled with both files kept for recovery at the next start. R33: raises
+        book_move.WaitsForWrite, nothing run, while the app writes the move's book (rewriting()); the action waits again."""
         import book_move
         if self.draining or self.__dict__.get('_closing'):
             with connect(self.inventory.database) as db:book_move.cancel(db,move_id)
             raise ValueError('Books Arranger is closing. Nothing was moved.')
+        # R35: a write that has ended is followed up now, before the registration below (it re-points this move, R30).
+        try:seen=self._follow_up_now(move_id)
+        except sqlite3.Error:seen=None  # the catalog is busy: the write's own pass records it
         running=self.__dict__.setdefault('_moves_running',set());running.add(move_id)
-        try:move=self._mover().run(move_id)
+        try:
+            # R33: asked after the move is registered as running. A write that starts after this point sees the registration
+            # and gives way (SeriesBackfill._give_way); one that started before it is seen here, and the move waits. R35: a
+            # write that ended between the follow-up above and the registration has its follow-up still to record: the move
+            # waits one more poll, and the next run_move records it first.
+            try:
+                import series_backfill
+                waits=self.rewriting(move_id) or bool(seen) and any(pending and seen.get((attr,job_id)) in series_backfill.ACTIVE
+                                                                     for attr,job_id,_state,pending in self._writes_of(move_id))
+            except sqlite3.Error:waits=True  # not known: it waits rather than meet a write
+            if waits:raise book_move.WaitsForWrite('The app is writing this audiobook; the move waits for it')
+            move=self._mover().run(move_id)
         except book_move.Unfinished as ran_out:
             why=self.__dict__.setdefault('_move_unfinished',{})[move_id]={'cause':ran_out.cause,'detail':ran_out.detail}
             self.__dict__.get('_move_progress',{}).pop(move_id,None);self._destination_changed()
@@ -6368,6 +6731,12 @@ class MergeService:
         """Whether this journaled move is being run (run_move) or reconciled (recovery at start) now."""
         recovery=self.__dict__.get('_move_recovery')
         return move_id in self.__dict__.get('_moves_running',()) or bool(recovery is not None and recovery.is_alive())
+
+    def _move_registered(self,move_id):
+        """R35 (Senua's 0.31.0 delta 2, m13): whether run_move has this move now. A write asks it of a move that is still
+        'queued' (book_move.begun): recovery at start never runs a queued move (it cancels the ones it found and leaves the
+        newer ones queued), so its "every move runs" reading of _move_running is not taken for one."""
+        return move_id in self.__dict__.get('_moves_running',())
 
     def _renamed_waiting(self,identity):
         """Senua 0.24.0 D1r3: the book's latest move when it is a same-volume rename that waits for a restart (unfinished,
@@ -6409,6 +6778,8 @@ class MergeService:
             if identity and identity[2]==final.get('size'):self._validated_outputs[move['job_id']]=tuple(identity)
             else:self._validated_outputs.pop(move['job_id'],None)  # not the bytes the move verified: the next check hashes it
         self._destination_changed()
+        filing=self.__dict__.get('rule_filing')
+        if filing is not None and move['state'] in book_move.TERMINAL:filing.notify()  # the rules' pass puts the next book in hand
 
     def _start_move_recovery(self):
         """In-engine reconciliation of moves a restart interrupted (no startup refusal); only when there are any.
@@ -6457,7 +6828,7 @@ class MergeService:
         start=self._publication_location(job_id,finished[1])
         if destination_overrides.key(os.path.dirname(start['final_path']))==destination_overrides.key(live['folder']):return
         if not destination_overrides.same_identity(live.get('identity'),destination_overrides.current_identity(live['folder'])):return  # fails closed
-        self._queue_move(row,finished,start,live['folder'],live['override_id'])
+        self._queue_move(row,finished,start,live['folder'],live['override_id'],origin='user')
 
     def destination_view(self,rows):
         """Every shown list row: destination_override, output and move (Judy's 0.23.1 spec, sections 15-18). Catalog and

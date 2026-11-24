@@ -431,6 +431,31 @@ class CheckPassTests(unittest.TestCase):
         again.assert_called_once_with(self.merge, 'free', 1, 'fp-free')
         self.assertEqual(sorted(call.args[0] for call in self.merge.approval_preview.call_args_list), ['free', 'taken'], 'only Name taken rows are previewed')
 
+    def test_a_row_held_for_another_books_name_is_checked_again_once_no_other_book_plans_it(self):
+        # 0.31.0 (Judy's 0.31.0 spec 4.2): "when one row's name changes and the clash ends, the other row leaves by the
+        # 0.29.0 rule and strip line". Its hold is the engine's same_destination; its reason names no file on disk.
+        free = str(Path(self.temp.name) / 'Sorted' / 'Gibson William' / 'Sprawl Trilogy - Gibson William.m4b')
+        Path(free).parent.mkdir(parents=True)
+        hold = {'kind': 'same_destination', 'detail': '', 'destination': 'Gibson William\\Sprawl Trilogy - Gibson William.m4b', 'absolute': free, 'count': 1,
+                'others': [{'book_id': 'renamed', 'kind': 'row', 'name': '03-Мона Лиза овердрайв', 'title': 'Sprawl Trilogy', 'author': 'Gibson William'}]}
+        with connect(self.database) as db:
+            db.execute('CREATE TABLE automatic_candidates(id TEXT PRIMARY KEY,revision INTEGER,fingerprint TEXT,state TEXT,result TEXT,retry_at REAL,attempted TEXT,matcher_version TEXT)')
+            for identity in ('ended', 'standing', 'on-disk', 'piece'):
+                db.execute('INSERT INTO book_groups VALUES(?,?,?,?,?,?,0)', (identity, str(self.root), identity, 1, 'fp-' + identity, json.dumps({'members': []})))
+                recorded = {'reasons': ['One part of a bigger book'], 'identity_hold': {'kind': 'piece', 'detail': ''}} if identity == 'piece' else \
+                    {'reasons': ['Another book would get the same name'], 'identity_hold': hold}
+                db.execute('INSERT INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)', (identity, 1, 'fp-' + identity, 'Held', json.dumps(recorded, ensure_ascii=False), None, '', ''))
+        previews = {'ended': {'absolute': free, 'taken': False, 'shared': None, 'title': 'Sprawl Trilogy'},
+                    'standing': {'absolute': free, 'taken': False, 'shared': hold, 'title': 'Sprawl Trilogy'},
+                    'on-disk': {'absolute': free, 'taken': True, 'shared': None, 'title': 'Sprawl Trilogy'}}
+        self.merge.approval_preview = Mock(side_effect=lambda identity, revision, names=None: previews[identity])
+        with patch.object(source_presence, '_check_again', return_value=True) as again:
+            cleared = source_presence.recheck_rows(self.merge, [str(self.root)], {})
+        self.assertEqual(cleared, [{'id': 'ended', 'title': 'Sprawl Trilogy', 'cause': 'name_taken'}], 'the strip line of a freed name ("the name is free now")')
+        again.assert_called_once_with(self.merge, 'ended', 1, 'fp-ended')
+        self.assertEqual(sorted(call.args[0] for call in self.merge.approval_preview.call_args_list), ['ended', 'on-disk', 'standing'],
+                         'a row with a question of its own (a piece) is never previewed; a name another book still plans, or a file took meanwhile, stays held')
+
     def test_open_source_folder_names_the_drive_while_its_root_does_not_answer(self):
         # Judy section 1, row side: "Z:\Audiobooks isn't available. Check that the drive is connected." instead of
         # "Couldn't open … Check that this folder is available."

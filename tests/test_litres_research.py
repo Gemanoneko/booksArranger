@@ -80,10 +80,11 @@ class LitresTests(unittest.TestCase):
             def lookup(*args):calls.append(name);return None
             return lookup
         def litres(title,author,stop,budget,result):
-            self.assertEqual(budget,{'remaining':6,'lane':'series'});calls.append('litres')
+            self.assertEqual((budget['remaining'],budget['lane']),(6,'series'));calls.append('litres')  # 0.31.0 also passes the pacing note
             result['sources'].append({'provider':'Litres','url':URL})
             return {'provider':'litres','name':'Мистер Вечный Канун','number':'1','source_url':URL}
         backfill=object.__new__(SeriesBackfill);backfill.stop=threading.Event()
+        backfill.clock=lambda:100000.0  # 0.31.0 step 4a: the look-up keeps what each source answered and when it may be tried again
         backfill.research=SimpleNamespace(_series_goodreads=empty('goodreads'),_series_fantlab=empty('fantlab'),_series_wikidata=empty('wikidata'),_series_publisher=empty('publisher'),_series_litres=litres)
         found=backfill.lookup({'metadata':{'title':TITLE,'canonical_author':AUTHOR}})
         self.assertEqual(calls,['goodreads','fantlab','wikidata','publisher','litres'])

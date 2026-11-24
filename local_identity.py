@@ -729,6 +729,61 @@ def _embedded(row):
     return found
 
 
+# 0.31.0 step 1b (Sergei 2026-11-22, ruling R4: "a series named in the file's own tags files the book without asking").
+# The sort-album and grouping tags of his library name the series and the book's number in it: "Клейн. Книга 2" (104 of
+# the 150 current books that carry such a tag, measured on a copy of the live catalog), "Гарри Поттер - Книга 1" (26),
+# "Тёмная Башня. Книга 0.5" / "Книга 1.0" (8) and "Цикл: Левиафан. Книга 2" (grouping). They were read only as a number
+# cross-check (source_identity.series_positions). A value that may be something else is not used, so the book keeps the
+# series the other rules give it, or none (when unsure, never guess a series, ruling 51): two names ("SCP Foundation.
+# Протоколы SCP. Книга 5"), a publisher's series ("Издательская серия «Хонкаку-детектив». Книга 2"), a universe
+# ("Вселенная Метро 2033 - Книга 1"), a volume of a book ("Созвездие Льва. Книга 3. Том 2"), no separator before the
+# book word ("Темная башняю Книга 4.5"), values that differ between the files or tags of one book.
+TAG_SERIES_VERSION = 'tag-series-v1'
+SERIES_NAME_TAGS = (('sort_album', 'sortalbum', 'albumsort', 'album-sort', 'album_sort'), ('grouping', 'contentgroup', 'content_group'))
+_TAG_SERIES = re.compile(r'^\s*(?:(?:цикл|серия|series|cycle)\s*:\s*)?(?P<series>\S.*?)\s*(?:[.:;,]|\s[-–—])\s*(?:книга|кн\.|book)\s*[#№]?\s*'
+                         r'(?P<number>\d{1,3}(?:[.,][05])?)\s*$', re.I)
+_NOT_A_NARRATIVE_SERIES = re.compile(r'^\W*(?:издательск\w*|издательство|publisher\w*|библиотека|коллекция)(?![^\W\d_])', re.I)
+
+
+def tag_series_value(value, author=''):
+    """{'series', 'number'} one sort-album or grouping value names ("Клейн. Книга 2" -> Клейн, 2), else None."""
+    found = _TAG_SERIES.match(text(value))
+    if not found:
+        return None
+    series = text(found['series']).strip(' .,;:-–—')
+    whole, _, part = found['number'].replace(',', '.').partition('.')
+    number = str(int(whole)) + ('.5' if part == '5' else '')
+    if number == '0' or not re.search(r'[^\W\d_]{2}', series) or re.search(r'\d', series) or re.search(r'[.!?…]\s', series):
+        return None  # book 0 by a tag alone, a name with a number of its own, or two names in one value
+    if _NOT_A_SERIES.match(series) or _NOT_A_NARRATIVE_SERIES.match(series) or universe_of(series) or _unsure_series(series) or garbled(series):
+        return None
+    if author and compare_names(series, author):
+        return None
+    return {'series': series, 'number': number}
+
+
+def tag_series(members, author=''):
+    """Step 1b: the series and number every file of the book names in its sort-album tag, else its grouping tag:
+    {'series', 'number', 'field', 'value'}; None when no file names one, the files disagree, or a file's two tags do."""
+    claims = []
+    for member in members or []:
+        tags = _tags(member)
+        own = []
+        for names in SERIES_NAME_TAGS:
+            for name in names:
+                value = text(tags.get(name))
+                found = tag_series_value(value, author) if value else None
+                if found:
+                    own.append(dict(found, field=names[0], value=value))
+                    break
+        if not own or any((series_key(o['series']), o['number']) != (series_key(own[0]['series']), own[0]['number']) for o in own[1:]):
+            return None
+        claims.append(own[0])
+    if not claims or any((series_key(c['series']), c['number']) != (series_key(claims[0]['series']), claims[0]['number']) for c in claims[1:]):
+        return None
+    return claims[0]
+
+
 def _edits(a, b, limit):
     """Levenshtein distance, stopping as soon as it exceeds limit."""
     if abs(len(a) - len(b)) > limit:
@@ -2521,9 +2576,14 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                 conflicts = [c for c in conflicts if c.get('piece') not in ('part_title', 'numbered_part', 'siblings')]
                 title = {'state': 'one', 'value': named, 'basis': 'number_rule', 'how': 'Set name + part number (Sergei 2026-10-24, rulings 13 and 15)',
                          'sources': [title['sources'][0], {'kind': 'file name', 'value': Path(members[0]['filename']).stem}]}
-    if len(members) == 1 and (row.get('volume_of_set') or {}).get('kept'):
+    if len(members) == 1 and isinstance(row.get('volume_of_set'), dict):
         # Kept as separate books by Sergei (Judy's spec, 2026-10-25): the set question is answered, so this file never
         # returns as one part of a bigger book for it. Title from its own tag, else its file name, else set name + part number.
+        # 0.31.0 step 1a (Sergei 2026-11-22): the same for a volume the app separated itself (part_sets.decide: "each file
+        # names its own work", its own chapters or afterword). It was named from the set's album tag and held as "one part
+        # of a bigger book" beside its sibling volumes, so «Count Zero» and «Mona Lisa Overdrive» both read "Sprawl Trilogy"
+        # and went to one destination. Its admission check is unchanged (a volume the app separated still proves its own
+        # chapters there; only Sergei's Keep skips that, merge_service).
         conflicts = [c for c in conflicts if c.get('piece') not in ('part_title', 'numbered_part', 'siblings', 'part_set')]
         tags = _tags(members[0])
         album = clean_title(text(tags.get('album')))
@@ -2536,7 +2596,12 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         stem = Path(members[0]['filename']).stem
         tag_title, name_title = own(text(tags.get('title'))), own(stem)
         number = re.match(r'^\s*(\d{1,4})', str(tags.get('track') or tags.get('tracknumber') or '')) or re.search(r'(\d{1,4})\D*$', stem)
-        if tag_title:
+        if part and part['title'] and title and not row['volume_of_set'].get('kept'):
+            # A volume the app separated that the part-book rule already named from its own title tag, without the words
+            # that only number it («Книга 1. Пятый Доминион» of «Имаджика» is «Пятый Доминион», book 1): that name stands.
+            # Step 1a took the whole tag again here, so the file was published as «Имаджика - 1 - Книга 1. Пятый Доминион».
+            pass
+        elif tag_title:
             title = {'state': 'one', 'value': tag_title, 'basis': 'tag', 'how': 'the embedded title tag', 'sources': [{'kind': 'embedded', 'field': 'title', 'value': tag_title}]}
         elif name_title:
             title = {'state': 'one', 'value': name_title, 'basis': 'file_name', 'how': 'the file name', 'sources': [{'kind': 'file name', 'value': stem}]}
@@ -2827,12 +2892,27 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         fields['number'] = {'state': 'green', 'value': root_series['position'], 'how': 'the "Книга N" in the book\'s folder name',
                             'sources': [{'kind': 'folder structure', 'value': root_series['book_name']}]}
         from_folders = True
+    volume = len(members) == 1 and isinstance(row.get('volume_of_set'), dict)
+    if not from_folders and not (part and part['series']) and (fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
+        # 0.31.0 step 1b (ruling R4): the series and the number the files' own sort-album or grouping tag names
+        # ("Память о прошлом Земли. Книга 2") file the book in that series without a question. Sergei's own folder
+        # structure, when it names a series, still decides (above). A series folder Sorted already holds for this author
+        # under the same name gives its spelling (ruling 52), so the book joins that folder.
+        by_tags = tag_series(members, author['name'] if author else '')
+        if by_tags:
+            name = sorted_spelling(by_tags['series'], author['name'] if author else '', index, rules) or by_tags['series']
+            source = [{'kind': 'embedded', 'field': by_tags['field'], 'value': by_tags['value']}]
+            fields['series'] = {'state': 'green', 'value': name, 'basis': 'tag', 'sources': source,
+                                'how': 'the series the %s tag names (ruling R4, 2026-11-22)' % by_tags['field'].replace('_', '-')}
+            fields['number'] = {'state': 'green', 'value': by_tags['number'], 'basis': 'tag', 'sources': source,
+                                'how': 'the book\'s number in the %s tag' % by_tags['field'].replace('_', '-')}
     # Ruling 41 (Sergei 2026-10-27, "2. Yes"): a name that reads "Series N. Title" fills Series, Number and Title itself and
     # the series never stays inside the title; the book files without a question once its series is confirmed (ruling 52,
     # below), else the row asks with the split filled in. A series the files already name the
     # same way keeps its source; one that names another series leaves the title as it is (its own names disagree).
     found = series_title_parts(fields['title']['value'], author['name'] if author else '') if fields['title']['value'] and not part else None
     unconfirmed = False
+    hint = None
     if found:
         # Ruling 45 (Sergei 2026-10-27): the series its sibling book folders carry decides it when the name only repeats
         # its own title as the series («Мертвый ноль 7. Мертвый ноль» beside «Сновидения Ехо 5. Сундук мертвеца»). A name
@@ -2857,15 +2937,34 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         filed = sorted_spelling(found['series'], author['name'] if author else '', index, rules)
         if filed:
             found = dict(found, series=filed)
-        unconfirmed = not (named or filed
+        # 0.31.0 step 1a (ruling R4): a volume of a set whose own title tag reads "<Set> NN - <Title>" and whose album tag
+        # names that set ("Sprawl Trilogy 02 - Count Zero", album "Sprawl Trilogy"): the files' own tags name the series, so
+        # it files without the ruling-52 question.
+        album_series = bool(volume and series_key(text(_tags(members[0]).get('album'))) == series_key(found['series']))
+        # R15 (Sergei 2026-11-22; R4 covers it): a file whose only clue is its own title tag shaped "Series NN - Title"
+        # ("Sprawl Trilogy 01 - Neuromancer", no album tag) is filed without the ruling-52 question: the file's own tag
+        # names the series. Only that shape (title_tag_series); every other name nothing confirms is asked as before.
+        own_tag = bool(not named and title_tag_series(fields['title'], members, found, author['name'] if author else ''))
+        unconfirmed = not (named or filed or album_series or own_tag
                            or confirmed_omen(found['series'], found['number'], found['title'], author['name'] if author else '')
                            or (fields['series']['state'] == 'green' and series_key(fields['series']['value']) == series_key(found['series'])))
         whole = fields['title']['value']
-        if not named:
-            source = [{'kind': 'the title (%s)' % (fields['title'].get('basis') or 'name'), 'value': whole}]
+        if unconfirmed:
+            # R22 (Sergei 2026-11-22; it replaces ruling 52's question, "Title unclear"): a series the name only looks
+            # like, which nothing confirms, is doubtful, and a doubtful series is treated as not found: no question. The
+            # title stays as the files give it and the book has no series of its own; the split is kept as a hint
+            # (series_hint), and the look-up before review asks the sources about the part after the number: a source that
+            # names that series with that number confirms it (public_research._gap_fill, series_certainty).
+            hint = {'series': series_spelling(found['series']), 'number': found['number'], 'title': found['title'], 'whole': whole, 'from': 'name'}
+            unconfirmed = False
+        elif not named:
+            # 'field' (0.31.0, Judy 4.3) is set only for R15: the series the title tag's own text alone names, so its row
+            # says "from the title tag" and no other row does (summary() keeps kind, field and value). A volume whose
+            # album tag names the set too reads "from the file's tags" (two of its tags name it).
+            source = [dict({'kind': 'the title (%s)' % (fields['title'].get('basis') or 'name'), 'value': whole}, **({'field': 'title'} if own_tag and not album_series else {}))]
             fields['series'] = {'state': 'green', 'value': found['series'], 'how': 'the series before the number in "%s" (ruling 41)' % whole, 'sources': source}
             fields['number'] = {'state': 'green', 'value': found['number'], 'how': 'the number in "%s" (ruling 41)' % whole, 'sources': source}
-        if not named or (norm(fields['series']['value']) == norm(found['series']) and _same_number(fields['number']['value'], found['number'])):
+        if not hint and (not named or (norm(fields['series']['value']) == norm(found['series']) and _same_number(fields['number']['value'], found['number']))):
             fields['title'] = dict(fields['title'], value=found['title'], how=fields['title'].get('how', '') + '; the title after the series and number (ruling 41)',
                                    aliases=list(fields['title'].get('aliases') or []) + [whole])
     if not found and fields['series']['state'] != 'green' and not part:
@@ -2876,10 +2975,9 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         for value in texts:
             mention = re.search(r'\(\s*([^()#№]{3,80}?)\s*(?:#|№)\s*0*(\d{1,3})\s*\)', value or '')
             if mention and re.search(r'[^\W\d_]{3}', mention[1]):
-                source = [{'kind': 'brackets in the name', 'value': value}]
-                fields['series'] = {'state': 'green', 'value': text(mention[1]), 'how': 'the series the name mentions in brackets', 'sources': source}
-                fields['number'] = {'state': 'green', 'value': mention[2], 'how': 'the number the name gives it in brackets', 'sources': source}
-                unconfirmed = True
+                # R22: nothing confirms the series a name mentions in brackets, so it is doubtful: not found, not asked.
+                # Kept as a hint for the look-up before review (the book's title is asked about as it is).
+                hint = {'series': series_spelling(text(mention[1])), 'number': series_number(mention[2]), 'title': fields['title']['value'], 'whole': fields['title']['value'], 'from': 'brackets'}
                 break
     if fields['series']['state'] == 'green' and series_spelling(fields['series']['value']) != fields['series']['value']:
         # Ruling 46: one series, one spelling, whichever name its files use.
@@ -2934,8 +3032,11 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                  'requires_own_chapters': True} if part and not part['blocked'] else None
     return {'version': IDENTITY_VERSION, 'accepted': accepted, 'route': route if accepted else None, 'part_book': part_book, 'fields': fields,
             'series': series, 'gaps': gaps, 'ignored': ignored, 'conflicts': conflicts, 'ask': ask,
-            # Ruling 52: the series and number came from the name's split and nothing confirms the series.
+            # Ruling 52's mark: the series and number came from the name's split and nothing confirms the series. Since R22
+            # (0.31.0) such a series is not set at all, so this is always False; the key stays for what reads it.
             'series_unconfirmed': bool(unconfirmed and series),
+            # R22: the series and number a name only looks like ({'series', 'number', 'title', 'whole', 'from'}), or None.
+            'series_hint': hint if hint and not series else None,
             # Rulings 30 and 37: the universe the book's folders name («Вселенная Дозоров»), else ''.
             'universe': (structure or {}).get('universe') or book_universe(row, root),
             'held': piece['detail'] if piece and not ask else '',
@@ -3152,6 +3253,24 @@ def series_title_parts(title, author=''):
     return parts if verdict == 'split' else None
 
 
+def title_tag_series(title, members, parts, author=''):
+    """R15 (Sergei 2026-11-22): True when one file's own title tag, and nothing else, reads "Series NN - Title" and so
+    names its series itself ("Sprawl Trilogy 01 - Neuromancer"). title: the identity's title field before the split
+    (its value is the whole tag); parts: series_title_parts() of it. The ruled shape only: one file, the title read
+    from its embedded title tag, the number followed by a dash. A name that reads another way is not this rule's and is
+    asked as before (ruling 52): "Series N. Title" or "Series N: Title", a title from the album tag, the file name or
+    the folder, a book of several files, and a title part that is the author's own name ("Catch 22 - Joseph Heller")."""
+    if not parts or len(members or []) != 1 or not isinstance(title, dict) or title.get('basis') != 'tag':
+        return False
+    whole = text(title.get('value'))
+    if not any(isinstance(s, dict) and s.get('kind') == 'embedded' and s.get('field') == 'title' and text(s.get('value')) == whole for s in title.get('sources') or []):
+        return False
+    found = _SERIES_PARTS.match(whole)
+    if not found or found['separator'] not in '-–—' or found['hash']:
+        return False
+    return not (author and compare_names(parts.get('title') or '', author))
+
+
 def _series_split(title, author=''):
     """(parts, verdict) for series_title_parts: 'split' when the name reads "Series N. Title"; 'ask' when it may as well
     be something else (Senua's 0.22.3 review: m12, a title with its own number and a subtitle, "Apollo 13: The Untold
@@ -3312,15 +3431,17 @@ def _same_number(left, right):
     return series_number(left) == series_number(right)
 
 
-def odd_identity(title, author, local_author='', no_author='', ruled=False, folders=()):
+def odd_identity(title, author, local_author='', no_author='', ruled=False, folders=(), series=True):
     """{'kind', 'why', 'proposal'?, 'candidates'?} when the title or author the app would file needs Sergei's answer,
     else None. kind is an existing question row: 'title_author' or 'author_unclear'. ruled: a rule chose the author (his
     answer, or the library's own folder for that name), so only the title is checked. folders: the names of the book's
-    own folders and their parents, which may name the title without its series."""
+    own folders and their parents, which may name the title without its series. series=False (research, since R22,
+    Sergei 2026-11-22): a title that only looks like a series name and number is not asked about (why 'title_series');
+    the doubtful series is treated as not found and the title is filed as it is."""
     title, author = text(title), text(author)
     if title and re.search(r'[^\W\d_]', _BITRATE_TAIL.sub('', title)) and _BITRATE_TAIL.search(title):
         return {'kind': 'title_author', 'why': 'title_bitrate'}
-    if title and (_series_in_title(title, folders) or _series_split(title, author)[1] == 'ask'):
+    if series and title and (_series_in_title(title, folders) or _series_split(title, author)[1] == 'ask'):
         return {'kind': 'title_author', 'why': 'title_series'}
     if author and author != no_author and not ruled:
         if '_' in author:

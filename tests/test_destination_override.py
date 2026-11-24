@@ -273,7 +273,8 @@ def merge_double(fix, finished=True, computed=None):
              '_move_root', '_override_stale', 'destination_view', '_chosen_folders', '_chosen_root', '_job_manifest', '_mover', 'run_move',
              '_after_move', 'cancel_move', '_publication_location', '_all_source_roots', '_destination_changed', '_start_move_recovery',
              '_move_to_chosen', '_approval_destination', '_move_running', '_unfinished_move', '_renamed_waiting', 'open_folder', 'OVERRIDE_REPLANNED', 'OVERRIDE_UNAVAILABLE',
-             '_source_directories', 'FOLDER_UNAVAILABLE')
+             '_source_directories', 'FOLDER_UNAVAILABLE', 'rewriting',  # rewriting: run_move asks it (0.31.0 R33)
+             '_follow_up_now', '_writes_of', 'WRITE_LEDGERS')  # R35: run_move records an ended write's follow-up first
     Double = type('Double', (), {name: MergeService.__dict__[name] for name in names})
     double = Double()
     row = {'id': fix.candidate, 'revision': 1, 'title_clue': 'Book', 'members': [{'path': str(fix.library / 'a.mp3')}], 'metadata': {}}

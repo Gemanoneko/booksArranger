@@ -26,7 +26,7 @@ const answer=body=>({ok:true,status:200,json:async()=>body});
   // 0.30.0 (Judy's spec 1.5): the engine's work rows; the start check is "Checking books before conversion", the check
   // before cleanup names its book, a paused cleanup is its own paused row after them.
   run("state.work={rows:[{id:'cleanup:old',kind:'cleanup',state:'paused',step:'originals',done:0,total:19,unit:'files',started:1,subject:'Older book'},{id:'start_check',kind:'start_check',state:'running',step:'checking_pending',started:1},{id:'maintenance:old',kind:'maintenance',state:'running',subject:'Earlier book',job_id:'old',started:1}],waiting:[],counts:{cleanups_paused:1},unread:[]};renderJobs();controls()");
-  assert.ok(get('jobs-status').textContent.startsWith('Paused · 2 tasks running · Cleanup paused for 1 book'),get('jobs-status').textContent);  // the queue is paused; the check and its cleanup check still run
+  assert.ok(get('jobs-status-text').textContent.startsWith('Paused · 2 tasks running · Cleanup paused for 1 book'),get('jobs-status-text').textContent);  // the queue is paused; the check and its cleanup check still run
   assert.equal(get('pause-jobs').disabled,false);assert.equal(get('resume-jobs').disabled,true);
   assert.equal(get('pause-jobs').title,'Pause the start checks and keep pending work. The current read may finish before stopping.');
   assert.deepEqual(get('jobs-rows').children.map(item=>item.dataset.id),['cleanup:old','start_check','maintenance:old'],"the engine's order, keyed by id");

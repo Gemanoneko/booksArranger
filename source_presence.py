@@ -472,7 +472,10 @@ def _probe_again(roots, states, report):
 
 
 def recheck_rows(merge, roots, states):
-    """Item 3: Name taken rows whose destination is free again are checked again. [{id, title, cause}]."""
+    """Item 3: Name taken rows whose destination is free again are checked again. [{id, title, cause}].
+    0.31.0 (Judy's 0.31.0 spec 4.2): so is a row held because another book would get its name (identity_hold
+    same_destination, listed under Name taken) once no other book plans that name any more; it leaves the list by the
+    same rule and strip line instead of waiting for automatic processing's own retry timer."""
     database = merge.inventory.database
     with connect(database) as db:
         have = _tables(db)
@@ -483,17 +486,21 @@ def recheck_rows(merge, roots, states):
     cleared = []
     for row in held:
         try:
-            reasons = json.loads(row['result'] or '{}').get('reasons') or []
+            recorded = json.loads(row['result'] or '{}')
+            reasons = recorded.get('reasons') or []
+            hold = recorded.get('identity_hold')
         except (TypeError, ValueError, AttributeError):
             continue
-        if not any(isinstance(r, str) and 'already exists at this path' in r for r in reasons):
+        clash = isinstance(hold, dict) and hold.get('kind') == 'same_destination'
+        if not clash and not any(isinstance(r, str) and 'already exists at this path' in r for r in reasons):
             continue
         try:
             preview = merge.approval_preview(row['id'], row['revision'], names={})
         except (ValueError, OSError, KeyError):
             continue  # the book changed or cannot be previewed now: it keeps its row
         destination = preview.get('absolute') or ''
-        if preview.get('taken') or not destination or os.path.lexists(destination):
+        # A name another book still plans, or a book waiting to convert still has, is not free (destination_clash).
+        if preview.get('taken') or preview.get('shared') or not destination or os.path.lexists(destination):
             continue
         if not os.path.isdir(os.path.dirname(destination)) and not answers(_output_state(merge)):
             continue  # the output drive does not answer: a missing file there proves nothing

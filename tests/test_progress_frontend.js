@@ -33,8 +33,8 @@ const conversion=(extra={})=>({id:'conversion:j1',kind:'conversion',subject:'Lon
 const ids=rows=>rows.map(item=>item.dataset.id);
 
 // Status line is unchanged.
-render();assert.match(get('jobs-status').textContent,/^Nothing running · 0 need attention · 1 converted out of 2 approved books/);  // 0.29.0: the worker's "Running" is not work
-render({approved_total:undefined});assert.match(get('jobs-status').textContent,/Approved book progress unavailable/);
+render();assert.match(get('jobs-status-text').textContent,/^Checking what is left · 0 need attention · 1 converted out of 2 approved books/);  // 0.29.0: the worker's "Running" is not work; 0.31.0 (G2): never the bare counts
+render({approved_total:undefined});assert.match(get('jobs-status-text').textContent,/Approved book progress unavailable/);
 
 // One measured conversion row: label, subject, audio-time detail, bar, Step N of 4, elapsed.
 let rows=render({},[conversion()]);assert.equal(rows.length,1);let row=parts(rows[0]);
@@ -69,16 +69,16 @@ const research={id:'research',kind:'research',subject:'Дюна',step:'researchi
 const series={id:'series',kind:'series',subject:'Мухи',step:'looking_up',done:0,total:292,unit:'books',state:'running',started:NOW-2000};
 const oldHeld={title:'Похититель детей',book_id:'b0',cause:'other',held_total:1};
 let mixed=render({state:'Paused',queued:418,attention_counts:{other:65},approved_total:1200,converted_total:778,pause:{origin:'interrupted'},attention_row:oldHeld},[series],{queued_conversions:418});
-assert.match(get('jobs-status').textContent,/^Paused · Metadata: Updating series: Мухи · 418 books waiting to convert · 65 need attention · 778 converted out of 1200 approved books/);
+assert.match(get('jobs-status-text').textContent,/^Paused · Finding series for finished audiobooks: Мухи · 418 books waiting to convert · 65 need attention · 778 converted out of 1200 approved books/,'0.31.0 (G7): a paused queue names the look-up that still runs');
 assert.match(get('jobs-help').textContent,/has not identified which book stopped them/);assert.doesNotMatch(get('jobs-help').textContent,/Похититель|Возрожденный/);
-assert.equal(parts(mixed.find(item=>item.dataset.id==='series')).label,'Metadata: Updating series: ');
+assert.equal(parts(mixed.find(item=>item.dataset.id==='series')).label,'Finding series for finished audiobooks: ');
 assert.equal(parts(mixed.find(item=>item.dataset.id==='series')).detail,'0 of 292 books');
 // 0.29.0 (Judy section 7): a held cleanup is not a Running row; it is On hold, with its plain cause.
 assert.equal(mixed.length,1);assert.equal(get('jobs-hold-block').hidden,false);
 assert.match(get('jobs-hold').children[0].children[0].children[0].textContent,/^On hold: /);
 // The start check is a row like any other; the help text keeps its line (spec 5: unchanged).
 render({state:'Running',queue_work:{schema:'books-audio-queue-work-v1',state:'checking_pending'}},[{id:'start_check',kind:'start_check',step:'checking_pending',state:'running',started:NOW-3000},series]);
-assert.match(get('jobs-status').textContent,/^2 tasks running · /);assert.match(get('jobs-help').textContent,/^Checking pending audiobook work/);
+assert.match(get('jobs-status-text').textContent,/^2 tasks running · /);assert.match(get('jobs-help').textContent,/^Checking pending audiobook work/);
 assert.deepEqual(ids(get('jobs-rows').children),['start_check','series']);
 rows=render({},[conversion(),finished,research]);assert.deepEqual(ids(rows),['conversion:j1','finished_check','research']);
 row=parts(rows[1]);assert.equal(row.label,'Re-checking finished audiobooks');assert.equal(row.subject,'');assert.equal(row.detail,'3 of 60 books');assert.equal(row.step,'Checking each finished file is still the right one');assert.equal(row.time,'0:09 elapsed');
@@ -113,25 +113,28 @@ rows=render({state:'Needs attention',current_title:'Long book title',current_boo
 assert.equal(rows.length,0,'a held row is not a running row');assert.equal(get('jobs-hold-block').hidden,false);
 let hold=get('jobs-hold').children[0];assert.equal(hold.children[0].children[0].textContent,'On hold: Long book title');
 assert.equal(hold.children[0].children[1].textContent,'Stopped. See Needs attention.');assert.equal(hold.children[1].textContent,'Show in list');
-assert.match(get('jobs-status').textContent,/^Nothing running · 1 on hold · /);
+assert.match(get('jobs-status-text').textContent,/^Checking what is left · 1 on hold · /);
 rows=render({state:'Needs attention',attention_row:{title:'Похититель детей',phase:'originals',reason:'Cannot refresh protected file identity',cause:'identity_read',book_id:'b1',held_total:1}},[]);
 hold=get('jobs-hold').children[0];assert.equal(hold.children[0].children[0].textContent,'On hold: Похититель детей');
 assert.equal(hold.children[0].children[1].textContent,"Cleanup stopped. The app couldn't read one file's information.");
-assert.doesNotMatch(get('jobs-status').textContent,/Running|Removing originals/);
+assert.doesNotMatch(get('jobs-status-text').textContent,/Running|Removing originals/);
 rows=render({state:'Running'},[conversion()]);assert.match(parts(rows[0]).time,/elapsed/,'positive control: a running row keeps its clock');assert.equal(rows[0].children[2].children[1].hidden,false);
 assert.equal(parts(render({state:'Pausing'},[conversion({state:'pausing'})])[0]).step,'Pausing - Step 3 of 4 - Encoding audio');
 
-// Idle: "Nothing running"; paused with no rows: how to continue.
-assert.equal(render({},[]).length,0);assert.equal(get('jobs-idle').textContent,'Nothing running');assert.equal(get('jobs-idle').hidden,false);
+// Idle (0.31.0, 1.3): nothing runs right now (this engine sends no finished state); paused with no rows: how to continue.
+assert.equal(render({},[]).length,0);assert.equal(get('jobs-idle').textContent,'Nothing is running right now.');assert.equal(get('jobs-idle').hidden,false);
 render({state:'Paused'},[]);assert.equal(get('jobs-idle').textContent,'Paused. Resume continues pending books.');
-render({},undefined);assert.equal(get('jobs-idle').textContent,'Nothing running');assert.equal(get('jobs-hold-block').hidden,true,'On hold empties with its rows');
-// Item 8: only Sergei's review can move things on (the engine's needs_you_only), the count is Needs attention's own.
-const renderYou=(jobs,you)=>{context.fixture={audiobook_jobs:{state:'Running',approved_total:2,converted_total:1,queued:0,failed:0,...jobs},work:{rows:[],waiting:[],counts:{},unread:[]},needs_you_only:you};run('state=fixture;renderJobs()');};
-renderYou({attention_counts:{other:329}},true);assert.equal(get('jobs-idle').textContent,'Nothing running.');
-assert.equal(get('jobs-you').hidden,false);assert.equal(get('jobs-you-line').children.map(item=>item.textContent).join(''),"Waiting for you: 329 books need attention. The app can't do more until you review them.");
-assert.equal(get('jobs-review').textContent,'Review them');assert.equal(get('jobs-review').title,'Show every book that needs you.');
-renderYou({attention_counts:{other:329}},false);assert.equal(get('jobs-you').hidden,true,'a retry or check the app will make itself: not shown');assert.equal(get('jobs-idle').textContent,'Nothing running');
-renderYou({attention_counts:{}},true);assert.equal(get('jobs-you').hidden,true,'nothing needs attention: Nothing running only');
+render({},undefined);assert.equal(get('jobs-idle').textContent,'Nothing is running right now.');assert.equal(get('jobs-hold-block').hidden,true,'On hold empties with its rows');
+// Item 8, 0.31.0 (1.4): only Sergei can move things on. The engine's finished state decides (needs_you_only is no longer
+// read); the count is Needs attention's own.
+const renderYou=(jobs,engine,you=true)=>{context.fixture={audiobook_jobs:{state:'Running',approved_total:2,converted_total:1,queued:0,failed:0,...jobs},work:{rows:[],waiting:[],counts:{},unread:[],state:engine,pending:{}},needs_you_only:you};run('state=fixture;renderJobs()');};
+renderYou({attention_counts:{other:329}},'waiting_for_you');assert.equal(get('jobs-idle').textContent,'Nothing is running, queued or waiting.');
+assert.equal(get('jobs-you').hidden,false);assert.equal(get('jobs-you-line').textContent,'329 books need attention.');
+assert.equal(get('jobs-review').textContent,'Review them');assert.equal(get('jobs-review').title,'Show every book that needs you.');assert.equal(get('jobs-review').hidden,false);
+renderYou({attention_counts:{other:329}},'continues');assert.equal(get('jobs-you').hidden,true,'a retry or check the app will make itself: not shown');assert.equal(get('jobs-idle').textContent,'Nothing is running right now.');
+renderYou({attention_counts:{other:329}},'waiting_for_you',false);assert.equal(get('jobs-you').hidden,false,'needs_you_only is not read: the state decides');
+renderYou({attention_counts:{other:329}},'',true);assert.equal(get('jobs-you').hidden,true,'needs_you_only alone shows nothing');
+renderYou({attention_counts:{}},'waiting_for_you');assert.equal(get('jobs-you').hidden,true,'only a hold or a drive waits: they keep their own homes, no line here');
 
 // ETA: only when determinate, running, at least 10 s into the step and 5 % done; from the recent rate.
 rows=render({},[conversion({started:NOW-20000,done:10,total:100,unit:'files'})]);
@@ -146,8 +149,8 @@ render({folder_cleanup_notes:['Native protected stream namespace unsupported']})
 // Page contract: the toolbar sits above the rows; the bar styles exist for every state.
 const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');
 assert.ok(html.indexOf('id="pause-jobs"')<html.indexOf('id="jobs-rows"'),'Pause/Resume are above the rows');assert.doesNotMatch(html,/id="jobs-progress"|id="book-progress"/);
-// Hidden until the engine reports its jobs: "Nothing running" is never a placeholder (Judy 0.22.1, 3.5).
-assert.match(html,/<ul id="jobs-rows" role="region" aria-label="Running activities" tabindex="0"><\/ul><p id="jobs-idle" class="field-help" hidden>Nothing running<\/p>/);assert.doesNotMatch(html,/id="jobs-more"/,'1.3: no overflow line');
+// Hidden until the engine reports its jobs: the idle line has no placeholder (Judy 0.22.1, 3.5; 0.31.0 retires "Nothing running").
+assert.match(html,/<ul id="jobs-rows" role="region" aria-label="Running activities" tabindex="0"><\/ul><p id="jobs-idle" class="field-help" hidden><\/p>/);assert.doesNotMatch(html,/id="jobs-more"/,'1.3: no overflow line');
 for(const rule of [/#jobs-activity\{min-height:136px\}/,/\.activity-row progress:indeterminate\{[^}]*animation:activity-slide 1\.4s linear infinite\}/,/\.activity-row\.paused progress:indeterminate\{animation:none/,/\.activity-row\.attention progress::-webkit-progress-value\{background:var\(--warning\)\}/,/@media\(prefers-reduced-motion:reduce\)\{\.activity-row progress:indeterminate\{animation:none;background:repeating-linear-gradient/,/@keyframes activity-slide/])assert.match(css,rule);
 
 // One writer for #version: the engine version, never 'local prototype' (the desktop layer no longer writes it).

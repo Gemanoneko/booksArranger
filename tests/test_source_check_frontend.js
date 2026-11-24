@@ -85,7 +85,7 @@ const texts=element=>element.children.map(child=>child.children.length?child.chi
   assert.equal(view('source_check'),undefined,'a pass under 1 s is not shown');
   work([{id:'source_check',kind:'source_check',state:'running',done:120,total:412,unit:'books',started:Date.now()-5000}]);
   assert.deepEqual(line('source_check'),['Checking source folders','','120 of 412 books','Checking 412 books']);
-  assert.match(get('jobs-status').textContent,/^Checking source folders · /);
+  assert.match(get('jobs-status-text').textContent,/^Checking source folders · /);
   work([{id:'source_folders',kind:'source_folders',state:'running',started:Date.now()-2000}]);
   assert.deepEqual(line('source_folders'),['Removing source folders','','','Checking leftovers']);assert.equal(view('source_folders').bar.hidden,false);
   run('rows=[{id:"m",kind:"candidate",title_clue:"Dune",move:{state:"moving",progress:45,target:"Z:/Sorted/Herbert/Dune.m4b"}}]');

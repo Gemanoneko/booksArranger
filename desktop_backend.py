@@ -515,7 +515,7 @@ class DesktopControl:
             for press in list(getattr(merge, '__dict__', {}).get('_approve_stops', ())):
                 press.set()
             getattr(merge,'pause_work',merge.pause)(origin='update')  # stop at the next safe checkpoint
-            for name in ('series_backfill', 'gap_fill'):
+            for name in ('series_backfill', 'name_write', 'gap_fill'):
                 background = getattr(merge, '__dict__', {}).get(name)
                 if background is not None:
                     background.stop.set(); background.wake.set()
@@ -613,7 +613,7 @@ class DesktopControl:
             plan.append(('conversion', queue + scan, self._resume_queue))
         if before.get('scanning') and not before.get('automatic') and before.get('library'):
             plan.append(('scan', scan, lambda: self._resume_scan(before['library'])))
-        for name in ('series_backfill', 'gap_fill'):
+        for name in ('series_backfill', 'name_write', 'gap_fill'):
             background = getattr(merge, '__dict__', {}).get(name)
             if background is not None:
                 plan.append(('lookups', live(getattr(background, 'thread', None)), background.start))

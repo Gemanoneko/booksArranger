@@ -418,8 +418,11 @@ class Identity(unittest.TestCase):
         # Rulings 51, 52, 71e: «Солнце и Замок (Книга Нового Солнца #3)»: the edition numbers its volumes 1/2/3.
         members=[{'path':ROOT+'\\Unsorted\\Солнце и Замок\\%02d.mp3'%n,'filename':'%02d.mp3'%n,'metadata':{'tags':{'album':'Солнце и Замок (Книга Нового Солнца #3)','artist':'Джин Вулф','track':str(n)}}} for n in (1,2)]
         record=local_identity.identify({'id':'g','revision':1,'fingerprint':'f','source_root':ROOT,'members':members},ROOT,[],())
-        self.assertEqual((record['fields']['title']['value'],record['fields']['series']['value'],record['fields']['number']['value']),('Солнце и Замок','Книга Нового Солнца','3'))
-        self.assertTrue(record['series_unconfirmed'],'asked with Series and Number filled in')
+        # R22 (Sergei 2026-11-22) withdrew the question: a series a name mentions in brackets is doubtful, so it is not the
+        # book's series and nothing is asked; it is kept as a hint for the look-up before review.
+        self.assertEqual((record['fields']['title']['value'],record['fields']['series']['value'],record['fields']['number']['value']),('Солнце и Замок','',''))
+        self.assertFalse(record['series_unconfirmed'])
+        self.assertEqual({key:record['series_hint'][key] for key in ('series','number','from')},{'series':'Книга Нового Солнца','number':'3','from':'brackets'})
 
     def test_narrator_marker_without_a_full_stop_in_brackets(self):
         self.assertEqual(local_identity.narrator_names(['Шляпа полная небес .(чит Капитан Абр и Nelly)']),['Капитан Абр и Nelly'])

@@ -55,7 +55,21 @@ def routing_compatibility(row,job,envelope):
         return True
     except (KeyError,TypeError,ValueError):return False
 
-def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,modern_profile,replacement=None,location_envelope=None,retry_binding=False):
+def placed_by_write(row,record,rewrites):
+    """0.31.0 B1 (Futaba's QA round 2; true of 0.30's series write too): the receipt is the one the app's own write into
+    the finished file recorded (series_backfill or name_write, catalog step: new_path and new_sha256), and that write's
+    planned place is the place the review plans now (row preview). A write whose planned folder is another one renames the
+    book in its own folder first (its series_folder) and the usual verified move takes it there, or to the folder he chose
+    (R30): the receipt then names the renamed file, never the planned path, and the book was read as not converted
+    (Pending, out of Audiobook Ready). rewrites: [(new_path, new_sha256, series_folder)] of this job's recorded writes."""
+    final=os.path.normcase(str(record.get('final_path') or ''))
+    for new_path,new_sha256,folder in rewrites or ():
+        if not new_path or os.path.normcase(str(new_path))!=final or new_sha256!=record.get('sha256'):continue
+        planned=os.path.join(str(folder),os.path.basename(str(new_path))) if folder else str(new_path)
+        if os.path.normcase(planned)==os.path.normcase(row['preview']['path']):return True
+    return False
+
+def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,modern_profile,replacement=None,location_envelope=None,retry_binding=False,rewrites=()):
     if not output_current or job.get('state')!='completed':return False
     manifest=job['manifest'];record=job.get('output') or {}
     from retry_intent import ready_compatible
@@ -63,7 +77,7 @@ def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,mod
     if manifest.get('candidate_id')!=row['id']:return False
     if (manifest.get('candidate_revision')!=row['revision'] or manifest.get('metadata')!=row.get('review')) and not compatible:return False
     if record.get('validation',{}).get('passed') is not True or record.get('job_id')!=job['job_id']:return False
-    if os.path.normcase(record.get('final_path',''))!=os.path.normcase(row['preview']['path']) and not compatible:
+    if os.path.normcase(record.get('final_path',''))!=os.path.normcase(row['preview']['path']) and not compatible and not placed_by_write(row,record,rewrites):
         if not replacement or replacement.get('state') not in {'published','retiring','completed'} or replacement.get('replacement_job_id')!=job['job_id'] or replacement.get('candidate_id')!=row['id'] or replacement.get('candidate_revision')!=row['revision'] or manifest.get('replacement_id')!=replacement.get('id') or manifest.get('replacement_parent_job_id')!=replacement.get('parent_job_id') or replacement.get('parent_job_id')==job['job_id']:return False
         import json
         if record!=json.loads(replacement.get('current_output_json') or '{}'):return False

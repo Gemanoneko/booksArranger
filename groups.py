@@ -1160,8 +1160,16 @@ def page(connection,root,limit=100,offset=0,search='',status='all',coverage=Fals
       'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] and not item['missing'] for item in row['members']),
       'changed':lambda row:row['changed']}
     if status not in filters:raise ValueError('Unknown candidate status')
-    values=[row for row in values if filters[status](row) and search.casefold() in (' '.join([row['title_clue'],row['scope']]+[item['path'] for item in row['members']])).casefold()]
+    values=[row for row in values if filters[status](row) and search.casefold() in searched(row).casefold()]
     return {'rows':values[offset:offset+limit],'total':len(values)}
+
+def searched(row):
+    """The text the list's search looks in: the title clue, the scope and the files' paths (the names the files give: a
+    translated book's Russian title stays findable), and (0.31.0 ruling R27) the names the book is filed under, its review's
+    title and author, so a book renamed to its English title is found by it too (Show in list searches for that title)."""
+    review=row.get('review') if isinstance(row.get('review'),dict) else {}
+    names=[str(review.get(field) or '') for field in ('title','author','canonical_author')]
+    return ' '.join([row['title_clue'],row['scope']]+[item['path'] for item in row['members']]+names)
 
 def page_sources(connection,roots,limit=100,offset=0,search='',status='all',coverage=None,ids=None,hidden=None):
     """All-source page from the caller's transaction, preserving source identity.
@@ -1194,8 +1202,7 @@ def page_sources(connection,roots,limit=100,offset=0,search='',status='all',cove
       'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] and not item['missing'] for item in row['members']),
       'changed':lambda row:row['changed']}
     if status not in filters:raise ValueError('Unknown candidate status')
-    values=[row for row in values if filters[status](row) and search.casefold() in
-            (' '.join([row['title_clue'],row['scope']]+[item['path'] for item in row['members']])).casefold()]
+    values=[row for row in values if filters[status](row) and search.casefold() in searched(row).casefold()]
     return {'rows':values[offset:offset+limit],'total':len(values)}
 
 def save(connection,root,identity,revision,review,approve=False):

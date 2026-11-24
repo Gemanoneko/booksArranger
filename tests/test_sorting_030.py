@@ -27,6 +27,11 @@ def hp_rows(folder, album, artist='Джоан Роулинг', count=2):
 class RootSeriesFolderTests(Base):
     """Item 4: a root-level <Series>\\NN. Книга N - <Title> (<Reader>) folder is a series and number clue, never the author."""
 
+    def setUp(self):
+        # 0.31.0 step 2: these fixtures predate the look-up before review and their sources are closed (it has its own tests).
+        from original_title_fixture import no_lookup
+        self.addCleanup(no_lookup().stop)
+
     def test_harry_potter_3_takes_its_series_and_number_from_the_root_series_folder(self):
         row = self.catalog(hp_rows(HP3, 'Гарри Поттер и узник Азкабана'))[ROOT + '\\' + HP3.rstrip('\\')]
         result = self.lookup(row)
@@ -89,9 +94,16 @@ class SeriesWaitTests(Base):
         return row
 
     def test_a_source_that_cannot_be_reached_publishes_as_now(self):
+        # R2 (Sergei 2026-11-22) replaced this part of item 3: a source that cannot be reached is a try of the look-up
+        # before review, and the book waits for the next one (a few tries, then it converts as before; the test keeps
+        # its name). Until 0.31.0 it was published at once without its series.
+        import public_research
         result = self.lookup(self.book(client=None))  # the Offline client: unreachable, not rate-limited
-        self.assertEqual(result['reasons'], [])
-        self.assertIsNone(result['wait'])
+        self.assertEqual(result['reasons'], [public_research.SERIES_WAIT_REASON])
+        self.assertEqual((result['lookup']['tries'], result['lookup']['next_try'], result['lookup']['limit']), (1, 2, 3))
+        # The waits are bounded: a book that already waited the limit of times is published without one, as before.
+        done = self.lookup(dict(self.book(client=None), _series_waits=public_research.SERIES_WAIT_LIMIT))
+        self.assertEqual((done['reasons'], done['wait']), ([], None))
 
     def test_every_series_source_only_rate_limited_waits_for_the_series(self):
         import public_research
@@ -251,8 +263,11 @@ class SortedCatalog(unittest.TestCase):
         return job_id
 
     def held(self, job_id, series, number, url, provider='fantlab'):
-        """Series backfill found a series and held the book on the old bug (item 2)."""
-        record = {'series': series, 'number': number, 'provider': provider, 'source_url': url, 'research_receipts': []}
+        """Series backfill found a series and held the book on the old bug (item 2). The series is one 0.31.0's look-up
+        judged certain (series_proof's number_from, as every hold it makes records it): one kept before that rule is not
+        planned until it is looked up again (Senua's 0.31.0 review, M3; test_series_moves_031.PreRuleSeriesTests)."""
+        record = {'series': series, 'number': number, 'provider': provider, 'source_url': url, 'research_receipts': [],
+                  'series_proof': {'number_from': 'source'}}
         with contextlib.closing(sqlite3.connect(self.database)) as db:
             db.execute("INSERT INTO series_backfill VALUES(?,'held',?,?,'now')", (job_id, 'The recorded series paths do not share their original parent',
                                                                                  json.dumps(record, ensure_ascii=False)))
@@ -333,9 +348,12 @@ class SortingPlanTests(SortedCatalog):
         chosen = self.book('Роулинг Джоан\\Chosen - Роулинг Джоан.m4b', 'Роулинг Джоан', 'Chosen', language='Unknown')
         with contextlib.closing(sqlite3.connect(self.database)) as db:
             book_move.setup(db)
-            for n, (job, final) in enumerate(((done, self.sorted / 'Rowling J. K' / 'Done - Rowling J. K.m4b'), (chosen, self.base / 'Mine' / 'Chosen - Роулинг Джоан.m4b'))):
-                db.execute("INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,target_folder,target_root,target_path,from_json,final_json,created_utc,updated_utc)"
-                           " VALUES(?,?,'base','c',1,'complete','f','r',?,'{}',?,'t','t')", ('m%d' % n, job, str(final), json.dumps({'final_path': str(final)})))
+            # 0.31.0 milestone B: a folder he chose is a move that carries his choice (override_id), as Choose folder… records
+            # it; a move without one (his approval of a listed move) leaves the book to the rules.
+            for n, (job, final, override) in enumerate(((done, self.sorted / 'Rowling J. K' / 'Done - Rowling J. K.m4b', None),
+                                                        (chosen, self.base / 'Mine' / 'Chosen - Роулинг Джоан.m4b', 'his-choice'))):
+                db.execute("INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,target_folder,target_root,target_path,from_json,final_json,override_id,created_utc,updated_utc)"
+                           " VALUES(?,?,'base','c',1,'complete','f','r',?,'{}',?,?,'t','t')", ('m%d' % n, job, str(final), json.dumps({'final_path': str(final)}), override))
             db.commit()
         found = self.plan()
         self.assertEqual(found['items'], [])

@@ -1,5 +1,7 @@
 'use strict';
-// The odd-name questions of 0.22.1 (Q3, ASK guards only): a bitrate, a series or number, or Latin letters in a title, and a
+// The odd-name questions of 0.22.1 (Q3, ASK guards only): a bitrate or Latin letters in a title (the third cause, a title
+// that looks like a series name and number, and the number question of ruling 74b were withdrawn by Sergei's R22:
+// tests/test_series_questions_frontend.js), and a
 // folder name used as an author, each reach the to-do list on the existing rows (Title or author / Author unclear) with
 // one sentence that says what looks wrong (Judy's section 11), the field to check prefilled with the proposal, and Approve
 // as is filing it unchanged. Two people in one author reuse the Author unclear row. Select all and the bulk "Approve as
@@ -18,7 +20,6 @@ const dest=p=>({path:p,absolute:ROOT+'\\'+p,taken:false,reason:''});
 const titleAsk=(name,why,title,author)=>askRow(name,{kind:'title_author',also:null,why,odd_name:true,reasons:['Title or author missing'],fields:{title:{proposal:title,basis:'tag'},author:{proposal:author,basis:'tag'}},candidates:[],
   destination:dest(author+'\\'+title+'.m4b')});
 const bitrate=titleAsk('br','title_bitrate','Антитела 128','Андерсон Кевин');
-const series=titleAsk('se','title_series','Сновидения Ехо #3','Фрай Макс');
 const latin=titleAsk('la','title_latin','Master vetrov i zakatov','Фрай Макс');
 const folder=titleAsk('fo','author_folder','Лабиринт','Ричард Форд');
 const people=askRow('pe',{kind:'author_unclear',also:null,why:'two_people',odd_name:true,reasons:['Author unclear'],fields:{title:{proposal:'Good Omens',basis:'tag'},author:{proposal:'Neil Gaiman',basis:'tag'}},
@@ -46,14 +47,13 @@ const radios=tr=>walk(statusCell(tr)).filter(e=>e.type==='radio');
 function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}));totalRows=rows.length;renderRows(true);controls()');}
 (async()=>{
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";attentionGroup="all";viewControls()');
-  paint([bitrate,series,latin,folder,people]);
+  paint([bitrate,latin,folder,people]);
   // A title the guards doubt: "Title unclear", the reason, and the Title field prefilled with the name as found.
   for(const [id,hint,value] of [['cand-br','The title ends with a number that looks like a bitrate.','Антитела 128'],
-    ['cand-se','The title starts with what looks like a series name and number.','Сновидения Ехо #3'],
     ['cand-la','The title looks like Russian written in Latin letters.','Master vetrov i zakatov']]){
     const tr=trOf(id);
     assert.equal(statusCell(tr).textContent,'Title unclear',id);assert.equal(statusCell(tr).children[0].textContent,hint,id);
-    const fields=inputs(tr);assert.deepEqual(fields.map(e=>e.dataset.name),id==='cand-se'?['title','series','number']:['title'],id+': one title, the series pair only for title_series, no author field');assert.equal(fields[0].value,value,id);
+    const fields=inputs(tr);assert.deepEqual(fields.map(e=>e.dataset.name),['title'],id+': one title, no series pair, no author field');assert.equal(fields[0].value,value,id);
   }
   // A folder name as the author: "Author unclear", the reason, and the Author field prefilled with the cleaned name.
   let tr=trOf('cand-fo');
@@ -65,21 +65,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   tr=trOf('cand-pe');assert.equal(statusCell(tr).textContent,'Author unclear');
   assert.equal(statusCell(tr).children[0].textContent,"Two people are credited. The app can't tell who wrote it.");
   assert.ok(radios(tr).length>=2,'a choice between the people');
-  // Ruling 74b (Judy): "Number unclear": the title's number against the source's, named by its provider's site (else "an
-  // online source", never "the catalog"); Title, Series and Number inline and filled in; Approve untouched sends them.
-  const numberAsk=(name,provider)=>askRow(name,{kind:'title_author',also:null,why:'number_unclear',odd_name:true,reasons:['Title or author missing'],volume:{title_number:1,series_number:'2',provider},
-    fields:{title:{proposal:'The Fellowship of the Ring',basis:'tag'},author:{proposal:'Tolkien J. R. R.',basis:'tag'},series:{proposal:'Властелин колец',basis:'source'},number:{proposal:'1',basis:'title'}},candidates:[],
-    destination:dest('Tolkien J. R. R\\Властелин колец\\Властелин колец - 1 - The Fellowship of the Ring - Tolkien J. R. R.m4b')});
-  paint([numberAsk('nf','fantlab'),numberAsk('ng','goodreads'),numberAsk('nx','publisher')]);
-  for(const [id,source] of [['cand-nf','FantLab'],['cand-ng','Goodreads'],['cand-nx','an online source']]){
-    tr=trOf(id);assert.equal(statusCell(tr).textContent,'Number unclear',id);
-    assert.equal(statusCell(tr).children[0].textContent,'The title says book 1, but '+source+' says book 2.',id);
-    assert.deepEqual(inputs(tr).map(e=>[e.dataset.name,e.value]),[['title','The Fellowship of the Ring'],['series','Властелин колец'],['number','1']],id+': the odd-title inline fields, filled in');
-  }
-  await buttonsOf(trOf('cand-nf'))[0].handlers.click({stopPropagation(){}});await tick();
-  const numbered=posted('/api/candidate/approve').at(-1);
-  assert.equal(numbered.id,'cand-nf');assert.deepEqual(numbered.names,{series:'Властелин колец',number:'1'});assert.equal('title' in numbered,false,'untouched: the shown values');
-  paint([bitrate,series,latin,folder,people]);
+  paint([bitrate,latin,folder,people]);
   // Approve as is files the book unchanged: nothing typed sends no title or author.
   await buttonsOf(trOf('cand-br'))[0].handlers.click({stopPropagation(){}});await tick();
   const sent=posted('/api/candidate/approve').at(-1);assert.equal(sent.id,'cand-br');assert.equal('title' in sent,false);assert.equal('author' in sent,false);
@@ -93,7 +79,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // Select all and bulk "Approve as is" never take an odd-name row (Judy 11.4, item 2; Jane for Sergei 2026-10-26):
   // "Антитела 128" is never filed unseen. Each is approved on its own row; the rows the bulk action was built for keep it.
   run('attentionGroup="title_author";selectedBooks.clear();viewControls()');
-  paint([bitrate,series,latin,folder,plain]);
+  paint([bitrate,latin,folder,plain]);
   get('select-page').checked=true;get('select-page').handlers.change();
   assert.equal(run('JSON.stringify([...selectedBooks.keys()])'),'["cand-pl"]','Select all leaves the odd-name rows unselected');
   assert.equal(get('select-page').checked,true,'every row Select all takes is selected');assert.equal(get('select-page').indeterminate,false);

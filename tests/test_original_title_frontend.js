@@ -1,7 +1,8 @@
 'use strict';
 // Ruling 38 (Sergei 2026-10-27; it replaces the waiting part of ruling 29): there is no "Waiting for the original title"
 // state, so its row, Approve tooltip, Goes to label, editor help and saved line are gone (Judy 0.22.2 section 4). The
-// details panel keeps its "Original title" fact (found, not found, entered), with no waiting line. Ruling 33's Author
+// details panel keeps the fact (found, not found, entered), with no waiting line; since 0.31.0 it is labelled "English
+// title" and its not-found sentence says so (Judy's 0.31.0 spec 4.5 and 5.2; tests/test_online_wait_frontend.js). Ruling 33's Author
 // unclear row for a Latin name with a Russian first name keeps its sentence. Runs the real frontend on the Retry
 // test's doubles.
 const fs=require('node:fs'),path=require('node:path');
@@ -47,10 +48,10 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.ok(run('askNames(fixture[1].ask)').includes('Author: Вестерфельд Скотт - Russian spelling'),'the names summary says the same');
   assert.equal(run('originalTitleFact({automatic:{state:"Waiting for source",wait:{kind:"original_title"}}})'),'','a record a 0.22.2 candidate left: no waiting line');
   assert.equal(run('originalTitleFact({metadata_facts:{original_title_lookup:{state:"found",title:"Jack of Shadows"}}})'),'Jack of Shadows');
-  assert.equal(run('originalTitleFact({metadata_facts:{original_title_lookup:{state:"none",title:""}}})'),'Not found. Filed under the Russian title.');
+  assert.equal(run('originalTitleFact({metadata_facts:{original_title_lookup:{state:"none",title:""}}})'),'No English title found online. Filed under the Russian title.');
   assert.equal(run('originalTitleFact({entered:["title"],metadata_facts:{original_title_lookup:{state:"none",title:""}}})'),'Entered by you.');
   assert.equal(run('originalTitleFact({})'),'','no lookup, no fact');
-  console.log('PASS no waiting state, row or copy; the Original title fact; the name-language sentence');
+  console.log('PASS no waiting state, row or copy; the English title fact; the name-language sentence');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
 const Module=require('node:module');const m=new Module(path.join(__dirname,'test_original_title_frontend.js'),module);m.filename=path.join(__dirname,'test_original_title_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

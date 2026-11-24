@@ -1,5 +1,5 @@
 """Confident automatic approval through real private MP3/M4B verification and 24h recovery."""
-import json,shutil,struct,subprocess,tempfile,threading,time,unittest,zlib
+import json,os,shutil,struct,subprocess,tempfile,threading,time,unittest,zlib
 from pathlib import Path
 from unittest.mock import patch
 from contextlib import contextmanager
@@ -317,6 +317,177 @@ class AutomaticMediaTests(unittest.TestCase):
         self.assertEqual(row['status'],'Needs attention — metadata research failed');self.assertFalse(row['metadata_approved']);self.assertFalse(row['creation']['can_create'])
         self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertEqual(self.service.state()['approved_total'],0)
         self.assertEqual(before,{str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in self.sources})
+
+
+class RewrittenBookTests(unittest.TestCase):
+    """0.31.0 B1 (Futaba's QA round 2; 0.30's series write too): once the app's own write renamed a finished book (its series,
+    or the author's name in order) and the rules moved it, the list read it as not converted: Pending, its source folder,
+    Open source folder, no Now in, no Choose folder…, out of Audiobook Ready, and "0 converted" beside All done. A rescan or
+    a restart did not help. The write's receipt names the renamed file in its own folder; the place the review plans (the
+    row's preview) is the series or author folder the move takes it to, and the converted check wanted the two equal
+    (conversion_progress.placed_by_write). A write the rules could not move also dropped the book's last verification until
+    a restart (SeriesBackfill._verified). A real conversion into a Sorted folder outside the library, the real writers,
+    plan, Mover and list (progress_books, the page's rows)."""
+    setUp=AutomaticMediaTests.setUp;tearDown=AutomaticMediaTests.tearDown;result=AutomaticMediaTests.result;wait=AutomaticMediaTests.wait
+
+    def convert(self):
+        # Short names: the series folder's path stays well inside the 240-character limit in every run folder.
+        self.sorted=self.base/'S';self.sorted.mkdir()
+        self.inv.output_root=str(self.sorted)  # as installed: the Sorted folder is not a source folder
+        from native_io import ordinary
+        self.service.publications.libraries+=(ordinary(self.sorted),)  # as MergeService builds it when Sorted is set at start
+        row,result=self.result();_,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
+        self.job_id=job_id;self.candidate=row['id']
+        # The engine's own background passes are stopped: each step below is the same pass, run by the test.
+        for name in ('rule_filing','series_backfill','name_write','gap_fill'):
+            worker=self.service.__dict__.get(name)
+            if worker is not None and callable(getattr(worker,'close',None)):
+                worker.close()
+                if hasattr(worker,'stop'):worker.stop.clear()  # its thread has ended; a pass the test runs is not stopped
+        self.assert_ready(Path(self.job()['output']['final_path']))
+        return job_id
+
+    def listed(self):
+        """The rules' list names this book's move (sorting_moves, the list their pass approves)."""
+        answer=self.service.sorting_moves()
+        item=next((item for item in answer['items'] if item['job_id']==self.job_id),None)
+        self.assertIsNotNone(item,answer)
+        return item
+
+    def job(self):
+        return next(job for job in self.service.jobs.status()['jobs'] if job['job_id']==self.job_id)
+
+    def settled(self):
+        """The conversion's own workers have ended: a write (and its look-up) waits while they run (SeriesBackfill._idle)."""
+        for thread in (self.service.jobs._thread,self.service.cleanup.thread):
+            if thread is not None:thread.join(60)
+        self.assertFalse(self.service.cleanup.current)
+
+    def written(self,record_names=False,blocked=None):
+        """The rules' series write (and its move): the look-up finds a series whose folder is another folder, the rules
+        approve the listed move, the write renames the book in its own folder and the usual verified move follows.
+        blocked: a file where the series folder would be, so the move cannot happen (Futaba's lane H)."""
+        from types import SimpleNamespace
+        from scanner import connect
+        from series_backfill import SeriesBackfill
+        from test_sorting_030 import cycle
+        with connect(self.inv.database) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS public_research_cache(url TEXT PRIMARY KEY, raw TEXT, sha256 TEXT, fetched REAL)')
+            cycle(db,777,'Норма','Norma','en')
+        found={'provider':'fantlab','name':'Норма','number':'10','number_from':'counted','source_url':'https://fantlab.ru/work777'}
+        research=SimpleNamespace(_series_goodreads=lambda *a:None,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None,_series_litres=lambda *a:None,
+                                 _series_fantlab=lambda *a:dict(found))
+        backfill=self.service.series_backfill=SeriesBackfill(self.service,research=research,stage=self.base/'proof-stage')
+        self.settled()
+        backfill.run_pass()
+        entry=backfill.entry(self.job_id)
+        self.assertEqual(entry['state'],'held',entry)  # the series is found; its move waits for an approval
+        item=self.listed()
+        if blocked:
+            Path(item['to']).parent.write_bytes(b'in the way')
+        backfill.approve(self.job_id,item['series'],item['to'],by='rules')  # as the rules' pass approves it (rule_filing)
+        backfill.run_pass()
+        entry=backfill.entry(self.job_id)
+        self.assertEqual(entry['state'],'done',entry)
+        return entry['record'],Path(item['to'])
+
+    def assert_ready(self,now_in):
+        """Audiobook Ready: counted as converted, its row finished (Now in its place, Choose folder…, Open book folder)."""
+        self.assertIn(self.candidate,self.service.converted_ids(max_age=0),'counted as converted')
+        status=self.service.state()
+        self.assertEqual((status['converted_total'],status['approved_total']),(1,1),'"1 converted out of 1 approved books"')
+        page=self.service.reviews.page(status='converted')
+        self.assertEqual(page['total'],1,'listed under Audiobook Ready')
+        self.assertEqual([row['id'] for row in page['rows']],[self.candidate])
+        row=next(row for row in self.service.reviews.page()['rows'] if row['id']==self.candidate)  # its row in the list
+        self.assertTrue(row['audiobook_ready'],'a finished row: Now in, Choose folder…, Open book folder')
+        self.assertEqual(os.path.normcase(row['output']['absolute']),os.path.normcase(str(now_in)),'Now in: where the book is')
+
+    def test_b1_a_book_the_rules_wrote_and_moved_into_its_series_folder_stays_converted(self):
+        # Futaba's lane M: every step automatic, nothing typed.
+        self.convert()
+        record,planned=self.written()
+        self.assertEqual(record['follow_up']['state'],'move_queued')
+        self.assertTrue(planned.is_file(),'moved into its series folder')
+        self.assertNotEqual(os.path.normcase(self.job()['output']['final_path']),os.path.normcase(str(planned)),'the receipt names the renamed file')
+        self.assert_ready(planned)
+
+    def test_b1_a_book_the_rules_wrote_but_could_not_move_stays_converted(self):
+        # Futaba's lane H: the series is written and the book renamed in its own folder; a file is where its series
+        # folder would be, so the move does not happen.
+        self.convert()
+        record,planned=self.written(blocked=True)
+        renamed=Path(record['new_path'])
+        self.assertTrue(renamed.is_file() and not planned.exists())
+        self.assert_ready(renamed)
+
+    def test_b1_his_folder_after_the_rules_wrote_it_stays_converted(self):
+        # Futaba's lane C: the book the rules wrote and filed, then moved by his Choose folder….
+        self.convert()
+        record,planned=self.written()
+        outside=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(outside.cleanup)
+        mine=Path(outside.name)/'Mine';mine.mkdir()  # a folder of his, outside the app's own folders
+        row=self.service.reviews.page(status='converted')['rows'][0]
+        answer=self.service.destination_choose(self.candidate,row['revision'],str(mine))
+        self.assertEqual(answer['outcome'],'move_queued',answer)
+        self.assertTrue((mine/planned.name).is_file())
+        self.assert_ready(mine/planned.name)
+
+    def names_written(self,blocked=False):
+        """The other write (R27, name_write): the author's name in order, another author folder; the same move follows.
+        blocked: a file where the author folder would be, so the move cannot happen."""
+        import author_rules
+        from scanner import connect
+        with connect(self.inv.database) as db:
+            author_rules.setup(db)
+            author_rules.append(db,'same_as','John Writer',target='Writer John',actor='user',source='test')
+        item=self.listed()
+        if blocked:
+            Path(item['to']).parent.write_bytes(b'in the way')
+        self.settled()
+        self.service.name_write.approve(self.job_id,item['names'],item['to'],by='rules',reasons=item.get('reasons'))  # as the rules' pass does
+        self.service.name_write.run_pass()
+        entry=self.service.name_write.entry(self.job_id)
+        self.assertEqual((entry['state'],entry['record']['follow_up']['state']),('done','move_queued'),entry)
+        return entry['record'],Path(item['to'])
+
+    def test_b1_a_book_whose_author_the_rules_put_in_order_stays_converted(self):
+        self.convert()
+        record,planned=self.names_written()
+        self.assertTrue(planned.is_file(),'moved into the author folder')
+        self.assertNotEqual(os.path.normcase(self.job()['output']['final_path']),os.path.normcase(str(planned)))
+        self.assert_ready(planned)
+
+    def test_b1_a_book_whose_author_the_rules_put_in_order_but_could_not_move_stays_converted(self):
+        self.convert()
+        record,planned=self.names_written(blocked=True)
+        renamed=Path(record['new_path'])
+        self.assertTrue(renamed.is_file() and not planned.exists())
+        self.assert_ready(renamed)
+
+    def test_control_a_receipt_the_write_planned_for_another_place_is_not_converted(self):
+        # The write's receipt counts only when the place it planned is the place the review plans: the same receipt with
+        # another planned folder in its record is not the book the review describes.
+        import json
+        from scanner import connect
+        self.convert()
+        record,planned=self.written()
+        with connect(self.inv.database) as db:
+            db.execute("UPDATE series_backfill SET record=json_set(record,'$.series_folder',?) WHERE job_id=?",(str(self.sorted/'Elsewhere'),self.job_id))
+        self.assertNotIn(self.candidate,self.service.converted_ids(max_age=0))
+
+    def test_control_a_rewritten_book_whose_review_changed_after_is_not_converted(self):
+        # The receipt the write recorded counts only while the review still plans the place the write planned: a changed
+        # review (his edit after the write) is not the book that was converted.
+        import json
+        from scanner import connect
+        self.convert()
+        self.written()
+        with connect(self.inv.database) as db:
+            review=json.loads(db.execute('SELECT review FROM book_groups WHERE id=?',(self.candidate,)).fetchone()[0])
+            db.execute('UPDATE book_groups SET review=? WHERE id=?',(json.dumps(dict(review,title='Another Title'),ensure_ascii=False),self.candidate))
+        self.service._approved_cache=None
+        self.assertNotIn(self.candidate,self.service.converted_ids(max_age=0))
 
 
 # 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).

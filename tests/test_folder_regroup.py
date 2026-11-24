@@ -82,8 +82,9 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.start();self.research_all()
         row=self.service.reviews.page(status='output_attention')['rows'][0]
         preview=self.service.approval_preview(row['id'],row['revision'])
-        self.assertEqual(preview.get('series'),{'name':'Дозоры','number':'2'},'positive control: Approve files it in the series')
-        self.assertEqual((row['ask']['kind'],row['ask']['series']),('order_unclear',{'name':'Дозоры','number':'2','basis':'research'}))
+        # 0.31.0 (f3dc8e4, Judy's spec 4.3): the preview's series also says where it came from, here his folder structure.
+        self.assertEqual(preview.get('series'),{'name':'Дозоры','number':'2','origin':'folders','title_from_title_tag':False},'positive control: Approve files it in the series')
+        self.assertEqual((row['ask']['kind'],row['ask']['series']),('order_unclear',{'name':'Дозоры','number':'2','origin':'folders','title_from_title_tag':False,'basis':'research'}))
         self.assertNotIn('series_clue',row['ask'])
 
     def number_unclear_book(self,researched=True):
@@ -117,60 +118,60 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.research_all();self.research_all()
         return self.service.reviews.page(status='output_attention')['rows'][0]
 
-    def answered_then_number_unclear(self,row,**press):
-        """Ruling 74b (Sergei 2026-10-31, as for ruling 52's series question): an Approve that answers the book's other
-        question while the numbers disagree keeps the answer, files nothing and starts nothing; once the book is researched
-        again (Start) its question is "Number unclear", and that question's Approve files the series with the title's number."""
-        with mock.patch.object(self.service.automatic,'request_start') as start:
-            with self.assertRaises(self.service.SeriesAsked) as caught:self.service.approve_book(row['id'],row['revision'],**press)
-        self.assertEqual(caught.exception.payload(),{'saved':True,'code':'series_needed','message':self.service.SERIES_ASKED},'the existing copy')
-        start.assert_not_called();self.assertEqual(self.service.jobs.status()['jobs'],[],'nothing filed')
-        self.research_all();self.research_all()
-        row=self.service.reviews.page(status='output_attention')['rows'][0]
-        self.assertEqual((row['ask']['why'],row['ask']['volume']),('number_unclear',{'title_number':1,'series_number':'2','provider':'fantlab'}),'asked next')
-        metadata,_=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))
-        self.assertEqual((metadata['title'],metadata['canonical_author'],metadata['series'],metadata['number']),('Хранители. Летопись первая','Tolkien J. R. R.','Властелин колец','1'))
+    def filed_without_the_series(self,row,**press):
+        """R22 (Sergei 2026-11-22; it withdrew ruling 74b's question and its follow-up): an Approve that answers the book's
+        other question while a source numbers the volume differently is no longer stopped to ask "Number unclear" next.
+        The doubtful series is treated as not found: the book is queued under its own title, with no series."""
+        metadata,destination=self.queued_metadata(self.service.approve_book(row['id'],row['revision'],**press))
+        self.assertEqual((metadata['title'],metadata['canonical_author'],metadata['series'],metadata['number']),('Хранители. Летопись первая','Tolkien J. R. R.','',''))
+        self.assertNotIn('Властелин',destination)
+        return metadata
 
     def queued_metadata(self,approved):
         job=next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==approved['job_id'])
         return job['manifest']['metadata'],job['manifest']['destination']
 
     def test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b(self):
-        """Ruling 74b, both ends: the to-do row (needs_you, ask_payload) carries both numbers and the provider with Series,
-        Number and Title filled in; Approve with them untouched (a press that sends none) queues the book with that series
-        and the title's number. Senua's 74b review, r2: the disagreeing record's English title is not used."""
-        row=self.number_unclear_book();ask=row['ask']
-        self.assertEqual((ask['kind'],ask['why'],ask['odd_name']),('title_author','number_unclear',True))
-        self.assertEqual(ask['volume'],{'title_number':1,'series_number':'2','provider':'fantlab'})
-        self.assertEqual({name:ask['fields'][name]['proposal'] for name in ('title','author','series','number')},
-                         {'title':'Хранители. Летопись первая','author':'Tolkien J. R. R.','series':'Властелин колец','number':'1'})
-        self.assertEqual(self.service.approval_preview(row['id'],row['revision']).get('series'),{'name':'Властелин колец','number':'1'},'its Goes to line')
-        metadata,destination=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))  # nothing typed
-        self.assertEqual((metadata['title'],metadata['canonical_author'],metadata['series'],metadata['number']),('Хранители. Летопись первая','Tolkien J. R. R.','Властелин колец','1'))
-        self.assertIn(os.path.join('Tolkien J. R. R','Властелин колец',''),destination)
+        """R22 withdrew ruling 74b's question (the test keeps its name): «Хранители. Летопись первая», which FantLab numbers
+        book 2, is not asked about. It is no to-do row; research files it under its own title with no series, and says
+        which series was dropped and why. Senua's 74b review, r2, kept: the disagreeing record's English title is not used."""
+        self.assertIsNone(self.number_unclear_book(researched=False))
+        self.research_all();self.research_all()
+        asked=[row for row in self.service.reviews.page(status='output_attention')['rows'] if (row.get('ask') or {}).get('why')=='number_unclear']
+        self.assertEqual(asked,[],'no "Number unclear" row')
+        row=self.service.reviews.page()['rows'][0]
+        result=self.research(self.service.reviews._row('Audiobooks',row['id']))
+        self.assertEqual((result['reasons'],result.get('ask')),([],None))
+        self.assertEqual((result['review']['title'],result['review']['canonical_author'],result['review']['series']),('Хранители. Летопись первая','Tolkien J. R. R.',''))
+        dropped=result['metadata_facts']['gap_search']['series_doubt']
+        self.assertEqual([(item['why'],item['provider'],item['number']) for item in dropped],[('number_mismatch','fantlab','2')],'positive control: the source does number it 2')
+        self.assertEqual(self.service.series_dropped(result)[0]['why'],'number_mismatch','the fact a row can show')
 
     def test_a_book_held_for_another_reason_never_takes_the_disagreeing_series_r1(self):
-        """Senua's 74b review, r1: the same book and the same disagreement in the research cache, but its current question is
-        another one (here: one part of a bigger book). Its Goes to line names no series, and its Approve without Series or
-        Number files nothing: ruling 74b's "Number unclear" is asked next (answered_then_number_unclear)."""
+        """Senua's 74b review, r1, under R22: the same book and the same disagreement in the research cache, and its current
+        question is another one (here: one part of a bigger book). Its Goes to line names no series, and its Approve files
+        it without one; nothing asks about the number."""
         import local_identity
-        row=self.number_unclear_book()
+        self.number_unclear_book(researched=False)
+        self.research_all();self.research_all()
+        row=self.service.reviews.page()['rows'][0]
         fresh=self.service.reviews._row('Audiobooks',row['id'])
         result=self.research(fresh)
-        self.assertEqual((result.get('ask') or {}).get('why'),'number_unclear','positive control: the cache holds the disagreement')
+        self.assertEqual([item['why'] for item in result['metadata_facts']['gap_search']['series_doubt']],['number_mismatch'],'positive control: the cache holds the disagreement')
         self.service.automatic._record(fresh,'Held',dict(result,ask=None,reasons=[local_identity.PIECE_REASON],identity_hold={'kind':'piece','detail':''},until_change=True),None)
         self.assertFalse(self.service.approval_preview(row['id'],row['revision']).get('series'),'its Goes to line names no series')
-        self.answered_then_number_unclear(fresh)
+        self.assertFalse(self.service.automatic.research.approved(fresh,str(self.audio))['approval']['number_question'],'nothing is asked next')
 
     def test_an_author_answer_on_disagreeing_numbers_asks_number_unclear_next_74b(self):
-        """Ruling 74b's follow-up, an identity question: no English spelling was found online («Джон Рональд Руэл Толкин»),
-        so the book asks for it first; the cache already holds the disagreement. His typed spelling is kept as his rule."""
+        """Ruling 74b's follow-up, under R22 (the test keeps its name): no English spelling was found online («Джон Рональд
+        Руэл Толкин»), so the book asks for it; the cache already holds the disagreement. His typed spelling is kept as his
+        rule, and his Approve queues the book without the doubtful series: "Number unclear" is not asked next."""
         import author_rules
         self.number_unclear_book(researched=False)
         with mock.patch.object(self.service.automatic.research,'_author_latin',return_value=None):self.research_all()
         row=self.service.reviews.page(status='output_attention')['rows'][0]
         self.assertEqual((row['ask']['kind'],row['ask']['why']),('author_unclear','english_spelling'),'positive control: another question first')
-        self.answered_then_number_unclear(row,author='Tolkien J. R. R.')
+        self.filed_without_the_series(row,author='Tolkien J. R. R.')
         self.assertEqual(author_rules.load(self.inv.database).same_as('Джон Рональд Руэл Толкин'),'Tolkien J. R. R.','his answer kept')
 
     def test_raised_folder_question_and_keep_as_separate_books(self):
@@ -205,7 +206,6 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.assertFalse(self.service._names_stale(cyrillic),'re-checked once: its research decides after that')
         planned_now=dict(raw,manifest=json.dumps(dict(json.loads(raw['manifest']),metadata=manifest['metadata']),ensure_ascii=False))
         self.assertFalse(self.service._names_stale(planned_now),'a job planned under this research is never re-checked')
-
 
 if __name__=='__main__':
     unittest.main()

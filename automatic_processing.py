@@ -71,6 +71,43 @@ def candidate_job_exists(db,identity):
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return False
     return bool(db.execute("SELECT 1 FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? LIMIT 1",(identity,)).fetchone())
 
+def waits_for(state,result):
+    """What a book in "Waiting for source" waits for, one of 'online_answer', 'library', 'catalog', 'cover', 'source'; None
+    for a book in any other state."""
+    if state!='Waiting for source' or not isinstance(result,dict):return None
+    wait=result.get('wait') if isinstance(result.get('wait'),dict) else {}
+    lookup=result.get('lookup') if isinstance(result.get('lookup'),dict) else {}
+    if lookup.get('waiting'):return 'online_answer'
+    if wait.get('kind')=='media_slow':return 'library'
+    if wait.get('source')=='catalog':return 'catalog'
+    if (result.get('reasons') or [None])[0]=='Cover source unavailable':return 'cover'
+    return 'source'
+
+
+# What a record put back to Pending keeps of its held result (withdrawn_to_pending): the look-up before review so far
+# and the attempt count and history, which the next reading takes up; never the withdrawn question or its reasons.
+PENDING_KEEPS=('lookup','research_attempt','research_history','source_refresh','research_version','duplicate_cleanup_policy')
+
+def withdrawn_to_pending(db):
+    """0.31.0 (rulings R22 and R25). A held book whose stored question was withdrawn (public_research.needs_local_recheck: a
+    series split of the title, "Number unclear", one of the two withdrawn stops, a part beside files that carry its title)
+    is read once more, from its files, at its next visit by automatic processing. Until that visit its record still said
+    Held with the old reason, so with automatic processing not running the list showed "Held — Title or author missing"
+    for a book nothing holds any more. Each such record is put back to Pending here, as a book not read yet: the state a
+    book has before its research, with no reasons. Local and one-time: nothing is researched, no request is made, no run,
+    queue or conversion is started and no Pause is read or written. What the next reading needs is kept (PENDING_KEEPS);
+    what was held and why stays in research_history, where the held record put it. A record read under the new rules
+    carries LOCAL_RECHECK and is never touched. Returns the number of records changed."""
+    from public_research import needs_local_recheck
+    changed=0
+    for record in db.execute("SELECT id,result FROM automatic_candidates WHERE state='Held'").fetchall():
+        try:result=json.loads(record['result'])
+        except (TypeError,ValueError):continue
+        if not needs_local_recheck(result):continue
+        kept={'reasons':[],**{key:result[key] for key in PENDING_KEEPS if key in result}}
+        changed+=db.execute("UPDATE automatic_candidates SET state='Pending',result=?,retry_at=NULL WHERE id=? AND state='Held'",(json.dumps(kept,ensure_ascii=False),record['id'])).rowcount
+    return changed
+
 def research_retry(run):
     if not run or run['state']!='Needs attention' or run['phase']!='research':return False
     try:
@@ -143,6 +180,8 @@ class AutomaticProcessing:
             # never writes the reason with the flag set.
             db.execute("UPDATE automatic_runs SET restart_paused=0 WHERE restart_paused<>0 AND reason='Paused after server restart — start to continue saved work'")
             db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
+            # 0.31.0 (R22, R25): a held book whose question was withdrawn is not shown as held until the next Start.
+            withdrawn_to_pending(db)
     def _run_row(self):
         with connect(self.database) as db:
             r=db.execute('SELECT * FROM automatic_runs ORDER BY created DESC LIMIT 1').fetchone()
@@ -179,6 +218,11 @@ class AutomaticProcessing:
             db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',(row['id'],row['revision'],row['fingerprint'],state,json.dumps(recorded,ensure_ascii=False),retry_at,stamp(),VERSION))
         worker=threading.current_thread() is self.thread
         transaction(self.database,persist,self.stop_event if worker else None)
+        # 0.31.0 step 1c: the name a researched row plans is noted for the other rows' same-destination check (memory only).
+        note=getattr(self.merge,'note_planned',None)
+        if callable(note) and state in ('Held','Waiting for source','Queued'):
+            try:note(row,dict(supplied,job_id=True) if state=='Queued' else supplied)
+            except Exception:pass
     def _paused_checkpoint(self,id,checkpoint):
         encoded=json.dumps(checkpoint);updated=stamp()
         def persist(db):
@@ -225,7 +269,14 @@ class AutomaticProcessing:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
         return {'state':r['state'],'duplicate_cleanup_policy':result.get('duplicate_cleanup_policy'),'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
                 'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
-                'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0),'series_waits':result.get('series_waits',0)}
+                'local_source_gate_version':result.get('local_source_gate_version'),'local_recheck':result.get('local_recheck'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0),'series_waits':result.get('series_waits',0),
+                # 0.31.0 step 2 (A6): the record of the book's look-up before review (public_research._bounded_lookup):
+                # what is asked, the tries made and their limit, the next try, and how the wait ended per field.
+                'lookup':result.get('lookup'),
+                # What a book in "Waiting for source" waits for (Judy's section 5: only an online answer gets the new words):
+                # 'online_answer' (the look-up before review), 'library' (the library drive answered slowly), 'catalog' (the
+                # app's own catalog was busy for a minute), 'cover' (the cover's source), 'source' (any other source wait).
+                'waits_for':waits_for(r['state'],result)}
     def _rules_generation(self):
         """The current author-rules generation ('' with none): a held book is researched again when it changes."""
         value=self._rules()
@@ -250,6 +301,12 @@ class AutomaticProcessing:
             # saved drafts, source revalidation and all metadata/media admission gates.
             return dict(previous,retry_at=None)
         if previous and previous['state']=='Held' and previous.get('research_version')!=RESEARCH_VERSION:return dict(previous,retry_at=None)
+        from public_research import needs_local_recheck
+        if previous and previous['state']=='Held' and needs_local_recheck(previous):
+            # 0.31.0 step 1d: a book held as one part beside files carrying its title, or asked about the series its name
+            # carries, is read once more from its files under the step 1 rules (its new record carries LOCAL_RECHECK, so
+            # once); a book that stays held makes no online request.
+            return dict(previous,until_change=False,retry_at=None)
         if previous and previous['state']=='Held' and (((previous.get('identity_hold') or {}).get('piece') or {}).get('cause'))=='long':
             # 0.30.0 item 8 (Sergei 2026-11-18: remove the 30-hour limit): a set held only by that limit is researched again
             # at the next visit and decided by its other clues (part_sets.decide); nothing else about it has to change.
@@ -850,6 +907,8 @@ class AutomaticProcessing:
                       row['_research_attempt']=previous.get('research_attempt',0) if previous else 0
                       # 0.30.0 item 3: how many times in a row this book has waited for its series (the wait is bounded).
                       row['_series_waits']=previous.get('series_waits',0) if previous and previous.get('state')=='Waiting for source' else 0
+                      # 0.31.0 step 2: the record of this book's look-up before review so far (bounded tries per source).
+                      row['_lookup']=previous.get('lookup') if previous and isinstance(previous.get('lookup'),dict) else None
                       import manual_metadata
                       with connect(self.inventory.database) as db:row['_manual_metadata_sources']=manual_metadata.records(db,row)
                       result=self.research.lookup(row,self._candidate_root(row),self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))
@@ -926,7 +985,11 @@ class AutomaticProcessing:
                               else:
                                   result['reasons']=[MEDIA_HELD];self._record(fresh,'Held',result,self.clock()+86400);deferred.append(identity)
                           else:
-                              result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
+                              result['reasons']=[str(error)[:300] or 'Automatic source checks failed']
+                              # 0.31.0 step 1c: a refusal with a typed hold (destination_clash.Shared: another book would get
+                              # this name) keeps it, so the row says which books; tried again by itself like any refusal.
+                              if isinstance(getattr(error,'identity_hold',None),dict):result['reasons']=[__import__('destination_clash').REASON];result['identity_hold']=json.loads(json.dumps(error.identity_hold,ensure_ascii=False))
+                              self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
                   checkpoint['pending'].pop(0)
                   if identity not in checkpoint['done']:checkpoint['done'].append(identity)
                   self._update(id,checkpoint=json.dumps(checkpoint))

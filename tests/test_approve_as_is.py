@@ -242,7 +242,10 @@ class ReviewFindingsTests(ApproveFixture):
         with connect(self.inv.database) as db:sources = manual_metadata.records(db, row)
         result = self.service.automatic.research.lookup(dict(row, _manual_metadata_sources=sources), str(self.audio), threading.Event())
         self.assertEqual(result['local_agreement']['author']['state'], 'entered', 'positive control: his entered author')
-        self.assertEqual(((result.get('ask') or {}).get('why'), (result.get('review') or {}).get('series')), ('title_series', None), result['reasons'])
+        # R22 (Sergei 2026-11-22) withdrew the question; what m21 guards still holds: the split's junk series is never
+        # filed, whoever entered the author. The book goes on under the name its files give, with no series.
+        self.assertEqual(((result.get('ask') or {}).get('why'), (result.get('review') or {}).get('series'), (result.get('review') or {}).get('title')),
+                         (None, '', 'Курс истории. Лекция 3. Греция'), result['reasons'])
 
     def test_m15_a_book_researched_under_a_refused_answer_is_put_back_on_the_run(self):
         # Senua's 0.22.3 review, m15: after m13 changed_for marks the book the run researched while the refused press's
@@ -464,6 +467,21 @@ class ResearchFramesTests(ApproveFixture):
         self.assertEqual(last[0].get('title'),'Beta Book','the last frame still names its book')
         first=[current for kind,current in seen if kind=='enters research']
         self.assertEqual((first[0].get('title'),first[0].get('stage')),('Alpha Book','Researching work identity'),'the first frame names the first book')
+
+# 0.31.0 step 2 (rulings R2 and R5): these fixtures predate the look-up before review, and their sources are closed or
+# cannot be reached. Under R2 such a book now waits a few tries for them, which is not what this suite tests; the
+# look-up has its own tests (test_lookup_before_review_031). tests/original_title_fixture.py.
+_no_lookup_before_review = None
+
+
+def setUpModule():
+    global _no_lookup_before_review
+    from original_title_fixture import no_lookup
+    _no_lookup_before_review = no_lookup()
+
+
+def tearDownModule():
+    _no_lookup_before_review.stop()
 
 
 if __name__=='__main__':unittest.main()

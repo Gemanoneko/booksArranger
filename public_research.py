@@ -87,6 +87,28 @@ STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.go
 # lookup for unknown first names, Wikidata person names and local Latin spellings, and edition volume titles
 # («Хранители. Летопись первая») looked up by their book title.
 RESEARCH_VERSION='standing-24-v1'
+# 0.31.0 step 1d (Sergei 2026-11-22): the two local rules of step 1 (a separated volume named from its own title tag; the
+# series read from the sort-album and grouping tags, R4) change what the files alone decide for a held book of two
+# shapes: one held as a part of a bigger book beside files that carry its title, and one asked about the series its
+# name carries. Each such book is read once more under them, from its files only: a held book makes no online request
+# (_lookup returns before any), and a book the rules now settle goes on as any new book does. Not a new RESEARCH_VERSION:
+# that would read every held and waiting book again and re-open the ruling-71f check of queued jobs. Measured on a copy
+# of the live catalog (2026-11-22): 58 of 276 held books have these shapes.
+LOCAL_RECHECK='local-031-v1'
+RECHECK_PIECES=('siblings','part_title','numbered_part','part_set')
+WITHDRAWN_HOLDS=('Series and standalone evidence conflicts','Series membership has conflicting author credits')
+
+def needs_local_recheck(result):
+    """True for a recorded held result of the step 1d shapes that was read before the 0.31.0 local rules."""
+    if not isinstance(result,dict) or result.get('local_recheck')==LOCAL_RECHECK:return False
+    hold=result.get('identity_hold') if isinstance(result.get('identity_hold'),dict) else {}
+    piece=hold.get('piece') if isinstance(hold.get('piece'),dict) else {}
+    ask=result.get('ask') if isinstance(result.get('ask'),dict) else {}
+    # R22 (Sergei 2026-11-22): a book asked "Number unclear" is read once more too; neither question is asked any more.
+    # R25: nor is a book stopped by one of the two holds that ruling withdrew (WITHDRAWN_HOLDS): read once more, it goes on
+    # without the doubtful series instead of keeping a stop nothing words any more.
+    withdrawn=any(isinstance(reason,str) and reason.startswith(WITHDRAWN_HOLDS) for reason in result.get('reasons') or [])
+    return bool(hold.get('kind')=='piece' and piece.get('piece') in RECHECK_PIECES or ask.get('why') in ('title_series','number_unclear') or withdrawn)
 
 class ChallengeDetected(ValueError):pass
 
@@ -98,6 +120,34 @@ CATALOG_BUSY_WAIT=60
 # many times in a row; then it is published without one as before (series backfill looks it up later).
 SERIES_WAIT_REASON='Waiting for the series: its sources are busy. The app tries again by itself.'
 SERIES_WAIT_LIMIT=3
+# 0.31.0 step 2 (Sergei 2026-11-22, rulings R2 and R5; it replaces "the book must not wait", 0.22.1, for these fields): the
+# look-up before review. Every book with a gap (no series, or a title not in Latin letters whose original title and
+# language no source has named yet) asks the sources BEFORE it is reviewed or converted: the series and its number, the
+# original language and title, the English title. A book may wait for the answer, bounded:
+#   - the sources asked before review are LOOKUP_SOURCES. The publisher and Litres adapters need DuckDuckGo, which has
+#     sat behind a human check for weeks and has supplied no series; they stay with the look-up of finished books;
+#   - each source's answer is kept with the book: a source that answered is not asked about it again;
+#   - the app's own hourly limits and a busy catalog are no try: the book waits for the limit and goes on from there;
+#   - a source that could not be reached is tried SOURCE_TRIES times for that book (series_backfill's number, R9), the next
+#     try when the source says it reopens, never sooner than LOOKUP_RETRY_MIN and never later than TRY_SPACING (6 hours:
+#     R9's spacing is the cap here, not the spacing, so a ten-second network error does not hold a new book six hours);
+#   - no book waits longer than LOOKUP_MAX_WAIT in all (twelve hours: R9's worst case, three tries six hours apart);
+#   - then it converts as before, and the look-ups of finished books fill what is missing.
+# A book held for Sergei (a review-list row) is looked up the same way, in the 'gap' lane (LANES): its look-up never takes
+# the hourly bound from a book that can convert, and gap_fill's background pass goes on with it between tries.
+# The numbers are product numbers Sergei may overrule; the record kept with the book carries them for the page.
+LOOKUP_POLICY='lookup-before-review-031-v1'
+LOOKUP_SOURCES=('fantlab','wikidata','goodreads')
+LOOKUP_GAPS=('original_title','series','series_name')  # 'series_name': the English name of a series the files themselves name (R1)
+LOOKUP_SERVES={'original_title':('fantlab','wikidata'),'series':('goodreads','fantlab','wikidata'),'series_name':('fantlab','wikidata')}
+LOOKUP_BUDGET=12
+LOOKUP_RETRY_MIN=600
+LOOKUP_MAX_WAIT=12*3600
+LOOKUP_WAIT_REASON='Waiting for the English title: its sources are busy. The app tries again by itself.'
+# The same reason as results kept before milestone B word it (R1: the app looks for the English title, which for a Chinese
+# book is not the original one). A kept result may still carry it; it is dropped with the current one, never matched alone.
+LOOKUP_WAIT_REASON_BEFORE='Waiting for the original title: its sources are busy. The app tries again by itself.'
+LOOKUP_OUTCOMES=('answered','nothing_found','no_answer','waiting')
 
 
 def catalog_busy(error):
@@ -465,6 +515,10 @@ class PublicClient:
     def _fetch_reserved(self,url,host,delay,stop,budget):
         # 0.22.1: the pacing wait and the fetch (up to 15 s) run outside the lock; the reservation above already paces the
         # site. A cached answer another thread (research) needs no longer waits behind a background pass's request.
+        # 0.31.0 (Judy's spec 2.2): a caller that shows a running row (series back-fill) is told when the client only waits
+        # for a site's pacing, so the row is not drawn as work that makes no progress. budget['pacing'](seconds); 0 when done.
+        pacing=budget.get('pacing') if isinstance(budget,dict) and callable(budget.get('pacing')) else None
+        if pacing and delay:pacing(delay)
         if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
         family='wikimedia' if host in WIKIMEDIA_HOSTS else host
         with self.lock:dispatch=self._dispatch_locks.setdefault(family,threading.Lock())
@@ -475,8 +529,10 @@ class PublicClient:
             # delays can compress actual starts, so also pace dispatch at the host.
             spacing=6.1 if host in WIKIMEDIA_HOSTS else host_policy(host)[1]
             remaining=self._last_dispatch.get(family,float('-inf'))+spacing-self.clock()
+            if pacing and remaining>0:pacing(remaining)
             if remaining>0 and (stop.wait(remaining) if stop else time.sleep(remaining)):
                 raise InterruptedError('Automatic processing paused')
+            if pacing:pacing(0)
             if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
             # A different URL may have reserved before the preceding request
             # received a pause. Keep that pause visible before handing off dispatch.
@@ -572,6 +628,10 @@ class PublicResearch:
     # Sergei decision 2026-10-12. Tests of the Internet research path switch this off
     # explicitly so they keep exercising that path with locally agreeing fixtures.
     local_agreement=True
+    # 0.31.0 step 2 (rulings R2 and R5): the look-up before review (LOOKUP_POLICY). Always on in the app. The identity,
+    # structure and admission suites written before it switch it off with the fixture they already share
+    # (tests/original_title_fixture.py), so their results stay about the rules they test.
+    lookup_before_review=True
     def __init__(self,client,leads=None,local_index=None):
         from pathlib import Path
         self.client=client;self.leads=source_leads() if leads is None else leads
@@ -694,13 +754,12 @@ class PublicResearch:
         if not final_title:raise ValueError('Type a title first.')
         # Ruling 49 (Sergei 2026-10-27): a Russian edition of a foreign book files under its original English title, on
         # Approve as automatically (_local_lookup's preferred title); a title he typed or entered wins.
-        mismatch={}  # ruling 74b: the files' volume title and the source disagree on the number (the cache only)
-        known=retained_fields or _confirmed_corbett_fields(record,shown['title'],shown['author'])
+        # 0.31.0 (A1): what the look-up before review found for this held row, kept with its record (the research cache
+        # forgets an answer after seven days; a review-list row may wait longer for him).
+        known=retained_fields or _held_lookup_fields(row,retained,shown['title'],shown['author']) or _confirmed_corbett_fields(record,shown['title'],shown['author'])
         if known and (author is not None or chosen is not None) and not _exact_people(final_author,[shown['author']]):known=None
-        known_catalog=(known or {}).get('catalog') or {}
-        english=(dict(known_catalog,series=(known or {}).get('series')) if known_catalog.get('language')=='en' else self._english_original(record,final_title,mismatch)) if 'title' not in typed else None
-        if 'title' in typed:self._english_original(record,shown['title'],mismatch)  # his title: the files' title still says which volume
-        if english:final_title=english['original_title']
+        english=self._english_original(record,final_title,known=known) if 'title' not in typed else None
+        if english:final_title=english['english_title']
         collection=not final_author and shown['collection']
         if not final_author and not collection:final_author=NO_AUTHOR
         settled=local_identity.settled(record,final_title,final_author,'approved',typed,collection=collection,rules=self.rules(),
@@ -711,40 +770,49 @@ class PublicResearch:
             settled['series']=dict(english['series'])  # found with the Russian title (_english_original); never his own values
             settled['gaps']=[gap for gap in settled.get('gaps') or [] if gap not in ('series','number')]
         if english:
-            settled['fields']['title']=dict(settled['fields']['title'],how=settled['fields']['title']['how']+'; the original English title (ruling 49) of "%s"'%shown['title'],
-                                            sources=list(settled['fields']['title']['sources'])+[{'kind':'catalog original title','value':english['original_title'],'url':english.get('source_url','')}])
+            settled['fields']['title']=dict(settled['fields']['title'],how=settled['fields']['title']['how']+'; the English title (rulings 49 and R1) of "%s"'%shown['title'],
+                                            sources=list(settled['fields']['title']['sources'])+[{'kind':'catalog original title','value':english['english_title'],'url':english.get('english_source') or english.get('source_url','')}])
         result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':[],'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
         result['local_agreement']=local_identity.summary(settled)
         result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index,retained_fields=known)
         result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown,
                             'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or []),'typed_names':sorted(typed_names),
-                            # Rulings 52 and 53 (Senua's 0.22.3 review, M10): the split's series is unconfirmed and not his.
-                            'series_question':bool(record.get('series_unconfirmed')) and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names))),
-                            # Ruling 74b (Sergei 2026-10-31, the follow-up): the numbers disagree and nothing he typed or saved says
-                            # the series: an Approve answering another question keeps its answer and "Number unclear" is asked next.
-                            'number_question':bool(mismatch) and not settled.get('series') and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)))}
+                            # R22 (Sergei 2026-11-22): a series the name only looks like, and a number the title and a source
+                            # disagree on, are doubtful: treated as not found (series_certainty) and never asked. Both
+                            # keys stay for the engine that read them (rulings 52, 53 and 74b); they are always False now.
+                            'series_question':False,'number_question':False,
+                            # The name that only looks like "Series N. Title" (local_identity.identify), for the look-up.
+                            'series_hint':copy.deepcopy(record.get('series_hint'))}
+        if isinstance(retained,dict) and isinstance((retained.get('result') or {}).get('lookup'),dict):
+            result['lookup']=copy.deepcopy(retained['result']['lookup'])  # the look-up's record of this row, for the page (A6)
         return attach_shared_routing(self.light_novel(result,row,root,typed_names))
-    def _english_original(self,record,title,mismatch=None):
-        """Ruling 49: the catalog record the research cache holds for this book (no request: the same cache-only gap fill
-        automatic filing uses, asked as automatic filing asks: with the identity's author, after Sergei's rules, «Grossman
-        Lev» for «Лев Гроссман»), when it says the work's original is English and names its Latin title; else None. A title
-        in Latin letters is left as it is."""
-        import local_identity
+    def _english_original(self,record,title,known=None):
+        """Rulings 49 and R1 through the one title rule (canonical_names.book_title): the catalog record the research cache
+        holds for this book (no request: the same cache-only gap fill automatic filing uses, asked as automatic filing
+        asks: with the identity's author, after Sergei's rules, «Grossman Lev» for «Лев Гроссман»), with 'english_title',
+        when the work was not written in Russian and a source names its English title; else None (the title shown is
+        filed: R3). A title in Latin letters is left as it is. known: the answers kept with the book's own record (the
+        look-up of a held row, or a retained approval), used where the cache has none. The record carries 'series' when
+        the book has none of its own and a source names a certain one."""
+        import local_identity,canonical_names
         if local_identity.script(title)=='latin':return None
         credit=text(((record.get('fields') or {}).get('author') or {}).get('value'))
         scratch={'sources':[],'evidence':[],'reasons':[]}
         # 2026-10-29 (Tolkien): the series is asked with the same Russian title. Approve then files under the English
         # title, which the catalogs know by another record; an edition volume's series is found only by its own title.
-        # Senua's 74b review, r2: the series is always read (the cache only), so a record that numbers this volume differently
-        # is recognised and its English title is not used (_gap_fill); it is filed only where it was asked for before.
+        # The series is always read (the cache only), so a record that numbers this volume differently is recognised and
+        # its English title is not used (_gap_fill_once); it is filed only where it was asked for before.
         wanted='series' in (record.get('gaps') or ()) and not record.get('series')
         try:filled=self._gap_fill(dict(record,gaps=['original_title','series']),title,credit,threading.Event(),{'remaining':0},[],lambda *_:None,scratch)
-        except Exception:return None  # nothing known: the title shown is filed
-        if mismatch is not None and isinstance((filled or {}).get('volume_mismatch'),dict):mismatch.update(filled['volume_mismatch'])  # ruling 74b
+        except Exception:filled={}  # nothing known: the title shown is filed
+        if known and not (filled or {}).get('doubtful'):
+            for field in ('catalog','series'):
+                if not filled.get(field) and known.get(field):filled[field]=copy.deepcopy(known[field])
         catalog=(filled or {}).get('catalog') or {}
-        original=text(catalog.get('original_title'))
-        if catalog.get('language')!='en' or not original or local_identity.script(original)!='latin':return None
-        return dict(catalog,series=dict(filled['series'])) if wanted and isinstance(filled.get('series'),dict) and filled['series'].get('name') and filled['series'].get('number') else catalog
+        english,rule=canonical_names.book_title(text(filled.get('split_title')) or title,catalog)
+        if rule!='english':return None
+        found=dict(catalog,english_title=english)
+        return dict(found,series=dict(filled['series'])) if wanted and isinstance(filled.get('series'),dict) and filled['series'].get('name') and filled['series'].get('number') else found
     def local_generation(self):
         from openlibrary_index import generation
         return generation(self.local_index)
@@ -877,16 +945,20 @@ class PublicResearch:
             if decision['decision']=='ask':
                 # "Part of a bigger book" with the proposed order and "Approve as one book"; never joined on its own.
                 import local_identity
-                result['reasons']=list(dict.fromkeys(list(result.get('reasons') or [])+[local_identity.PIECE_REASON]))
+                # 0.31.0 step 2: a wait for the look-up before review is no reason of a book held for him. The look-up's record
+                # stays with the row, and gap_fill's pass goes on with it (GapFill.look_up_held).
+                result['reasons']=list(dict.fromkeys([reason for reason in result.get('reasons') or [] if reason not in (SERIES_WAIT_REASON,LOOKUP_WAIT_REASON,LOOKUP_WAIT_REASON_BEFORE)]+[local_identity.PIECE_REASON]))
+                result.pop('series_waits',None)
                 hold=dict(result.get('identity_hold') or {'kind':'piece','detail':''})
                 if hold.get('kind')=='piece':hold['piece']={'piece':'set','cause':decision['basis'],'parts':len(row.get('members') or []),
                                                             'hours':round(sum(float(m.get('duration') or 0) for m in row.get('members') or [])/3600,1)}
                 result['identity_hold']=hold;result['wait']=None
-        self._held_translation(row,root,result,stop or threading.Event())
+        self._held_lookup(row,root,result,stop or threading.Event())
         if result.get('review'):result['review']['organization_policy']='books-hierarchy-v2'
         self.light_novel(result,row,root)
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
+        result['local_recheck']=LOCAL_RECHECK  # 0.31.0 step 1d: read under the current local rules
         result=attach_shared_routing(result)
         if not entered:return result
         # Human values guide discovery and remain attributed evidence. They never count
@@ -903,79 +975,149 @@ class PublicResearch:
                                        'reason':'Saved manual metadata disagrees with researched identity'}]
         return result
 
-    HELD_TRANSLATION_BUDGET=12  # requests, as research and the background gap fill have per book
+    HELD_TRANSLATION_BUDGET=LOOKUP_BUDGET  # requests per book and visit, as research and the background gap fill have
 
-    def _held_translation(self,row,root,result,stop):
-        """Ruling 49 and the series on a book held for Sergei (2026-10-29, Tolkien: «Хранители. Летопись первая» by
-        «Джон Рональд Руэл Толкин» needed «Властелин Колец» 1 and "The Fellowship of the Ring"). A held book's row and its
-        Approve read the original title and the series from the research cache only (approved(), _english_original), and
-        only the background pass after an approval used to ask the sources, so a held translation never had them. When the
-        book is held, its title is Cyrillic and the author it files under is in Latin letters (a foreign author), the
-        sources are asked once now for the gaps the cache does not answer, under the same title and author Approve uses (an
-        edition volume by its book title, as _gap_fill's second pass asks), through the client's cache, per-site bounds and
-        pauses (no bypass). Nothing is filed or changed here: the row's preview and Approve then read the answers from the
-        cache, and a series position must still agree with the volume number (_gap_fill). A title or series Sergei
-        entered is never looked up. Best effort: any failure leaves the book as it was."""
-        import local_identity
-        if not result.get('reasons') or result.get('wait') or not result.get('local_agreement') or stop.is_set():return
-        # Cheap first: what research read (its review, else the local agreement) must already look like a translation.
-        local=result['local_agreement'];review=result.get('review') or {}
-        read_title=text(review.get('title') or ((local.get('title') or {}).get('value') if isinstance(local.get('title'),dict) else ''))
-        read_author=text(review.get('canonical_author') or ((local.get('author') or {}).get('value') if isinstance(local.get('author'),dict) else ''))
-        if local_identity.script(read_title)!='cyrillic' or local_identity.script(read_author)!='latin':return
-        try:
-            preview=self.approved(row,root)
-            approval=preview.get('approval') or {};review=preview.get('review') or {}
-            title=text(approval.get('title'));author=text(approval.get('author'))
-            if not title or not author or approval.get('collection') or local_identity.script(title)!='cyrillic' or local_identity.script(author)!='latin':return
-            entered=set(approval.get('typed') or [])|set(approval.get('entered') or [])|set(approval.get('names') or {})
-            gaps=[]
-            if 'title' not in entered:gaps.append('original_title')
-            if not text(review.get('series')) and not {'series','number'}&entered:gaps.append('series')
-            if not gaps:return
-            base=edition_volume(title)[0]
-            scratch={'sources':[],'evidence':[],'reasons':[]};budget={'remaining':self.HELD_TRANSLATION_BUDGET}
-            self._gap_fill_once({'gaps':gaps,'fields':{'author':{'partial':False}}},base,author,stop,budget,[],lambda *_:None,scratch)
-            result['translation_lookup']={'title':base,'author':author,'gaps':gaps,'requests':self.HELD_TRANSLATION_BUDGET-budget['remaining'],
-                                          'sources':[source.get('url','') for source in scratch['sources']][:8]}
-        except Exception:
-            return
+    def _bounded_lookup(self,row,local,title,author,gaps,stop,progress,result,lane='research'):
+        """0.31.0 step 2 (rulings R2 and R5; the rule and its numbers are at LOOKUP_POLICY): ask the sources about this
+        book's gaps before it is reviewed or converted, bounded per book. row['_lookup'] is the record of the book's
+        earlier visits (the automatic run and gap_fill's pass hand it back); a record made for another title or author is
+        not continued. Returns (found, record). found: as _gap_fill, read from the research cache exactly as Approve and
+        its preview read it. record, kept with the book for its next visit and for the page:
+          'asked'    {'title', 'author', 'gaps'}: what is asked
+          'sources'  {source: {'answered'} | {'tries', 'next', 'reason'} | {'gave_up'}}: what each source did so far
+          'tries', 'limit'  the most tries any source has had for this book, and the limit (SOURCE_TRIES)
+          'first_at', 'last_at', 'until', 'visits', 'requests' (this visit's), 'spacing' (the numbers, in seconds)
+          'fields'   {gap: one of LOOKUP_OUTCOMES}: 'answered', 'nothing_found' (every source asked had none), 'no_answer'
+                     (a source never answered within the limit) or 'waiting'
+          'waiting', 'next_at', 'wait'  it waits for a source: when the next try is, and the wait as the run records it
+          'ended'    '' | 'time' (LOOKUP_MAX_WAIT passed) | 'waits' (it had waited SERIES_WAIT_LIMIT times under 0.30.0's rule)
+          'doubtful' the series a source named that were dropped as doubtful (series_certainty), with why
+          'found'    the answers themselves with their receipts (a held row keeps them past the cache's seven days)."""
+        from gap_fill import remember,settled
+        from series_backfill import SOURCE_TRIES,TRY_SPACING
+        now=getattr(self.client,'clock',time.time)()
+        asked={'title':text(title),'author':text(author),'gaps':list(gaps)}
+        prior=row.get('_lookup') if isinstance(row.get('_lookup'),dict) else {}
+        same=prior.get('policy')==LOOKUP_POLICY and isinstance(prior.get('asked'),dict) and (prior['asked'].get('title'),prior['asked'].get('author'))==(asked['title'],asked['author'])
+        memory={name:dict(value) for name,value in ((prior.get('sources') or {}) if same else {}).items() if name in LOOKUP_SOURCES and isinstance(value,dict)}
+        first=prior['first_at'] if same and isinstance(prior.get('first_at'),(int,float)) else now
+        waited=row.get('_series_waits',0);waited=waited if type(waited) is int and 0<=waited<1000 else 0
+        ended='time' if now-first>=LOOKUP_MAX_WAIT else 'waits' if not same and waited>=SERIES_WAIT_LIMIT else ''
+        never={'publisher','litres'}  # not asked before review (LOOKUP_SOURCES)
+        idle={name for name,state in memory.items() if settled(state) or isinstance(state.get('next'),(int,float)) and state['next']>now}
+        requests=0;waits=[]
+        if not ended and not stop.is_set() and set(LOOKUP_SOURCES)-idle:
+            budget={'remaining':LOOKUP_BUDGET,'lane':lane};scratch={'sources':[],'evidence':[],'reasons':[]}
+            answer=None
+            try:answer=self._gap_fill(dict(local,gaps=list(gaps),skip=tuple(sorted(never|idle))),title,author,stop,budget,waits,progress,scratch)
+            except InterruptedError:raise  # a pause stops research here, as any request does
+            except Exception:pass  # best effort: the book goes on with what the cache has
+            requests=LOOKUP_BUDGET-budget['remaining']
+            if answer is not None:remember(memory,answer,now,floor=LOOKUP_RETRY_MIN,ceiling=TRY_SPACING,tries=SOURCE_TRIES,candidate_wait=LOOKUP_RETRY_MIN)
+        again={'sources':[]}
+        found=self._gap_fill(dict(local,gaps=list(local.get('gaps') or gaps),skip=tuple(sorted(never))),title,author,stop,{'remaining':0},[],progress,again)
+        known={(source.get('url'),source.get('api_url')) for source in result.get('sources') or []}
+        result.setdefault('sources',[]).extend(source for source in again['sources'] if (source.get('url'),source.get('api_url')) not in known)
+        fields={};open_sources=set()
+        for gap in gaps:
+            serving=[name for name in LOOKUP_SERVES.get(gap,()) if name in memory]
+            unsettled=[name for name in serving if not settled(memory[name])]
+            if gap not in (found.get('unfilled') or ()):fields[gap]='answered'
+            elif unsettled and not ended:
+                fields[gap]='waiting';open_sources.update(unsettled)
+            elif unsettled or ended=='waits' or any(memory[name].get('gave_up') for name in serving):fields[gap]='no_answer'
+            else:fields[gap]='nothing_found'
+        waiting=bool(open_sources)
+        due=[memory[name]['next'] for name in open_sources if isinstance(memory[name].get('next'),(int,float))]
+        # The next visit: when the first open source is due, and every other one due within LOOKUP_RETRY_MIN of it (sources
+        # that failed in one visit are due seconds apart: one visit tries them together, not one visit each).
+        together=max(value for value in due if value<=min(due)+LOOKUP_RETRY_MIN) if due else None
+        next_at=min(max(now+1,together) if due else now+LOOKUP_RETRY_MIN,first+LOOKUP_MAX_WAIT) if waiting else None
+        base=_wait(waits) or {'source':sorted(open_sources)[0] if open_sources else 'lookup','reason':'Waiting for its next try','kind':'source_unavailable','scope':'book'}
+        answers={key:copy.deepcopy(found[key]) for key in ('catalog','series','split_title') if found.get(key)}
+        if answers:answers['receipts']=[dict(source) for source in again['sources'] if isinstance(source,dict) and source.get('sha256')][:12]
+        next_try=max([int(memory[name].get('tries') or 0) for name in open_sources] or [0])+1 if waiting else None
+        record={'policy':LOOKUP_POLICY,'asked':asked,'lane':lane,'sources':memory,'first_at':first,'last_at':now,'until':first+LOOKUP_MAX_WAIT,
+                # 'next_try' of 'limit': the number of the next try and the tries in all, so "Try 2 of 3" is literally true (the
+                # app's own hourly limit is no try: a book that waited only for it still has try 1 ahead). 'waiting_for': the
+                # sources that are still to answer, and 'asking': the gaps that still wait.
+                'next_try':next_try,'waiting_for':sorted(open_sources),'asking':[gap for gap,outcome in fields.items() if outcome=='waiting'],
+                'visits':(int(prior.get('visits') or 0) if same else 0)+1,'requests':requests,
+                'tries':max([int(state.get('tries') or 0) for state in memory.values()] or [0]),'limit':SOURCE_TRIES,
+                'spacing':{'min_seconds':LOOKUP_RETRY_MIN,'max_seconds':TRY_SPACING,'max_wait_seconds':LOOKUP_MAX_WAIT},
+                'fields':fields,'waiting':waiting,'next_at':next_at,'ended':ended,'wait':dict(base,retry_at=next_at) if waiting else None,
+                'doubtful':[dict(item) for item in found.get('doubtful') or [] if isinstance(item,dict)][:6],'found':answers}
+        return found,record
 
-    def _translation_lookup(self,local,title,author,filled,stop,progress,result):
-        """Futaba's 0.24.0 QA, B1 (Tolkien; rulings 38, 49 and 72b). A translation identified by its files (a Cyrillic title,
-        an author in Latin letters or with a foreign first name: original_titles.translation) whose original title or
-        series the research cache does not answer asks the sources once, as a held translation does (_held_translation):
-        by the edition's book title («Хранители. Летопись первая» -> «Хранители»), through the client's cache, per-site
-        bounds and pauses (no bypass), at most HELD_TRANSLATION_BUDGET requests. The answers are then read as before, from
-        the cache (_gap_fill, which still checks a found series position against the volume number). Only the ruling-39
-        lookup of an author with no English spelling yet used to ask, and never for the series: once a rule named the
-        author, his other volumes were filed with neither. Never a title or series Sergei entered; nothing waits (ruling
-        38): a closed source leaves the gap to the background pass. Returns the cache's answers (filled when unchanged)."""
+    def _review_lookup(self,row,local,title,author,filled,stop,progress,result):
+        """The look-up before review of a book its files identify (0.31.0 step 2; it replaces the one-time lookup of a
+        translation, Futaba's 0.24.0 QA B1, and 0.30.0 item 3's series wait). Every such book with a gap asks the sources
+        now: the original title and language of a title not in Latin letters, and the series. Never a title Sergei
+        entered or approved, never a part of a bigger book. Returns the cache's answers (filled when nothing is asked)
+        with 'lookup': the book's record (_bounded_lookup), which says whether it waits."""
         import local_identity
         fields=local['fields']
-        if stop.is_set() or local.get('version')!=local_identity.IDENTITY_VERSION or local.get('part_book') or not original_titles.translation(title,author):return filled
+        if not self.lookup_before_review or stop.is_set() or local.get('version')!=local_identity.IDENTITY_VERSION or local.get('part_book'):return filled
         his=fields['title'].get('state') in ('entered','approved') or any(s.get('kind')=='entered by you' for s in fields['title'].get('sources') or ())
-        gaps=[gap for gap in ('original_title','series') if gap in (filled.get('unfilled') or ()) and not (gap=='original_title' and his)]
+        gaps=[gap for gap in LOOKUP_GAPS if gap in (filled.get('unfilled') or ()) and not (gap=='original_title' and his)]
         if not gaps:return filled
-        base=edition_volume(title)[0];scratch={'sources':[],'evidence':[],'reasons':[]};budget={'remaining':self.HELD_TRANSLATION_BUDGET}
-        waits=[]
-        try:asked=self._gap_fill_once({'gaps':gaps,'fields':{'author':{'partial':bool(fields['author'].get('partial'))}}},base,author,stop,budget,waits,progress,scratch)
-        except InterruptedError:raise  # a pause stops research here, as any request does
-        except Exception:return filled  # best effort: the book is filed as the cache had it
-        result['translation_lookup']={'title':base,'author':author,'gaps':gaps,'requests':self.HELD_TRANSLATION_BUDGET-budget['remaining'],
-                                      'sources':[source.get('url','') for source in scratch['sources']][:8]}
-        again={'sources':[]};found=self._gap_fill(local,title,author,stop,{'remaining':0},[],progress,again)
-        known={(source.get('url'),source.get('api_url')) for source in result['sources']}
-        result['sources'].extend(source for source in again['sources'] if (source.get('url'),source.get('api_url')) not in known)
-        series_asked=asked.get('series_asked') or []
-        if 'series' in gaps and not found.get('series') and series_asked and all(outcome=='limited' for _,outcome in series_asked):
-            # 0.30.0 item 3 (Sergei 2026-11-18): every series source asked was only rate-limited (the app's bounds, the site's
-            # pause or pacing) and none answered: the book waits for its series (_local_lookup) instead of being published
-            # without one. A source that answered "no series" (or something unusable), or one that could not be reached at
-            # all, publishes as before.
-            wait=_wait(waits,budget.get('answered'))
-            if wait:found=dict(found,series_wait=wait,series_closed=[source for source,_ in series_asked])
-        return found
+        found,record=self._bounded_lookup(row,local,title,author,gaps,stop,progress,result)
+        # The 0.24.0 record of this lookup, kept for what reads it (the title and author asked, the requests made).
+        result['translation_lookup']={'title':edition_volume(title)[0],'author':author,'gaps':gaps,'requests':record['requests'],
+                                      'sources':[source.get('url','') for source in (record.get('found') or {}).get('receipts') or []][:8]}
+        return dict(found,lookup=record)
+
+    def held_lookup(self,row,root,prior=None,stop=None,progress=lambda *_:None):
+        """The look-up before review of a book held for Sergei (a review-list row; 0.31.0 step 2, it replaces the one-time
+        lookup of a held translation, 2026-10-29). The sources are asked about the book as its row shows it now: the title
+        the files give and the author Approve would file it under. Nothing is filed or changed here: the row's preview and
+        Approve read the answers from the research cache and from the record this returns (_held_lookup_fields). A title
+        or series Sergei entered is never looked up. prior: the row's record so far (gap_fill's pass hands it back).
+        Returns the record (_bounded_lookup), or {'policy', 'nothing': True, ...} when the row has nothing to ask about:
+        no title or author yet, a collection, or no gap."""
+        import local_identity
+        from organization import NO_AUTHOR
+        stop=stop or threading.Event()
+        nothing={'policy':LOOKUP_POLICY,'nothing':True,'fields':{},'waiting':False,'next_at':None,'sources':{},'tries':0,'doubtful':[],'found':{}}
+        try:preview=self.approved(row,root)
+        except ValueError:return nothing
+        approval=preview.get('approval') or {};review=preview.get('review') or {}
+        shown=approval.get('shown') if isinstance(approval.get('shown'),dict) else {}
+        entered=set(approval.get('typed') or [])|set(approval.get('entered') or [])|set(approval.get('names') or {})
+        title=text(approval.get('title') if 'title' in entered else shown.get('title'));author=text(approval.get('author'))
+        if not title or not author or author==NO_AUTHOR or approval.get('collection'):return nothing
+        gaps=[]
+        if 'title' not in entered and local_identity.script(title)!='latin':gaps.append('original_title')
+        own=self._own_series(preview)
+        if not {'series','number'}&entered and not own:gaps.append('series')
+        local={'gaps':gaps,'fields':{'author':{'partial':False}},'series_hint':approval.get('series_hint')}
+        if own and not {'series','number'}&entered and local_identity.script(text(review.get('series')))!='latin':
+            # R1: the English name of a series the files themselves name, in case the book is a translation.
+            gaps.append('series_name');local['series']={'name':text(review.get('series')),'number':text(review.get('number'))}
+        if not gaps:return nothing
+        _,record=self._bounded_lookup(dict(row,_lookup=prior if prior is not None else row.get('_lookup')),local,title,author,gaps,stop,progress,{'sources':[]},lane='gap')
+        return record
+
+    @staticmethod
+    def _own_series(preview):
+        """True when the series a preview shows is the book's own (its tags, his folders, what he entered), not one a source
+        found: only a book without a series of its own has a series to look up."""
+        review=preview.get('review') or {}
+        if not text(review.get('series')):return False
+        source=((preview.get('metadata_facts') or {}).get('series_source') or {}).get('provider')
+        return source in (None,'','local','entered')
+
+    def _held_lookup(self,row,root,result,stop):
+        """A book research has just held for Sergei is looked up at once (held_lookup), so its row has the series and the
+        English title when he first sees it. Best effort: any failure leaves the row as it was, and gap_fill's pass looks
+        it up later."""
+        if not self.lookup_before_review or not result.get('reasons') or result.get('wait') or not result.get('local_agreement') or stop.is_set():return
+        try:record=self.held_lookup(row,root,None,stop)
+        except Exception:return
+        result['lookup']=record
+        if not record.get('nothing'):
+            result['translation_lookup']={'title':record['asked']['title'],'author':record['asked']['author'],'gaps':list(record['asked']['gaps']),'requests':record['requests'],
+                                          'sources':[source.get('url','') for source in (record.get('found') or {}).get('receipts') or []][:8]}
 
     def _part_set(self,row,root,stop):
         """Rulings 19 and 19a (Sergei 2026-10-24): whole .m4b parts of one set: their chapters decide whether they are one
@@ -1060,6 +1202,10 @@ class PublicResearch:
                     local=local_identity.settled(local,title,author,'entered',typed,collection=not author and shown['collection'],rules=self.rules(),
                                                  folder='\\'.join(reversed(local_identity._ancestors(row,root))))
             local=self.with_names(row,root,local)  # Edit names (Judy 0.22.2 section 1): his corrections come first
+            if entered and (entered[0].get('series') or entered[0].get('number')):
+                # R22: a series or number he saved as metadata is a local fact. A source that names another is doubtful
+                # and dropped (series_certainty), so "Sources disagree" is never asked about a series.
+                local=dict(local,manual_series={'series':text(entered[0].get('series')),'number':text(entered[0].get('number'))})
             result['local_agreement']=local_identity.summary(local)
             if local.get('route'):return self._local_collection(row,local,result)
             if local['accepted']:
@@ -1184,7 +1330,7 @@ class PublicResearch:
             except ResearchWait as wait:waits.append(wait)
         reasons=list(result['reasons'])
         if not primary:reasons.append('Author and work not independently verified')
-        primary_fact_sources={}
+        primary_fact_sources={};series_doubt=''
         if provider!='fantlab':
             from public_work_identity import primary_fields
             details=[(pair,primary_fields(pair,phrase)) for pair in primary]
@@ -1195,7 +1341,11 @@ class PublicResearch:
                 work['original_language']=next(iter(languages));primary_fact_sources['original_language']=next(pair['url'] for pair,facts in details if facts['language'])
             standalone=[pair for pair,facts in details if facts['standalone']]
             if standalone and data.get('known_series'):
-                reasons.append('Series and standalone evidence conflicts')
+                # R25 (Sergei 2026-11-22; it follows R22): one source lists the book in a series and another calls it a
+                # standalone book. A doubtful series is treated as not found: the book gets no series and goes on. It used
+                # to be held with 'Series and standalone evidence conflicts'.
+                data['verified_series']=None;series_doubt='source_conflict'
+                result.setdefault('series_dropped',[]).append({'provider':text(provider),'name':'','number':'','why':'source_conflict','source_url':text(source_url)})
             elif standalone and data.get('parents',{}).get('cycles') is None:
                 data['parents']['cycles']=[];primary_fact_sources['standalone']=standalone[0]['url']
         language=work['original_language']
@@ -1232,7 +1382,7 @@ class PublicResearch:
             reasons.append('Collection components and source order need positive evidence')
         from standing_metadata import build_policy
         series=data.get('verified_series') or {}
-        if not reasons and not _tagged_series(row) and canonical_title and canonical_author:
+        if not reasons and not _tagged_series(row) and canonical_title and canonical_author and not series_doubt:
             # Series is optional: a source that is unavailable or unsure never holds the book.
             try:
                 found=self._series_goodreads(canonical_title,canonical_author,stop,budget,result)
@@ -1334,23 +1484,42 @@ class PublicResearch:
         fields come from answers already in the research cache only: no request is made and nothing waits or defers the
         book. The gaps nothing answered are recorded (metadata_facts gap_search 'background') and filled later by the
         background pass (gap_fill.GapFill; series positions by series backfill). It used to wait 5-7 s per site, plus
-        downloads, and to defer the book up to 3 times while sources cooled down. A translation is the exception
-        (_translation_lookup, Futaba's 0.24.0 QA B1): research asks for its original title and series once."""
-        import local_identity
+        downloads, and to defer the book up to 3 times while sources cooled down.
+
+        0.31.0 step 2 (rulings R2 and R5; they replace "nothing waits" for the series and the original title): a research
+        pass asks the sources about those two gaps before the book is filed (_review_lookup), and the book may wait for the
+        answer, bounded (LOOKUP_POLICY). Approve and its preview (budget 0) still read the cache only."""
+        import local_identity,canonical_names
         from standing_metadata import build_policy
         fields=local['fields'];title=fields['title']['value'];author=fields['author']['value']
-        waits=[];filled=self._gap_fill(local,title,author,stop,{'remaining':0},[],progress,result) if local['gaps'] else {'closed':[],'unfilled':[]}
+        # 0.31.0 step 3 (R1): a series the book's own files name in letters other than Latin (its tags, its title tag,
+        # a folder) is asked about for its English name, in case the book is a translation ('series_name'). Never a
+        # series he typed or saved: that name is his and is never renamed.
+        own_series=local.get('series') if isinstance(local.get('series'),dict) else {}
+        his_series=own_series.get('provider')=='entered' or bool({'series','number'}&(set(local.get('names_entered') or [])|set(local.get('names') or {})))
+        asked=dict(local,gaps=list(local['gaps'])+['series_name']) if own_series.get('name') and own_series.get('number') and not his_series \
+            and local_identity.script(own_series['name'])!='latin' and not local.get('part_book') else local
+        waits=[];filled=self._gap_fill(asked,title,author,stop,{'remaining':0},[],progress,result) if asked['gaps'] else {'closed':[],'unfilled':[]}
         confirmed = _confirmed_corbett_fields(local,title,author)
         durable = retained_fields or confirmed
-        if durable and not filled.get('volume_mismatch'):
-            for field in ('catalog','series'):
-                if not filled.get(field) and durable.get(field):filled[field]=copy.deepcopy(durable[field])
-            filled['unfilled']=[gap for gap in filled.get('unfilled',[]) if not (gap=='original_title' and filled.get('catalog') or gap=='series' and filled.get('series'))]
-            result['sources'].extend(copy.deepcopy(durable.get('retained_sources') or []))
-        if budget.get('remaining',0)>0:filled=self._translation_lookup(local,title,author,filled,stop,progress,result)
+        def kept(filled):
+            # The answers kept with the book itself (a retained approval, a held row's look-up, a confirmed decision) fill
+            # what the cache no longer has; never beside a series this read dropped as doubtful.
+            if durable and not filled.get('doubtful'):
+                for field in ('catalog','series'):
+                    if not filled.get(field) and durable.get(field):filled[field]=copy.deepcopy(durable[field])
+                filled['unfilled']=[gap for gap in filled.get('unfilled',[]) if not (gap=='original_title' and filled.get('catalog') and not filled.get('english_pending') or gap=='series' and filled.get('series'))]
+            return filled
+        filled=kept(filled)
+        if durable and not filled.get('doubtful'):result['sources'].extend(copy.deepcopy(durable.get('retained_sources') or []))
+        if budget.get('remaining',0)>0:filled=kept(self._review_lookup(row,asked,title,author,filled,stop,progress,result))
         catalog=filled.get('catalog') or {}
         language=catalog.get('language','')
+        # The part after the series and number of a name that only looks like "Series N. Title", once a source has
+        # confirmed that series for it (_gap_fill): the book's own title. Else the title the files give.
+        split=text(filled.get('split_title'))
         titles=local_identity.title_forms(local)
+        if split and split not in titles:titles.append(split)
         part=local.get('part_book')
         if part and part['set_title'] not in titles:
             # One part of a multi-part set, its own book (Sergei 2026-10-13): the set's album is
@@ -1411,11 +1580,26 @@ class PublicResearch:
                 known=[spelling for spelling,_ in (ruled.known_authors.values() if ruled is not None else [])]
                 own=_local_latin(author,folders=_ancestor_folders(row),known=known)
                 cited=own['source_url'] if own else catalog.get('source_url','')
-                latin=_latin_surname_first(own['name'] if own else names[0],author)
+                latin=_latin_surname_first(own['name'] if own else names[0],author,None if own else _order_evidence(catalog))
                 self._learn_author('same_as',author,latin,cited,title)
                 result['author_learned']={'credit':author,'name':latin,'source_url':cited}
                 if latin not in authors:authors.append(latin)
                 names=[latin];fields=dict(fields,author=dict(fields['author'],rule='catalog-latin'))
+        elif one_source and not reasons and not typed_author and budget.get('remaining',0)>0 and fields['author'].get('rule') and text(catalog.get('author_latin')):
+            # 0.31.0 step 3 (Sergei 2026-11-22, "Cixin Liu"): a rule research itself learned by the old guess (a two-word
+            # name turned around without evidence) is corrected when this book's own catalog record shows the order on
+            # evidence (canonical_names.latin_order). Only a rule the app learned (actor 'assistant'), only the same
+            # words in another order, never Sergei's own answer; the newest rule for the credit wins (author_rules).
+            ruled=self.rules()
+            learned=next((r for r in (ruled.rules if ruled is not None else []) if r.get('kind')=='same_as' and r.get('actor')=='assistant'
+                          and text(r.get('target')).casefold()==text(author).casefold() and text(r.get('credit_as_seen'))),None)
+            if learned and canonical_names._order_key(catalog['author_latin'])==canonical_names._order_key(author):
+                ordered,why=canonical_names.latin_order(catalog['author_latin'],learned['credit_as_seen'],_order_evidence(catalog))
+                if why!=canonical_names.ORDER_UNKNOWN and ordered!=text(author) and canonical_names._order_key(ordered)==canonical_names._order_key(author):
+                    self._learn_author('same_as',learned['credit_as_seen'],ordered,catalog.get('source_url',''),title)
+                    result['author_learned']={'credit':learned['credit_as_seen'],'name':ordered,'source_url':catalog.get('source_url',''),'corrected':text(author),'why':why}
+                    if ordered not in authors:authors.append(ordered)
+                    names=[ordered]
         spelling=None
         from organization import NO_AUTHOR
         rules=self.rules() if one_source else None
@@ -1457,22 +1641,31 @@ class PublicResearch:
         if 'series' in saved_names or 'number' in saved_names:
             # Edit names (Judy 0.22.2 section 1): his series and number (with_names); an empty series makes the book standalone.
             series=dict(local['series']) if local.get('series') else {}
+        # R1: the English name of a series the files themselves name, where a source gave it (the work is the files' own:
+        # work['verified_series'] below keeps their name; the review and the folder carry the English one).
+        named=filled.get('series_english') if isinstance(filled.get('series_english'),dict) else None
+        filed_series=dict(series)
+        if named and text(named.get('name')) and own_series.get('name') and not his_series and language not in ('','ru'):
+            filed_series=dict(series,name=text(named['name']),name_rule='english',name_provider=text(named.get('provider')),name_url=text(named.get('source_url')),name_local=text(series.get('name')))
         work_ids=[catalog['work_id']] if catalog.get('work_id') else [local_identity.work_id(local)]
         work={'id':work_ids[0],'titles':titles,'author_aliases':author_variants(authors),'original_language':language,
-            'original_title':catalog.get('original_title') if language else title,'policy_version':'standing-17-v1','full_author_verified':True,
+            'original_title':(catalog.get('original_title') or split or title) if language else split or title,'policy_version':'standing-17-v1','full_author_verified':True,
             'source_surnames':[],'verified_series':series,'identity_basis':'local_agreement','cover_url':'','work_type':'','contained_story':False,
             'recording_completeness':'unknown','part_book':bool(part)}
         if one_source:
             work['identity_rule']=local_identity.IDENTITY_VERSION
             # Rulings 13 and 15: a numbered part filed as its own book under "set name + number".
             if fields['title'].get('basis')=='number_rule':work['numbered_part']=True
-        preferred=title
-        if language=='ru':preferred=catalog.get('title_native') or title
-        elif language=='en':preferred=catalog.get('original_title') or title
-        if fields['title'].get('state') in ('entered','approved'):preferred=title
+        # 0.31.0 step 3 (rulings R1 and R3): the one title rule. A Russian original keeps its Russian title, any other
+        # original language gets the English title a source names, and with none found the title in the files stays and
+        # nobody is asked. His own title is never replaced.
+        his_title=fields['title'].get('state') in ('entered','approved')
+        preferred,title_rule=canonical_names.book_title(title if his_title else split or title,catalog,his=his_title)
         sergei=fields['title'].get('state') in ('entered','approved') or fields['author'].get('state') in ('entered','approved')
         folders={name for member in row.get('members') or [] for name in (ntpath.basename(ntpath.dirname(member['path'])),ntpath.basename(ntpath.dirname(ntpath.dirname(member['path']))))}
-        odd=None if not one_source or reasons or sergei or part else local_identity.odd_identity(preferred,names[0],author,NO_AUTHOR,ruled=bool(fields['author'].get('rule')),folders=sorted(folders))
+        # R22 (Sergei 2026-11-22): a title that only looks like a series name and number is no longer asked about
+        # ("Title unclear"): the doubtful series is treated as not found and the title is filed as the files give it.
+        odd=None if not one_source or reasons or sergei or part else local_identity.odd_identity(preferred,names[0],author,NO_AUTHOR,ruled=bool(fields['author'].get('rule')),folders=sorted(folders),series=False)
         if odd:
             # 0.22.1: a name the app should not file without asking (local_identity.odd_identity): a question on the to-do
             # list with the existing rows; the row shows what the app read, nothing is renamed, Approve files what it shows.
@@ -1510,70 +1703,52 @@ class PublicResearch:
             # an edition's volume title («Хранители. Летопись первая») is also looked up by its book title.
             ancestors=_ancestor_folders(row)
             known=[spelling for spelling,_ in (rules.known_authors.values() if rules is not None else [])]
-            found=None if approving or rules is not None and rules.taken_back(names[0]) else self._author_latin(title,names[0],stop,budget,result,folders=ancestors,known=known)
+            hinted=[text(local['series_hint'].get('title'))] if isinstance(local.get('series_hint'),dict) and text(local['series_hint'].get('title')) not in ('',text(title)) else []
+            found=None if approving or rules is not None and rules.taken_back(names[0]) else self._author_latin(title,names[0],stop,budget,result,folders=ancestors,known=known,**({'also':hinted} if hinted else {}))
             if found and found['state']=='found':
-                latin=_latin_surname_first(found['name'],names[0])
+                latin=_latin_surname_first(found['name'],names[0],found.get('order'))
                 self._learn_author('same_as',names[0],latin,found['source_url'],preferred)
                 result['author_learned']={'credit':names[0],'name':latin,'source_url':found['source_url']}
                 if latin not in authors:authors.append(latin)
                 names=[latin];name_source=found['source_url'];work['author_aliases']=author_variants(authors)
                 title_entered='title' in set(local.get('names_entered') or []) or any(s.get('kind')=='entered by you' for s in fields['title'].get('sources') or [])
-                if found.get('title') and not title_entered:
-                    # The same record names the English original title: ruling 38 files the book under it.
-                    russian=preferred;preferred=found['title'];english_title=True
+                # Senua's 74b review, r2, kept since R22 withdrew the question: when a source numbers this volume differently
+                # from its own title, the record may be another book, so its English title is not taken either.
+                other_book=any(item.get('why')=='number_mismatch' for item in filled.get('doubtful') or [] if isinstance(item,dict))
+                if found.get('title') and not title_entered and not other_book:
+                    # The same record names the English title: rulings 38 and R1 file the book under it. The record says
+                    # which language the work was written in (English, unless it names another).
+                    russian=preferred;preferred=found['title'];english_title=True;title_rule='english'
                     if russian not in titles:titles.append(russian)
                     if preferred not in titles:titles.insert(0,preferred)
-                    work.update(titles=titles,original_title=preferred,original_language='en')
+                    found_language=text(found.get('language')) if re.fullmatch('[a-z]{2,3}',text(found.get('language'))) and found.get('language')!='ru' else 'en'
+                    work.update(titles=titles,original_title=text(found.get('original_title')) or preferred,original_language=found_language)
             elif found and found['state']=='russian':
                 # The work's catalog says it was written in Russian: the Cyrillic name is right (the folder language rule).
                 self._learn_author('keep',names[0],'',found['source_url'],preferred)
                 result['author_learned']={'credit':names[0],'name':names[0],'source_url':found['source_url']}
+            elif isinstance(filled.get('lookup'),dict) and filled['lookup'].get('waiting'):
+                # 0.31.0 step 2: the sources that could name this author did not answer yet and the look-up before review
+                # still has tries left: the book waits for them (below) instead of asking Sergei now. He is asked only
+                # once the look-up has ended without the name.
+                pass
             else:
                 ask={'kind':'author_unclear','why':'english_spelling','odd_name':True,'credit':names[0],
                      'candidates':[{'name':names[0],'source':'spelling','reader_count':0}],
                      'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')}}}
                 return result|{'reasons':[local_identity.ASK_REASONS['author_unclear']],'ask':ask,'identity_hold':{'kind':'author_unclear','detail':''},'wait':None,
                                'rules_generation':rules.generation if rules else ''}
-        # Ruling 52 (Sergei 2026-10-27): a "Series N. Title" split nothing confirms is asked, with Series, Number and Title
-        # filled in from the split (the row's Title, its Goes to line and the names editor); his Approve files them. Asked
-        # only now (Senua's 0.22.3 review, M9): ruling 33's spelling question and ruling 39's lookup come first, so the
-        # author is settled (a rule learned) before the row asks, and Approve files under it. Not asked when he approved
-        # the book (Approve settles it) or saved its series or number (Edit names); a title or author he entered alone does
-        # not answer it (m21).
-        his=any(fields[name].get('state')=='approved' for name in ('title','author')) or bool({'series','number'}&set(local.get('names_entered') or []))
-        if local.get('series_unconfirmed') and not his and one_source and not reasons and not part:
-            split={'series':series.get('name',''),'number':series.get('number',''),'title':preferred}
-            ask={'kind':'title_author','why':'title_series','odd_name':True,'split':split,
-                 'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')},
-                           'series':{'proposal':split['series'],'basis':'title'},'number':{'proposal':split['number'],'basis':'title'}}}
-            return result|{'reasons':[local_identity.ASK_REASONS['title_author']],'ask':ask,'identity_hold':{'kind':'title_author','detail':''},'wait':None,
-                           'rules_generation':rules.generation if rules else ''}
-        mismatch=filled.get('volume_mismatch')
-        if not mismatch and not local['gaps'] and not series and edition_volume(title)[1] is not None:
-            # Ruling 74b's follow-up: an identity settled by his saved answer (settled(): no gaps left) is still read for the
-            # disagreement (the cache only), so the question his Approve was told comes next is asked; nothing else is used.
-            mismatch=self._gap_fill(dict(local,gaps=['series']),title,author,stop,{'remaining':0},[],progress,{'sources':[]}).get('volume_mismatch')
-        if mismatch and not series and not his and one_source and not reasons and not part:
-            # Ruling 74b (Sergei 2026-10-31; Judy's "Number unclear"): an edition volume title and the source disagree on
-            # the number («Летопись первая», the source's book 2). Asked with both numbers and the source's provider; Series
-            # (the source's), Number (the title's) and Title (what Approve files under now) are filled in; the row sends them
-            # with its Approve (MergeService._approval_result for a press without them). The author is settled first, as for
-            # ruling 52. Senua's 74b review, r2: an English title the ruling-39 lookup took from a record is not offered (it
-            # may be the disagreeing record, _gap_fill keeps none of it): the title as it is, as Approve files it.
-            ask={'kind':'title_author','why':'number_unclear','odd_name':True,
-                 'volume':{'title_number':mismatch['title_number'],'series_number':mismatch['series_number'],'provider':mismatch['provider']},
-                 'fields':{'title':{'proposal':title if english_title else preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')},
-                           'series':{'proposal':mismatch['series'],'basis':'source'},'number':{'proposal':str(mismatch['title_number']),'basis':'title'}}}
-            return result|{'reasons':[local_identity.ASK_REASONS['title_author']],'ask':ask,'identity_hold':{'kind':'title_author','detail':''},'wait':None,
-                           'rules_generation':rules.generation if rules else ''}
+        # R22 (Sergei 2026-11-22; it replaces rulings 52 and 74b's questions): a series the name only looks like ("Series N.
+        # Title" nothing confirms) and a number the book's title and a source disagree on are doubtful, and a doubtful
+        # series is treated as not found: neither is asked ("Title unclear", "Number unclear"), the book goes on without
+        # the series. series_certainty.judge decides it, where the sources are read (_gap_fill_once); what was dropped is
+        # recorded below (facts gap_search 'series_doubt'). A series or number Sergei saved or approved is his and stays.
         original=None
         if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and language!='ru':
-            # Ruling 38 (Sergei 2026-10-27; it replaces ruling 29's wait): a translation is filed under the English original
-            # title research has (the research cache's catalog answer: preferred, above), else right away under the title
-            # it has. It never waits; the rename pass can apply the English title later (ruling 21). The author keeps the
-            # folder language rule (canonical_author, above: the English spelling when the library or the catalog has
-            # one). Recorded for the details panel's "Original title" fact (Judy 0.22.2 section 4).
-            if (language=='en' or english_title) and local_identity.script(title)=='cyrillic' and local_identity.script(preferred)=='latin':
+            # Ruling 38 (Sergei 2026-10-27; it replaces ruling 29's wait) with R1 and R3: a translation is filed under the
+            # English title a source names (the one title rule: preferred, above), else under the title it has. Recorded
+            # for the details panel's "Original title" fact (Judy 0.22.2 section 4).
+            if title_rule=='english' and local_identity.script(title)=='cyrillic' and local_identity.script(preferred)=='latin':
                 original={'state':'found','title':preferred}
             elif original_titles.translation(preferred,names[0]):
                 original={'state':'none','title':''}
@@ -1586,13 +1761,29 @@ class PublicResearch:
             import canonical_names
             # Senua's 0.30.0 review, m2: a rule Sergei scoped to a folder counts in the book's own folder.
             folder=ntpath.dirname(str((row.get('members') or [{}])[0].get('path') or ''))
-            filed,_=canonical_names.author(names[0],self.rules(),folder)
+            # A rule this research has just learned or corrected is in the catalog, not in the copy read at its start.
+            current_rules=self.rules()
+            if result.get('author_learned'):
+                import author_rules
+                current_rules=author_rules.load(self.client.database) or current_rules
+            filed,_=canonical_names.author(names[0],current_rules,folder)
             if filed and filed!=names[0]:
                 names=[filed]+names[1:]
                 if filed not in authors:authors.append(filed);work['author_aliases']=author_variants(authors)
-        review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
+        review,facts,policy_reasons=build_policy(row,work,preferred,names,series=filed_series.get('name',''),number=filed_series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
         facts['research_version']=RESEARCH_VERSION  # ruling 71f: a job planned under this research needs no re-check
+        # 0.31.0 (A6): the four states of the details panel's "English title" fact, as the engine knows them. 'found' (the
+        # title, with its source) and 'none' (the sources answered and have no English title: filed under the title in the
+        # files, R3) are 0.22.2's; new: 'no_answer' (a source never answered within the limit, with the tries made and
+        # their limit) and 'entered' (the title is his). A Russian original has no such fact, as before.
+        lookup_record=filled.get('lookup') if isinstance(filled.get('lookup'),dict) else {}
+        if his_title:result['original_title']={'state':'entered','title':''}
+        elif result.get('original_title') and result['original_title'].get('state')=='found':
+            result['original_title'].update(provider=text(catalog.get('english_provider') or catalog.get('provider')) if catalog and not english_title else series_source({'source_url':name_source})['provider'],
+                                            url=text(catalog.get('english_source') or catalog.get('source_url')) if catalog and not english_title else name_source)
+        elif result.get('original_title') and (lookup_record.get('fields') or {}).get('original_title')=='no_answer':
+            result['original_title']={'state':'no_answer','title':'','tries':lookup_record.get('tries'),'limit':lookup_record.get('limit')}
         if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or []),'saved_utc':dict(local.get('names_saved_utc') or {})}  # Edit names: the job's names
         if result.get('original_title'):facts['original_title_lookup']=dict(result['original_title'])  # ruling 38: the details panel's fact
         if spelling:facts['author_spelling']=spelling
@@ -1623,88 +1814,153 @@ class PublicResearch:
         if language:
             evidence('original_language',language,catalog.get('source_url',''),'Original-work language from the catalog record matching the locally agreed title and author.')
         elif english_title:
-            # Futaba's 0.24.0 QA, B1: the ruling-39 record that named the English title says the original is English
-            # (_author_latin). The policy records that language, and approval refused a book with no evidence for it
-            # ("Assistant approval requires ... original language"), holding it 15 minutes until the cache answered.
-            evidence('original_language','en',name_source,'Original-work language from the catalog record that named the author\'s English spelling and the original English title (ruling 39).')
+            # Futaba's 0.24.0 QA, B1: the ruling-39 record that named the English title says which language the work was
+            # written in (_author_latin: English unless it names another). The policy records that language, and approval
+            # refused a book with no evidence for it ("Assistant approval requires ... original language"), holding it 15
+            # minutes until the cache answered.
+            evidence('original_language',work['original_language'] or 'en',name_source,'Original-work language from the catalog record that named the author\'s English spelling and the English title (ruling 39).')
         if review['series']:
             url=series.get('source_url','')
             why=(SERIES_WHY.get(series.get('provider'),'Series and position from the catalog record matching the locally agreed title and author.') if url else
                 'Series and number entered by you (Edit names; Sergei 2026-10-24, ruling 6a): '+review['series']+'; '+review['number']+'.' if series.get('provider')=='entered' else
                 'Embedded series tags repeated in the folder/file name: '+described('series')+'; '+described('number')+'.')
+            if filed_series.get('name_provider') and filed_series.get('name_local'):
+                why+=' The series is named in English (ruling R1): "%s" for the files\' "%s", from %s.'%(review['series'],filed_series['name_local'],filed_series.get('name_url') or filed_series['name_provider'])
             evidence('series',review['series'],url,why);evidence('number',review['number'],url,why)
-            facts['series_source']=series_source(series)
+            facts['series_source']=series_source(filed_series)
+        # 0.31.0 (A6): where the title came from, as keys the page words: 'rule' is the title rule's own answer
+        # (canonical_names.TITLE_RULES); a title a source named carries that source.
+        facts['title_source']={'rule':title_rule,'provider':text(catalog.get('english_provider') or catalog.get('provider')) if title_rule in ('english','russian_original') and catalog else '',
+                               'url':text(catalog.get('english_source') or catalog.get('source_url')) if title_rule in ('english','russian_original') and catalog else '',
+                               'split':bool(split and not his_title)}
+        if english_title and not facts['title_source']['url']:facts['title_source'].update(provider=series_source({'source_url':name_source})['provider'],url=name_source)
+        # A doubtful series that was dropped (series_certainty): what the source named and why it is doubtful.
+        doubtful=[dict(item) for item in filled.get('doubtful') or [] if isinstance(item,dict)]
+        if doubtful and not review['series']:facts['gap_search']['series_doubt']=doubtful[:6]
         # Edit names (his universe, also an empty one) over the universe the book's folders name (rulings 30 and 37).
         if 'universe' in saved_names and saved_names['universe'] is not None:review['universe']=saved_names['universe']
         elif local.get('universe'):review['universe']=local['universe']
         result.update(review=review,metadata_facts=facts)
         result['reasons']=list(dict.fromkeys(reasons))
-        # Nothing waits for a source (0.22.1): the missing fields were read from the cache, the rest is filled later.
         result['wait']=None
         result['gap_wait']=None
-        series_wait=filled.get('series_wait')
-        if series_wait and not review['series'] and not result['reasons']:
-            # 0.30.0 item 3 (Sergei 2026-11-18): every series source research asked was only closed (paused, limited, busy):
-            # the book waits for its series ("Waiting for source", the wait's own retry time) instead of being published
-            # without one. The wait ends: the sources are asked again at its retry time, and after SERIES_WAIT_LIMIT waits
-            # in a row the book is published without a series as before (series backfill then finds it). A source that
-            # answered "no series" never makes it wait.
+        lookup=filled.get('lookup')
+        if isinstance(lookup,dict):
+            # 0.31.0 step 2 (rulings R2 and R5): the look-up before review asked the sources (_review_lookup). While a
+            # source that could still answer a missing field is closed and has a try left, the book waits ("Waiting for
+            # source", the next try's time) instead of being filed without the answer; the wait is bounded (LOOKUP_POLICY)
+            # and then the book is filed as before. A source that answered "none" never makes it wait.
+            result['lookup']=lookup
             waited=row.get('_series_waits',0)
             waited=waited if type(waited) is int and 0<=waited<1000 else 0
-            if waited<SERIES_WAIT_LIMIT:
-                result['reasons']=[SERIES_WAIT_REASON];result['wait']=dict(series_wait);result['series_waits']=waited+1
-                facts['gap_search']['series_wait']={'sources':list(filled.get('series_closed') or []),'tries':waited+1}
-            else:
-                facts['gap_search']['series_wait']={'sources':list(filled.get('series_closed') or []),'tries':waited,'published_without':True}
+            closed=sorted(name for name,state in (lookup.get('sources') or {}).items() if not (state.get('answered') or state.get('gave_up')))
+            facts['gap_search']['lookup']={key:copy.deepcopy(lookup.get(key)) for key in ('policy','fields','tries','limit','next_at','waiting','ended','visits')}
+            if lookup.get('waiting') and not result['reasons']:
+                # 'series_waits' and gap_search 'series_wait' are 0.30.0 item 3's facts, kept: how many times in a row
+                # the book has waited, and for which sources.
+                result['reasons']=[SERIES_WAIT_REASON if lookup['fields'].get('series')=='waiting' else LOOKUP_WAIT_REASON]
+                result['wait']=dict(lookup['wait']);result['series_waits']=waited+1
+                facts['gap_search']['series_wait']={'sources':closed,'tries':waited+1}
+            elif lookup['fields'].get('series')=='no_answer' and not review['series']:
+                facts['gap_search']['series_wait']={'sources':closed,'tries':waited,'published_without':True}
         return result
 
-    def fill_gaps(self,ask,gaps,stop,budget,progress=lambda *_:None):
+    def fill_gaps(self,ask,gaps,stop,budget,progress=lambda *_:None,skip=()):
         """The background gap fill's request (gap_fill.GapFill, 0.22.1): ask the sources about these missing fields of a
         book identified locally as ask['title'] by ask['author'] ('partial': a surname only). budget carries the lane.
         Returns (found, result): found as _gap_fill (catalog, author_full, series, unfilled, closed) plus 'wait', when
-        a closed source could still answer an unfilled field; result['sources'] holds the fetched receipts."""
+        a closed source could still answer an unfilled field; result['sources'] holds the fetched receipts.
+        0.31.0 (R16): skip names the sources the look-up has settled for this book or that are not due yet (not asked);
+        found['asked'] lists the sources asked this time and found['closures'] each one that was closed, with the wait's
+        kind, so the look-up can count its tries per source."""
         result={'sources':[],'evidence':[]};waits=[]
-        local={'gaps':list(gaps),'fields':{'author':{'partial':bool(ask.get('partial'))}}}
+        local={'gaps':list(gaps),'fields':{'author':{'partial':bool(ask.get('partial'))}},'skip':tuple(skip or ())}
         found=self._gap_fill(local,ask['title'],ask['author'],stop,budget,waits,progress,result)
         found['wait']=_wait(waits,budget.get('answered')) if found.get('closed') else None
         return found,result
 
     def _gap_fill(self,local,title,author,stop,budget,waits,progress,result):
-        """Ask only the sources that can answer a field missing locally; never block. An edition's volume title
-        («Хранители. Летопись первая») no catalog knows is asked again by its book title («Хранители») for the fields
-        the first pass left unfilled (2026-10-29, Tolkien); a series position found that way must agree with the volume
-        number the title gives, else the series stays unfilled and is asked (rulings 51 and 52)."""
-        found=self._gap_fill_once(local,title,author,stop,budget,waits,progress,result)
-        base,volume=edition_volume(title)
-        if base==text(title) or not found.get('unfilled') or stop.is_set():return found
-        again=self._gap_fill_once(dict(local,gaps=list(found['unfilled'])),base,author,stop,budget,waits,progress,result)
-        series=again.get('series')
-        if series and volume is not None and str((series or {}).get('number') or '').strip()!=str(volume):
-            # Ruling 74b (Sergei 2026-10-31): the title and the source disagree on the volume number. Never filed (rulings 51
-            # and 52); research asks Sergei with both numbers and the source (_local_lookup). Senua's 74b review, r2: the
-            # record that numbers it differently may be another book, so nothing else this pass found is used either (its
-            # English title: «Хранители. Летопись первая» was offered as "The Two Towers"); the title stays as it is.
-            again={key:value for key,value in again.items() if key not in ('series','catalog','author_full')}
-            if not found.get('series'):
-                found['volume_mismatch']={'series':text(series.get('name')),'series_number':str(series.get('number') or '').strip(),'title_number':volume,
-                                          'provider':text(series.get('provider')),'source_url':text(series.get('source_url'))}
-        for key in ('catalog','series','author_full'):
+        """Ask only the sources that can answer a field missing locally; never block. Up to three passes, each for the
+        fields the passes before left unfilled:
+          1. the title as the files give it;
+          2. an edition's volume title («Хранители. Летопись первая») no catalog knows, by its book title («Хранители»;
+             2026-10-29, Tolkien);
+          3. a name that only looks like "Series N. Title" (local['series_hint'], local_identity.identify), by the part after
+             the number: when a source names a certain series for it whose number is the name's own, that confirms the
+             series, and the part after the number is the book's title (found['split_title']).
+        Whether a series a source names is certain is decided in one place (series_certainty.judge, through
+        _gap_fill_once): a number the book's own title or name does not give, more than one series, a universe and a
+        conflict are doubtful, and a doubtful series is treated as not found (rulings R18, R21, R22; it replaces the
+        questions of rulings 52 and 74b). found['doubtful'] lists what was dropped, with why."""
+        facts=self._series_facts(local,title)
+        found=self._gap_fill_once(dict(local,series_facts=facts),title,author,stop,budget,waits,progress,result)
+        base,_=edition_volume(title)
+        if base!=text(title) and found.get('unfilled') and not stop.is_set():
+            again=self._gap_fill_once(dict(local,gaps=list(found['unfilled']),series_facts=facts),base,author,stop,budget,waits,progress,result)
+            found=self._merge_passes(found,again)
+        hint=local.get('series_hint') if isinstance(local.get('series_hint'),dict) else None
+        if hint and text(hint.get('title')) and text(hint['title'])!=text(title) and 'series' in (found.get('unfilled') or ()) and not stop.is_set():
+            asked=dict(facts,hint={'series':text(hint.get('series')),'number':text(hint.get('number'))})
+            again=self._gap_fill_once(dict(local,gaps=[gap for gap in ('series','original_title') if gap in found['unfilled']],series_facts=asked),text(hint['title']),author,stop,budget,waits,progress,result)
+            if again.get('series'):
+                found=self._merge_passes(found,again);found['split_title']=text(hint['title'])
+            else:
+                # Nothing confirms the series the name looks like: the book goes on without it, under the title the
+                # files give. What this pass learned of the part after the number is not the book's (no catalog used).
+                again={key:value for key,value in again.items() if key not in ('catalog','author_full','series')}
+                found=self._merge_passes(found,again)
+        if hint and 'series' in (found.get('unfilled') or ()) and 'series' in (local.get('gaps') or ()):
+            # The series the name only looks like (or mentions in brackets) stays unconfirmed: dropped, and said so.
+            found['doubtful'].append({'provider':'','name':text(hint.get('series')),'number':text(hint.get('number')),'why':'unconfirmed_name','source_url':''})
+        return found
+
+    @staticmethod
+    def _series_facts(local,title):
+        """What the book's own files say of its series, for series_certainty.judge: a series they name (tags, his folders,
+        what he entered or saved) and the number the title itself gives («Летопись первая» -> 1)."""
+        own=local.get('series') if isinstance(local.get('series'),dict) else {}
+        saved=local.get('manual_series') if isinstance(local.get('manual_series'),dict) else {}
+        # A series the title mentions in brackets («Солнце и Замок (Книга Нового Солнца #3)») is the book's own word on
+        # its number: a source that numbers it differently is doubtful. (A name split "Series N. Title" is asked about
+        # by the part after the number, with its own hint: _gap_fill's third pass.)
+        hint=local.get('series_hint') if isinstance(local.get('series_hint'),dict) else {}
+        mentioned={'series':text(hint.get('series')),'number':text(hint.get('number'))} if hint and text(hint.get('title'))==text(title) else None
+        return {'series':text(own.get('name') or saved.get('series')),'number':text(own.get('number') or saved.get('number')),'volume':edition_volume(title)[1],'hint':mentioned}
+
+    @staticmethod
+    def _merge_passes(found,again):
+        taken=not found.get('catalog') and bool(again.get('catalog'))
+        for key in ('catalog','series','author_full','series_english'):
             if again.get(key) and not found.get(key):found[key]=again[key]
+        if taken:found['english_pending']=bool(again.get('english_pending'))
+        for key in ('asked','closures','doubtful','series_asked'):found[key]=list(found.get(key) or [])+list(again.get(key) or [])  # 0.31.0 (R16)
         found['closed']=list(dict.fromkeys(list(found.get('closed') or [])+list(again.get('closed') or [])))
-        found['unfilled']=[field for field in found['unfilled'] if not (field=='original_title' and found.get('catalog') or field=='series' and found.get('series') or field=='author_full' and (found.get('author_full') or found.get('catalog')))]
+        found['unfilled']=[field for field in found['unfilled'] if not (field=='original_title' and found.get('catalog') and not found.get('english_pending') or field=='series' and found.get('series')
+                                                                      or field=='series_name' and found.get('series_english') or field=='author_full' and (found.get('author_full') or found.get('catalog')))]
         found['closed']=[source for source in found['closed'] if found['unfilled']]
         return found
 
     def _gap_fill_once(self,local,title,author,stop,budget,waits,progress,result):
-        gaps=set(local['gaps']);found={'closed':[]}
+        import series_certainty,canonical_names,wikidata_books
+        gaps=set(local['gaps']);found={'closed':[],'asked':[],'closures':[],'doubtful':[]}
         partial=bool(local['fields']['author'].get('partial'))
+        facts=local.get('series_facts') if isinstance(local.get('series_facts'),dict) else {'volume':edition_volume(title)[1]}
+        # 0.31.0 (R16, the detail look-up's bounded tries): a source it has settled for this book, or that is not due yet,
+        # is not asked; each source asked is named, and each closure keeps why (the app's own limit and a busy catalog are
+        # no try of the source).
+        skip=set(local.get('skip') or ())
+        def closure(source,wait,kind=None):
+            found['closures'].append({'source':source,'reason':wait.reason,'retry_at':wait.retry_at,'kind':kind or wait.kind,'scope':wait.scope})
         def attempt(source,function):
+            if source in skip:return None
+            found['asked'].append(source)
             try:return function()
-            except ResearchWait as wait:waits.append(wait);found['closed'].append(source)
+            except ResearchWait as wait:waits.append(wait);found['closed'].append(source);closure(source,wait)
             except sqlite3.OperationalError as error:
                 # 0.22.2: a busy catalog is a closed source for now, never the end of the run (the live stop at _expire).
                 if not catalog_busy(error):raise
-                waits.append(ResearchWait(source,CATALOG_BUSY_REASON,getattr(self.client,'clock',time.time)()+CATALOG_BUSY_WAIT,'source_unavailable','host'));found['closed'].append(source)
+                busy=ResearchWait(source,CATALOG_BUSY_REASON,getattr(self.client,'clock',time.time)()+CATALOG_BUSY_WAIT,'source_unavailable','host')
+                waits.append(busy);found['closed'].append(source);closure(source,busy,'catalog_busy')
             except (ValueError,TypeError,KeyError,AttributeError):pass
             return None
         if gaps&{'original_title','author_full'}:
@@ -1718,46 +1974,107 @@ class PublicResearch:
         def series_attempt(source,function):
             before,seen=len(found['closed']),len(waits)
             value=attempt(source,function)
+            if source in skip:return value
             if len(found['closed'])==before:asked.append((source,'answered'))
             else:
                 wait=waits[-1] if len(waits)>seen else None
                 limited=wait is not None and (wait.kind in ('app_limit','source_pause') or wait.reason=='Public source cooling down')
                 asked.append((source,'limited' if limited else 'closed'))
             return value
+        def certain(candidate,others=()):
+            # The one rule (series_certainty): a doubtful series is treated as not found, and what was dropped is kept.
+            if not candidate:return None
+            verdict=series_certainty.judge(candidate,facts,others)
+            if verdict['verdict']==series_certainty.CERTAIN:return verdict['series']
+            found['doubtful'].append(series_certainty.dropped(verdict))
+            return None
+        series=None
         if 'series' in gaps:
             # Sergei 2026-10-18: Goodreads is the series source; FantLab's cycle only when Goodreads has none.
             progress('Goodreads','Filling missing series position')
-            series=series_attempt('goodreads',lambda:self._series_goodreads(title,author,stop,budget,result))
+            series=certain(series_attempt('goodreads',lambda:self._series_goodreads(title,author,stop,budget,result)))
             if not series:
                 progress('FantLab','Filling missing series position')
-                series=series_attempt('fantlab',lambda:self._series_fantlab(title,author,partial,stop,budget,result))
-            if series:found['series']=series
-        if 'original_title' in gaps and not found.get('catalog'):
+                series=certain(series_attempt('fantlab',lambda:self._series_fantlab(title,author,partial,stop,budget,result)))
+        # Wikidata, the work's own record (0.31.0 step 2): asked for the original-work facts when FantLab has none; for the
+        # English title of a work written in neither Russian nor English (FantLab names such a work only in its own
+        # language, ruling R1); for the series when the sources before it have none; and for the English name of a series
+        # FantLab names in another language. One look-up serves all four (_wikidata_book; its answers are cached).
+        catalog=found.get('catalog') or {}
+        needs_english=bool(catalog) and catalog.get('language') not in ('','ru','en') and not catalog.get('english_title')
+        series_language=text(catalog.get('language')) or text((series or {}).get('language'))
+        needs_name=bool(series) and series.get('provider')=='fantlab' and series_language not in ('','ru','en')
+        wants_catalog='original_title' in gaps and (not catalog or needs_english)
+        wants_series='series' in gaps and not series
+        # 0.31.0 step 3 (R1): a translated book whose own files name its series in Russian («Память о прошлом Земли. Книга
+        # 2») is asked about for the series' English name only ('series_name'); the series and its number stay the files'.
+        naming_asked='series_name' in gaps and 'series' not in gaps
+        naming=naming_asked and text(catalog.get('language')) not in ('','ru')
+        if naming and text(catalog.get('language'))=='en':
+            # A work written in English: FantLab's cycle carries its original, English name.
+            candidate=attempt('fantlab',lambda:self._series_fantlab(title,author,partial,stop,budget,result))
+            verdict=series_certainty.judge(candidate,facts) if candidate else None
+            if verdict and verdict['verdict']==series_certainty.CERTAIN and text(candidate.get('name_english')):
+                found['series_english']={'name':series_spelling(candidate['name_english']),'provider':'fantlab','source_url':text(candidate.get('source_url'))}
+        record=None
+        if wants_catalog or wants_series or needs_name or naming and not found.get('series_english'):
             progress('Wikidata','Filling missing original-work facts')
-            entry=attempt('wikidata',lambda:self._gap_wikidata(title,author,partial,stop,budget,result))
-            if entry:
-                # Old broad catalog proposals are not series-order proof. The
-                # referenced series-only adapter below owns that separate gap.
-                if not found.get('catalog') and entry.get('language'):found['catalog']=entry
-        if 'series' in gaps and not found.get('series'):
-            series=series_attempt('wikidata',lambda:self._series_wikidata(title,author,stop,budget,result))
-            if series:found['series']=series
-            if not series:
-                series=series_attempt('publisher',lambda:self._series_publisher(title,author,stop,budget,result))
-                if series:found['series']=series
-            if not series:
-                series=series_attempt('litres',lambda:self._series_litres(title,author,stop,budget,result))
-                if series:found['series']=series
+            record=(series_attempt if wants_series else attempt)('wikidata',lambda:self._wikidata_book(title,author,partial,stop,budget,result))
+        # A work written in neither Russian nor English whose English title only Wikidata can give, and Wikidata did not
+        # answer now (closed, limited): the original-title gap is not filled yet, so the book waits for that answer too.
+        english_pending=needs_english and 'wikidata' in found['closed']
+        disagreed=False
+        if record and record.get('conflict'):
+            found['doubtful'].append({'provider':'wikidata','name':'','number':'','why':'source_conflict','source_url':''});record=None
+        if record:
+            entry=self._wikidata_catalog(record,title)
+            if not catalog and entry.get('language'):found['catalog']=catalog=entry
+            elif needs_english and entry.get('english_title') and entry.get('language')==catalog.get('language'):
+                # The same work in both sources (the title, the author and the language agree): Wikidata's English title.
+                found['catalog']=catalog=dict(catalog,english_title=entry['english_title'],english_source=entry['source_url'],english_provider='wikidata')
+                for key in ('author_latin','author_family','author_given'):
+                    if entry.get(key) and not re.search('[A-Za-z]',text(catalog.get(key))):catalog[key]=entry[key]  # FantLab names him in his own letters
+            own=wikidata_books.series(record)
+            if series and series.get('provider')!='wikidata' and own and not own.get('doubt') and own.get('number') \
+                    and not series_certainty.same_number(series.get('number'),own['number']):
+                # Two sources in hand number the book differently, and which source wins is not ruled: doubtful.
+                found['doubtful'].append({'provider':text(series.get('provider'))+', wikidata','name':text(series.get('name')),'number':text(series.get('number'))+' / '+text(own['number']),
+                                          'why':'sources_disagree','source_url':text(series.get('source_url'))})
+                series=None;disagreed=True
+            elif wants_series and own:series=certain(own)
+            elif series and own and not own.get('doubt') and own.get('name_english'):
+                # The series' English name comes from another source than the series itself: said so (A6).
+                series=dict(series,name_english=own['name_english'],name_provider='wikidata',name_url=text(own.get('source_url')))
+            # R1 for a series the book's own files name (its tags, its title tag, a folder): the series itself is the
+            # files'; its English name is Wikidata's when the work's one series statement has the files' number.
+            naming=naming_asked and text((found.get('catalog') or {}).get('language')) not in ('','ru')  # the language may be Wikidata's own answer
+            if naming and own and own.get('name_english') and series_certainty.judge(own,facts)['verdict']==series_certainty.CERTAIN:
+                found['series_english']={'name':series_spelling(own['name_english']),'provider':'wikidata','source_url':text(own.get('source_url'))}
+        if 'series' in gaps and not series and not disagreed:
+            series=certain(series_attempt('publisher',lambda:self._series_publisher(title,author,stop,budget,result)))
+            if not series:series=certain(series_attempt('litres',lambda:self._series_litres(title,author,stop,budget,result)))
+        if any(item.get('why')=='number_mismatch' for item in found['doubtful']):
+            # Ruling 74b's caution (Senua's review, r2), kept: a record that numbers this book differently may be another
+            # book, so nothing else this pass found is used either (its English title: «Хранители. Летопись первая» was
+            # offered as "The Two Towers"); the title stays as it is.
+            found.pop('catalog',None);series=None
+        if series:
+            # R1: the series is named by the same rule as the title (canonical_names.series_name).
+            name,rule=canonical_names.series_name(series,text((found.get('catalog') or {}).get('language')) or text(series.get('language')))
+            found['series']=dict(series,name=series_spelling(name),name_rule=rule)
         if 'author_full' in gaps and not found.get('catalog'):
             for source,function in (('openlibrary',self._gap_openlibrary),('googlebooks',self._gap_googlebooks),('itunes',self._gap_itunes)):
                 progress({'openlibrary':'Open Library','googlebooks':'Google Books','itunes':'iTunes'}[source],'Filling missing full author name')
                 name=attempt(source,lambda:function(title,author,stop,budget,result))
                 if name:found['author_full']=name;break
         unfilled=[]
-        if 'original_title' in gaps and not found.get('catalog'):unfilled.append('original_title')
+        if english_pending and found.get('catalog') and not found['catalog'].get('english_title'):found['english_pending']=True
+        if 'original_title' in gaps and (not found.get('catalog') or found.get('english_pending')):unfilled.append('original_title')
         if 'series' in gaps and not found.get('series'):unfilled.append('series')
+        # Open until a source says the work was written in Russian (nothing to name in English then) or gives the name.
+        if naming_asked and text((found.get('catalog') or {}).get('language'))!='ru' and not found.get('series_english'):unfilled.append('series_name')
         if 'author_full' in gaps and not (found.get('author_full') or found.get('catalog')):unfilled.append('author_full')
-        serves={'fantlab':{'original_title','author_full','series'},'wikidata':{'original_title','series'},'publisher':{'series'},'goodreads':{'series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'},'litres':{'series'}}
+        serves={'fantlab':{'original_title','author_full','series','series_name'},'wikidata':{'original_title','series','series_name'},'publisher':{'series'},'goodreads':{'series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'},'litres':{'series'}}
         goodreads_waited='goodreads' in found['closed']
         found['closed']=[source for source in found['closed'] if serves[source]&set(unfilled)]
         # Goodreads decides the series: a fallback answer still waits a little for it (gap deferral).
@@ -1765,35 +2082,71 @@ class PublicResearch:
         found['unfilled']=unfilled
         return found
 
+    @staticmethod
+    def _wikidata_catalog(record,title):
+        """A Wikidata work record (wikidata_books.book) as the catalog record research reads: the language, the original and
+        English titles, and the one author's names (with the family and given names Wikidata's own fields give, for the
+        folder's name order)."""
+        authors=record.get('authors') or []
+        one=authors[0] if len(authors)==1 else {}
+        order=record.get('author_order') or {}
+        return {'provider':'wikidata','work_id':'wikidata:'+record['work_id'],'source_url':record['source_url'],'language':record.get('language') or '',
+                'original_title':record.get('original_title') or record.get('english_title') or record.get('title_ru') or text(title),
+                'english_title':record.get('english_title') or '','title_native':record.get('title_ru') or '',
+                'author_native':text(one.get('name_ru')),'author_latin':text(one.get('name_en')),
+                'author_family':text(order.get('family')),'author_given':text(order.get('given'))}
+
+    def _wikidata_book(self,title,author,partial,stop,budget,result):
+        """0.31.0 step 2: the one written work Wikidata holds under this title by this author (wikidata_books.book: the
+        title, every credited author and "is a written work", never the title alone), or None; {'conflict': why} when two
+        works fit. Three requests (the search, its candidates, the items they point to), through the client: its cache,
+        the Wikimedia bounds and pauses. A fourth only for an author whose name order the app cannot tell, for Wikidata's
+        own family-name field (canonical_names.latin_order)."""
+        import wikidata_books,canonical_names
+        from local_identity import title_key
+        search=wikidata_books.search_url(title)
+        found=wikidata_books.search_ids(self.client.json(search,stop,budget))
+        if not found:return None
+        first=wikidata_books.entities_url(found)
+        candidates=wikidata_books.entities(self.client.json(first,stop,budget),found)
+        wanted=title_key(title)
+        exact={key:entity for key,entity in candidates.items() if wanted in {title_key(name) for name in wikidata_books.names(entity)}}
+        if not exact:return None
+        links=wikidata_books.related_ids(exact.values())
+        second=wikidata_books.entities_url(links) if links else ''
+        related=wikidata_books.entities(self.client.json(second,stop,budget),links) if links else {}
+        record=wikidata_books.book(exact,related,title,author,title_key,_name_matches,_people,partial)
+        if not record or record.get('conflict'):return record
+        authors=record['authors']
+        if len(authors)==1 and len(authors[0]['name_en'].split())>=2 and canonical_names.latin_order(authors[0]['name_en'])[1]==canonical_names.ORDER_UNKNOWN:
+            keys=list(dict.fromkeys(authors[0]['family_ids']+authors[0]['given_ids']))[:6]
+            if keys:
+                third=wikidata_books.entities_url(keys)
+                record['author_order']=wikidata_books.name_order(authors[0],wikidata_books.entities(self.client.json(third,stop,budget),keys))
+        for url in (first,second) if second else (first,):
+            self._gap_receipt(url,result,record['source_url'],['title','authors','original_title','original_language','series','number'])
+        return record
+
     # ------------------------------------------------------------ series (Sergei 2026-10-18)
 
     def _series_wikidata(self,title,author,stop,budget,result):
-        from local_identity import title_key
-        from public_work_identity import ids,names
-        from series_evidence import wikidata_series
-        language='ru' if re.search('[А-Яа-яЁё]',title) else 'en'
-        search='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbsearchentities','search':title,'language':language,'uselang':language,'type':'item','limit':5,'format':'json','maxlag':5})
-        data=self.client.json(search,stop,budget)
-        values=list(dict.fromkeys(r.get('id') for r in data.get('search',[])[:5] if isinstance(r,dict) and re.fullmatch(r'Q[1-9]\d{0,11}',str(r.get('id')))))
-        if not values:return None
-        receipts=[]
-        def entities(keys):
-            if not keys or len(keys)>40:raise ValueError('Series relationship bound')
-            url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbgetentities','ids':'|'.join(keys),'props':'labels|aliases|claims|info','languages':'en|ru|ja','format':'json','maxlag':5})
-            data=self.client.json(url,stop,budget)
-            if not isinstance(data,dict) or not isinstance(data.get('entities'),dict):raise ValueError('Malformed series entities')
-            records={key:e for key,e in data['entities'].items() if key in keys and isinstance(e,dict) and e.get('id')==key}
-            receipts.append(url);return records
-        works=entities(values)
-        exact=[w for w in works.values() if title_key(title) in {title_key(v) for v in names(w)}]
-        keys=list(dict.fromkeys(id for w in exact for prop in ('P50','P179') for id in ids(w,prop)))
-        related=entities(keys) if keys else {}
-        matches=[value for work in exact if (value:=wikidata_series(work,related,title,author,title_key,_same_people))]
-        if len(matches)>1:raise ValueError('Ambiguous series work identities')
-        if not matches:return None
-        found=matches[0]
-        for url in receipts:self._gap_receipt(url,result,found['source_url'],['title','authors','series','number'])
-        return found
+        """The series Wikidata's own record of this work names (0.31.0 step 2), as a candidate for series_certainty.judge,
+        or None when it knows no such work or the work is in no series. The work is matched by its title, every credited
+        author and its type (_wikidata_book), never by the title alone. Ruling R5: one source naming a series is enough,
+        so the statement needs no reference of its own any more (0 of 151 series came from the referenced-only adapter).
+        The candidate carries 'doubt' for the doubtful shapes Wikidata shows: two series on one book, a universe in place
+        of a series, two works that fit; a series named without a number has number ''."""
+        import wikidata_books
+        record=self._wikidata_book(title,author,False,stop,budget,result)
+        if not record:return None
+        if record.get('conflict'):return {'provider':'wikidata','name':'','number':'','doubt':'source_conflict','source_url':''}
+        return wikidata_books.series(record)
+
+    def series_verdict(self,candidate,title):
+        """The one rule (series_certainty.judge) for the series look-up of finished books (series_backfill.lookup): the
+        candidate a source's adapter returned, against the number the book's own title gives. Returns judge()'s answer."""
+        import series_certainty
+        return series_certainty.judge(candidate,{'volume':edition_volume(title)[1]})
 
     def _series_publisher(self,title,author,stop,budget,result):
         from local_identity import title_key
@@ -1909,6 +2262,9 @@ class PublicResearch:
         if not found:return None
         shown,names,series=found
         if title_key(shown)!=title_key(title) or not _same_people(author,names) or not series:return None
+        if len({text(entry[0]).casefold() for entry in series if text(entry[0])})>1:
+            # 0.31.0 (series_certainty): the book page lists the book in more than one series. Doubtful: never the first.
+            return {'provider':'goodreads','name':'; '.join(text(entry[0]) for entry in series if text(entry[0]))[:300],'number':'','doubt':'several_series','source_url':page}
         name,position=series[0]
         if not name or not re.fullmatch(r'[1-9]\d{0,3}',position):return None
         self._gap_receipt(page,result,page,['series','number'])
@@ -1937,19 +2293,35 @@ class PublicResearch:
         # three novels are its volumes; 2026-10-29, Tolkien). Its forewords and appendices are extras ("plus").
         chains=(work.get('parents') or {}).get('cycles') or []
         cycles=[chain[-1] for chain in chains if isinstance(chain,list) and chain and isinstance(chain[-1],dict) and chain[-1].get('work_type_id') in (4,13) and type(chain[-1].get('work_id')) is int]
-        if len(cycles)!=1:return None  # no cycle, or several unrelated ones
+        work_url='https://fantlab.ru/work'+str(work.get('work_id'))
+        if len(cycles)>1:
+            # 0.31.0 (series_certainty): the work sits in several unrelated cycles (FantLab's "conditional" cycles group
+            # books by their setting: «Оно» is in «Дерри» and «Касл-Рок»). Doubtful: never the first one.
+            return {'provider':'fantlab','name':'; '.join(text(c.get('work_name')) for c in cycles if text(c.get('work_name')))[:300],'number':'','doubt':'several_series','source_url':work_url}
+        if not cycles:return None
         api='https://api.fantlab.ru/work/'+str(cycles[0]['work_id'])+'/extended'
         cycle=self.client.json(api,stop,budget)
         if not isinstance(cycle,dict) or not isinstance(cycle.get('children'),list):raise ValueError('Malformed catalog cycle')
         numbered=[c for c in cycle['children'] if isinstance(c,dict) and c.get('deep')==1 and c.get('work_type_id')==work.get('work_type_id') and not c.get('plus')]
         position=next((index for index,child in enumerate(numbered,1) if child.get('work_id')==work['work_id']),None)
         # 0.30.0 item 6 (Sergei 2026-11-18): the series in the language it was written in ("Harry Potter", not «Гарри Поттер»).
+        # 0.31.0 (R1): the candidate also carries the cycle's Russian name and its language, for the one naming rule
+        # (canonical_names.series_name, applied where the sources are read).
         import canonical_names
-        name=text(canonical_names.series_original(cycle) or cycles[0].get('work_name'))
-        if not position or not name:return None
+        russian=text(cycles[0].get('work_name') or cycle.get('work_name'))
+        name=text(canonical_names.series_original(cycle) or russian)
+        if not name:return None
         citation='https://fantlab.ru/work'+str(cycles[0]['work_id'])
         self._gap_receipt(api,result,citation,['series','number'])
-        return {'provider':'fantlab','name':series_spelling(name),'number':str(position),'source_url':citation}
+        language=_language_code(cycle.get('lang_code'))
+        found={'provider':'fantlab','name':series_spelling(name),'number':str(position) if position else '','number_from':'counted' if position else '','source_url':citation,
+               'name_russian':series_spelling(russian),'language':language}
+        if language=='en' and name!=russian:found['name_english']=name
+        if any(marker in text(cycle.get('work_type_name') or cycle.get('work_type')).casefold() for marker in ('условный','вселенная','conditional','universe')):
+            found['doubt']='universe'  # a setting or a universe in place of a series
+        # R21: the number is counted from the cycle order. A work FantLab does not number (an extra, another kind of work)
+        # has none here; the book's own name may still give it (series_certainty).
+        return found
 
     def _gap_receipt(self,url,result,citation,fields):
         result['sources'].append(self.client.receipt(url)|{'url':citation,'api_url':url,'kind':'catalog_gap','verified_identity':False,'fields':fields})
@@ -1974,43 +2346,36 @@ class PublicResearch:
         if len(authors)!=1:return None
         native=text(authors[0].get('name'));latin=_latin_credit(authors[0].get('name_orig')) or text(authors[0].get('name_orig'))
         if not any(v and _name_matches(author,v,partial) for v in (native,latin)):return None
-        language={'jp':'ja'}.get(text(data.get('lang_code')),text(data.get('lang_code')))
+        language=_language_code(data.get('lang_code'))
         original=text(data.get('work_name_orig') or data.get('work_name'))
         if not original:return None
         citation='https://fantlab.ru/work'+str(ids[0])
         self._gap_receipt(api,result,citation,['original_title','original_language','author'])
-        return {'provider':'fantlab','work_id':'fantlab:'+str(ids[0]),'source_url':citation,'language':language if re.fullmatch('[a-z]{2,3}',language) else '',
-            'original_title':original,'title_native':text(data.get('work_name')),'author_native':native,'author_latin':latin}
+        # 0.31.0 (R1): the English title, where FantLab has it: the original itself for a work written in English, else
+        # the one English title its translations list (two different ones are not chosen between).
+        english=original if language=='en' and re.search('[A-Za-z]',original) and not re.search('[А-Яа-яЁё]',original) else ''
+        if not english and language not in ('','ru','en'):
+            listed=[]
+            for entry in data.get('translations') or []:
+                if isinstance(entry,dict) and entry.get('lang_code')=='en':
+                    for translation in entry.get('translations') or []:
+                        listed.extend(text(t.get('title')) for t in (translation.get('titles') or []) if isinstance(t,dict) and text(t.get('title'))) if isinstance(translation,dict) else None
+            listed=list(dict.fromkeys(listed))
+            if len(listed)==1 and re.search('[A-Za-z]',listed[0]) and not re.search('[А-Яа-яЁё]',listed[0]):english=listed[0]
+        return {'provider':'fantlab','work_id':'fantlab:'+str(ids[0]),'source_url':citation,'language':language,
+            'original_title':original,'english_title':english,'title_native':text(data.get('work_name')),'author_native':native,'author_latin':latin}
 
     def _gap_wikidata(self,title,author,partial,stop,budget,result):
-        from public_work_identity import ids,names,wikidata_work
-        from local_identity import title_key
-        language='ru' if re.search('[А-Яа-яЁё]',title) else 'en'
-        url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbsearchentities','search':title,'language':language,'uselang':language,'type':'item','limit':5,'format':'json'})
-        data=self.client.json(url,stop,budget);search=data.get('search') if isinstance(data,dict) else None
-        if not isinstance(search,list):raise ValueError('Malformed Wikidata search evidence')
-        found=list(dict.fromkeys(r['id'] for r in search[:5] if isinstance(r,dict) and re.fullmatch(r'Q[1-9][0-9]{0,11}',str(r.get('id','')))))
-        if not found:return None
-        def entities(values):
-            url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbgetentities','ids':'|'.join(values),'props':'labels|aliases|claims','languages':'en|ru|ja','format':'json'})
-            records=self.client.json(url,stop,budget).get('entities')
-            if not isinstance(records,dict):raise ValueError('Malformed Wikidata work evidence')
-            return {id:e for id,e in records.items() if id in values and isinstance(e,dict) and e.get('id')==id and all(isinstance(e.get(k,{}),dict) for k in ('labels','aliases','claims'))}
-        works=entities(found)
-        exact=[w for w in works.values() if title_key(title) in {title_key(v) for v in names(w)}]
-        if not exact:return None
-        links=list(dict.fromkeys(id for w in exact for prop in ('P50','P407','P31','P179') for id in ids(w,prop)))[:20]
-        related=entities(links) if links else {}
-        matches=[m for m in (wikidata_work(w,related,title,author,norm,lambda a,b:_name_matches(a,b,partial)) for w in exact) if m]
-        if len(matches)!=1:return None
-        match=matches[0];citation=match['source_url']
-        self._gap_receipt(url,result,citation,['series','original_title','original_language'])
-        author_names=match['authors'][0]
-        return {'provider':'wikidata','work_id':'wikidata:'+match['work_id'],'source_url':citation,'language':match['lang_code'],
-            'original_title':match['work_name_orig'],'title_native':match['work_name'],'author_native':text(author_names.get('name')),
-            'author_latin':text(author_names.get('name_orig')),'series':match.get('verified_series') or None}
+        """The catalog record of this work from Wikidata (0.31.0 step 2: _wikidata_book, matched by the title, every
+        credited author and its type), or None: {'provider', 'work_id', 'source_url', 'language', 'original_title',
+        'english_title', 'title_native', 'author_native', 'author_latin', 'author_family', 'author_given'}. Only a record
+        that says what language the work was written in is one."""
+        record=self._wikidata_book(title,author,partial,stop,budget,result)
+        if not record or record.get('conflict'):return None
+        entry=self._wikidata_catalog(record,title)
+        return entry if entry.get('language') else None
 
-    def _author_latin(self,title,author,stop,budget,result,folders=(),known=()):
+    def _author_latin(self,title,author,stop,budget,result,folders=(),known=(),also=()):
         """Ruling 39: the original-language name of a foreign author credited only in Cyrillic. In order: the Latin name
         the book's own folders or the library's filed authors give for a credit with a foreign first name (no request);
         this work's catalog records (FantLab's original name, Wikidata's), looked up by the title and, for an edition's
@@ -2029,7 +2394,9 @@ class PublicResearch:
             except (ValueError,TypeError,KeyError,AttributeError):return None
         local=_local_latin(author,folders,known)
         if local:return local
-        titles=list(dict.fromkeys(t for t in (title,edition_volume(title)[0]) if t))
+        # also: other titles the work may be known by (0.31.0: the part after the number of a name that only looks like
+        # "Series N. Title"; since R22 the title itself stays whole, and no catalog knows the whole name).
+        titles=list(dict.fromkeys(t for t in (title,edition_volume(title)[0],*[text(value) for value in also or ()]) if t))
         functions=[]
         for value in titles:
             functions.append(lambda value=value:self._gap_fantlab(value,author,False,stop,budget,result))
@@ -2044,9 +2411,12 @@ class PublicResearch:
             latin=text(entry.get('author_latin'))
             # The record already matched this work's author by the Cyrillic name (its native name) or the Latin one.
             if latin and local_identity.script(latin)=='latin':
-                original=text(entry.get('original_title'))
-                english=original if entry.get('language')=='en' and original and local_identity.script(original)=='latin' else ''
-                return {'state':'found','name':latin,'source_url':entry.get('source_url',''),'title':english}
+                # 0.31.0 step 3: the English title by the one title rule (any original language but Russian, R1), with the
+                # work's language, and what the record shows of the name's order (never a guess: canonical_names.latin_order).
+                import canonical_names
+                english,rule=canonical_names.book_title('',entry)
+                return {'state':'found','name':latin,'source_url':entry.get('source_url',''),'title':english if rule=='english' else '',
+                        'language':text(entry.get('language')),'original_title':text(entry.get('original_title')),'order':_order_evidence(entry)}
         for value in titles:
             found=attempt(lambda value=value:self._author_goodreads(value,author,stop,budget))
             if found:return found
@@ -2091,7 +2461,17 @@ class PublicResearch:
             if 'Q7737' in languages:return {'state':'russian','source_url':citation}
             latin=text((entity.get('labels') or {}).get('en',{}).get('value'))
             if latin and local_identity.script(latin)=='latin' and not re.search(r'[\d()]',latin):
-                return {'state':'found','name':latin,'source_url':citation,'title':''}
+                # 0.31.0 step 3: a name whose order the app cannot tell is ordered by the person's own family-name field
+                # (P734), one more request; without it the name stays as Wikidata writes it (never a guess).
+                import canonical_names,wikidata_books
+                order={}
+                if len(latin.split())>=2 and canonical_names.latin_order(latin)[1]==canonical_names.ORDER_UNKNOWN:
+                    person={'family_ids':wikidata_books.ids(entity,'P734'),'given_ids':wikidata_books.ids(entity,'P735')}
+                    keys=list(dict.fromkeys(person['family_ids']+person['given_ids']))[:6]
+                    if keys:
+                        try:order=wikidata_books.name_order(person,wikidata_books.entities(self.client.json(wikidata_books.entities_url(keys),stop,budget),keys))
+                        except (ResearchWait,ValueError,TypeError):order={}
+                return {'state':'found','name':latin,'source_url':citation,'title':'','order':order}
             return None
         return None
     def _author_goodreads(self,title,author,stop,budget):
@@ -2179,6 +2559,7 @@ class PublicResearch:
         return found
 
 SERIES_WHY={
+    'wikidata':'Series and position from the one series statement of the Wikidata work matching the locally agreed title, every credited author and its type as a written work (ruling R5, Sergei 2026-11-22: one source naming a series is enough).',
     'litres':'Series and explicit position on the canonical Litres book page matching the exact title and all credited authors; not the series total or retailer card order.',
     'goodreads':'Series and position from the Goodreads book record or explicit series entry, joined to the exact book id, title and all locally agreed authors (Sergei 2026-10-18: Goodreads is the series source).',
     'fantlab':'Series from the FantLab cycle holding the work matching the locally agreed title and author; FantLab gives no number, so the position is counted in the cycle order (Goodreads listed no series).'}
@@ -2186,7 +2567,14 @@ SERIES_WHY={
 def series_source(series):
     """Where the series and number came from, recorded on the metadata facts."""
     url=series.get('source_url','')
-    return {'provider':series.get('provider') or ('wikidata' if 'wikidata.org' in url else 'local' if not url else 'catalog'),'url':url}
+    found={'provider':series.get('provider') or ('wikidata' if 'wikidata.org' in url else 'local' if not url else 'catalog'),'url':url}
+    # 0.31.0 (A6): where the number came from ('source', 'counted' from FantLab's cycle order, 'names' or 'tags': the
+    # book's own, series_certainty.NUMBER_FROM) and which naming rule named the series (canonical_names.series_name).
+    # 'name_provider' (and 'name_url'): the source the series' English name came from, where that is another source than
+    # the one the series and its number came from (the files' own tags, or FantLab with Wikidata's English name).
+    for key in ('number_from','name_rule','name_provider','name_url'):
+        if series.get(key):found[key]=str(series[key])
+    return found
 
 GOODREADS_SERIES=re.compile(r'^(.*\S)\s*\(([^()]*\S),\s*#([^()]*)\)\s*$')
 
@@ -2406,17 +2794,46 @@ def _local_latin(author,folders=(),known=()):
         if len(found)>1:return None
     return None
 
-def _latin_surname_first(latin,credit):
-    """Ruling 33 for the Latin name a source gives a Cyrillic credit (ruling 39): surname first. A catalog writes it
-    "Given Surname"; when its first name is not one the app knows ("Lev Grossman"), the credit's own known first name
-    («Лев») shows the order, so a two-word name is turned around (Grossman Lev), never left as written."""
-    import local_identity
-    chosen,why=local_identity.surname_first(latin)
-    tokens=text(latin).split()
-    if why.startswith('kept as written (surname position') and len(tokens)==2 and len(text(credit).split())==2 \
-            and not local_identity.surname_first(credit)[1].startswith('kept as written'):
-        return tokens[1]+' '+tokens[0]
-    return chosen
+def _latin_surname_first(latin,credit,evidence=None):
+    """Ruling 33 for the Latin name a source gives a Cyrillic credit (ruling 39): surname first, on evidence only
+    (canonical_names.latin_order: the source's own family-name field, a first name the app knows, a Chinese name's own
+    order, or the credit in the files showing which word is the surname). evidence: {'family', 'given', 'language'} from
+    the record that named the author (_order_evidence). With no evidence the name stays as the source writes it. Until
+    0.31.0 a two-word name was turned around whenever the credit's own order was known, whichever way that was: "Liu
+    Cixin" (credit «Лю Цысинь», surname first) became "Cixin Liu"."""
+    import canonical_names
+    return canonical_names.latin_order(latin,credit,evidence)[0]
+
+
+def _order_evidence(catalog):
+    """What a catalog record shows of its author's name order: Wikidata's family and given names, and the work's language."""
+    catalog=catalog if isinstance(catalog,dict) else {}
+    return {'family':text(catalog.get('author_family')),'given':text(catalog.get('author_given')),'language':text(catalog.get('language'))}
+
+
+def _language_code(value):
+    """A source's language code as research records it: FantLab's own codes for Japanese and Chinese are 'jp' and 'cn'."""
+    code={'jp':'ja','cn':'zh'}.get(text(value).casefold(),text(value).casefold())
+    return code if re.fullmatch('[a-z]{2,3}',code) else ''
+
+
+def _held_lookup_fields(row,envelope,title,author):
+    """0.31.0 step 2: what the look-up before review found for a held row, from the record kept with it (the research
+    cache forgets an answer after seven days; a review-list row may wait longer for Sergei): the same shape as
+    retained_gap_fields, or None. Only the record of this very book (id, revision, fingerprint) made for the title and
+    author its row shows now."""
+    if not isinstance(envelope,dict) or any(envelope.get(key)!=row.get(field) for key,field in (('candidate_id','id'),('revision','revision'),('fingerprint','fingerprint'))):
+        return None
+    lookup=envelope['result'].get('lookup') if isinstance(envelope.get('result'),dict) else None
+    if not isinstance(lookup,dict) or lookup.get('policy')!=LOOKUP_POLICY or not isinstance(lookup.get('found'),dict) or not isinstance(lookup.get('asked'),dict):
+        return None
+    if (lookup['asked'].get('title'),lookup['asked'].get('author'))!=(text(title),text(author)):
+        return None
+    found=lookup['found']
+    if not found.get('catalog') and not found.get('series'):
+        return None
+    return {'catalog':copy.deepcopy(found.get('catalog') or {}),'series':copy.deepcopy(found.get('series') or {}),'closed':[],'unfilled':[],
+            'retained_sources':copy.deepcopy(found.get('receipts') or [])}
 
 
 def _latin_credit(value):
@@ -2545,6 +2962,23 @@ def _routing_member(result):
     return {'work_id': ids[0], 'authors': list(authors)}
 
 
+def _drop_doubtful_series(result, why):
+    """A series a source found turns out doubtful after the review was built (R25): take it out of the review, the facts,
+    the work and the evidence, and record what was dropped (metadata_facts gap_search 'series_doubt'), in place. The book
+    goes on without a series."""
+    review = result.get('review') or {}; facts = result.get('metadata_facts') or {}; work = result.get('work') or {}
+    found = work.get('verified_series') or {}
+    dropped = {'provider': text(found.get('provider')), 'name': text(review.get('series')), 'number': text(review.get('number')), 'why': why,
+               'source_url': text(found.get('source_url'))}
+    review['series'] = ''; review['number'] = ''
+    facts['series_state'] = 'omitted_unknown'
+    facts.pop('series_source', None)
+    search = facts.setdefault('gap_search', {}) if isinstance(facts.get('gap_search', {}), dict) else {}
+    search['series_doubt'] = (list(search.get('series_doubt') or []) + [dropped])[:6]
+    work['verified_series'] = {}
+    result['evidence'] = [item for item in result.get('evidence') or [] if not (isinstance(item, dict) and item.get('field') in ('series', 'number'))]
+
+
 def attach_shared_routing(result, peers=()):
     """Attach routing proof to newly accepted metadata, never to old job manifests.
 
@@ -2586,9 +3020,17 @@ def attach_shared_routing(result, peers=()):
             if _exact_people('; '.join(item['authors']), member['authors']) and _exact_people('; '.join(member['authors']), item['authors']):
                 item['authors'] = list(member['authors'])
             if item['work_id'] in members and item != members[item['work_id']]:
-                raise RoutingEvidenceError('Series membership has conflicting author credits. Confirm this book in Edit names.')
+                # R25 (Sergei 2026-11-22; it follows R22): the series' members carry conflicting author credits for one
+                # work. That series is doubtful, and a doubtful series is treated as not found: the book gets no series
+                # and goes on. It used to stop the book with 'Series membership has conflicting author credits. Confirm
+                # this book in Edit names.' Only a series a source found reaches here (a series he typed or saved has no
+                # source identity), so his own answers are never dropped.
+                _drop_doubtful_series(out, 'source_conflict')
+                sid = None
+                break
             members[item['work_id']] = item
-        series = {'id': sid, 'name': review['series'], 'basis': 'catalog', 'evidence': [sid], 'members': list(members.values())}
+        if sid:
+            series = {'id': sid, 'name': review['series'], 'basis': 'catalog', 'evidence': [sid], 'members': list(members.values())}
     # Exact Omen memberships confirmed on 2026-11-01 and 2026-11-02.
     omen = local_identity.CONFIRMED_OMEN_WORKS
     for number, title, author, _ in omen:

@@ -36,15 +36,15 @@ const shown=text=>assert.doesNotMatch(text,/Connection interrupted|Local server 
   run('pressTick('+(t0+2000)+')');assert.equal(get('connection-notice').textContent,'','under 3 s: nothing');
   run('pressTick('+(t0+4000)+')');
   assert.equal(get('connection-notice').hidden,false);
-  assert.equal(get('connection-notice').textContent,'The app is busy with background work and answers slowly. This page refreshes by itself.\nBusy with: Re-checking finished audiobooks, Metadata: Updating series: Dune, Researching books: Foo, Looking up book details: Bar.');
+  assert.equal(get('connection-notice').textContent,'The app is busy with background work and answers slowly. This page refreshes by itself.\nBusy with: Re-checking finished audiobooks, Finding series for finished audiobooks: Dune, Researching books: Foo, Finding English titles and author names: Bar.');
   assert.equal(get('status').textContent,'Last update '+clock+' · Discovery: idle · Files cataloged 5');
-  assert.match(get('jobs-status').textContent,/^Last confirmed — /);
+  assert.match(get('jobs-status-text').textContent,/^Last confirmed — /);
   run('pressTick('+(t0+150000)+')');
   assert.equal(get('connection-notice').textContent,'No answer for 2 min: the app is busy with background work. Your files are not touched. If it goes on, quit from the tray and open Books Arranger again.');
   assert.equal(run('recoveryDisconnected'),false,'no offline flag for a slow answer');
   // The first answer clears it.
   answer(ok({...backend,work:{rows:[],waiting:[],counts:{},unread:[]}}));await reading;await tick();
-  assert.equal(get('connection-notice').hidden,true);assert.equal(get('connection-notice').textContent,'');assert.doesNotMatch(get('jobs-status').textContent,/^Last confirmed/);
+  assert.equal(get('connection-notice').hidden,true);assert.equal(get('connection-notice').textContent,'');assert.doesNotMatch(get('jobs-status-text').textContent,/^Last confirmed/);
   // Without named passes there is no second line.
   stateAnswer=()=>new Promise(resolve=>{answer=resolve;});const again=run('refresh()'),t1=Date.now();run('pressTick('+(t1+5000)+')');
   assert.equal(get('connection-notice').textContent,'The app is busy with background work and answers slowly. This page refreshes by itself.');

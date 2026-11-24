@@ -553,6 +553,44 @@ class QueueTests(unittest.TestCase):
         self.assertIsNone(self.queue.item_blocker({'action': 'cleanup', 'book_id': own, 'args': {'job_id': own}}))
         self.assertEqual(self.queue.blocker('cleanup', other), 'jobs')
 
+    def test_r35_a_move_that_waits_for_its_own_book_holds_no_other_books_action_p8(self):
+        # 0.31.0 R35 (Senua's 0.31.0 delta 2, M6, her probe P8): his Choose folder… waits while the app writes its book
+        # (MergeService.rewriting). The queue looked only at its head and gave every action behind it the head's blocker,
+        # so a Retry of another book waited with it ("this book's processing", the wrong book). Now the move keeps its place
+        # and its own blocker, and the first action nothing holds runs.
+        merge, writing, ran = self.server.merge, {'his': True}, []
+        merge.rewriting = lambda move_id: writing.get(move_id, False)
+        merge.answers = {'retry': {'job_id': self.job[1]}}
+        self.server.run_queued = lambda item: ran.append(item['args']['move_id']) or {'result': 'done'}
+        his = self.queue.enqueue('move', self.book[0], 'Book 0', {'move_id': 'his'})
+        self.assertEqual(his['blocker'], {'kind': 'book'})
+        other = self.retry(1)
+        self.assertIsNone(other['blocker'], 'nothing holds the Retry of another book (was: the head move\'s "book")')
+        self.assertTrue(until(lambda: [name for name, _ in merge.calls] == ['retry']), 'the Retry ran while his move waits')
+        with self.assertRaises(ValueError):
+            self.retry(0)  # his own book's row has its queued action (one per row, Judy 1.1)
+        self.assertEqual([(item['action'], item['blocker']['kind']) for item in self.queue.view()['queued_actions']], [('move', 'book')],
+                         'his move keeps its place, waiting for its own book')
+        self.assertEqual(ran, [])
+        writing['his'] = False  # the write has ended
+        self.assertTrue(until(lambda: ran == ['his']), 'then it runs')
+        self.assertEqual(self.queue.view()['queued_actions'], [])
+
+    def test_r35_control_an_action_of_the_waiting_moves_book_stays_behind_it(self):
+        # A join that takes his book in waits behind his move ('book'), as every action of a book its move waits for.
+        merge, writing = self.server.merge, {'his': True}
+        merge.rewriting = lambda move_id: writing.get(move_id, False)
+        self.server.run_queued = lambda item: {'result': 'done'}
+        self.queue.enqueue('move', self.book[0], 'Book 0', {'move_id': 'his'})
+        item = {'id': 'join', 'action': 'join', 'book_id': self.book[2], 'title': 'Join', 'args': {'items': [{'id': self.book[2]}, {'id': self.book[0]}]},
+                'queued_at': time.time(), 'blocker': None}
+        with mock.patch.object(action_queue.ActionQueue, 'item_blocker', lambda queue, entry, held=0: 'book' if entry['action'] == 'move' and writing['his'] else None):
+            with self.queue.lock:
+                self.queue.items.append(item)  # queued behind his move (a press would be refused: it holds his book's row)
+                self.queue.changed.notify_all()
+            time.sleep(.2)
+            self.assertEqual([(entry['action'], entry['blocker']['kind']) for entry in self.queue.view()['queued_actions']], [('move', 'book'), ('join', 'book')])
+
 
 class PersistentQueueTests(unittest.TestCase):
     """0.30.0 (Sergei, Q4: remember): the waiting actions are kept in a private catalog and come back at the next start."""
@@ -731,6 +769,29 @@ class PersistentQueueTests(unittest.TestCase):
         queue = ActionQueue(server, poll=.02); self.addCleanup(queue.close)
         return server, queue
 
+    def crash(self, queue):
+        """The session behind this queue ends without closing, as a crashed or ended process does: nothing of it saves or runs
+        from here on, and the saved queue stays as its last press left it, with no clean-close stamp.
+
+        A stand-in left alive is not a crashed session. Its worker looks every 20 ms; when it looked while the press's own
+        save was still under way it began a save of the same press (the retry of an unfinished save), and on a loaded machine
+        that save could land after the next launch had dropped the saved queue. The test then read back a press the launch
+        under test had not saved (1 gate run in several; 8 of 240 runs of this module under load on 0.30.1). In the app the
+        session that saved the queue is another process and is gone; within one queue an older save never lands over a
+        newer one (_persist's versions under its save lock)."""
+        class Gone:  # what a dead session still writes: nothing
+            def save(self, *_args, **_kwargs):
+                pass
+        with queue._save_lock:  # a save under way has landed, and none begins before the store is gone
+            queue.store = Gone()
+        with queue.lock:
+            queue.closed = True  # its worker ends at its next look; nothing waiting is run
+            queue.changed.notify_all()
+            thread = queue.thread
+        if thread is not None:
+            thread.join(5)
+            self.assertFalse(thread.is_alive(), 'the stand-in for the crashed session is dead before the next launch')
+
     def test_a_queue_saved_before_another_versions_session_crashed_is_dropped_with_an_outcome(self):
         # m6: the stale check read only the shutdown record, which a session that crashed or was ended never writes. The
         # ownership record it left behind (retired at the next start) names it.
@@ -743,7 +804,9 @@ class PersistentQueueTests(unittest.TestCase):
                 server, queue = self.launch(mine, '0.30.0')
                 queue.restore()
                 server.scanning = True
-                self.press(queue, 0)  # saved; no clean close: the session crashes
+                self.press(queue, 0)  # saved
+                self.crash(queue)  # no clean close: the session is gone
+                self.assertEqual((self.saved(), self.closed_at()), ([('retry', self.book[0])], None), 'what it left behind: its press, and no clean-close stamp')
                 later, again = self.launch('c' * 32, '0.30.0', previous)
                 later.scanning = True
                 self.assertEqual(again.restore(), kept)

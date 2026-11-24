@@ -1,5 +1,43 @@
 # Changelog
 
+## [v0.31.0] - 2026-11-23
+
+### Added
+
+- An All done badge and the window title show when nothing is left to do, background look-ups included.
+- Series name and number are read from the file's own tags.
+- A book is looked up online before review. It waits a few tries for the answer, then converts with the names from its files.
+- A translated book is filed under its English title and English series name. Its row says where each came from.
+- Finished audiobooks are renamed and moved by the rules, with no approval step. A notice shows how many are left.
+- "Renamed or moved by the app" lists every such change: where the book was, where it is now, and why.
+- "Could not be renamed or moved" lists the books that stay where they are, each with its reason.
+
+### Changed
+
+- A volume the app separated is named from its own title tag. So is a file whose title tag reads "Series NN - Title", such as Neuromancer.
+- Two books never share one name. When they would, both are held.
+- The series look-up and the look-up for English titles and author names each end after 3 tries per source.
+- Background look-ups are named in plain words.
+- A doubtful series is treated as not found. The app no longer asks about a series.
+- A move the app queued has no Cancel. Choose folder… works again once the book has moved.
+- A book whose question was withdrawn no longer shows as Held before Start.
+- An English title, or an author's name put in order, is written inside the finished file's tags and into the app's list, not only into its name and folder. The audio is not changed.
+
+### Fixed
+
+- Choose folder… while a book's new names are written into its file no longer leaves a book the app cannot find. No file is lost.
+- The same holds while a book's series is written into its file.
+- A series found before 0.31.0 is looked up again before the app renames or moves a book by it. Until then the book stays as it is.
+- Choose folder… pressed after the app has recorded a book's rewrite now wins: the book moves to the folder you chose. The app's own move no longer cancels it.
+- After Stop automatic processing, the status line and the window title say Paused at once.
+- A source that only answers with a human check (through DuckDuckGo) counts as nothing found at once, so it no longer holds back All done for 12 hours.
+- Choose folder… pressed while the app rewrites a book waits for the rewrite itself, then moves the book to the folder you chose. It never fails as "in use". The rewritten file is the one that moves, unless the rewrite and the move start at the same instant: then the rewrite steps aside and the book moves as it was.
+- Choose folder… no longer waits for Start, for a conversion to end or for the app's next ten-minute check when a Quit or a crash cut a rewrite of the book short. A rewrite cut short is finished or undone about two minutes after the next start, even under Pause, and the move then runs. A move that waits for its own book no longer holds up actions queued for other books.
+- A rewrite that finishes while the app checks unfinished moves at startup is kept when a Choose folder… waits for it. It was thrown away, and the book moved as it was.
+- Choose folder… pressed during a rewrite is no longer cancelled by the app's own move when a check of the book fails for a moment. The app asks again at its next check.
+- A book the app rewrote (its series, English title or author's name written into the file) stays in Audiobook Ready after its rename or move, with Now in, Choose folder… and its place in the converted count. It read as Pending, from its source folder, even after a restart. 0.30's approved series moves did the same.
+- Nothing that can never finish holds back All done. A folder that cannot take the book's new name is refused once, with its reason, and an old series hold on a book converted again is no longer counted as a look-up.
+
 ## [v0.30.1] - 2026-11-20
 
 ### Fixed

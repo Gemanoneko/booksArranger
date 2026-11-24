@@ -19,7 +19,7 @@ function askRow(name,ask,extra={}){
     automatic:{state:'Held',reasons:['Title or author missing']},creation:{status:'Held',can_create:false,reasons:[]},source_directory_count:1,ask,...extra};
 }
 const dest=p=>({path:p,absolute:ROOT+'\\'+p,taken:false,reason:''});
-const scp=askRow('a',{kind:'title_author',also:null,why:'title_series',odd_name:true,reasons:['Title or author missing'],fields:{title:{proposal:'Пртоколы SCP. Сейф №1',basis:'tag'},author:{proposal:'Разные авторы',basis:''}},candidates:[],
+const scp=askRow('a',{kind:'title_author',also:null,why:'title_latin',odd_name:true,reasons:['Title or author missing'],fields:{title:{proposal:'Пртоколы SCP. Сейф №1',basis:'tag'},author:{proposal:'Разные авторы',basis:''}},candidates:[],
   destination:dest('Сборники\\Пртоколы SCP. Сейф №1 - Разные авторы.m4b')},{place:{universe:'',series:'',number:'',collection:true},entered:[]});
 const other=askRow('b',{kind:'title_author',also:null,why:'author_missing',reasons:['Title or author missing'],fields:{title:{proposal:'Тайна',basis:'tag'},author:{proposal:'Иван Петров',basis:'tag'}},candidates:[],destination:dest('Петров Иван\\Тайна - Петров Иван.m4b')});
 const stopped={...askRow('c',null),ask:undefined,automatic:{state:'Needs attention',reasons:[]},place:{universe:'',series:'Протоколы SCP',number:'2',collection:true},entered:['series','number'],
