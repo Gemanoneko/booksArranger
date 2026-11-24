@@ -666,7 +666,9 @@ class ColdServePendingPageTests(unittest.TestCase):
         code,desktop=self.call('/api/desktop/status');self.assertEqual(code,200)
         self.assertIsNone(desktop['busy']);self.assertFalse(desktop['loading']['parts']['books'])
         self.assertEqual(self.workers,1);self.assertEqual(self.background,[])
-        self.release.set();self.server.loader.join(10)
+        # 0.31.1: the loader ends once the first status after loading has an answer (BrowserServer._first_status); on 669
+        # rows that computation takes seconds, more under the gate's parallel load.
+        self.release.set();self.server.loader.join(60)
         self.assertTrue(self.server.loading.finished,self.server.loading.error)
         self.assertEqual(self.workers,1,'retry must join the same expensive page read')
         code,desktop=self.call('/api/desktop/status');self.assertEqual(code,200);self.assertIsInstance(desktop['loading']['took_ms'],int)
