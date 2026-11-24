@@ -319,3 +319,28 @@ Sergei explicitly requested logging only: no investigation, implementation, test
 ## Backlog after 0.31.0 (Sergei, 2026-11-24)
 
 - **An occasional Goodreads human check holds back "All done" for about 6 hours** (Futaba 0.31.0 r2 M1, shipped as a known issue). Sergei: "Yes. Next version." Constraint from Senua's 0.31.0 delta3 M7/M8: the fix must not file a book whose series only Goodreads knows with no series for good (the reverted R32 extension did that). See the 0.31.0 Scope R32 and [Senua's delta3](BooksArranger_CodeReview_v0.31.0_delta3_2026-11-24.md).
+
+## Ruling 27, restated — Sergei, 2026-11-24 (0.31.2)
+
+- **An update is never cancelled by the app.** Sergei, on the 0.31.2 Install line "Update cancelled: an action did not stop in time (tried 22:19)": "Didn't I explain you a few times already that the update can't be 'cancelled'?" The same thing happened on 0.24.4 (Session_2026-11-02_Recap). Ruling 27 ("Updater must not fail") was built as "the bound runs out → undo the update and say cancelled", which is exactly what Sergei does not want. Once Restart to update is pressed, the update goes through: work that does not stop in time is stopped, and the app installs and reopens. No "Update cancelled" line from a bound. How it stays safe for a critical file change is Ender's to propose; the wording is Judy's.
+- **Sergei, 2026-11-24:** the fix ships as the next version (0.31.3). Ender diagnoses first (read-only), then proposes; Sergei approves the proposal before the build.
+- **Ender's read-only diagnosis (2026-11-24):**
+  - **Likely cause:** one of the app's own rule moves was still running when Restart to update was pressed. That move has no stop flag (`merge_service.py:7160-7162`; `book_move.py:716`, `:795`). The engine's 150 s bound (`desktop_backend.py:535-536`) then undid the update.
+  - **Cancel paths:** there are eleven; all are listed in Ender's report.
+  - **Proposal:**
+    - check the installer before anything stops;
+    - give every action a stop flag, then force the stop and install;
+    - remove the bound/blocked/error undo branches;
+    - remove the Cancel update button;
+    - Judy rewrites the lines.
+  - **Open for Sergei:**
+    1. Critical file change: (A) wait up to 300 s, then force-stop and rely on recovery, or (B) no limit. Ender recommends A.
+    2. Remove Cancel update entirely, or keep it only until stopping begins.
+    3. Installer blocked (antivirus or UAC): keep "run it yourself", or retry once, then open the folder.
+    4. Save the shell's update log to `I:\Books Arranger\Logs`.
+  - **Separately seen:** a half-finished name write is still next to its original in `Z:\Audiobooks Sorted\Orson Scott Card\Сага теней\` (`.books-arranger-names-5c47e451-….m4b`).
+- **Sergei's answers (2026-11-24), 0.31.3 scope:**
+  1. A critical file change is waited for **up to 5 minutes**, then force-stopped and repaired by recovery at the next start.
+  2. **Remove the Cancel update button** completely.
+  3. **Keep** "the old app reopens and asks you to run the installer yourself" when antivirus or UAC blocks the installer.
+  4. **Yes**: save the shell's update log to `I:\Books Arranger\Logs`.
