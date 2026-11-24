@@ -32,6 +32,8 @@ import groups
 INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd-93ab-85e5b0fbeea7'}
 STATUS_MAX_AGE=1.0 # Seconds after a status computation STARTED during which polling readers may reuse it.
 STATUS_WAIT=4.0 # Seconds a reader waits on another thread's computation; below the desktop shell's 5 s request timeout.
+RELINK_SHOW_MS=600000  # 0.31.1 (Judy's stuck-load spec, 8.1): finished books found again show in the status line this long
+RELINK_INDEX_SECONDS=300.0  # 0.31.1: one listing of the output folder serves every missing book of a check pass this long
 STALE_WAIT=0.5 # Seconds a poll waits for a newer status when an earlier answer exists; then it gets that answer.
 CLOSE_READS=2.0 # Seconds close waits, in all, for read-only work (status computations, book pages, lookups) before it goes on.
 CATALOG_MAX_AGE=60.0 # Seconds catalog facts (cleanups, Ready totals) are reused per catalog version while no cleanup runs.
@@ -267,6 +269,7 @@ class MergeService:
         self.jobs = AudioJobs(inventory.database, self._run, self._guard, self._output_valid,self.retirement.historical_retired)
         self.jobs.reuse_validator=self._reuse_output_valid
         self.jobs.output_current=self._output_current;self.jobs.verify_pace=self._pacer
+        self.jobs.relink=self._relink_found  # 0.31.1: a finished book moved by hand is found again, never flagged
         self.jobs.background_stop=_Flag(lambda:bool(self.__dict__.get('_maintenance_paused') or self.__dict__.get('_foreground_waiters',0) or self.__dict__.get('_closing') or self.draining or self.inventory.worker and self.inventory.worker.is_alive() or self._worker_active() or self.__dict__.get('_update_hold') is not None and self._update_hold.is_set()))
         self.retirement.stop=self.jobs._stop
         self.jobs.pending_postprocessing=self._pending_replacement_postprocessing
@@ -5849,6 +5852,129 @@ class MergeService:
         except (ValueError,OSError,KeyError):pass
         return self._output_valid(record,stop,pace)
 
+    # ── 0.31.1 (Sergei 2026-11-24): a finished book moved by hand is found again ──────────────────────────────────────
+    def _relink_found(self, record, stop=None, pace=None):
+        """The published-book check could not confirm this finished book (AudioJobs._published_done). When its file is gone
+        from where the app last had it, the output folder is searched for it: a file of the same name in any folder under the
+        output root (one listing, reused by the pass), the file ID and size the app last recorded for it (cheap metadata),
+        then its full SHA-256 against the receipt, on a held handle. Exactly one such file: its location is recorded as a
+        completed move of origin 'found' (book_move.found), so every later step uses it, and its identity is remembered as
+        after a full check. A name alone is never enough (refused, never guessed): no recorded file ID, none or several
+        matches change nothing; one line in the engine's log. True when a new location was recorded."""
+        import book_move
+        try:
+            if not isinstance(record,dict) or not all(isinstance(record.get(k),str) and record[k] for k in ('job_id','final_path','sha256')) or type(record.get('size')) is not int:
+                return False
+            bindings=getattr(self,'publication_bindings',None)
+            effective=bindings.current(record)[0] if bindings else copy.deepcopy(record)
+            old=ordinary(effective['final_path'])
+            if os.path.lexists(old):return False  # it is there: changed or unreadable, never looked for elsewhere
+        except InterruptedError:raise
+        except (ValueError,OSError,KeyError,TypeError,sqlite3.Error):return False
+        output_root=getattr(self.inventory,'output_root',None)
+        known=self._known_identity(old,effective['sha256'])  # [dev, ino, size, mtime] at its last full check, if any
+        native=effective.get('identity')
+        if not output_root or not (isinstance(known,list) and len(known)>=2) and not native:
+            self._relink_log('not at its recorded path; no file ID recorded to look for it by',old);return False
+        try:
+            matches=self._relink_matches(ordinary(output_root),old,effective,known,native,stop,pace)
+        except InterruptedError:raise
+        except (OSError,ValueError) as error:
+            self._relink_log('not at its recorded path; the output folder could not be searched ('+(str(error) or type(error).__name__)+')',old);return False
+        if len(matches)!=1:
+            self._relink_log('not at its recorded path and not found again' if not matches else 'not at its recorded path; %d files match it, none chosen'%len(matches),old)
+            return False
+        found=matches[0];stat_identity=found.pop('stat_identity')
+        try:
+            with connect(self.inventory.database) as db:
+                db.execute('BEGIN IMMEDIATE')
+                from publication_binding import PublicationBindings
+                exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='output_relocations'").fetchone()
+                kind=PublicationBindings._kind(db,record,exists)
+                now,_=bindings.lookup(db,record,kind) if bindings else (record,None)
+                if not book_move.same_location(book_move.location(now),book_move.location(effective)):return False  # moved meanwhile
+                job=db.execute("SELECT json_extract(manifest,'$.candidate_id') FROM audio_jobs WHERE job_id=?",(record['job_id'],)).fetchone()
+                if not job or not job[0]:return False
+                book_move.found(db,job_id=record['job_id'],kind=kind,candidate_id=job[0],start=effective,final=found,
+                                proof={'found':{'matched':['name','file_id','size','sha256'],'file_id':list(known[:2]) if isinstance(known,list) else None,
+                                                'native_identity':list(native) if native else None,'searched':str(output_root)}})
+        except (sqlite3.Error,ValueError,KeyError) as error:
+            self._relink_log('found again but its new location could not be recorded ('+(str(error) or type(error).__name__)+')',old);return False
+        self._remember_identity(dict(found,job_id=record['job_id']),stat_identity)  # the hash above was a full check
+        with _WORKING_LOCK:
+            last=self.__dict__.get('_relinked_last');at=time.monotonic()
+            count=1 if last is None or (at-last)*1000>=RELINK_SHOW_MS else self.__dict__.get('_relinked_count',0)+1
+            self._relinked_count,self._relinked_last=count,at
+        self._relink_log('found again after a move outside the app; now '+found['final_path'],old)
+        return True
+
+    def _relink_matches(self, root, old, effective, known, native, stop=None, pace=None):
+        """The files under root that are this book: the same name (NFC, case-insensitive), not its old path, a regular file
+        of its size with the file ID recorded for it (os.stat's, as verified_outputs keeps it, and the native identity
+        when the record has one), then on a held handle in a checked folder chain: one link, the size, the full SHA-256."""
+        import stat as stat_module,unicodedata,book_move
+        name=unicodedata.normalize('NFC',old.name).casefold();found=[]
+        for path in self._output_files(root,stop).get(name,()):
+            if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
+            if book_move.key(path)==book_move.key(old):continue
+            try:
+                info=os.stat(path,follow_symlinks=False)
+                if not stat_module.S_ISREG(info.st_mode) or info.st_size!=effective['size']:continue
+                if isinstance(known,list) and len(known)>=2 and [info.st_dev,info.st_ino]!=list(known[:2]):continue
+                final=ordinary(path)
+                with DirectoryBoundary(root,final.parent) as boundary,VerifiedFile(final) as handle:
+                    facts=handle.facts()
+                    if facts['links']!=1 or facts['size']!=effective['size']:continue
+                    if native and list(facts['identity'])!=list(native):continue
+                    if verify_digest(final,stop,pace)!=effective['sha256']:continue
+                    found.append({'root':str(root),'final_path':str(final),'sha256':effective['sha256'],'size':effective['size'],
+                                  'parent_identity':[list(item) for item in boundary.identities],'identity':list(facts['identity']),
+                                  'stat_identity':file_identity(final)})
+            except InterruptedError:raise
+            except (OSError,ValueError):continue  # unreadable or changed meanwhile: not this book
+        return found
+
+    def _output_files(self, root, stop=None):
+        """{NFC case-folded file name: [paths]} of the .m4b files in every folder under root (no links, junctions, hidden or
+        system folders, recycle bins), listed once and reused for RELINK_INDEX_SECONDS: one listing serves a whole pass."""
+        import unicodedata,book_move
+        with _WORKING_LOCK:
+            kept=self.__dict__.get('_relink_index')
+            if kept and kept[0]==book_move.key(root) and 0<=time.monotonic()-kept[1]<RELINK_INDEX_SECONDS:return kept[2]
+        if not os.path.isdir(root):raise OSError('The output folder is not available')
+        index={};pending=[str(root)]
+        while pending:
+            if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
+            try:entries=list(os.scandir(pending.pop()))
+            except OSError:continue
+            for entry in entries:
+                try:
+                    if entry.is_symlink() or getattr(entry,'is_junction',lambda:False)():continue
+                    if entry.is_dir(follow_symlinks=False):
+                        attributes=getattr(entry.stat(follow_symlinks=False),'st_file_attributes',0)
+                        if entry.name[:1] in '#@.$' or attributes&0x6:continue  # #recycle, @eaDir, .Trash, $RECYCLE.BIN; hidden, system
+                        pending.append(entry.path)
+                    elif entry.name.lower().endswith('.m4b') and entry.is_file(follow_symlinks=False):
+                        index.setdefault(unicodedata.normalize('NFC',entry.name).casefold(),[]).append(entry.path)
+                except OSError:continue
+        with _WORKING_LOCK:self._relink_index=(book_move.key(root),time.monotonic(),index)
+        return index
+
+    @staticmethod
+    def _relink_log(what,path):
+        """One line in the engine's own log (Judy's spec, 8.3: never sent to the page)."""
+        import sys
+        try:print('Books Arranger: published-book check: finished book '+what+' (was '+str(path)+')',file=sys.stderr,flush=True)
+        except Exception:pass
+
+    def relinked_view(self):
+        """{count, last_age_ms} for the page's status line (Judy's spec, 8.4): finished books found again since the current
+        burst began (back to 0 after RELINK_SHOW_MS without a find); the age is an age, never a clock time."""
+        with _WORKING_LOCK:last=self.__dict__.get('_relinked_last');count=self.__dict__.get('_relinked_count',0)
+        if last is None:return {'count':0,'last_age_ms':None}
+        age=max(0,round((time.monotonic()-last)*1000))
+        return {'count':count if age<RELINK_SHOW_MS else 0,'last_age_ms':age}
+
     def _identity_current(self, record):
         bindings=getattr(self,'publication_bindings',None)
         lease=bindings.protect(record) if bindings else contextlib.nullcontext((record,None))
@@ -6841,6 +6967,7 @@ class MergeService:
         try:
             with connect(self.inventory.database) as db:
                 moves=book_move.latest(db,ids)
+                relinks=book_move.relinks(db,ids)  # 0.31.1: each book's last find after a move by hand (its Technical details)
                 completed={}
                 if ids and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():
                     marks=','.join('?' for _ in ids)
@@ -6853,7 +6980,7 @@ class MergeService:
                 job=completed.get(row.get('id'))
                 lives[row.get('id')]=destination_overrides.live_in(records,book_key=entered_names.book_key(row),job_id=job[0] if job else None)
         except sqlite3.Error:
-            for row in rows:row.setdefault('destination_override',None);row.setdefault('move',None);row.setdefault('output',None)
+            for row in rows:row.setdefault('destination_override',None);row.setdefault('move',None);row.setdefault('output',None);row.setdefault('relinked',None)
             return
         for row in rows:
             current=row.get('current_audiobook') or {}
@@ -6865,6 +6992,7 @@ class MergeService:
             move=book_move.view(found,unfinished=self._unfinished_move(found))  # ruling 73k: not running is 'unfinished'
             if move and move['state']=='moving' and move['move_id'] in progress:move['progress']=progress[move['move_id']]
             row['move']=move
+            row['relinked']=relinks.get(row.get('id'))
             if move and move['state']=='unfinished' and move['cause']=='renamed':
                 # Senua 0.24.0 D1r3 (Judy): the renamed file is the only one, in the new folder; the catalog names the old
                 # path (gone) until recovery proves it, so the converted check and describe() read the book unavailable.

@@ -814,6 +814,8 @@ class BrowserServer(ThreadingHTTPServer):
             'needs_you_only': needs_you_only(jobs, automatic, rows, active, queue),
             # 0.30.0 (Sergei 2026-11-18, Judy's spec): every running job and everything waiting (background_work).
             'work': background_work.view(self, jobs, automatic, queue, active, scan, sources.get('library_roots'), self.__dict__.setdefault('_work_started', {})),
+            # 0.31.1 (Judy's stuck-load spec, 8.4): finished books found again after a move by hand, for the status line.
+            **({'relinked': self.merge.relinked_view()} if callable(getattr(self.merge, 'relinked_view', None)) else {}),
             # 0.29.0 item 1 (Judy section 1): each library root's state and the last check pass's report.
             **sources}
 

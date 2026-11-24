@@ -1427,7 +1427,7 @@ function renderJobs(){
   const shown=shownRows(work,now);
   // 0.31.0 (1.2, 1.3): the badge is the first thing in #jobs-status, the parts follow it. No badge while the last answer is
   // only "last confirmed" (the engine is not answering now). From 30 s the as-of time follows the badge as plain text.
-  const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge);
+  const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge,stale?null:state?.relinked);
   renderBadge(badge);renderWindowTitle(windowTitleState(jobs,work,shown,badge,stale));
   text('jobs-status-text',(stale?'Last confirmed — ':'')+(badge?(asOf?asOf:'')+(parts.length?' · ':''):'')+parts.join(' · '));
   renderActivities(shown,jobs,unread,asOf);renderWaitingList(work);renderHold(heldRows(jobs));renderFiling(work);renderFreshness(now);renderUnread(unread);renderSourceCheck();
@@ -1440,7 +1440,14 @@ function renderJobs(){
 }
 // The status line (sections 1.3, 3 and 4): what runs, then the split counts. Three numbers, three phrases: books waiting to
 // convert, cleanups paused or waiting, actions waiting (work.counts); jobs.queued is never read (it adds them together).
-function statusParts(jobs,work,shown,counts,asOf,badge=null){
+// 0.31.1 (Judy's stuck-load spec, 8.1): finished books moved by hand and found again, for 10 minutes after the latest find.
+const RELINK_SHOW_MS=600000;
+function relinkedPart(relinked){
+  const count=Number.isInteger(relinked?.count) && relinked.count>0?relinked.count:0,age=Number(relinked?.last_age_ms);
+  if(!count || !Number.isFinite(age) || age>=RELINK_SHOW_MS)return '';
+  return `${plural(count,'moved book','moved books')} found, new location${count===1?'':'s'} saved`;
+}
+function statusParts(jobs,work,shown,counts,asOf,badge=null,relinked=null){
   const c=work.counts,n=key=>Number.isInteger(c?.[key]) && c[key]>0?c[key]:0,paused=n('cleanups_paused'),waiting=n('cleanups_waiting');
   const cleanup=paused && waiting?`Cleanup paused for ${plural(paused,'book','books')}, waiting for ${waiting.toLocaleString()}`:paused?`Cleanup paused for ${plural(paused,'book','books')}`:waiting?`Cleanup waiting for ${plural(waiting,'book','books')}`:'';
   // 0.31.0 (1.3): the badge or the first part; "N on hold" its own part after it when nothing runs; the background
@@ -1454,7 +1461,7 @@ function statusParts(jobs,work,shown,counts,asOf,badge=null){
     n('actions_waiting')?plural(n('actions_waiting'),'action','actions')+' waiting':'',`${attentionTotal(jobs)} need attention`,
     counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books${badge?'':asOf}`:'Approved book progress unavailable',
     n('retry_checks_waiting')?`${n('retry_checks_waiting')} waiting for retry checks`:'',
-    lookups?`${plural(lookups,'background look-up','background look-ups')} left`:''].filter(Boolean);
+    lookups?`${plural(lookups,'background look-up','background look-ups')} left`:'',relinkedPart(relinked)].filter(Boolean);
 }
 // 0.29.0 (Sergei 2026-11-17; Judy section 7): the jobs line starts with what is running, in plain words; a held item is never
 // counted as running; the queue worker's own momentary state word ("Running") is not shown. 0.30.0 (section 1.3): two or more
@@ -3651,6 +3658,13 @@ const OS_PLAIN="A source file is missing or can't be opened.";
 const MEDIA_SLOW_PLAIN='The library drive answered slowly while the app checked this book. It tries again automatically.';  // Judy 14.6
 function plainReason(reason){return typeof reason==='string' && /^Owned (media operation|decode verification) exceeded its deadline$/.test(reason)?MEDIA_SLOW_PLAIN:typeof reason==='string' && OS_TEXT.test(reason)?OS_PLAIN:reason;}
 function rawReasons(row){return (row?.automatic?.reasons || []).filter(reason=>typeof reason==='string' && OS_TEXT.test(reason));}
+// 0.31.1 (Judy's stuck-load spec, 8.2): a book found again after a move outside the app, kept until it is found again.
+function relinkedDetail(row){
+  const found=row?.relinked,at=new Date(found?.at || '');
+  if(!found || typeof found.was!=='string' || typeof found.now!=='string' || !found.now || Number.isNaN(at.getTime()))return '';
+  const two=n=>String(n).padStart(2,'0');
+  return `Technical detail: Found again after a move outside the app (${at.getDate()} ${MONTHS[at.getMonth()]}, ${two(at.getHours())}:${two(at.getMinutes())}). Was in ${found.was}. Now in ${found.now}. Matched by name, file ID, size and hash.`;
+}
 function technicalText(row){
   const chapter=chapterDiagnostic(row),corrected=row.audiobook_ready===true && Array.isArray(row.chapter_corrections) && row.chapter_corrections.length;
   const chapterDetail=activeChapterCheck(row)?'Checking source audio: '+JSON.stringify(row.chapter_check,null,2):chapter?'Chapter timing: '+JSON.stringify(chapter,null,2):corrected?'Final chapter end corrected in the audiobook. Chapter names and start times are kept.\n'+JSON.stringify(row.chapter_corrections,null,2):'';
@@ -3857,7 +3871,7 @@ function renderAutomaticResult(row){
   // Ruling 73k: a move that waits for a restart keeps its raw error here only.
   const move=moveOf(row),moveDetail=move?.state==='unfinished' && typeof move.detail==='string' && move.detail?'Technical detail: '+move.detail:'';
   const corrected=row.audiobook_ready===true && Array.isArray(row.chapter_corrections) && row.chapter_corrections.length;
-  const technical=(activeChapterCheck(row) || corrected || chapterDiagnostic(row) || attention || untyped || rawReasons(row).length?technicalText(row):patched.length && typeof repaired.detail==='string' && repaired.detail?'Technical detail: '+repaired.detail:'') || moveDetail;
+  const technical=[(activeChapterCheck(row) || corrected || chapterDiagnostic(row) || attention || untyped || rawReasons(row).length?technicalText(row):patched.length && typeof repaired.detail==='string' && repaired.detail?'Technical detail: '+repaired.detail:'') || moveDetail,relinkedDetail(row)].filter(Boolean).join('\n');
   setText('automatic-technical',technical);$('automatic-technical').hidden=!technical;if($('technical-details'))$('technical-details').hidden=!technical;
   // Names found (section 7): where the title and author came from, for the three name reasons.
   const ask=askOf(row),names=ask && ['title_author','author_unclear','same_author'].includes(askKind(ask))?askNames(ask):[];

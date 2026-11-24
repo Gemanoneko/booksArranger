@@ -61,7 +61,10 @@ TABLE = ('CREATE TABLE IF NOT EXISTS book_moves(move_id TEXT PRIMARY KEY, job_id
 # folder…, Use computed folder, the folder chosen before the book was published, or his approval of a listed move). NULL:
 # a move made before 0.31.0. One nullable column, added to an existing table by setup() (migrate): a version before
 # 0.31.0 names its columns when it writes a move and reads a move by name, so it runs on the migrated table unchanged.
-ORIGINS = ('rules', 'user')
+# 'found' (0.31.1, Sergei 2026-11-24): the app did not move the book; Sergei moved it by hand and the published-book check
+# found it again (same name, file ID, size and full hash: MergeService._relink_found) and recorded where it is now (found()).
+# A move he made himself: the rules never file it back (sorting_moves._last_move), and the row shows no move line (view()).
+ORIGINS = ('rules', 'user', 'found')
 EVENTS = ('CREATE TABLE IF NOT EXISTS book_move_events(event_id INTEGER PRIMARY KEY AUTOINCREMENT, move_id TEXT NOT NULL,'
           ' from_state TEXT, to_state TEXT NOT NULL, proof_json TEXT, created_utc TEXT NOT NULL)')
 INDEXES = ('CREATE INDEX IF NOT EXISTS book_moves_by_job ON book_moves(job_id,kind,generation)',
@@ -363,7 +366,7 @@ def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=Non
     folder); None keeps the book's own name. The same verified move either way (only the target path differs).
     origin: who made the move, one of ORIGINS (None: not said)."""
     setup(db)
-    if origin is not None and origin not in ORIGINS:
+    if origin is not None and origin not in ORIGINS or origin == 'found':  # 'found' is recorded by found() only
         raise ValueError('Unknown move origin')
     if kind not in KINDS:
         raise Refused('changed', 'This audiobook cannot be moved: it is a chapter update of another file.')
@@ -392,6 +395,46 @@ def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=Non
                 json.dumps(start, ensure_ascii=False, sort_keys=True), override_id, now, now, origin))
     _event(db, move_id, None, 'queued', {'start': start, 'target': target} | ({'origin': origin} if origin else {}))
     return load(db, move_id)
+
+
+def found(db, *, job_id, kind, candidate_id, start, final, proof):
+    """0.31.1: a finished book Sergei moved by hand, found again: one completed move of origin 'found' from where the app last
+    had it (start: its effective location) to where it is now (final: the verified file, with its folder and native
+    identities). The caller holds a write transaction and has read start in it. Journaled queued -> complete, the match in
+    the proof. Refused (ValueError) when another move of the book is not finished, or the chain no longer ends at start."""
+    setup(db)
+    if kind not in KINDS:
+        raise ValueError('Unknown publication kind')
+    start, final = location(start), location(final)
+    if db.execute('SELECT 1 FROM book_moves WHERE job_id=? AND kind=? AND state NOT IN (%s) LIMIT 1' % ','.join('?' for _ in TERMINAL),
+                  (job_id, kind, *TERMINAL)).fetchone():
+        raise ValueError('Another move of this audiobook is not finished')
+    generation = (db.execute('SELECT coalesce(max(generation),0) FROM book_moves WHERE job_id=? AND kind=?', (job_id, kind)).fetchone()[0] or 0) + 1
+    move_id = str(uuid.uuid4())
+    now = stamp()
+    target = final['final_path']
+    db.execute('INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,strategy,target_folder,target_root,target_path,from_json,final_json,temp_path,cause,detail,progress,override_id,created_utc,updated_utc,origin)'
+               ' VALUES(?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL,NULL,?,?,?)',
+               (move_id, job_id, kind, candidate_id, generation, 'complete', 'found', ntpath.dirname(target), str(final['root']), target,
+                json.dumps(start, ensure_ascii=False, sort_keys=True), json.dumps(final, ensure_ascii=False, sort_keys=True), now, now, 'found'))
+    _event(db, move_id, None, 'queued', {'start': start, 'target': target, 'origin': 'found'})
+    _event(db, move_id, 'queued', 'complete', proof)
+    return load(db, move_id)
+
+
+def relinks(db, candidate_ids):
+    """{candidate id: {'at', 'was', 'now'}} of each book's newest 'found' move (Judy's stuck-load spec, 8.2: the book's own
+    Technical details; kept until the book is found again)."""
+    if not have(db) or not candidate_ids:
+        return {}
+    found = {}
+    marks = ','.join('?' for _ in candidate_ids)
+    for record in db.execute("SELECT * FROM book_moves WHERE origin='found' AND state='complete' AND candidate_id IN (%s) ORDER BY created_utc, rowid" % marks,
+                             tuple(candidate_ids)):
+        move = _row(record)
+        found[move['candidate_id']] = {'at': move['created_utc'], 'was': (move.get('from') or {}).get('final_path') or '',
+                                       'now': (move.get('final') or {}).get('final_path') or move['target_path']}
+    return found
 
 
 def _set(db, move_id, state, *, expected=None, strategy=None, final=None, temp=None, cause=None, detail=None, progress=None, proof=None):
@@ -435,8 +478,8 @@ def view(move, unfinished=None):
     unfinished (ruling 73k): {'cause', 'detail'} for a journaled move that is not running (its retries ran out, or recovery
     at start could not finish it). The line is then 'unfinished', its cause 'copy', 'renamed' or 'catalog' (what the page
     words) and its detail the raw error (Technical details only). Without it a journaled move reads 'moving', as before."""
-    if not move or move['state'] == 'cancelled':
-        return None
+    if not move or move['state'] == 'cancelled' or move.get('origin') == 'found':
+        return None  # 0.31.1: a book found again after a move by hand shows nothing on its row (Judy's spec, 8.2)
     state = {'queued': 'queued', 'complete': 'moved', 'failed': 'failed', 'partial': 'failed'}.get(move['state'], 'moving')
     if state == 'moving' and unfinished:
         state = 'unfinished'

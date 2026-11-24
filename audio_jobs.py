@@ -531,6 +531,9 @@ class AudioJobs:
         # Optional routine check output_current(record, stop, pace): unchanged verified file identity, else a
         # full interruptible hash. Without it, routine checks use output_validator (always a full check).
         self.output_current = None
+        # 0.31.1 (Sergei 2026-11-24): relink(record, stop, pace), optional: a finished book missing from where the app last
+        # had it is looked for under the output folder and, found exactly once, its new location recorded; True then.
+        self.relink = None
         self.verify_pace = None
         self._resuming = False
         # Books checked of total while a finished-book check runs (after launch, or at Start); None otherwise.
@@ -658,7 +661,28 @@ class AudioJobs:
         except Exception as exc:
             if routine and row["state"] == "completed" and self._historical(row, stop):
                 return None  # Exact authorized former-output retirement; preserve immutable history.
+            if routine and row["output"] and row["state"] in ("completed", "needs attention"):
+                return self._published_done(row, record, str(exc) or type(exc).__name__, stop, pace)
             return {"state": "needs attention", "reason": str(exc) or type(exc).__name__}
+
+    def _published_done(self, row, record, reason, stop=None, pace=None):
+        """0.31.1 (Sergei 2026-11-24): a book the app delivered into Audiobooks Sorted is done. The routine check of a finished
+        book (after launch, at Start) no longer puts it in Needs attention when its file is missing, changed or fails
+        validation; that check is a diagnostic now. A missing book is looked for (relink): found exactly once, it is checked
+        again at its new place. Otherwise nothing changes (relink logs one line), and a flag this same check set before
+        0.31.1 (the row's reason is this failure) is taken back. A stop is raised, never a verdict."""
+        relink = self.relink
+        if callable(relink) and relink(copy.deepcopy(record), stop, pace) is True:
+            try:
+                self._check_output(record, True, stop, pace)
+                return None if row["state"] == "completed" else {"state": "completed", "stage": "completed", "reason": ""}
+            except InterruptedError:
+                raise
+            except Exception as exc:
+                reason = str(exc) or type(exc).__name__
+        if row["state"] == "needs attention" and row["reason"] == reason:
+            return {"state": "completed", "stage": "completed", "reason": ""}
+        return None
 
     def _apply_unchanged(self, changes):
         """Caller holds the lock. A row changes only if it is still exactly what was checked."""
