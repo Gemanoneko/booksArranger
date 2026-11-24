@@ -244,6 +244,48 @@ class PublishedSnapshotTests(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in stage.glob('source*.mp3')),['source%05d.mp3'%index for index in range(4)])
         self.assertEqual(self.life._attempt(self.job_id,attempt)['state'],'published_held')
 
+    def test_a_reference_made_while_the_snapshots_are_removed_keeps_the_rest_0_31_1(self):
+        # Senua m3: the check before the first removal cannot see a reference written while the removals run; it runs again
+        # every REFERENCE_RECHECK_SECONDS for the snapshots still to go (here 0: before each removal).
+        import working_lifecycle
+        self.more_sources(3)
+        attempt,stage,_=self.published()
+        current,referenced=self.life._published,[]
+        def reference_after_the_first_removal(found):
+            if not referenced and not (stage/'source00000.mp3').exists():
+                referenced.append(True)
+                other=dict(self.manifest,job_id=str(uuid.uuid4()),candidate_id=str(uuid.uuid4()))
+                other['evidence']=[str(stage/'source00003.mp3').replace(chr(92),'/').upper()]
+                self.queue.enqueue(other)
+            return current(found)
+        with patch.object(working_lifecycle,'REFERENCE_RECHECK_SECONDS',0),patch.object(self.life,'_published',side_effect=reference_after_the_first_removal):
+            with self.assertRaisesRegex(BoundaryError,'another durable dependency: audio_jobs'):self.discharge()
+        self.assertTrue(referenced,'positive control: the reference was written after the first removal')
+        self.assertFalse((stage/'source00000.mp3').exists())
+        self.assertTrue((stage/'source00003.mp3').exists(),'the referenced snapshot is kept')
+        self.assertEqual(self.life._attempt(self.job_id,attempt)['state'],'published_held')
+
+    def test_one_search_token_stands_for_every_file_of_the_attempt_0_31_1(self):
+        # Futaba's 0.31.1 QA, Major 1: each path's own longest run was its search token, so the hex-named working files of a
+        # 40-part book gave a token each; past 64 the check read every row of every table in Python (minutes on a large
+        # catalog, at a full core). The attempt folder's UUID is in every one of its paths and finds every row that can
+        # name any of them: one token, one indexed-free SQL pass per table, and a reference to any one file is still found.
+        import working_lifecycle
+        stage,names=self.stage,[uuid.uuid4().hex+'.decode-stderr' for _ in range(70)]
+        self.stage=lambda extras=():stage(extras=[(name,b'') for name in names])
+        attempt,directory,_=self.published()
+        paths=[working_lifecycle.normalized(entry['path']) for entry in self.life._files(self.job_id,attempt)]
+        self.assertGreater(len({working_lifecycle.search_token(path) for path in paths}),64,'positive control: over the old limit')
+        self.assertEqual(set(working_lifecycle.search_tokens(paths)),{attempt.lower()})
+        other=dict(self.manifest,job_id=str(uuid.uuid4()),candidate_id=str(uuid.uuid4()))
+        other['evidence']=[str(directory/names[37]).replace(chr(92),'/').upper()]
+        self.queue.enqueue(other)
+        searched,real=[],working_lifecycle._token_rows
+        with patch.object(working_lifecycle,'_token_rows',side_effect=lambda db,table,columns,tokens:(searched.append(list(tokens)),real(db,table,columns,tokens))[1]):
+            with self.assertRaisesRegex(BoundaryError,'another durable dependency: audio_jobs'):self.discharge()
+        self.assertTrue(searched and all(tokens==[attempt.lower()] for tokens in searched),'one shared token, never the full scan')
+        self.assertTrue((directory/'source00000.mp3').exists(),'nothing removed')
+
     def removed(self):
         """Sergei deleted the finished book; the published-book check removed it from the records (finished_removal)."""
         import finished_removal

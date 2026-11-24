@@ -4,6 +4,7 @@ This ledger is deliberately separate from published-output/original cleanup.
 Creation intent is not deletion authority: retirement revalidates the exact
 closed file, current failed job, protected input and every durable reference.
 """
+import collections
 import contextlib
 import base64
 import hashlib
@@ -11,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 import uuid
 import threading
 from scanner import connect
@@ -80,9 +82,9 @@ def casefold_to_ascii():
     return _CASEFOLD[0]
 
 
-def search_token(wanted):
-    """The longest run of TOKEN characters in a normalized path (the last of equal ones: the attempt folder before the job
-    folder), or None when the path cannot be searched this way (no '/', a '"', no run)."""
+def search_runs(wanted):
+    """Every run of TOKEN characters in a normalized path, in order, or None when the path cannot be searched this way (no
+    '/', a '"', no run)."""
     if '/' not in wanted or '"' in wanted:
         return None
     runs, current = [], ''
@@ -93,18 +95,68 @@ def search_token(wanted):
             if current:
                 runs.append(current)
             current = ''
+    return runs or None
+
+
+def search_token(wanted):
+    """The longest run of TOKEN characters in a normalized path (the last of equal ones: the attempt folder before the job
+    folder), or None when the path cannot be searched this way (no '/', a '"', no run)."""
+    runs = search_runs(wanted)
     return max(reversed(runs), key=len) if runs else None
 
 
+SHARED_TOKEN = 20  # a run this long (a job or attempt folder's UUID, a hex working-file name) is selective enough to share
+
+
+def search_tokens(wanted):
+    """One search token per normalized path in wanted, or None when a path cannot be searched this way.
+
+    0.31.1 (Futaba's QA, Major 1): any run of TOKEN characters of a path finds every row that can hold that path (the
+    comment above TOKEN holds for every such run, not only the longest), so a long run that several paths share (the
+    attempt folder's UUID, in the path of each of its files) stands for all of them. Before, each path's own longest run
+    was its token: the hex-named working files of a 40-part book gave over 64 tokens, and the check fell back to reading
+    every row of every reference table in Python (minutes on a large catalog, at a full core, the status reads slow
+    meanwhile). Runs shorter than SHARED_TOKEN are never shared; a path with none of that length keeps its longest run."""
+    runs = [search_runs(path) for path in wanted]
+    if not runs or None in runs:
+        return None
+    tokens, left = [None] * len(wanted), list(range(len(wanted)))
+    while left:
+        counts = collections.Counter(run for index in left for run in dict.fromkeys(reversed(runs[index])) if len(run) >= SHARED_TOKEN)
+        if not counts:
+            break
+        best = max(counts, key=lambda run: (counts[run], len(run)))  # the first of equal ones: the later folder (attempt)
+        for index in left:
+            if best in runs[index]:
+                tokens[index] = best
+        left = [index for index in left if tokens[index] is None]
+    for index in left:
+        tokens[index] = max(reversed(runs[index]), key=len)
+    return tokens
+
+
+# 0.31.1 (Senua m3): while a book's snapshots or working files are removed one by one, the reference check that ran before
+# the first removal runs again this often, for the files not yet removed: a durable reference written meanwhile is seen.
+REFERENCE_RECHECK_SECONDS = 30.0
+
+
 def reference_candidates(db, table, wanted, limit=64):
-    """The rows of table that can hold one of the normalized paths in wanted; every row when a path has no search token or
-    there are more than limit tokens (the old full scan). See the comment above TOKEN for why none is missed."""
-    tokens = [search_token(path) for path in wanted]
-    if not tokens or None in tokens or len(set(tokens)) > limit:
+    """The rows of table that can hold one of the normalized paths in wanted (search_tokens); every row when a path has no
+    search token. More than limit tokens are searched limit at a time (0.31.1, Futaba's QA, Major 1: no longer the full
+    scan); a row found twice is only decided twice. See the comment above TOKEN for why none is missed."""
+    tokens = search_tokens(wanted)
+    if not tokens:
         return db.execute('SELECT * FROM ' + table)
     columns = [row[1] for row in db.execute('PRAGMA table_info(' + table + ')')]
     if not columns:
         return db.execute('SELECT * FROM ' + table)
+    distinct = list(dict.fromkeys(tokens))
+    if len(distinct) > limit:
+        return (row for start in range(0, len(distinct), limit) for row in _token_rows(db, table, columns, distinct[start:start + limit]))
+    return _token_rows(db, table, columns, distinct)
+
+
+def _token_rows(db, table, columns, tokens):
     # A control character (one GLOB pass), and each casefold character that can stand for a character of a token: one byte
     # search per distinct start of their UTF-8 forms (every such character is 2 or more bytes; a shared start may also catch
     # other characters, which only returns more rows). Faster than a GLOB class over non-ASCII text.
@@ -672,7 +724,8 @@ class WorkingLifecycle:
                     if table=='audio_jobs' and row['job_id']==attempt['job_id']:continue
                     if table in {'working_attempts','working_files'} and row['job_id']==attempt['job_id'] and row['attempt_id']==attempt['attempt_id']:continue
                     if table=='storage_cleanup_files' and row['job_id']==attempt['job_id'] and row['kind']=='staging':continue
-                    if any(path in normalized(packed(row)) for path in wanted):
+                    text=normalized(packed(row))  # once per row, not once per wanted path
+                    if any(path in text for path in wanted):
                         raise BoundaryError('Published snapshot has another durable dependency: '+table)
 
     def schedule_published(self, job_id):
@@ -751,8 +804,12 @@ class WorkingLifecycle:
             # its removal, and each run reads every reference table (6 s on a 379 MB synthetic catalog): a 1,436-file book took
             # the recovery cleanup's thread over an hour. It runs once here, for every snapshot this pass removes, after the
             # hashing and the source proofs and before the first removal; the loop below does no hashing.
+            # Senua m3: and again every REFERENCE_RECHECK_SECONDS while they are removed, for the ones still to go.
             if prepared:self._published_references(attempt,[str(path) for _,path,_ in prepared])
-            for entry,path,handle in prepared:
+            checked=time.monotonic()
+            for index,(entry,path,handle) in enumerate(prepared):
+                if time.monotonic()-checked>=REFERENCE_RECHECK_SECONDS:
+                    self._published_references(attempt,[str(item) for _,item,_ in prepared[index:]]);checked=time.monotonic()
                 source_proof();self._published(attempt);boundary.revalidate()
                 if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
                 with storage._publication_transaction() as generation_db:
@@ -804,6 +861,7 @@ class WorkingLifecycle:
         entries=self._files(attempt['job_id'],attempt['attempt_id'])
         stage=self.stage_root/attempt['job_id']/attempt['attempt_id']
         self._published_references(attempt,[entry['path'] for entry in entries])
+        checked=time.monotonic()
         removed=0
         with contextlib.ExitStack() as stack:
             present=os.path.lexists(stage)
@@ -835,7 +893,9 @@ class WorkingLifecycle:
                 if facts['links']!=1 or not facts_match(path,facts,json.loads(entry['facts']),receipt_class='working-file') or facts['size']!=entry['size'] or self._hash(handle)!=entry['sha256']:
                     raise BoundaryError('Working file native identity or bytes changed; preserved')
                 prepared.append((entry,path,handle))
-            for entry,path,handle in prepared:
+            for index,(entry,path,handle) in enumerate(prepared):
+                if time.monotonic()-checked>=REFERENCE_RECHECK_SECONDS:  # Senua m3: hashing took a while, or the removals do
+                    self._published_references(attempt,[str(item) for _,item,_ in prepared[index:]]);checked=time.monotonic()
                 self.guard();boundary.revalidate()
                 if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
                 if entry['state']=='removal_intended':
