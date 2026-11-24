@@ -117,6 +117,9 @@ HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab
 # Ruling R32 (Sergei 2026-11-23): the search the publisher and Litres sources go through; its human check counts as
 # "nothing found" at once (SeriesBackfill.lookup). A human check from any other host is still a try (R9).
 HUMAN_CHECK_HOST = 'html.duckduckgo.com'
+# 0.31.0 M1 (Futaba's QA round 2, as R32): Goodreads' own human check (its web firewall's challenge,
+# public_research.waf_challenge) counts as "nothing found" for Goodreads at once too.
+HUMAN_CHECK_HOSTS = (HUMAN_CHECK_HOST, 'www.goodreads.com')
 
 
 class Held(ValueError):
@@ -828,9 +831,10 @@ class SeriesBackfill:
                 if verdict:
                     memory[name].update(doubt=verdict['why'], dropped=series_certainty.dropped(verdict))
             except ResearchWait as wait:
-                if wait.reason == CHALLENGE_REASON and wait.source == HUMAN_CHECK_HOST and name in HOST_SOURCES[HUMAN_CHECK_HOST]:
+                if wait.reason == CHALLENGE_REASON and wait.source in HUMAN_CHECK_HOSTS and name in HOST_SOURCES[wait.source]:
                     # Ruling R32 (Sergei 2026-11-23): a source that only answers with a human check (the two that go through
                     # DuckDuckGo) counts as "nothing found" at once, never a try: it held "All done" back for 12 hours or more.
+                    # 0.31.0 M1: Goodreads' own human check too (it held All done back for 6 hours or more).
                     memory[name] = {'answer': 'none', 'at': now, 'reason': str(wait.reason)[:200]}
                     continue
                 closed(name, {'source': wait.source, 'reason': wait.reason, 'retry_at': wait.retry_at, 'kind': wait.kind, 'scope': wait.scope},
@@ -1286,9 +1290,18 @@ class SeriesBackfill:
             if named:
                 name_write.catalog_list(db, manifest, *named, record.get('name_reasons'))
             db.execute("UPDATE series_backfill SET state='cataloged',updated=? WHERE job_id=?", (_stamp(), job_id))
-        merge.__dict__.get('_validated_outputs', {}).pop(job_id, None)
+        self._verified(job_id, stat)
         if hasattr(merge, 'invalidate_status'):
             merge.invalidate_status()
+
+    def _verified(self, job_id, stat):
+        """0.31.0 B1 (Futaba's QA round 2): the rewritten file a catalog step recorded is the book's last full verification
+        (the write's proofs hashed every byte; verified_outputs keeps the same identity, which a restart reads). The
+        converted check compares the live file with it (MergeService.progress_books). It was dropped, so a rewritten book
+        the rules did not move read Pending, out of Audiobook Ready, until a restart."""
+        validated = self.merge.__dict__.get('_validated_outputs')
+        if isinstance(validated, dict):
+            validated[job_id] = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
 
     def _no_move_begun(self, db, job_id):
         """Senua's 0.31.0 review, M1 and M2: the one move check of both writes' catalog step (this one and the write of

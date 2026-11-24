@@ -589,7 +589,7 @@ class NameWrite(SeriesBackfill):
                        (str(new), record['new_sha256'], record['new_size'], job_id))
             catalog_list(db, manifest, was, now, record.get('reasons'))
             db.execute("UPDATE name_writes SET state='cataloged',updated=? WHERE job_id=?", (series_backfill._stamp(), job_id))
-        merge.__dict__.get('_validated_outputs', {}).pop(job_id, None)
+        self._verified(job_id, stat)  # 0.31.0 B1: the book stays converted (SeriesBackfill._verified)
         if hasattr(merge, 'invalidate_status'):
             merge.invalidate_status()
 

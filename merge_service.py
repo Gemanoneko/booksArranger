@@ -620,6 +620,14 @@ class MergeService:
                         retry_binding=retry_intent.guard(db,job['manifest'],proof['approved_manifest'],proof['target_root'])
                     observed.append((job,relation,binding,effective,location_envelope,retry_binding))
                 self._lookups=kept
+                # 0.31.0 B1: the writes into finished files the catalog recorded, read in this snapshot (completed_book's
+                # placed_by_write: a rewritten book's receipt names its renamed file, not the planned path).
+                rewrites={}
+                for table in ('series_backfill','name_writes'):
+                    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone():continue
+                    for job_id,new_path,new_sha256,folder in db.execute("SELECT job_id,json_extract(record,'$.new_path'),json_extract(record,'$.new_sha256'),"
+                                                                         "json_extract(record,'$.series_folder') FROM "+table+" WHERE state IN ('cataloged','done') AND json_valid(record)"):
+                        rewrites.setdefault(job_id,[]).append((new_path,new_sha256,folder))
             # DB committed/closed before every filesystem callback.
             approved={identity:(row,ctx) for identity,(row,ctx) in catalog_approved.items()
                       if any((self.reviews.cache/(ctx['cover_id']+suffix)).is_file() for suffix in ('.png','.jpg'))}
@@ -634,7 +642,8 @@ class MergeService:
                     stat=Path(effective['final_path']).stat()
                     current=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)==self._validated_outputs.get(job['job_id'])
                 except (OSError,KeyError,ValueError,TypeError):pass
-                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE},binding,location_envelope=location_envelope,retry_binding=retry_binding):converted.add(identity)
+                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE},binding,location_envelope=location_envelope,retry_binding=retry_binding,
+                                  rewrites=rewrites.get(job['job_id'])):converted.add(identity)
             return {'approved':len(approved),'converted':len(converted),'converted_ids':converted,'candidate_total':len(candidate_ids),'not_approved_total':len(candidate_ids-set(approved))}
         finally:self._progress_lock.release()
 

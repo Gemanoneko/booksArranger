@@ -165,6 +165,21 @@ class AutoTests(unittest.TestCase):
             # An explicit website pause survives local-budget migration and later reads.
             with self.assertRaises(ResearchWait) as again:client.read('https://ast.ru/book/another')
             self.assertEqual(again.exception.retry_at,wait.retry_at);self.assertEqual(again.exception.kind,wait.kind)
+    def test_m1_goodreads_own_human_check_is_a_human_check_and_a_plain_202_is_not(self):
+        """0.31.0 M1 (Futaba's QA round 2): Goodreads, behind Amazon's web firewall, answers some requests with HTTP 202, an
+        empty body and the header x-amzn-waf-action: challenge. The app read it as "unavailable". It is its human check (a
+        pause, as DuckDuckGo's); a 202 without that header, or with another action, is still "unavailable"."""
+        import http.client
+        from public_research import CHALLENGE_REASON,CHALLENGE_PAUSE
+        unavailable=('Public source unavailable; no bypass attempted','source_unavailable',300)
+        for index,(action,expected) in enumerate((('challenge',(CHALLENGE_REASON,'source_pause',CHALLENGE_PAUSE)),(None,unavailable),('captcha',unavailable))):
+            headers=http.client.HTTPMessage()
+            if action:headers['X-Amzn-Waf-Action']=action
+            def fetch(*_,headers=headers):raise urllib.error.HTTPError('https://www.goodreads.com/search?q=book',202,'Accepted',headers,None)
+            client=PublicClient(self.base/('waf'+str(index)+'.sqlite3'),fetch=fetch,clock=lambda:100000)
+            with self.assertRaises(ResearchWait) as caught:client.read('https://www.goodreads.com/search?q=book')
+            wait=caught.exception
+            self.assertEqual((wait.source,wait.reason,wait.kind,wait.retry_at),('www.goodreads.com',)+expected[:2]+(100000+expected[2],),action)
     def test_later_inflight_failure_cannot_shorten_a_shared_source_pause(self):
         first_entered=threading.Event();second_entered=threading.Event();first_finished=threading.Event();results=[]
         def first_fetch(*_):

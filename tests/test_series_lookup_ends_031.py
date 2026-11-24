@@ -254,10 +254,29 @@ class HumanCheckTests(Fixture):
         self.passes(3, step=TRY_SPACING + 1)
         self.assertEqual((self.asked('publisher'), self.asked('litres')), (1, 1), 'never asked about this book again')
 
-    def test_control_a_human_check_from_another_host_is_still_a_try(self):
+    def test_m1_goodreads_own_human_check_is_nothing_found_at_once_and_all_done_shows(self):
+        # 0.31.0 M1 (Futaba's QA round 2): Goodreads answered with its own human check (its web firewall's challenge, read as
+        # one by public_research.waf_challenge); the book waited six hours for each of three tries. This test asserted it
+        # was a try (R32's control) before M1.
         self.sources.answers.update(goodreads=human_check(lambda: self.now[0], 'www.goodreads.com'))
         self.passes(1)
+        entry = self.entry()
+        self.assertEqual((entry['state'], entry['record']['sources']['goodreads'].get('answer')), ('none', 'none'), 'nothing found (was: deferred, a try)')
+        self.assertNotIn('next_attempt', entry['record'], 'no six-hour wait')
+        self.assertEqual(self.finished_state(), 'all_done', 'All done the same pass (was: background look-ups only for 6 hours or more)')
+        self.passes(3, step=TRY_SPACING + 1)
+        self.assertEqual(self.asked('goodreads'), 1, 'never asked about this book again')
+
+    def test_control_a_human_check_from_another_host_is_still_a_try(self):
+        self.sources.answers.update(fantlab=human_check(lambda: self.now[0], 'api.fantlab.ru'))
+        self.passes(1)
         self.assertEqual((self.entry()['state'], self.entry()['record']['next_attempt']), ('deferred', 1000.0 + TRY_SPACING))
+        self.assertEqual(self.finished_state(), 'background_only')
+
+    def test_control_goodreads_not_answering_is_still_a_try(self):
+        self.sources.answers.update(goodreads=unavailable(lambda: self.now[0], 'www.goodreads.com'))
+        self.passes(1)
+        self.assertEqual((self.entry()['state'], self.entry()['record']['sources']['goodreads']['tries']), ('deferred', 1))
         self.assertEqual(self.finished_state(), 'background_only')
 
     def test_control_duckduckgo_not_answering_is_still_a_try(self):

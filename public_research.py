@@ -64,6 +64,15 @@ SOURCE_PAUSE_REASON='Public source requested a pause; no bypass attempted'
 CHALLENGE_REASON='Public source presented a human check; no bypass attempted'
 PAUSE_REASONS=(SOURCE_PAUSE_REASON,CHALLENGE_REASON)
 CHALLENGE_MARKERS=(b'anomaly.js',b'bots use duckduckgo',b'verify you are human',b'cf-chl-',b'challenge-platform')
+def waf_challenge(error):
+    """0.31.0 M1 (Futaba's QA round 2): Goodreads, behind Amazon's web firewall, answers some requests with its own human
+    check: HTTP 202, an empty body and the header x-amzn-waf-action: challenge. Only that shape is a human check; a 202 or
+    any other answer without it is what it was (unavailable, a try)."""
+    import urllib.error
+    if not isinstance(error,urllib.error.HTTPError) or error.code!=202 or error.headers is None:return False
+    try:action=next((value for key,value in error.headers.items() if str(key).lower()=='x-amzn-waf-action'),'')
+    except Exception:return False
+    return isinstance(action,str) and action.strip().lower()=='challenge'
 PRIMARY_HOSTS={'ast.ru','www.oupjapan.co.jp','magazines.gorky.media','www.kodansha.co.jp','www.penguinrandomhouse.com','www.harpercollins.com','www.simonandschuster.com','www.hachettebookgroup.com','us.macmillan.com'}
 RECORDING_HOSTS={'akniga.org','booklis.com','livelib.ru','av3715.ru','t.me'}
 RETAIL_HOSTS={'www.litres.ru'}
@@ -551,7 +560,7 @@ class PublicClient:
             now=self.clock();http_error=isinstance(error,urllib.error.HTTPError);paused=http_error and error.code in (403,429)
             # DuckDuckGo answers automated HTML queries with HTTP 202 and its anomaly
             # page: a human check. Respect it like a pause instead of retrying in 5 min.
-            challenge=isinstance(error,ChallengeDetected) or (http_error and error.code==202 and host=='html.duckduckgo.com')
+            challenge=isinstance(error,ChallengeDetected) or (http_error and error.code==202 and host=='html.duckduckgo.com') or waf_challenge(error)
             retry=now+(CHALLENGE_PAUSE if challenge else 3600 if paused else 300)
             if http_error and error.headers:
                 after=error.headers.get('Retry-After','')
