@@ -39,11 +39,13 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   // Rows: status, hint, technical detail on hover; Keep files is the only action (no remedy is offered yet).
   context.fixture=[changed,missing,unverified];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
   const trs=get('inventory').children;assert.equal(trs.length,3);
-  for(const tr of trs)assert.equal(statusCell(tr).children[0].textContent,'Recovery copies are kept until the audiobook is verified.');
+  // Judy's stuck-load spec, 9.2-9.3: each group's own truth; none says "until you decide".
+  assert.deepEqual([...trs].map(tr=>statusCell(tr).children[0].textContent),['The app left this original in place. Recovery copies are not kept.',
+    'Recovery copies are kept until the audiobook is verified.','Recovery copies are kept until the audiobook is verified.']);
   assert.equal(techOf(trs[0]),'Technical detail: '+CHANGED,'the kept reason, not the empty job reason');
   assert.equal(techOf(trs[1]),'Technical detail: The system cannot find the file specified');
   const keep=actionButtons(trs[0])[0];
-  assert.equal(keep.textContent,'Keep files');assert.equal(keep.title,"Keep this book's originals and folder as they are, and stop flagging it. Recovery copies still go once the audiobook is verified.");
+  assert.equal(keep.textContent,'Keep files');assert.equal(keep.title,"Keep this book's originals and folder as they are, and stop flagging it. It does not keep recovery copies.");
   assert.equal(keep.getAttribute('aria-label'),'Keep files: Title a');assert.ok(keep.className.split(' ').includes('quiet'));assert.equal(keep.disabled,false);
   for(const tr of trs)assert.ok(![...actionButtons(tr)].some(button=>/^(Retry|Repair|Check again|Convert again)$/.test(button.textContent)),'no remedy button and no disabled ghost');
   run('busy=true;controls()');assert.equal(keep.disabled,false,'ruling 35: another press never disables it');assert.notEqual(keep.title,'Another operation is in progress.');run('busy=false;controls()');
@@ -79,7 +81,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(statusCell(get('inventory').children[0]).children[0].textContent,'Kept at your choice: originals and folder stay as they are.');
   assert.ok(![...actionButtons(get('inventory').children[0])].some(button=>button.textContent==='Keep files'));
   show(kept);run('automaticResultKey=null;renderAutomaticResult(fixture);controls()');
-  assert.equal(get('automatic-result-hint').textContent,"You chose to keep this book's originals and folder as they are. Recovery copies are not kept: they go once the audiobook is verified.");assert.equal(get('automatic-result-hint').hidden,false);assert.equal(get('retry-block').hidden,true);
+  assert.equal(get('automatic-result-hint').textContent,"You chose to keep this book's originals and folder as they are. This does not keep recovery copies.");assert.equal(get('automatic-result-hint').hidden,false);assert.equal(get('retry-block').hidden,true);
   // The details panel action reads Keep files for a kept-files book.
   show(changed);run('controls()');assert.equal(get('retry-job').textContent,'Keep files');assert.equal(get('retry-block').hidden,false);
   run('filters.candidates="output_attention";viewControls()');

@@ -332,6 +332,63 @@ class PublishedBooksKeepNoCopiesTests(unittest.TestCase):
             Path(self.output['final_path']).unlink();self.remove()
             s._release_removed_leftovers();s._release_removed_leftovers()
         self.assertEqual(calls,[('recovery',self.job_id)],'its unfinished cleanup\'s copies, once per run')
+    def changed(self,kept=False):
+        """A published book's source cleanup held because an original changed since it was checked: one original back in
+        place with other bytes (its copy only verified), the other already removed (its copy the only one)."""
+        self.ready()
+        members=self.retention._rows('SELECT * FROM cleanup_members WHERE cleanup_id=? ORDER BY path',(self.cleanup_id,))
+        first=members[0];original=Path(first['path']);original.write_bytes(b'changed by Sergei'+Path(first['backup']).read_bytes()[17:])
+        from recovery_retention import RecoveryRetention
+        with connect(self.db) as db:
+            db.execute("UPDATE source_cleanup SET state='needs_attention',reason=? WHERE id=?",(RecoveryRetention.CHANGED_HOLD,self.cleanup_id))
+            db.execute("UPDATE cleanup_members SET state='backup_verified' WHERE cleanup_id=? AND path=?",(self.cleanup_id,first['path']))
+            db.execute('DELETE FROM recovery_retention WHERE job_id=?',(self.job_id,))  # a held cleanup has no retention set
+            if kept:
+                db.execute('CREATE TABLE IF NOT EXISTS kept_files(job_id TEXT PRIMARY KEY,kept_at TEXT NOT NULL)')
+                db.execute('INSERT INTO kept_files VALUES(?,?)',(self.job_id,'2026-10-18T00:00:00+00:00'))
+        return original,original.read_bytes()
+    def test_a_changed_original_cleanup_releases_its_copies_once_the_audiobook_verifies(self):
+        # Sergei 2026-11-24: no recovery copies for a published book, also under "Original changed since checked", also a
+        # copy that is the only one of an original the cleanup already removed (he accepted that). Keep files does not stop it.
+        original,raw=self.changed(kept=True)
+        self.assertEqual(len(self.copies()),2,'positive control: two copies held')
+        self.assertEqual(self.retention.release_changed(self.job_id),2)
+        self.assertEqual(self.copies(),[]);self.assertEqual(original.read_bytes(),raw,'the changed original is Sergei\'s and stays')
+        self.assertTrue(Path(self.output['final_path']).exists(),'the delivered book is never touched')
+        row=self.retention._rows('SELECT state,reason FROM source_cleanup WHERE id=?',(self.cleanup_id,))[0]
+        self.assertEqual((row['state'],row['reason']),('needs_attention','Original bytes differ from reviewed sources'),'the hold, and its Needs attention entry, stay')
+    def test_a_changed_original_cleanup_keeps_its_copies_while_the_audiobook_does_not_verify(self):
+        original,raw=self.changed();final=Path(self.output['final_path']);final.rename(final.with_suffix('.offline'))
+        with self.assertRaises(Exception):self.retention.release_changed(self.job_id)
+        self.assertEqual(len(self.copies()),2)
+    def test_a_changed_original_cleanup_keeps_its_copies_on_unknown_content_or_another_hold(self):
+        original,raw=self.changed()
+        extra=self.source.root/self.cleanup_id/'foreign.txt';extra.write_text('preserve')
+        with self.assertRaisesRegex(BoundaryError,'Unknown recovery'):self.retention.release_changed(self.job_id)
+        extra.unlink()
+        with connect(self.db) as db:db.execute("UPDATE source_cleanup SET reason='Download marker native identity differs' WHERE id=?",(self.cleanup_id,))
+        with self.assertRaisesRegex(BoundaryError,'Only a cleanup held because an original changed'):self.retention.release_changed(self.job_id)
+        self.assertEqual(len(self.copies()),2);self.assertEqual(original.read_bytes(),raw)
+    def test_after_the_release_the_panel_says_deleted_automatically_and_the_entry_stays_by_default(self):
+        # Judy's stuck-load spec, 9.3: the Recovery copies panel says "deleted automatically"; the row stays in Needs attention
+        # until Keep files (the spec's default), or leaves by itself if Sergei answers 9.4 with yes (one switch).
+        self.changed();self.retention.release_changed(self.job_id)
+        status=self.retention.status(self.job_id)
+        self.assertEqual((status['state'],status['actor'],status['count']),('deleted','automatic',0))
+        s=KeptFilesTests.merge(self)
+        self.assertEqual(s.kept_files()[self.job_id]['group'],'changed','stays until Keep files')
+        with patch.object(MergeService,'CHANGED_LEAVES_WHEN_RELEASED',True):
+            self.assertNotIn(self.job_id,s.kept_files(),'leaves by itself, as if kept')
+    def test_the_sweep_releases_changed_original_copies_once_per_run(self):
+        import threading as threads
+        s=MergeService.__new__(MergeService);calls=[]
+        s.inventory=SimpleNamespace(database=self.db);s.operation_lock=threads.RLock()
+        s.recovery=SimpleNamespace(storage=self.storage,release_changed=lambda job_id:calls.append(job_id) or 2)
+        with patch('sys.stderr'):
+            s._release_changed_copies();self.assertEqual(calls,[],'nothing held: nothing to release')
+            self.changed()
+            s._release_changed_copies();s._release_changed_copies()
+        self.assertEqual(calls,[self.job_id])
     def test_the_sweep_takes_a_few_sets_per_pass(self):
         import merge_service
         s=MergeService.__new__(MergeService);due=['job-%d'%n for n in range(7)]

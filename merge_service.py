@@ -1647,6 +1647,7 @@ class MergeService:
                         if manual:self._manual_recovery=None
                         self._purge_replacement_recoveries()
                         self._release_removed_leftovers()
+                        self._release_changed_copies()
                         self._finish_held_cleanups(cleanup_generation)
                         self._finish_temporary_cleanups()
                         self.jobs.start_published_check()
@@ -1715,6 +1716,33 @@ class MergeService:
             except Exception as error:
                 self._cleanup_failed(('removed',job_id),error)
                 self._removal_log('A removed finished book\'s leftovers were kept: '+(str(error) or type(error).__name__)+' (job '+job_id+')')
+
+    def _release_changed_copies(self):
+        """0.31.1 (Sergei 2026-11-24): the recovery copies of a published book whose source cleanup is held because an
+        original changed since it was checked go too (RecoveryRetention.release_changed: its audiobook verified in full,
+        each copy proven). The Needs attention entry stays (the changed originals are Sergei's). Once per run, at most
+        RECOVERY_BATCH books per pass, in the recovery sweep after the first status; a refusal keeps everything and logs."""
+        database=getattr(getattr(self,'inventory',None),'database',None)
+        if not database:return
+        try:
+            with connect(database) as db:
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE name='source_cleanup'").fetchone():return
+                rows=[dict(r) for r in db.execute("SELECT c.id,c.job_id FROM source_cleanup c JOIN audio_jobs j ON j.job_id=c.job_id WHERE c.state='needs_attention' AND c.reason=? AND j.state='completed' ORDER BY c.updated,c.id",
+                                                    (__import__('recovery_retention').RecoveryRetention.CHANGED_HOLD,))]
+        except (sqlite3.Error,OSError):return
+        root=getattr(getattr(self,'recovery',None),'storage',None)
+        root=getattr(root,'recovery_root',None)
+        todo=[row for row in rows if self._cleanup_due(('changed',row['job_id'])) and (root is None or os.path.lexists(Path(root)/row['id']))][:RECOVERY_BATCH]
+        for row in todo:
+            job_id=row['job_id']
+            try:
+                with self.operation_lock,_PURGE_LOCK:copies=self.recovery.release_changed(job_id)
+                if copies:self._removal_log('Recovery copies of a book whose original changed since it was checked: %d released (job %s)'%(copies,job_id))
+                with _WORKING_LOCK:self.__dict__.setdefault('_purge_tried',set()).add(('changed',job_id))  # done for this run
+            except InterruptedError:return
+            except Exception as error:
+                self._cleanup_failed(('changed',job_id),error)
+                self._removal_log('Recovery copies of a book whose original changed were kept: '+(str(error) or type(error).__name__)+' (job '+job_id+')')
 
     def _purge_replacement_recoveries(self):
         """Recovery copies of retired former outputs, once the replacement is verified (same rule)."""
@@ -2388,6 +2416,10 @@ class MergeService:
         return order,counts
 
     KEPT_CHANGED=('Original bytes differ from reviewed sources',)  # a content mismatch: keep-case (A)
+    # Judy's stuck-load spec, 9.4 (question to Sergei): once the recovery copies of an "Original changed since checked" book
+    # are released (RecoveryRetention.release_changed), does it leave Needs attention by itself, as if kept? False: it stays
+    # until Keep files is pressed (the spec's default, as built).
+    CHANGED_LEAVES_WHEN_RELEASED=False
 
     def kept_files(self,job_ids=None):
         """Completed books whose files the 0.16.8 rule keeps, as attention entries (Judy's spec section 3):
@@ -2406,6 +2438,9 @@ class MergeService:
                     for job_id,reason in db.execute("SELECT job_id,reason FROM source_cleanup WHERE state='needs_attention'"):
                         if reason in self.KEPT_CHANGED:found[job_id]={'group':'changed','cause':None,'reason':reason}
                 if db.execute("SELECT 1 FROM sqlite_master WHERE name='recovery_retention'").fetchone():
+                    if self.CHANGED_LEAVES_WHEN_RELEASED:
+                        for (job_id,) in db.execute("SELECT job_id FROM recovery_retention WHERE state='deleted'"):
+                            if found.get(job_id,{}).get('group')=='changed':del found[job_id]  # its copies are gone: as if kept
                     for job_id,reason in db.execute("SELECT job_id,reason FROM recovery_retention WHERE state='needs_attention'"):
                         for prefix,cause in ((AUDIOBOOK_MISSING,'missing'),(AUDIOBOOK_UNVERIFIED,'unverified')):
                             if (reason or '').startswith(prefix):found[job_id]={'group':'audiobook','cause':cause,'reason':reason[len(prefix):]}

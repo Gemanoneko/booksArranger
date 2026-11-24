@@ -109,7 +109,8 @@ class RecoveryRetention:
             except OSError:uncertain=True
         state=row['state'];reason=row['reason']
         source=self._rows('SELECT state FROM source_cleanup WHERE id=?',(row['cleanup_id'],))
-        if not source or source[0]['state']!='completed':uncertain=True;reason='Original-track recovery or cleanup requires attention'
+        released=state=='deleted' and not count and not uncertain  # 0.31.1: an unfinished cleanup's copies released (_release_copies)
+        if (not source or source[0]['state']!='completed') and not released:uncertain=True;reason='Original-track recovery or cleanup requires attention'
         if uncertain:state='needs_attention';reason=reason or 'Recovery copies changed or are unavailable; preserved for attention'
         if state=='deleted' and count:state='needs_attention';reason='Replacement files at a discarded recovery location were preserved'
         eligible=state=='retained' and count==len(members) and bool(count)
@@ -164,6 +165,28 @@ class RecoveryRetention:
             row=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
             members=[dict(r) for r in db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(row['id'],))] if row else []
         if not row or row['state']=='completed':return 0  # a completed cleanup's copies go through purge()
+        return self._release_copies(job_id,dict(row),members)
+
+    CHANGED_HOLD='Original bytes differ from reviewed sources'  # source_cleanup: an original no longer matches its review
+
+    def release_changed(self,job_id):
+        """0.31.1 (Sergei 2026-11-24): a published book's source cleanup held because an original changed since it was
+        checked keeps no recovery copies either, including a copy that is the only one of an original the cleanup already
+        removed (Sergei accepted that). The book must be published (its job completed) and its audiobook verified in full
+        now (storage.protected_cleanup); the hold must be exactly that one; then the same proofs as release_unfinished. The
+        hold itself stays: the changed originals are Sergei's and stay where they are, so the book stays in Needs attention
+        under "Original changed since checked" until he presses Keep files, as before. Returns the copies removed."""
+        with connect(self.database) as db:
+            row=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+            members=[dict(r) for r in db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(row['id'],))] if row else []
+        if not row or row['state']!='needs_attention' or row['reason']!=self.CHANGED_HOLD:
+            raise BoundaryError('Only a cleanup held because an original changed releases its copies this way')
+        with self.storage.protected_cleanup(job_id,guard=self.guard):  # published, and its audiobook verified in full now
+            return self._release_copies(job_id,dict(row),members)
+
+    def _release_copies(self,job_id,row,members):
+        """The copies in one unfinished cleanup's own recovery folder, each proven before it goes (release_unfinished,
+        release_changed). Refused while any original's removal or restore is half done, or the folder holds anything unknown."""
         if any(m['state'] in ('removal_intended','disposition_set','restore_intended') for m in members):
             raise BoundaryError('An original\'s removal or restore is in progress; recovery copies preserved')
         intent=json.loads(row['intent']);manifest=intent['manifest']
@@ -190,6 +213,12 @@ class RecoveryRetention:
             self.storage._dispose(prepared,guard=self.guard);removed=len(prepared)
         try:location.rmdir()  # the emptied set folder; anything left in it stays
         except OSError:pass
+        # Recorded as an automatic deletion (Judy's stuck-load spec, 9.3: the Recovery copies panel says "deleted
+        # automatically"). No completion time: never due, and a later sync() leaves the record as it is.
+        with connect(self.database) as db:
+            now=self.clock().isoformat()
+            db.execute("INSERT INTO recovery_retention VALUES(?,?,?,'','','deleted','','automatic',?) ON CONFLICT(job_id) DO UPDATE SET state='deleted',actor='automatic',deleted_at=excluded.deleted_at",
+                       (job_id,row['id'],intent['output']['sha256'],now))
         return removed
 
     def purge(self,job_id,actor='automatic',confirmation=None):
