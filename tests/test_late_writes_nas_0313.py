@@ -1351,6 +1351,87 @@ class ReReviewTests(HeldBook, unittest.TestCase):
                                      [(lib.job_id, 'temporary')], 'its ownership row is kept')
                 self.assertTrue(temp.exists())
 
+    # M5: a folder that is gone while the drive answers is not a drive that is away (P5, P10).
+    @staticmethod
+    def rename_folder(path):
+        folder = Path(path).parent
+        moved = folder.with_name(folder.name + ' (renamed by hand)')
+        os.rename(folder, moved)
+        return moved
+
+    def test_m5_a_retried_book_whose_folder_is_gone_is_held_n4_and_the_run_ends(self):
+        lib = self.lib
+        self.hold()
+        moved = self.rename_folder(lib.path)
+        backfill = lib.backfill()
+        backfill.merge.__dict__['series_backfill'] = backfill
+        with nas_library(lib.root):
+            backfill.run_pass()
+        entry = backfill.entry(lib.job_id)
+        self.assertEqual((entry['state'], entry['reason']), ('held', series_backfill.FOLDER_CHANGED), 'N4, not "The library drive is not answering" for good')
+        counts = backfill._cleanup_counts()
+        self.assertEqual((counts['total'], counts['removed'], counts['kept']), (1, 0, 1))
+        self.assertEqual(series_backfill.cleanup_view(backfill.merge)['left'], 0, '"Removing old files" ends, so "All done" can show')
+        self.assertTrue((moved / lib.path.name).exists() and (moved / lib.target.name).exists(), 'both files kept')
+        with nas_library(lib.root):
+            self.at(1).run_pass()
+        self.assertEqual(lib.backfill().entry(lib.job_id), entry, 'settled: not tried again')
+
+    def test_m5_a_write_of_names_whose_folder_is_gone_is_held_n4(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        book.approve()
+        moved = self.rename_folder(book.path)
+        with nas_library(book.lib.root), mock.patch.object(series_backfill, '_log') as log:
+            book.writer.run_pass()
+        entry = book.writer.entry(book.lib.job_id)
+        self.assertEqual((entry['state'], entry['reason']), ('held', series_backfill.FOLDER_CHANGED), 'not deferred for good')
+        self.assertNotIn('temp_left', entry['record'], 'no temporary file is said kept where there is none')
+        self.assertFalse(any('Temporary file kept' in call.args[0] for call in log.call_args_list))
+        self.assertTrue((moved / book.path.name).exists())
+        book.writer.clock = lambda: __import__('time').time() + 3600
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertEqual(book.writer.entry(book.lib.job_id), entry, 'settled')
+
+    def test_m5_a_leftover_whose_folder_is_gone_settles(self):
+        """Card or Hobb with the book's folder renamed by hand: the leftover is not at its path (found gone), the one fresh try
+        runs and is held N4 with section 6's opening; it was skipped on every pass with no word."""
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = LeftoverTemporaryTests.leave(self, book)
+        moved = self.rename_folder(book.path)
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        entry = book.writer.entry(book.lib.job_id)
+        self.assertTrue(entry['record']['temp_removed']['found_gone'])
+        self.assertEqual(entry['record']['names_retry'], series_backfill.REMOVAL_RETRY)
+        self.assertEqual((entry['state'], entry['reason']), ('held', name_write.NAMES_UNCHANGED + ' ' + series_backfill.FOLDER_CHANGED))
+        self.assertTrue((moved / temp.name).exists() and (moved / book.path.name).exists(), 'nothing was removed')
+        book.writer.clock = lambda: __import__('time').time() + 3600
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertEqual(book.writer.entry(book.lib.job_id), entry, 'settled')
+
+    def test_m5_the_drive_is_away_only_when_the_folder_cannot_be_told_gone(self):
+        base_folder = Path(tempfile.mkdtemp(dir=self.temp.name))
+        root = base_folder / 'Audiobooks Sorted'
+        folder = root / 'Author' / 'Series'
+        folder.mkdir(parents=True)
+        record = {'root': str(root), 'old_path': str(folder / 'Book.m4b')}
+        error = native_io.AncestorUnavailable('An inspected destination ancestor is unavailable')
+        backfill = self.lib.backfill()
+        self.assertTrue(backfill._drive_away(record, error), 'every folder there: a blip of the drive, it waits')
+        with mock.patch.object(series_backfill.SeriesBackfill, '_answers', staticmethod(lambda root: False)):
+            self.assertTrue(backfill._drive_away(record, error), 'the library folder does not answer: the drive')
+        with lstat_fails(root / 'Author', 53):
+            self.assertTrue(backfill._drive_away(record, error), 'a network error on the way: cannot be told, it waits')
+        os.rename(root / 'Author', root / 'Author (renamed)')
+        self.assertFalse(backfill._drive_away(record, error), 'a folder on the way is gone and the drive answers: it settles')
+        with mock.patch.object(series_backfill.SeriesBackfill, '_answers', staticmethod(lambda root: False)):
+            self.assertTrue(backfill._drive_away(record, error), 'the same with the library folder not answering: the drive')
+        self.assertTrue(backfill._drive_away({'old_path': record['old_path']}, error), 'no root recorded: cannot be told, it waits')
+
     # m8: a crash between a leftover temporary file's removal and its record.
     def crash_after(self, book, temp, step):
         """The pass dies right after this step of the leftover's removal (the process ends: nothing after it runs, no

@@ -53,7 +53,7 @@ import time
 from pathlib import Path
 
 import series_backfill
-from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, ordinary
+from native_io import AncestorUnavailable, BoundaryError, DirectoryBoundary, VerifiedFile, ordinary
 from scanner import connect
 from series_backfill import ACTIVE, Blocked, Held, Later, SeriesBackfill, encoded, published_root
 
@@ -592,6 +592,11 @@ class NameWrite(SeriesBackfill):
                 # included): the write waits, as it waits when the drive is away before it starts (_pass, DRIVE_AWAY).
                 self._set(job_id, 'pending', '', record)
                 raise Later(DRIVE_AWAY, self.clock() + 60) from None
+            if isinstance(error, AncestorUnavailable):
+                # Senua's re-review at 520ee66, M5: the drive answers and the book's folder is gone: N4, stored as a Held
+                # reason is (the series write's step holds it the same way); nothing was written.
+                self._set(job_id, 'held', self._failed(record, series_backfill.FOLDER_CHANGED), record)
+                return
             self._set(job_id, 'held', self._failed(record, NAMES_FAILED + (str(error) or type(error).__name__)), record)
             return
         finally:

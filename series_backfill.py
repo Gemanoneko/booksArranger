@@ -527,12 +527,37 @@ class SeriesBackfill:
 
     def _drive_away(self, record, error=None):
         """Senua's 0.31.3 review, M2: the book's library drive does not answer, so the book waits (Later) and nothing it may
-        do once is used up. An error of a folder on the way that is not there (AncestorUnavailable) says so; any other
-        error does when the library folder does not answer right after it."""
+        do once is used up. Any error says so when the library folder does not answer right after it. Senua's re-review at
+        520ee66, M5: an error of a folder on the way that is not there (AncestorUnavailable) also means "the folder is gone",
+        so it is the drive only while the book's folder cannot be told gone (_absent): with the library folder answering
+        and the book's folder positively not there, the book settles (held N4) instead of waiting for good."""
         if isinstance(error, AncestorUnavailable):
-            return True
+            old = record.get('old_path') if isinstance(record, dict) else None
+            return not (old and self._absent(record, os.path.dirname(str(old))))
         root = record.get('root') if isinstance(record, dict) else None
         return bool(root) and not self._answers(root)
+
+    def _absent(self, record, path):
+        """M5: this path is positively not there while the drive answers. The library folder (record 'root') answers, and
+        walking down from it, a name on the way is not found (present(): Windows error 2, so the folder it is in answered).
+        A folder renamed, moved or deleted is not a drive that is away. Anything that cannot be told (no root, a path
+        outside it, a network error on the way) is False: the caller waits, as before."""
+        try:
+            root, path = ordinary(record['root']), ordinary(path)
+            steps = path.relative_to(root).parts
+        except (KeyError, TypeError, ValueError):  # BoundaryError is a ValueError
+            return False
+        if not self._answers(root):
+            return False
+        current = root
+        try:
+            for part in steps:
+                current = current / part
+                if not present(current):
+                    return True
+        except OSError:
+            return False
+        return False
 
     def _finish_active(self, job_id, entry):
         """One begun write finished from its recorded state (both passes' first loop). A book of the clean-up is the row's
@@ -1146,12 +1171,14 @@ class SeriesBackfill:
         _log('Removed a leftover temporary file of an unfinished update: ' + title + ' (' + size_text(now['size']) + '): ' + str(temp))  # Judy 6
         return {'path': str(temp), 'size': now['size'], 'sha256': digest, 'modified': now['modified'], 'method': getattr(handle, 'disposition_method', None)}
 
-    @staticmethod
-    def _leftover_gone(record, temp):
-        """m8: the leftover temporary file is positively not there (present: only "not found", Windows error 2). An error
-        that cannot be told is not "gone": its proofs run as before and decide."""
+    def _leftover_gone(self, record, temp):
+        """m8: the leftover temporary file is positively not there (present: only "not found", Windows error 2), or (M5) its
+        folder is gone while the drive answers (_absent). An error that cannot be told is not "gone": its proofs run as
+        before and decide."""
         try:
             return not present(temp)
+        except FileNotFoundError:
+            return self._absent(record, temp)
         except OSError:
             return False
 
@@ -1594,6 +1621,8 @@ class SeriesBackfill:
                 # Senua's 0.31.3 review, M2: the drive went away during the step. Not a hold (one would end a retry for good):
                 # the book keeps its recorded state and the step runs again once the drive answers.
                 raise Later(DRIVE_AWAY, self.clock() + 60) from None
+            if isinstance(error, AncestorUnavailable):
+                error = Held(FOLDER_CHANGED)  # Senua's re-review M5: the drive answers and the book's folder is gone (N4)
             # Judy's spec 5.3: a reason of section 5 (Held) is stored as it is, without the engine's prefix; any other error
             # keeps RECOVERY_HOLD (so a removal refused again still reads as _removal_retained expects).
             reason = str(error) if isinstance(error, Held) else RECOVERY_HOLD + str(error)
@@ -1916,6 +1945,10 @@ class SeriesBackfill:
                 self._dispose_temporary(Path(temp))
             self._forget_temporary(job_id, Path(temp))
         except (OSError, ValueError) as error:
+            if isinstance(error, FileNotFoundError) and self._absent(record, temp):
+                # Senua's re-review M5: its folder is gone while the drive answers (Windows error 3): nothing is there to keep
+                self._forget_temporary(job_id, Path(temp))
+                return
             reason = (str(error) or type(error).__name__)[:300]
             record['temp_left'] = {'path': str(temp), 'reason': reason, 'at': _stamp()}
             _log('Temporary file kept: ' + reason + ' (' + str(temp) + ')')
