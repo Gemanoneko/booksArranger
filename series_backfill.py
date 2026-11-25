@@ -1612,6 +1612,11 @@ class SeriesBackfill:
         # Every recovery entry point proves and protects the replacement through
         # catalog commit and exact-handle old-file disposal. No pathname unlink.
         withdrawn = False
+        if not self._seen(new):
+            # Futaba's 0.31.3 QA, m4: a new file already gone failed at its handle's open and was held as engine speech
+            # ("Cannot protect exact file: [WinError 2] ..."). It is Judy's row 3; the old file is not touched. (Can it not
+            # be seen at all, _seen waits instead: M3.)
+            raise Held(NEW_CHANGED_OR_MISSING)
         with self._protected(new, record, 'new') as kept:
             if state == 'renamed':
                 try:

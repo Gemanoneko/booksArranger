@@ -885,6 +885,23 @@ class ReviewMajorTests(HeldBook, unittest.TestCase):
             lib.backfill().run_pass()
         self.assertEqual(lib.state(backfill), ('done', ''), 'control: without stop the clean-up runs')
 
+    def test_m1_both_quit_routes_set_the_stop_the_loops_read(self):
+        """Futaba's B1 (= M1): the desktop Quit (/api/desktop/quit: DesktopBackend._stop_work -> MergeService.stop_background)
+        and the plain shutdown (/api/shutdown: finish_shutdown -> MergeService.close -> _close_lookups) both set the stop of
+        both passes before they wait for a file change; the loops read it between books."""
+        import time
+        from merge_service import MergeService
+        backfill = self.lib.backfill()
+        merge = backfill.merge
+        names = NameWrite(merge, stage=self.lib.base / 'names-stage')
+        merge.series_backfill, merge.name_write = backfill, names
+        MergeService.stop_background(merge)
+        self.assertTrue(backfill.stop.is_set() and names.stop.is_set(), 'the desktop Quit, at its first step')
+        for worker in (backfill, names):
+            worker.stop.clear()
+            MergeService._close_lookups(worker, time.monotonic())
+            self.assertTrue(worker.stop.is_set(), 'the plain shutdown, before close waits for a file change')
+
     def test_m1_the_series_loop_stops_between_books(self):
         lib = self.lib
         self.hold()
@@ -978,6 +995,18 @@ class ReviewMajorTests(HeldBook, unittest.TestCase):
             book.writer.run_pass()
         self.assertEqual(book.state(), ('done', ''))
         self.assertEqual(book.manifest()['metadata']['title'], ENGLISH)
+
+    def test_futaba_m4_a_new_file_gone_before_the_retry_reads_row_3(self):
+        """Futaba's QA m4: the new file deleted before the retry was held as engine speech ("Series recovery could not verify
+        the files; remaining copies kept: Cannot protect exact file: [WinError 2] ..."). Judy's check 4 expects row 3."""
+        lib = self.lib
+        self.hold()
+        lib.target.unlink()  # the new file, gone
+        with nas_library(lib.root):
+            lib.backfill().run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('held', 'The new file changed or is missing; the old file is kept.'))
+        self.assertEqual(sha(lib.path), lib.original, 'the old file is kept')
+        self.assertEqual(lib.backfill()._cleanup_counts()['kept'], 1)
 
     # M3: an old file that cannot be proven gone is never recorded as removed (P1).
     def test_m3_an_old_file_already_missing_is_held_n7_and_not_counted_removed(self):
