@@ -200,6 +200,18 @@ These show only when a check fails (the old file is then not removed). All are o
 - **The reason is written in the same `_set` that records the outcome** (`temp_removed`, `temp_kept` or the fresh try's result), never earlier: `_leftover_temporary` finds these two books by matching the old stored text exactly. The record keeps `temp_removed` (path, size, SHA-256, time), so the fact is not lost.
 - **No button and no advice** (ruling 2 applies the same way).
 
+**A series write's leftover temporary file** (Senua's review m6, Sergei: all review findings are fixed in 0.31.3). The same clearing runs for a series write held on `APPLY_HOLD` + the refused removal, whose stored text ends "The file was kept." (0 such books on Sergei's catalog copy, so this is for the day one exists). The rule is the one of the names sentence: the engine's own opening stays, the false tail goes. Nothing else of section 6 changes (the proofs, the log line, the kept-file reasons table and the no-page-text rule for a successful clearing are the same).
+
+| Outcome | Hold reason | Their entry in "Could not be renamed or moved" |
+| --- | --- | --- |
+| The leftover is removed; the book stays held | **Series update failed; the audiobook is unchanged.** | unchanged: "The rename or move did not finish." (see below) |
+| A proof kept the leftover (path of the file) | **Series update failed; the audiobook is unchanged. A temporary file is still there: {path}** | unchanged |
+
+- **It replaces the hold reason, as for Card and Hobb**: written in the same `_set` that records `temp_removed` or `temp_kept`, never earlier (the old stored text is how `_leftover_temporary` finds the book). The record keeps `temp_removed`.
+- **The could-not line does not change.** For the names books it changed because the key `tags_not_written` already existed and cost nothing. A series write that failed before its rename has the generic key, and the generic sentence is true for it (the rename did not finish). A new key for a book that does not exist is not worth building. If a series key is ever added, the line reads the same first sentence as the hold.
+- **Why not "The series could not be written".** It would match the names sentence word for word, but it would give a series book two different openings (the failure text the engine writes for every other series failure is `Series update failed; the audiobook is unchanged: {cause}`). Same opening, tail dropped, is the one rule for both ledgers.
+- **No fresh try, and no ruling needed.** Sergei's ruling 4 named Card and Hobb, and the case should not arise again: the leftovers formed because a removal was refused on the NAS, which 0.31.3 fixes. Left as built; if one ever does appear, a fresh try would be a ruling for that day.
+
 **The reasons a proof keeps the file** (record `temp_kept`; new strings of `212a278`, shown only when a check fails):
 
 | Engine text today | New |
@@ -221,7 +233,7 @@ These show only when a check fails (the old file is then not removed). All are o
 5. The thirteen sentences of section 5 at every place that raises them, without the prefix; the nine of 5.2 and the kept-file reasons of section 6 likewise; `old_file_kept` (or Ender's name) for the list entry of section 4.
 6. Where each of these reasons reaches the page today. The could-not list prints only a key sentence, and I found no page element that prints a ledger reason. If they are in the ledger and the log only, they stay there, in these words.
 7. Whether a kept book (section 4) is listed in "Could not be renamed or moved". **Answered by the build:** the 82 series books are; the 33 title/author books are not (question 1). Whether the 2 temporary-file books carry cause `tags_not_written` is covered by the build's tests.
-8. The new reason of section 6 is written in the same `_set` as `temp_removed` / `temp_kept` / the fresh try's result.
+8. The new reason of section 6 is written in the same `_set` as `temp_removed` / `temp_kept` / the fresh try's result; for a series write (Senua m6) the sentences of the table under "A series write's leftover temporary file".
 9. The two parts in `statusParts`, last, with the existing `plural` helper.
 10. **After the build (ruling 3 of "As built"):** for the `late_cleanup` row the ETA samples are not trimmed to 30 s; the rate runs from the first sample the page saw to the latest.
 
