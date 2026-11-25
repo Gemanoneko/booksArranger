@@ -9,15 +9,32 @@ Earlier the same day: clean all 115 books; clear the 2 temporary files; show a p
 1. **"74 GB freed" stays in the done line.** Yes.
 2. **A kept book keeps both files until a later version.** Enough: no try-again button, no advice to delete by hand.
 3. **Reword the nine neighbouring hold reasons too.** Yes: section 5.2.
-4. **Card «Сага теней» 1 and Hobb «Сага о живых кораблях» 2: retry.** Their three tries were used up by the NAS bug, not by the names. Once their temporary file is cleared, 0.31.3 gives each one fresh try at writing the English names. If it succeeds, the book leaves the held list. If it fails, the book stays as it is with the section 6 text. This overrides section 6's "leave" assumption.
+4. **Card «Сага теней» 1 and Hobb «Сага о живых кораблях» 2: retry.** Their three tries were used up by the NAS bug, not by the names. Once their temporary file is cleared, 0.31.3 gives each one fresh try at writing the English names. If it succeeds, the book leaves the held list. If it fails, the book stays as it is with the section 6 text. This overrides the "leave" assumption of the first draft of section 6, now rewritten.
+
+## As built / rulings (Judy, 2026-11-25, on Ender's `e8932ce` and `9288f20`)
+
+Ender built this spec and reported four differences; each is ruled here. Where the body below read differently, it has been corrected to match.
+
+| # | Spec said | As built | Ruling |
+| --- | --- | --- | --- |
+| 1 | Tooltip "on the label, as the series row's `lookupTip`" | On the label. The series and detail look-up rows put theirs on the step line | **Accept: on the label.** The label is what the sentence explains ("old files"), and it leaves the step line its own full-text title for when the step is cut off at a narrow width (progress-rows spec 2). My "as the series row's" was wrong about where that row's tip is; "on the label" was the intent. The Waiting item's tip stays on its second line, as every item in that list has it. No change |
+| 2 | Waiting item mockup `Removing old files · 73 books` | `Removing old files: 73 books` | **Accept.** The list writes every item as "Label: subject" (`renderWaitingList`); the dot was my mistake. Section 3 corrected. No change |
+| 3 | ETA "exactly as progress-rows spec 5" | Samples are kept across books for this row (the key ignores the subject), as the research row does | **Accept the exception; one change.** Without it the subject change resets the samples every book and no estimate ever shows. But the rate still comes from the last two settled books (the trim keeps two samples once changes are sparser than 30 s), and books here take from seconds to a minute, so the estimate would swing by several times between books ("under 1 min left" after a small book). **Change for this row: do not trim the samples; the rate is from the first sample the page saw to the latest**, the whole observed run (a relaunch mid-run starts from where the page first saw it). Every other rule stays: nothing before 10 s and 5%, refreshed at most every 5 s, same words |
+| 4 | A kept book is listed in "Could not be renamed or moved" with "The old file was not removed." | Kept series books are listed so. The 33 title/author books are not in the rules' list at all, and listing them needs a new path in the rules code; left out | **Accept for now; Sergei decides (question 1).** My "durable record" claim was true for the 82 series books only. A kept title/author book shows only in the done line's count for 1 hour and, by name, in the engine log. Section 4 corrected. Default: log only |
+
+**Also as built, all accepted.**
+- **Sizes in the status line are 1024-based** (`byteText`): 612,367,405 bytes reads **584 MB**, as Explorer shows the file on `Z:`. That is the page's one size convention (progress rows, "1.2 of 6.1 GB"). The brief's 612 MB, 1.2 GB and 78 GB are decimal, so the line reads about 5% lower than those. Examples below use the page's numbers.
+- **Two engine-log lines not specced word for word:** `Old file kept: {title}: {reason} ({path})` and `Leftover temporary file kept: {reason} ({path})`. Specific, one fact each, no internal names. The reason already ends in "kept" or "left in place", so the line says it twice; harmless in a log, not worth a change.
+- **After a successful fresh try Card shows briefly as "The rename or move did not finish."** in "Could not be renamed or moved" until its follow-up move completes. It is the existing generic line for an entry between steps, not a string of this spec, and it clears by itself. If Futaba sees it outlast the move by more than a minute, she reports it and I look again.
+- **Ruling 4 as built** (`NameWrite._leftover_outcome`, `_failed`): section 6.
 
 ## In brief
 
 1. **During: one Running row** in "Audiobook jobs", the app's existing place for work with progress. Label "Removing old files", the book in hand, `42 of 115 books`, a bar, elapsed and ETA by the existing rules. No new surface, no new control.
 2. **It counts books**, not files or GB: the 115 sent back for the clean-up, fixed at the start. A book counts as done when its old file is removed or when a check keeps both files. A kept book adds `· 1 kept` to the count.
-3. **After: two plain parts at the end of the status line** for 1 hour: `110 old files removed, 74 GB freed` and `5 old files kept: a check failed`. They are the "N moved books found" pattern. A kept book stays visible for good in its own list entry.
+3. **After: two plain parts at the end of the status line** for 1 hour: `110 old files removed, 74 GB freed` and `5 old files kept: a check failed`. They are the "N moved books found" pattern. A kept series book stays visible for good in its own list entry; a kept title/author book is named only in the engine log (section 4, question 1).
 4. **Thirteen hold reasons are reworded** (section 5): the four first asked about and the nine neighbours, in plain "old file" and "new file", with no "rewritten", "former", "identity", "bytes" or "alias". One of them stopped claiming "both files kept" when the new file is missing. The engine's prefix "Series recovery could not verify the files; remaining copies kept:" is not shown with any of them.
-5. **The temporary-file clearing shows nothing when it works.** The 2 books it leaves held (Card, Hobb) show **The names could not be written; the audiobook is unchanged.** in place of the hold text that said "The file was kept", now false (section 6). The leftover-file proofs' failure reasons are worded there too.
+5. **The temporary-file clearing shows nothing when it works.** Card and Hobb then get one fresh try at their names (Sergei's ruling 4): success leaves them off the held list; failure or a kept file shows **The names could not be written; the audiobook is unchanged.** in place of the hold text that said "The file was kept", now false (section 6). The leftover-file proofs' failure reasons are worded there too.
 
 ## 1. What goes wrong without a line
 
@@ -46,8 +63,8 @@ Removing old files: The Name of the Wind                42 of 115 books · 1 kep
 | What `total` and `done` count | `total` = the books sent back for the clean-up, series writes and name writes together (115 on Sergei's catalog). Fixed once the retry has queued them; it never grows during the run. `done` = books settled: old file removed, or both files kept by a failed check. `kept` = the second kind. The 2 leftover temporary files are not books and not in any number |
 | Bar | Determinate `<progress>`, `floor(done / total * 100)`, never 100% before the row ends (progress-rows spec 3). Settled, not removed, drives it, so a kept book never leaves the bar stuck short of full |
 | Step text (line 3 left) | **Checking both files, then removing the old one.** One sentence; says what happens this second and that nothing is removed unchecked |
-| Time (line 3 right) | Elapsed and ETA exactly as progress-rows spec 5 (ETA only from 10 s and 5%, moving average). No new rule |
-| Tooltip (on the label, as the series row's `lookupTip`) | **These books still have their old file beside the updated one. The app checks both files, then removes the old one.** |
+| Time (line 3 right) | Elapsed and ETA as progress-rows spec 5 (nothing before 10 s and 5%, refreshed at most every 5 s), with one difference ruled after the build: the samples are kept for the whole run and the rate runs from the first sample the page saw to the latest, not over the last 30 s. A 30-second window holds one or two settled books here, and books differ many times in size, so it would swing |
+| Tooltip (on the label; the step line keeps its own full-text title) | **These books still have their old file beside the updated one. The app checks both files, then removes the old one.** |
 | Status line's first part | The row's own name, as for any single running row: `Removing old files: The Name of the Wind`. With two or more running rows: "2 tasks running" (existing) |
 
 **It is main work.** While the row (or the Waiting item below) exists, the state is working or continues, never "All done" and never "Nothing running": the badge must not say finished while 40 minutes of work runs. Same standing as a series write or a rename.
@@ -63,12 +80,12 @@ Removing old files: The Name of the Wind                42 of 115 books · 1 kep
 The books wait while a library scan runs (`_may_finish`: "A library scan is running", tried again every 60 s). A scan on a large library can be long, and a row that disappears for that time would look like the clean-up vanished. One item in the existing **Waiting** block (`#jobs-wait`), in the form of its neighbours:
 
 ```
-Removing old files · 73 books
+Removing old files: 73 books
 Waiting for the library scan to finish.
 ```
 
-- `73 books` = the books still to do (total less settled), not the 115.
-- Same tooltip as the row. No "Show in list" button (a count, not one book).
+- `73 books` = the books still to do (total less settled), not the 115. The list writes every item as "Label: subject".
+- Same tooltip as the row, on the second line as every Waiting item has its tip. No "Show in list" button (a count, not one book).
 - Shown only while no book is in hand. When the scan ends the item is replaced by the row in the same update; the two never show together.
 - Any other short wait (the catalog busy for a moment) shows no Waiting item: the row simply stays.
 
@@ -79,9 +96,9 @@ Rows leave at once when their work ends (existing). A 40-minute job that ends wi
 | | Removed | Kept |
 | --- | --- | --- |
 | Copy, several | **110 old files removed, 74 GB freed** | **5 old files kept: a check failed** |
-| Copy, one | **1 old file removed, 612 MB freed** | **1 old file kept: a check failed** |
+| Copy, one | **1 old file removed, 584 MB freed** | **1 old file kept: a check failed** |
 | Shown when | the count is 1 or more | the count is 1 or more |
-| Size | existing `byteText` (1024-based, one decimal under 10, none from 10 up). Sergei's ruling 1: it stays | none |
+| Size | the page's `byteText` words (1024-based like Explorer, one decimal under 10, none from 10 up). Sergei's ruling 1: it stays | none |
 
 - **Where.** The last parts of the status line, after "missing books removed", removed first, kept second. Example:
 
@@ -103,10 +120,13 @@ Rows leave at once when their work ends (existing). A 40-minute job that ends wi
 | --- | --- |
 | The running row | `· 1 kept` after the count (live, so a run that keeps every book shows early) |
 | The status line, after | `N old files kept: a check failed`, for 1 hour |
-| Its entry in "Could not be renamed or moved" (Ender confirms a kept book is listed there) | The reason line reads **The old file was not removed.** instead of "The rename or move did not finish." That sentence is false for these books: the rename happened, the new file is in place and named. New cause key for Ender (for example `old_file_kept`) beside `did_not_finish` in `COULD_NOT_REASONS`. This line is the durable record; the status parts are only the cue |
-| Technical details / the engine log | The specific reason of section 5 |
+| A kept **series** book (the 82): its entry in "Could not be renamed or moved" | As built: key `old_file_kept`, the reason line **The old file was not removed.** in place of "The rename or move did not finish." (that sentence is false here: the rename happened, the new file is in place and named). This entry is its durable record; the status parts are only the cue |
+| A kept **title/author** book (the 33) | **Not listed by name anywhere on the page.** These books are not in the rules' list, and listing them needs a new path in the rules code (not built). They show in the running row's `· N kept` and the done line's count for 1 hour, and by name only in the engine log |
+| The engine log | `Old file kept: {title}: {reason} ({path})`, the reason of section 5 |
 
 **No try-again button and no advice to delete by hand** (Sergei's ruling 2). A kept book keeps both files until a later version. The line says what is kept and why. In the existing partial-move line ("Delete it yourself.") the app knows which file is right; here three of the first four reasons mean it does not.
+
+**The gap, and why it is Sergei's call.** A kept title/author book that is nowhere on the page by name is the one place this spec's own rule fails ("never silent"): after the hour only the log knows which book has two files. How likely is a kept book at all? Not known: Ender's read-only rehearsal on `Z:` covered the two temporary files, not the 115 old files. 33 of the 115 are in this group. Two ways to close it: (a) list them in "Could not be renamed or moved" with "The old file was not removed." (a new path in the rules code, late in 0.31.3, with its own tests); (b) leave it: the count says how many, and Sergei or Jane read the log for the names. Question 1. Default: (b), because ruling 2 already accepts that a kept book waits for a later version with nothing to press, so a name list buys him knowledge but no action.
 
 ## 5. The hold reasons: thirteen sentences
 
@@ -160,25 +180,24 @@ These show only when a check fails (the old file is then not removed). All are o
 - **No fix is named** (section 4).
 - **Dependency.** `sorting_moves.NOT_MOVED_KEYS` finds the key `file_changed` by the phrase "no longer matches". Rows 2a and 2b no longer contain it; Ender moves the mark to "changed since the app checked" and its test. The key `tags_not_written` keeps working because section 6 keeps "The names could not be written". The page does not read `file_changed` today.
 
-## 6. The temporary-file clearing, and the two books it leaves held
+## 6. The temporary-file clearing, and the two books (Card, Hobb)
 
-**Built** (`212a278`): after the proofs (the book's own file matches the catalog; the leftover's audio is byte-for-byte the book's; no other record names it; not written since the hold; one link; same file when reopened) the app removes the leftover temporary file of the two unfinished name writes: Orson Scott Card «Сага теней» 1 (612 MB) and Robin Hobb «Сага о живых кораблях» 2 (1.2 GB). **The hold stays**: their names were not written, and both books have used the rules' three tries. The code keeps the stored hold text as it was: "The names could not be written; the audiobook is unchanged: Safe removal of “{path}” could not be verified. The file was kept." After the removal its last sentence is false, and the rest is engine speech.
+**Built** (`212a278`, `e8932ce`): after the proofs (the book's own file matches the catalog; the leftover's audio is byte-for-byte the book's; no other record names it; not written since the hold; one link; same file when reopened) the app removes the leftover temporary file of the two unfinished name writes: Orson Scott Card «Сага теней» 1 (584 MB on the page's scale) and Robin Hobb «Сага о живых кораблях» 2 (1.1 GB). Their old hold text still said "The names could not be written; the audiobook is unchanged: Safe removal of “{path}” could not be verified. The file was kept." After the removal its last sentence is false, and the rest is engine speech.
 
 **A successful clearing shows nothing on the page.** Two app-owned leftovers, not books; no number that fits "N of 115 books"; nothing for Sergei to decide or check. It is the same call as the background sweep in section 8.1 of the stuck-load spec ("the app tidying its own leftovers; the engine log keeps its lines"). Not in `total`, `done` or `kept`, and in neither part of section 4. Engine log, one normal-level line per file: `Removed a leftover temporary file of an unfinished update: {title} ({size}): {path}`.
 
-**What the two books show after the removal.** They stay where they are today, in "Could not be renamed or moved" (Ender confirms), with one sentence changed everywhere the hold is printed:
+**Then one fresh try at the names** (Sergei's ruling 4, as built in `NameWrite._leftover_outcome` and `_failed`): once its file is removed, each write goes back to pending with its approval as it was and runs with every proof of a write of names. Three outcomes, and what each book shows:
 
-| Place | After the temporary file is removed | If a proof failed and the file stays |
-| --- | --- | --- |
-| Hold reason (ledger, Technical details, anywhere the page prints it) | **The names could not be written; the audiobook is unchanged.** | **The names could not be written; the audiobook is unchanged. A temporary file is still there: {path}** |
-| Their entry in "Could not be renamed or moved" | The same sentence on the reason line, in place of "The rename or move did not finish." (that line is for an entry whose last try's cause is `tags_not_written`; no other entry changes) | The first sentence only |
-| Status line, running row, Waiting, the parts of section 4 | Nothing. They are not among the 115 | Nothing |
-| Why it was kept | not applicable | Technical details and the log: the sentence of the table below |
+| Outcome | Hold reason (ledger, Technical details, wherever the page prints it) | Their entry in "Could not be renamed or moved" | Everything else |
+| --- | --- | --- | --- |
+| The try succeeds | none: the book is done and leaves the held list | gone. Card then moves to its author folder by the usual follow-up; the existing Moving row shows it, and until the move completes the entry may still read the generic "The rename or move did not finish." (accepted, section "As built") | nothing new |
+| The try fails | **The names could not be written; the audiobook is unchanged.** then the cause, as the engine gives it, after one space. Not tried again by this version | the same first sentence in place of "The rename or move did not finish." (for an entry whose last try's cause is `tags_not_written`; no other entry changes) | nothing |
+| A proof kept the temporary file (no try) | **The names could not be written; the audiobook is unchanged. A temporary file is still there: {path}** | the first sentence only | the reason of the table below in Technical details and the log |
 
 - **One sentence, two places.** The hold reason and the list line are the same words, so they cannot disagree. "The names could not be written" is the engine's own opening (`NAMES_FAILED`); keeping it keeps `tags_not_written` working.
-- **Ender writes the new reason in the same `_set` that records the outcome** (`temp_removed` or `temp_kept`), never earlier: `_leftover_temporary` finds these two books by matching the old stored text exactly. The record keeps `temp_removed` (path, size, SHA-256, time), so the fact is not lost.
-- **The original cause of the failed write is not known** (the second try overwrote it). If the record still holds it, Ender may append it after the sentence; the page does not invent one.
-- **No button and no advice** (ruling 2 applies the same way). Sergei's question 1 below asks only whether 0.31.3 should try the names once more.
+- **The cause after the sentence is the engine's own text** (for example "The new names did not read back: title"). It is outside the thirteen: a plain Held sentence of the write's own proofs, not reworded here. Ender reports any that reaches the page as jargon.
+- **The reason is written in the same `_set` that records the outcome** (`temp_removed`, `temp_kept` or the fresh try's result), never earlier: `_leftover_temporary` finds these two books by matching the old stored text exactly. The record keeps `temp_removed` (path, size, SHA-256, time), so the fact is not lost.
+- **No button and no advice** (ruling 2 applies the same way).
 
 **The reasons a proof keeps the file** (record `temp_kept`; new strings of `212a278`, shown only when a check fails):
 
@@ -200,9 +219,10 @@ These show only when a check fails (the old file is then not removed). All are o
 4. Main-work standing for the row and the Waiting item, so the state never reads "All done" while either exists.
 5. The thirteen sentences of section 5 at every place that raises them, without the prefix; the nine of 5.2 and the kept-file reasons of section 6 likewise; `old_file_kept` (or Ender's name) for the list entry of section 4.
 6. Where each of these reasons reaches the page today. The could-not list prints only a key sentence, and I found no page element that prints a ledger reason. If they are in the ledger and the log only, they stay there, in these words.
-7. Whether a kept book (section 4) is listed in "Could not be renamed or moved"; whether the 2 temporary-file books are listed there today and carry cause `tags_not_written`.
-8. The new reason of section 6 is written in the same `_set` as `temp_removed` / `temp_kept`.
+7. Whether a kept book (section 4) is listed in "Could not be renamed or moved". **Answered by the build:** the 82 series books are; the 33 title/author books are not (question 1). Whether the 2 temporary-file books carry cause `tags_not_written` is covered by the build's tests.
+8. The new reason of section 6 is written in the same `_set` as `temp_removed` / `temp_kept` / the fresh try's result.
 9. The two parts in `statusParts`, last, with the existing `plural` helper.
+10. **After the build (ruling 3 of "As built"):** for the `late_cleanup` row the ETA samples are not trimmed to 30 s; the rate runs from the first sample the page saw to the latest.
 
 ## 8. Noticed, not specced
 
@@ -212,18 +232,20 @@ These show only when a check fails (the old file is then not removed). All are o
 ## 9. Checks for Futaba (seeded fixture library, nothing real, no real NAS; slow the removal with a stub so rows can be watched)
 
 1. Seed about 12 held books with the 0.31.2 reason, start the app: for about 2 minutes nothing shows. Then the row: label, the book in hand, `0 of 12 books`, empty bar. Text exactly as section 2.
-2. Counts rise; the bar moves; no ETA before 10 s and 5%; elapsed ticks. Rects: the toolbar rect is identical with no row, this row and this row plus a conversion row; row heights equal across ticks (progress-rows spec 8).
+2. Counts rise; the bar moves; no ETA before 10 s and 5%; elapsed ticks. With a stub that alternates 3-second and 40-second books, the ETA once 10 books are done stays within about a quarter of the true time left and does not swing between books (a 30-second window would). Rects: the toolbar rect is identical with no row, this row and this row plus a conversion row; row heights equal across ticks (progress-rows spec 8).
 3. The status line starts `Removing old files: {title}`; the badge never reads All done or Nothing running while the row exists.
 4. Make books fail: catalog mismatch (row 1), old file changed (2a), new file changed (2b), new file deleted (3), old file with a second hard link (N1), old file already missing (N7). Each keeps its files. The detail reads `· 1 kept`, `· 2 kept` and so on; the bar still ends at full; each reason reads exactly as sections 5.1 and 5.2, with no prefix, wherever it shows. Where a fixture cannot cause one (N3, N4, N5, N6, N9), Ender's engine tests read the exact string.
 5. Last book settles: the row is gone and both parts show in the same update, no frame with neither. With 9 removed and 3 kept: `9 old files removed, {size} freed` then `3 old files kept: a check failed`. One of each: the singular forms. All kept: only the kept part. All removed: only the removed part.
 6. After the part's hour (clock stub) both parts are gone; a relaunch inside the hour does not show them; under "Last confirmed —" neither the row nor the parts show.
-7. A kept book's entry in "Could not be renamed or moved" reads "The old file was not removed." (or Ender reports it is not listed).
+7. A kept series book's entry in "Could not be renamed or moved" reads "The old file was not removed." A kept title/author book is not listed (until Sergei's answer to question 1): it shows only in the row's `· N kept`, the done line's count and the log line `Old file kept: {title}: {reason} ({path})`.
 8. A library scan running: the Waiting item with the books left; the scan ends: the row replaces it; both never show together. Both numbers of section 8 are read together with the Moving rows and the filing notice.
 9. Press Pause audiobook jobs mid-run: the row keeps moving; the line reads `Paused · Removing old files: ...`.
 10. Quit mid-run, relaunch: same total, done count kept, the row returns.
-11. Leftover temporary files, two seeded books held on `NAMES_FAILED` + the refused removal: after the pass the file is gone, no page text mentions it, one log line; both books' hold reason and list line read **The names could not be written; the audiobook is unchanged.** Seed one with a changed audio byte: the file stays and the hold reads the kept variant with its path; Technical details or the log carries "The temporary file's audio differs from the book's; it was left in place." Seed one with a second hard link: the file stays, the log carries N2.
+11. Leftover temporary files, two seeded books held on `NAMES_FAILED` + the refused removal: after the pass the file is gone, no page text mentions it, one log line, and each book gets its one fresh try. Success: the book leaves the held list and the could-not list. Failure (seed a name that will not read back): the hold and list line read **The names could not be written; the audiobook is unchanged.** then the cause, and it is not tried again. Seed one with a changed audio byte: the file stays, no try, and the hold reads the kept variant with its path; Technical details or the log carries "The temporary file's audio differs from the book's; it was left in place." Seed one with a second hard link: the file stays, the log carries N2.
 12. Hover the row label: the tooltip of section 2, exact. Narrow width and 200% zoom: lines wrap, nothing overlaps, no horizontal scroll; no new tokens, no new control, no new hit rect.
 
 ## 10. Question for Sergei
 
-1. **Card «Сага теней» 1 and Hobb «Сага о живых кораблях» 2 stay without their English names after the temporary files go (their three tries are used). Leave them until a later version, or let 0.31.3 try their names once more now that the files are gone?** Default in this spec: leave them (word: "leave" or "retry").
+1. **If the clean-up keeps a title/author book's old file, it is named only in the engine log (the other 82, the series books, are listed by name in "Could not be renamed or moved"). Is a count plus the log enough, or should 0.31.3 also list those books by name? Listing is a new path in the rules code, late in 0.31.3, with its own tests.** Default in this spec: **log** (word: "log" or "list").
+
+The earlier question (Card and Hobb) is answered: ruling 4, "retry".
