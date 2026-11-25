@@ -397,6 +397,20 @@ class NameWrite(SeriesBackfill):
     def _other_writer(self, job_id):
         return self._series_in_hand(job_id)
 
+    def _waits_for_other(self, job_id):
+        """Senua's 0.31.3 review, m2: a begun write of names waits while the same book's series write is in its last step
+        (the series write goes first and never waits; SeriesBackfill._waits_for_other)."""
+        other = self._ledger_entry('series_backfill', job_id)
+        return bool(other and other['state'] in ACTIVE)
+
+    def _retry_blocked(self, job_id):
+        """m2: not sent back for the clean-up while the same book's series write is in its last step, or while a series hold
+        of it is one the series retry will take first (it goes first)."""
+        other = self._ledger_entry('series_backfill', job_id)
+        if not other:
+            return False
+        return other['state'] in ACTIVE or (SeriesBackfill._removal_retained(other) and other['record'].get('removal_retry') != series_backfill.REMOVAL_RETRY)
+
     def _leftover_outcome(self, entry, record, temp):
         """Judy 6 with Sergei's ruling 4 (2026-11-25): its three tries were used up by the NAS bug, not by the names. Once its
         leftover temporary file is removed, the write gets one fresh try ('pending' with its approval as it was, record

@@ -23,6 +23,7 @@ from contextlib import contextmanager
 import critical_sections
 from datetime import datetime
 import hashlib
+import itertools
 import sqlite3
 import json
 import os
@@ -125,6 +126,16 @@ RECOVERY_HOLD = 'Series recovery could not verify the files; remaining copies ke
 REMOVAL_RETRY = '0.31.3'
 RETRY_FIELDS = ('old_path', 'new_path', 'temp', 'root', 'parent_identity', 'old_identity', 'new_identity', 'old_sha256', 'new_sha256',
                 'old_size', 'new_size')
+# Senua's 0.31.3 review, m5: what 0.31.2 and older STORED for the two kinds of hold this version finishes, frozen here as
+# data. The retry finds those holds by these, never by the sentences the app shows now (RECOVERY_HOLD, APPLY_HOLD,
+# native_io.retained_text), so rewording the screen can never change which books are sent back. A removal 0.31.3 starts
+# itself is marked in its record ('removal_version', m3), and such a hold is never one of 0.31.2's.
+LEGACY_REMOVAL_HOLD = 'Series recovery could not verify the files; remaining copies kept: Safe removal of “{}” could not be verified. The file was kept.'
+LEGACY_APPLY_HOLDS = {'series_backfill': 'Series update failed; the audiobook is unchanged: ',
+                      'name_writes': 'The names could not be written; the audiobook is unchanged: '}
+LEGACY_TEMP_REFUSAL = 'Safe removal of “{}” could not be verified. The file was kept.'
+# m2: one write of a book at a time (the words apply() already uses when the names write has the book).
+ONE_AT_A_TIME = 'This audiobook is being renamed now'
 # The hold of a write that failed before its rename (apply); a refused removal of the write's own leftover temporary file
 # reads APPLY_HOLD + retained_text(temp). Sergei 2026-11-25: such a leftover is removed by the app, once per REMOVAL_RETRY
 # (record 'temp_retry'), after the proofs of _remove_leftover (_clear_leftover_temporaries).
@@ -162,6 +173,7 @@ DRIVE_AWAY = 'The library drive is not answering'
 # Judy's spec 4 and 7.3: the clean-up's outcome shows on the status line for this long after its last book settles.
 LATE_SHOW_MS = 3600000
 _CLEANUP_LOCK = threading.Lock()
+_GENERATIONS = itertools.count(1)  # m1: each ledger write's token; a count read across one is not kept
 # The hosts a deferral recorded before 0.31.0 named, as the sources that ask them.
 HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
                 'html.duckduckgo.com': ('publisher', 'litres'), 'en.wikipedia.org': ('publisher',), 'ru.wikipedia.org': ('publisher',),
@@ -439,7 +451,9 @@ class SeriesBackfill:
     def _changed(self):
         """The ledger was written: the cached summary (and the clean-up's counts) are recounted at their next read."""
         self.__dict__['_summary'] = None
-        self.__dict__['_cleanup_cache'] = None
+        with _CLEANUP_LOCK:  # m1: a count read across this write is never kept (its generation no longer matches)
+            self.__dict__['_cleanup_generation'] = next(_GENERATIONS)
+            self.__dict__['_cleanup_cache'] = None
 
     # ------------------------------------------------------------------ the clean-up's progress (Judy's late-write clean-up spec)
     def _cleanup_counts(self):
@@ -450,6 +464,7 @@ class SeriesBackfill:
         cached = self.__dict__.get('_cleanup_cache')
         if cached is not None:
             return dict(cached)
+        generation = self.__dict__.get('_cleanup_generation')
         counts = {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}
         with connect(self.database) as db:
             for state, number, freed in db.execute(
@@ -461,7 +476,11 @@ class SeriesBackfill:
                     counts['freed'] += int(freed or 0)
                 elif state not in ACTIVE:
                     counts['kept'] += number
-        self.__dict__['_cleanup_cache'] = dict(counts)
+        with _CLEANUP_LOCK:
+            # Senua's 0.31.3 review, m1: the other thread's write (a book settling) may land while this read runs; its _changed()
+            # moves the generation, and then this answer is used once but not kept, so the next read counts again.
+            if self.__dict__.get('_cleanup_generation') == generation:
+                self.__dict__['_cleanup_cache'] = dict(counts)
         return counts
 
     @staticmethod
@@ -489,6 +508,8 @@ class SeriesBackfill:
             self._may_finish()  # R35: a begun write finishes without the Pause or conversion gate (_idle)
             if self._drive_away(entry['record']):
                 raise Later(DRIVE_AWAY, self.clock() + 60)  # Senua M2: nothing is tried on a drive that does not answer
+            if self._waits_for_other(job_id):
+                raise Later(ONE_AT_A_TIME, self.clock() + 60)  # Senua m2: the same book's other write is in its last step
             if retried:
                 self.__dict__.update(_cleanup_hand=str((entry['record'].get('review') or {}).get('title') or ''), _cleanup_waiting=False)
                 self.__dict__.setdefault('_cleanup_started', int(time.time() * 1000))
@@ -500,7 +521,38 @@ class SeriesBackfill:
         finally:
             if retried:
                 self.__dict__['_cleanup_hand'] = None
-                cleanup_view(self.merge)  # the outcome's hour starts when the last book settles, whether a page asks or not
+                try:
+                    cleanup_view(self.merge)  # the outcome's hour starts when the last book settles, whether a page asks or not
+                except Exception as error:
+                    # Senua's 0.31.3 review, m4: a failed count (a busy catalog) never replaces the step's own outcome or stops
+                    # the pass; it is said in the log, and the next count (a poll, the next book) reads again.
+                    _log('Clean-up count not read: ' + (str(error) or type(error).__name__))
+
+    def _ledger_entry(self, table, job_id):
+        """The same book's entry in another ledger (series_backfill or name_writes), or None."""
+        with connect(self.database) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                return None
+            row = db.execute('SELECT * FROM ' + table + ' WHERE job_id=?', (job_id,)).fetchone()
+        if not row:
+            return None
+        entry = dict(row)
+        try:
+            entry['record'] = json.loads(entry['record'])
+        except (TypeError, ValueError):
+            entry['record'] = {}
+        return entry
+
+    def _waits_for_other(self, job_id):
+        """Senua's 0.31.3 review, m2: one write of a book at a time. The series write goes first and never waits here (two
+        that waited for each other would both wait for good); the names write waits for it (NameWrite)."""
+        return False
+
+    def _retry_blocked(self, job_id):
+        """m2: this book is not sent back for the clean-up now: the series write waits while the names write of the same
+        book is in its last step (NameWrite also waits for a series hold the series retry will take first)."""
+        other = self._ledger_entry('name_writes', job_id)
+        return bool(other and other['state'] in ACTIVE)
 
     # ------------------------------------------------------------------ what is left (0.31.0 step 4b)
     def summary(self):
@@ -878,6 +930,7 @@ class SeriesBackfill:
         re-hashed), the folder is the same; then the former file goes through its held handle (on the NAS after those
         checks again, _last_checks) and the approved move follows (_follow_up). Any doubt holds it again with why, both
         files kept; it is not tried again by this version."""
+        picked = []
         for row in self._rows('SELECT job_id FROM ' + self.LEDGER + " WHERE state='held'"):
             if self.stop.is_set():
                 return  # Senua M1
@@ -886,23 +939,32 @@ class SeriesBackfill:
                 continue
             if self._drive_away(entry['record']):
                 continue  # Senua M2: not sent back while its drive does not answer; the next pass looks again
+            if self._retry_blocked(row['job_id']):
+                continue  # Senua m2: one write of a book at a time; the next pass looks again
+            picked.append(entry)
+        if self.stop.is_set():
+            return
+        # Senua m3: the books are sent back together, so the run's total is fixed once they are queued (Judy 2). Only 0.31.2's
+        # holds are found (_removal_retained: never one this version made), so no later hold joins the run.
+        for entry in picked:
             # Senua M3: 0.31.2's 'removal_intended' is not carried. It said "the removal began", so a missing old file read as
             # removed by the app; the resume sets it again right before the removal, and a missing old file is N7.
             record = {key: value for key, value in entry['record'].items() if key not in ('approved_failed', 'next_attempt', 'removal_intended')}
             record['removal_retry'] = REMOVAL_RETRY
-            self._set(row['job_id'], 'cataloged', '', record)
+            self._set(entry['job_id'], 'cataloged', '', record)
 
     @staticmethod
     def _removal_retained(entry):
-        """Whether this ledger entry is a write held at its last step only because its former file's removal was refused:
-        held with exactly RECOVERY_HOLD + that file's retained_text, its removal intended, every recorded proof there."""
-        from native_io import retained_text
+        """Whether this ledger entry is a write 0.31.2 (or older) held at its last step only because its former file's removal
+        was refused: held with exactly the text 0.31.2 stored for that (LEGACY_REMOVAL_HOLD with that file's path; Senua m5:
+        never the screen's sentences), its removal intended, every recorded proof there, and no mark of a removal this
+        version started (removal_version; Senua m3: a hold made now never joins the run)."""
         if not entry or entry['state'] != 'held' or not isinstance(entry.get('record'), dict):
             return False
         record = entry['record']
-        if record.get('removal_intended') is not True or any(record.get(field) in (None, '') for field in RETRY_FIELDS):
+        if record.get('removal_intended') is not True or 'removal_version' in record or any(record.get(field) in (None, '') for field in RETRY_FIELDS):
             return False
-        return entry['reason'] == RECOVERY_HOLD + retained_text(record['old_path'])
+        return entry['reason'] == LEGACY_REMOVAL_HOLD.format(record['old_path'])
 
     def _clear_leftover_temporaries(self):
         """Sergei 2026-11-25 (0.31.3): the write's own temporary file that 0.31.2 could not remove on the NAS (the hold
@@ -951,15 +1013,16 @@ class SeriesBackfill:
     def _leftover_temporary(self, entry):
         """The path of this held entry's own temporary file when its hold is that file's refused removal, else None: the
         record names it, it is TEMP_PREFIX + this job id + '.m4b' in the folder of the book's file, and the hold reads
-        exactly APPLY_HOLD + retained_text(it)."""
-        from native_io import retained_text
+        exactly what 0.31.2 stored for that (LEGACY_APPLY_HOLDS of this ledger + LEGACY_TEMP_REFUSAL; Senua m5: never the
+        screen's sentences)."""
         if not entry or entry['state'] != 'held' or not isinstance(entry.get('record'), dict):
             return None
         try:
             temp, old = ordinary(entry['record']['temp']), ordinary(entry['record']['old_path'])
         except (KeyError, TypeError, BoundaryError):
             return None
-        if temp != old.parent / (self.TEMP_PREFIX + entry['job_id'] + '.m4b') or entry['reason'] != self.APPLY_HOLD + retained_text(temp):
+        legacy = LEGACY_APPLY_HOLDS.get(self.LEDGER, '') + LEGACY_TEMP_REFUSAL.format(temp)
+        if temp != old.parent / (self.TEMP_PREFIX + entry['job_id'] + '.m4b') or entry['reason'] != legacy:
             return None
         return temp
 
@@ -1562,6 +1625,7 @@ class SeriesBackfill:
                             raise Held(SAME_FILE)  # N3
                         boundary.revalidate()
                         record['removal_intended'] = True
+                        record['removal_version'] = REMOVAL_RETRY  # Senua m3: a removal this version began; never one of 0.31.2's holds
                         self._set(job_id, 'cataloged', '', record)
                         former.dispose(remote_legacy=lambda handle: self._last_checks(handle, record, 'old', boundary, kept, new))
                     if self._seen(old):

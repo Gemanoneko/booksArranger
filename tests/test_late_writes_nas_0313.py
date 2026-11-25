@@ -111,6 +111,15 @@ def as_0312():
         yield
 
 
+def like_0312(database, table, job_id):
+    """The record as 0.31.2 stored it: since 0.31.3 (Senua m3) a removal this version starts carries 'removal_version', so
+    a hold made here by running today's code under as_0312() is not one 0.31.2 left. Drop that mark to model the live hold."""
+    with connect(database) as db:
+        record = json.loads(db.execute('SELECT record FROM ' + table + ' WHERE job_id=?', (job_id,)).fetchone()[0])
+        record.pop('removal_version', None)
+        db.execute('UPDATE ' + table + ' SET record=? WHERE job_id=?', (json.dumps(record, ensure_ascii=False), job_id))
+
+
 def key(path):
     return os.path.normcase(str(path))
 
@@ -130,6 +139,7 @@ class SeriesWriteOnNasTests(unittest.TestCase):
         backfill = lib.backfill()
         with nas_library(lib.root), as_0312():
             backfill.run_pass()
+        like_0312(lib.db, 'series_backfill', lib.job_id)
         state, reason = lib.state(backfill)
         self.assertEqual(state, 'held')
         self.assertEqual(reason, LIVE_PREFIX + str(lib.path) + LIVE_SUFFIX, 'the reason Sergei\'s catalog holds, word for word')
@@ -272,6 +282,7 @@ class NameWriteOnNasTests(unittest.TestCase):
         book.approve()
         with nas_library(book.lib.root), as_0312():
             book.writer.run_pass()
+        like_0312(book.lib.db, 'name_writes', book.lib.job_id)
         state, reason = book.state()
         self.assertEqual((state, reason), ('held', LIVE_PREFIX + str(book.path) + LIVE_SUFFIX), 'control: the reason of the 33 live holds')
         new = Path(book.writer.entry(book.lib.job_id)['record']['new_path'])
@@ -294,6 +305,7 @@ class NameWriteOnNasTests(unittest.TestCase):
         book.filing.tick()
         with nas_library(book.lib.root), as_0312():
             book.writer.run_pass()
+        like_0312(book.lib.db, 'name_writes', book.lib.job_id)
         self.assertEqual(book.state()[0], 'held')
         book.filing.tick()
         with connect(book.lib.db) as db:
@@ -791,6 +803,7 @@ class CleanupViewTests(unittest.TestCase):
         backfill = lib.backfill()
         with nas_library(lib.root), as_0312():
             backfill.run_pass()
+        like_0312(lib.db, 'series_backfill', lib.job_id)
         merge = backfill.merge
         merge.series_backfill = backfill
         seen = []
@@ -812,9 +825,8 @@ class CleanupViewTests(unittest.TestCase):
         self.assertEqual((end['removed'], end['kept'], end['freed_bytes']), (1, 0, old_size), 'the end, fixed when the last book settled')
 
 
-class ReviewMajorTests(unittest.TestCase):
-    """Senua's 0.31.3 review at db4b366 (Docs/BooksArranger_CodeReview_v0.31.3_2026-11-25.md), M1-M4; Sergei 2026-11-25: fix all
-    four in 0.31.3. Her probes P1-P3 are the first three repros. Each case failed on db4b366."""
+class HeldBook:
+    """A book in 0.31.2's held state on the simulated NAS (setUp, hold, later), for the review's cases."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=base.AREA)
@@ -827,6 +839,7 @@ class ReviewMajorTests(unittest.TestCase):
         backfill = lib.backfill()
         with nas_library(lib.root), as_0312():
             backfill.run_pass()
+        like_0312(lib.db, 'series_backfill', lib.job_id)
         self.assertEqual(lib.state(backfill), ('held', series_backfill.RECOVERY_HOLD + retained_text(lib.path)))
         return backfill
 
@@ -835,6 +848,11 @@ class ReviewMajorTests(unittest.TestCase):
         backfill = lib.backfill()
         backfill.clock = lambda: __import__('time').time() + 3600
         return backfill
+
+
+class ReviewMajorTests(HeldBook, unittest.TestCase):
+    """Senua's 0.31.3 review at db4b366 (Docs/BooksArranger_CodeReview_v0.31.3_2026-11-25.md), M1-M4; Sergei 2026-11-25: fix all
+    four in 0.31.3. Her probes P1-P3 are the first three repros. Each case failed on db4b366."""
 
     # M1: the clean-up stops for Quit and for "Restart to update" between two books (P3).
     def test_m1_a_stop_before_the_pass_touches_no_book(self):
@@ -1017,6 +1035,91 @@ class ReviewMajorTests(unittest.TestCase):
         self.assertEqual(left.get('path'), str(temp), 'recorded with the hold')
         self.assertEqual(left.get('reason'), retained_text(temp))
         self.assertTrue(any(str(temp) in call.args[0] and retained_text(temp) in call.args[0] for call in log.call_args_list), 'one log line with why and where')
+
+
+class ReviewMinorTests(HeldBook, unittest.TestCase):
+    """Senua's 0.31.3 review, m1-m5 (Sergei 2026-11-25: in this batch too). m6 needs a sentence Judy words (not built).
+    Each case failed before its fix."""
+
+    def test_m1_a_write_during_the_count_read_never_leaves_a_stale_count(self):  # P4
+        import contextlib as ctx
+        lib = self.lib
+        self.hold()
+        backfill = lib.backfill()
+        backfill._retry_retained_removals()
+        self.assertEqual(backfill.entry(lib.job_id)['state'], 'cataloged')
+        real, fired = series_backfill.connect, []
+
+        @ctx.contextmanager
+        def racing(path):
+            with real(path) as db:
+                yield db
+            if not fired:
+                fired.append(1)
+                backfill._set(lib.job_id, 'done', '', backfill.entry(lib.job_id)['record'])  # the other thread's book settles meanwhile
+        backfill.__dict__['_cleanup_cache'] = None
+        with mock.patch.object(series_backfill, 'connect', racing):
+            backfill._cleanup_counts()
+        self.assertEqual(backfill._cleanup_counts()['removed'], 1, 'the count is read again, never the stale one')
+
+    def test_m2_one_book_is_cleaned_up_by_one_write_at_a_time(self):
+        lib = self.lib
+        backfill = self.hold()
+        names = NameWrite(backfill.merge, stage=lib.base / 'names-stage')
+        series_record = backfill.entry(lib.job_id)['record']
+        with connect(lib.db) as db:  # the same book also held at its last step in the names ledger
+            db.execute('INSERT INTO name_writes VALUES(?,?,?,?,?)', (lib.job_id, 'held', series_backfill.RECOVERY_HOLD + retained_text(series_record['old_path']),
+                                                                    json.dumps(series_record, ensure_ascii=False), 'now'))
+        with nas_library(lib.root):
+            names._retry_retained_removals()
+            self.assertEqual(names.entry(lib.job_id)['state'], 'held', 'the series write goes first')
+            backfill._retry_retained_removals()
+            names._retry_retained_removals()
+        self.assertEqual((backfill.entry(lib.job_id)['state'], names.entry(lib.job_id)['state']), ('cataloged', 'held'), 'never both at once')
+        with connect(lib.db) as db:
+            db.execute("UPDATE name_writes SET state='cataloged' WHERE job_id=?", (lib.job_id,))
+        with mock.patch.object(NameWrite, 'resume') as resume, mock.patch.object(series_backfill, 'cleanup_view'):
+            names._finish_active(lib.job_id, names.entry(lib.job_id))
+        resume.assert_not_called()
+        self.assertGreater(names.entry(lib.job_id)['record'].get('next_attempt', 0), 0, 'it waits for the series write to settle')
+
+    def test_m3_a_hold_this_version_made_never_joins_the_run(self):
+        lib = self.lib
+        backfill = lib.backfill()
+        with nas_library(lib.root), as_0312():
+            backfill.run_pass()  # a removal refused by 0.31.3 itself: the same words as 0.31.2's hold
+        self.assertEqual(lib.state(backfill), ('held', series_backfill.RECOVERY_HOLD + retained_text(lib.path)))
+        with nas_library(lib.root):
+            lib.backfill().run_pass()
+        entry = lib.backfill().entry(lib.job_id)
+        self.assertEqual((entry['state'], entry['record'].get('removal_retry')), ('held', None), 'not sent back: the run is fixed at its start')
+        self.assertEqual(lib.backfill()._cleanup_counts()['total'], 0)
+        self.assertTrue(lib.path.exists() and lib.target.exists())
+
+    def test_m4_a_count_error_is_logged_and_never_stops_the_pass(self):
+        lib = self.lib
+        self.hold()
+        with nas_library(lib.root), mock.patch.object(series_backfill, 'cleanup_view', side_effect=sqlite3.OperationalError('database is locked')), \
+                mock.patch.object(series_backfill, '_log') as log:
+            lib.backfill().run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('done', ''), 'the book finished; the count error did not replace anything')
+        self.assertTrue(any('database is locked' in call.args[0] for call in log.call_args_list), 'one log line')
+
+    def test_m5_the_selection_does_not_follow_the_display_wording(self):
+        from test_name_write_031 import Book
+        lib = self.lib
+        self.hold()
+        entry = lib.backfill().entry(lib.job_id)
+        self.assertTrue(series_backfill.SeriesBackfill._removal_retained(entry), 'control')
+        with mock.patch.object(series_backfill, 'RECOVERY_HOLD', 'Reworded: '), mock.patch.object(native_io, 'retained_text', lambda path: 'Reworded ' + str(path)):
+            self.assertTrue(series_backfill.SeriesBackfill._removal_retained(entry), 'a 0.31.2 hold is found by what 0.31.2 stored, whatever the screen now says')
+        book = Book(self)
+        temp = LeftoverTemporaryTests.leave(self, book)
+        held = book.writer.entry(book.lib.job_id)
+        self.assertEqual(book.writer._leftover_temporary(held), temp, 'control')
+        with mock.patch.object(NameWrite, 'APPLY_HOLD', 'Reworded: '), mock.patch.object(name_write, 'NAMES_FAILED', 'Reworded: '), \
+                mock.patch.object(native_io, 'retained_text', lambda path: 'Reworded ' + str(path)):
+            self.assertEqual(book.writer._leftover_temporary(held), temp)
 
 
 class KeptOldFileKeyTests(unittest.TestCase):
