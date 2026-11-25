@@ -29,6 +29,33 @@ Ender built this spec and reported four differences; each is ruled here. Where t
 - **After a successful fresh try Card shows briefly as "The rename or move did not finish."** in "Could not be renamed or moved" until its follow-up move completes. It is the existing generic line for an entry between steps, not a string of this spec, and it clears by itself. If Futaba sees it outlast the move by more than a minute, she reports it and I look again.
 - **Ruling 4 as built** (`NameWrite._leftover_outcome`, `_failed`): section 6.
 
+### After Futaba's QA (2026-11-25): rulings on m3 and m7
+
+Sergei ruled every QA minor is fixed in 0.31.3. Both visual ones are code shared by every row, so each ruling says which rows change and that it is intended. Each is a correction to what `BooksArranger_ProgressRows_Spec.md` already says, not a new design.
+
+**m3. The bar at `0 of N books`.**
+- **What it shows:** an **empty determinate bar**: the track, no fill, no sliding segment, no stripes, no animation, in normal and in reduced-motion mode. `<progress max="100" value="0">` with the `value` attribute present, so `:indeterminate` is false. Elapsed keeps ticking on line 3 and the step text names what is happening; that is the liveness, as the progress-rows spec says of its rows (the ticking elapsed time is the proof of life). A determinate row's value is `floor(done / total * 100)`, which is 0 here.
+- **Cause (Futaba's):** `updateActivity` writes `bar.value` only when it differs from the element's current value. A new `<progress>` reports 0 with no attribute, so 0 is never written and the browser draws the indeterminate bar.
+- **Change (web/app.js, the determinate branch of `updateActivity`):** write the value when the attribute is missing as well as when the number differs: `if(!view.bar.hasAttribute('value') || view.bar.value!==value) view.bar.value=value;`. The `else` branch (no amount, or `finishing`) still removes the attribute, so a row without a measurable total still slides. Nothing else in the formula changes: `Math.min(99, floor(fraction * 100))` still keeps the bar short of full until the row ends.
+- **Applies to every row, intended.** One code path draws all of them, and a special case for this row would keep a bug on the others. Affected: every row that has a measurable total and is at 0 done, so conversion steps at their start (a step with fractional progress before its first update), originals cleanup, the identity and finished-book checks, the series and detail look-up rows (`0 of N books`), retry, approve and release rows that carry a count (`0 of N`), source check, and this row. Ender lists the exact kinds from `workDetail`'s measured rows when he makes the change. They now show an empty bar at 0 where they showed a sliding segment. Rows with no total, a total of 0, or `done` above `total` are unchanged (sliding segment). It is a visible change on rows other than this one, so Jane captures one of them (a conversion step or a Retry all row at 0) before Sergei is told it is clean.
+
+**m7. The Running region below 560 px.**
+- **Behaviour:** the step line and the book line **truncate with an ellipsis** inside the row's own width; they never widen the row. The step's full text is its `title` (already so for this row: `view.step.title` falls back to the step text), and the book line's full title is on the subject span (existing). The right-hand parts (the count, with `· N kept`, and the time) **never truncate**: in the narrow layout they sit under their left part as today, and if one is wider than the row it **wraps** at a space. No horizontal scrolling inside `#jobs-rows`, at any width. This is progress-rows spec section 2 ("subject and step truncate with an ellipsis; the right-hand parts never truncate").
+- **Cause:** below 560 px the container rule makes each line a column with `align-items:flex-start`. In a column, a `white-space:nowrap` item takes its full text width (421 px for the conversion row's step); `min-width:0` and `overflow:hidden` do not cap the cross axis, so it overflows and `#jobs-rows` (`overflow-y:auto`, so `overflow-x:auto`) scrolls sideways.
+- **Change (web/style.css, inside the existing `@container(max-width:560px)` rule, no new breakpoint):**
+  - `.activity-line,.activity-first{flex-direction:column;align-items:stretch;height:auto;gap:0}`, that is `align-items:stretch` in place of `flex-start`, so the book and step lines take the row's width and their ellipsis applies;
+  - `.activity-detail,.activity-time{white-space:normal;overflow-wrap:anywhere}`, so a count or a time wider than the row wraps and is never cut;
+  - nothing else; do not add `overflow-x:hidden` to `#jobs-rows` (it would hide a regression instead of fixing it).
+  Above 560 px nothing changes.
+- **Smallest width the app must support: 320 CSS px** (the WCAG 2.2 reflow width, 400% of a 1280 viewport). The window cannot be narrower than 950 px at 100% zoom, so 320 CSS px is reached only at about 300% zoom; the rule above is the same at any narrower width. At 320 px the Running region is about 247 px wide.
+- **Heights in this layout:** auto, as since the stuck-load spec. A row's height may change only when a string changes length (a time reaching 10:00 or 1:00:00, an ETA changing unit), never per second.
+- **Applies to every row, intended.** The CSS is shared, so every Running row (conversion, cleanup, queue, series, this one) now truncates its book and step lines with an ellipsis at narrow widths instead of widening the list.
+
+**Also reported, no objection.**
+- **The row's total covers both ledgers from the start** (m8): that is the spec ("fixed once the retry has queued them; it never grows"). The bar no longer steps back.
+- **The clean-up starts about 2 minutes after launch, whether or not the page reads state:** the spec's "about 2 minutes after the app starts", as written.
+- **The "Waiting for the library scan to finish." item clears promptly when the scan ends:** the spec's "replaced by the row in the same update".
+
 ## In brief
 
 1. **During: one Running row** in "Audiobook jobs", the app's existing place for work with progress. Label "Removing old files", the book in hand, `42 of 115 books`, a bar, elapsed and ETA by the existing rules. No new surface, no new control.
@@ -256,6 +283,8 @@ These show only when a check fails (the old file is then not removed). All are o
 10. Quit mid-run, relaunch: same total, done count kept, the row returns.
 11. Leftover temporary files, two seeded books held on `NAMES_FAILED` + the refused removal: after the pass the file is gone, no page text mentions it, one log line, and each book gets its one fresh try. Success: the book leaves the held list and the could-not list. Failure (seed a name that will not read back): the hold and list line read **The names could not be written; the audiobook is unchanged.** then the cause, and it is not tried again. Seed one with a changed audio byte: the file stays, no try, and the hold reads the kept variant with its path; Technical details or the log carries "The temporary file's audio differs from the book's; it was left in place." Seed one with a second hard link: the file stays, the log carries N2.
 12. Hover the row label: the tooltip of section 2, exact. Narrow width and 200% zoom: lines wrap, nothing overlaps, no horizontal scroll; no new tokens, no new control, no new hit rect.
+13. **Bar at 0 (m3).** At `0 of N books` this row's bar has `value="0"`, `:indeterminate` is false, and it draws the empty track: no segment, no stripes, no motion, also with `prefers-reduced-motion`. When the first book settles the fill appears at its value. Then one other row at 0 (a conversion step at its start, or a Retry all row `0 of N`): the same empty bar. A row with no total still shows the sliding segment (or the reduced-motion stripes).
+14. **Narrow Running region (m7).** At 1280, 640, 360 and 320 px, with this row, a conversion row and a queue row up: `#jobs-rows` `scrollWidth` equals `clientWidth` (no sideways scroll in the list), the document has none, and every step and book line that does not fit ends in an ellipsis with the full text in its `title`. The count and the time are complete (wrapped if wider than the row), none of the six parts overlaps another (measured rects), and a row's height does not change between two ticks unless a string changed length.
 
 ## 10. Question for Sergei
 
