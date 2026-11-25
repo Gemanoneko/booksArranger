@@ -282,6 +282,9 @@ REFUSAL_KEYS = (('name_exists', ('A file with the new name is already there',)),
                 ('data_move', ('Kept as published while the data folder move is unfinished',)), ('sources_disagree', ('Series sources need review',)),
                 ('no_name', ('No name for it', 'Could not be planned')))
 NOT_MOVED_KEYS = (('file_changed', ('The book changed since you approved', 'The published audiobook changed', 'no longer matches',
+                                    # 0.31.3 (Judy's late-write clean-up spec 5.3): rows 2a and 2b say it so now; "no longer
+                                    # matches" stays for the holds stored with the old words
+                                    'changed since the app checked',
                                     'The book changed since its new names were approved')),
                   ('place_changed', ('The planned place changed',)), ('name_exists', ('A file with the series name already exists',)),
                   # 0.31.0 R27: the new title or author credit did not go into the file (a name that did not read back,

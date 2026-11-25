@@ -81,6 +81,12 @@ NEWER = 'Has a newer version; left as it is'
 # The hold of a write of names that failed before its rename (the series write's APPLY_HOLD; 0.31.3 reads it to find a
 # leftover temporary file whose removal was refused, SeriesBackfill._clear_leftover_temporaries).
 NAMES_FAILED = 'The names could not be written; the audiobook is unchanged: '
+# Judy's late-write clean-up spec, section 6: what a write of names whose leftover temporary file was handled says (the
+# key tags_not_written still finds "The names could not be written"). With the file kept: TEMP_LEFT + its path.
+NAMES_UNCHANGED = 'The names could not be written; the audiobook is unchanged.'
+TEMP_LEFT = ' A temporary file is still there: '
+# The marks of the leftover handling and of Sergei's ruling 4 (one more try) that a new write of the same book keeps.
+RETRY_KEYS = ('temp_retry', 'temp_removed', 'temp_kept', 'names_retry')
 
 
 def have(db):
@@ -391,6 +397,27 @@ class NameWrite(SeriesBackfill):
     def _other_writer(self, job_id):
         return self._series_in_hand(job_id)
 
+    def _leftover_outcome(self, entry, record, temp):
+        """Judy 6 with Sergei's ruling 4 (2026-11-25): its three tries were used up by the NAS bug, not by the names. Once its
+        leftover temporary file is removed, the write gets one fresh try ('pending' with its approval as it was, record
+        'names_retry'; the usual pass runs it with every proof of a write of names). If the file was kept, the book stays
+        held with section 6's sentence and the file's path."""
+        if record.get('temp_removed') and record.get('names_retry') != series_backfill.REMOVAL_RETRY:
+            record['names_retry'] = series_backfill.REMOVAL_RETRY
+            record.pop('next_attempt', None)
+            return 'pending', ''
+        if record.get('temp_kept'):
+            return 'held', NAMES_UNCHANGED + TEMP_LEFT + str(temp)
+        return 'held', NAMES_UNCHANGED
+
+    @staticmethod
+    def _failed(record, reason):
+        """The hold of a failed write. The one more try of ruling 4 fails with section 6's sentence, its cause after it."""
+        if not isinstance(record, dict) or record.get('names_retry') != series_backfill.REMOVAL_RETRY:
+            return reason
+        cause = reason[len(NAMES_FAILED):] if reason.startswith(NAMES_FAILED) else reason
+        return NAMES_UNCHANGED + (' ' + cause if cause else '')
+
     def _series_in_hand(self, job_id):
         """The series look-up is writing this book, or has an approved write of it waiting: one writer per file."""
         with connect(self.database) as db:
@@ -408,11 +435,7 @@ class NameWrite(SeriesBackfill):
             entry = self.entry(row['job_id'])
             if entry['record'].get('next_attempt', 0) > self.clock():
                 continue
-            try:
-                self._may_finish()  # R35: a begun write finishes without the Pause or conversion gate (_idle)
-                self.resume(row['job_id'])
-            except Later as wait:
-                self._defer(row['job_id'], wait, state=entry['state'])
+            self._finish_active(row['job_id'], entry)  # SeriesBackfill's: R35, and the clean-up's book in hand
         # A book whose names were written before a restart still gets its move to the folder the rules file it in.
         for row in self._rows("SELECT job_id FROM name_writes WHERE state='done' AND json_extract(record,'$.move_approved') "
                               "AND json_extract(record,'$.follow_up') IS NULL"):
@@ -458,9 +481,9 @@ class NameWrite(SeriesBackfill):
             except InterruptedError:
                 return
             except Held as held:
-                self._set(job_id, 'held', str(held), dict(entry['record']))
+                self._set(job_id, 'held', self._failed(entry['record'], str(held)), dict(entry['record']))
             except Exception as error:
-                self._set(job_id, 'held', NAMES_FAILED + (str(error) or type(error).__name__)[:300], dict(entry['record']))
+                self._set(job_id, 'held', self._failed(entry['record'], NAMES_FAILED + (str(error) or type(error).__name__)[:300]), dict(entry['record']))
             finally:
                 self.progress = None
 
@@ -491,6 +514,7 @@ class NameWrite(SeriesBackfill):
         record = {'kind': 'names', 'names': names, 'was': {field: was.get(field) for field in names}, 'reasons': prior.get('reasons') or [],
                   'old_path': str(old), 'old_sha256': output['sha256'], 'old_size': output['size']}
         record.update({key: prior[key] for key in series_backfill.APPROVAL_KEYS if key in prior})
+        record.update({key: prior[key] for key in RETRY_KEYS if key in prior})  # ruling 4's one try is known as such
         try:
             if not prior.get('move_approved') or prior.get('approved_by') != BY or not names:
                 raise Held(NOT_BY_RULES)
@@ -539,7 +563,7 @@ class NameWrite(SeriesBackfill):
                 self._write(job_id, manifest, output, old, temp, review, record)
         except Held as held:
             self._discard_temp(job_id, record)
-            self._set(job_id, 'held', str(held), record)
+            self._set(job_id, 'held', self._failed(record, str(held)), record)
             return
         except (Later, InterruptedError):
             self._discard_temp(job_id, record)
@@ -547,7 +571,7 @@ class NameWrite(SeriesBackfill):
             raise
         except Exception as error:
             self._discard_temp(job_id, record)
-            self._set(job_id, 'held', NAMES_FAILED + (str(error) or type(error).__name__), record)
+            self._set(job_id, 'held', self._failed(record, NAMES_FAILED + (str(error) or type(error).__name__)), record)
             return
         finally:
             self._clear_stage(job_id)
@@ -615,7 +639,7 @@ class NameWrite(SeriesBackfill):
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
             series_backfill.remove_owned(handle)  # 0.31.3: on the NAS too (series_backfill.RECOVERY_HOLD's note)
         if os.path.lexists(temp):
-            raise BoundaryError('The temporary file could not be removed')
+            raise BoundaryError(series_backfill.TEMP_STILL_THERE)  # N8
 
 
 def placed(db):

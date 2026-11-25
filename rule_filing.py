@@ -71,7 +71,10 @@ PASSING = ('Move was not accepted. Nothing was moved.', 'Books Arranger is closi
            'Close and reopen Books Arranger to finish the move', 'This audiobook is being renamed now')
 RECORD_LIMIT = 200         # entries the record's route returns at a time (Judy 3.4)
 DID_NOT_FINISH = 'did_not_finish'  # the could-not-move key of a change that started and did not finish
-COULD_NOT_KEYS = sorting_moves.LASTING_KEYS + (DID_NOT_FINISH,)
+# 0.31.3 (Judy's late-write clean-up spec, section 4): a book of the clean-up whose old file a check kept. Its new file is in
+# place and named, so "did not finish" (or its name refusal) would be false; this key says the old file was not removed.
+OLD_FILE_KEPT = 'old_file_kept'
+COULD_NOT_KEYS = sorting_moves.LASTING_KEYS + (DID_NOT_FINISH, OLD_FILE_KEPT)
 
 
 def _stamp(epoch):
@@ -354,6 +357,19 @@ class RuleFiling:
         with connect(self.database) as db:
             db.execute("DELETE FROM rule_filings WHERE filing_id=? AND state='open' AND placed_path IS NULL", (filing['filing_id'],))
 
+    def _kept_old_files(self):
+        """Job ids of the clean-up's books (series_backfill.REMOVAL_RETRY) that a check held again with both files kept
+        (Judy's late-write clean-up spec, section 4: their could-not entry reads OLD_FILE_KEPT)."""
+        import series_backfill
+        found = set()
+        with connect(self.database) as db:
+            for table in ('series_backfill', 'name_writes'):
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    found.update(row[0] for row in db.execute(
+                        'SELECT job_id FROM ' + table + " WHERE state='held' AND record LIKE '%removal_retry%' AND json_valid(record) "
+                        "AND json_extract(record,'$.removal_retry')=?", (series_backfill.REMOVAL_RETRY,)))
+        return found
+
     def _failed(self):
         """{(job id, planned path): (tries that did not finish, epoch of the last one, the last one's cause key)}."""
         found = {}
@@ -530,6 +546,7 @@ class RuleFiling:
         waits = self._look_ups_open()
         opened = self._open()
         failed = self._failed()
+        kept_old = self._kept_old_files()
         paused = bool(merge.filing_paused()) if callable(getattr(merge, 'filing_paused', None)) else False
         ready, could, counts = [], [], {'waiting_for_lookup': 0, 'on_hold': 0, 'settling': 0}
         listed = set()
@@ -547,12 +564,12 @@ class RuleFiling:
                 continue
             tries = failed.get((job, sorting_moves.key(item['to'])))
             if tries and job not in opened and (tries[0] >= TRIES or now - tries[1] < SPACING):
-                could.append(self._could(item, DID_NOT_FINISH, output_root, tries=tries[0], cause=tries[2]))
+                could.append(self._could(item, OLD_FILE_KEPT if job in kept_old else DID_NOT_FINISH, output_root, tries=tries[0], cause=tries[2]))
                 continue
             ready.append(item)
         for item in answer['refused']:
             if item.get('refused_key') in sorting_moves.LASTING_KEYS and item['job_id'] not in waits and not (item['job_id'] in opened and opened[item['job_id']]['step']):
-                could.append(self._could(item, item['refused_key'], output_root))
+                could.append(self._could(item, OLD_FILE_KEPT if item['job_id'] in kept_old else item['refused_key'], output_root))
         # An entry in hand with nothing queued whose book the list no longer moves (he chose its folder meanwhile, or the
         # list now refuses it): closed. Its series was written and the file renamed in its own folder: that is the change.
         for job, filing in opened.items():

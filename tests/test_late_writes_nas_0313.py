@@ -30,6 +30,7 @@ import quicktime_chapters
 import runtime_file_disposition as runtime
 import series_backfill
 import name_write
+import sorting_moves
 from native_io import FileRemovalRetained, VerifiedFile, retained_text
 from name_write import NameWrite
 from scanner import connect
@@ -184,7 +185,7 @@ class SeriesWriteOnNasTests(unittest.TestCase):
             backfill.run_pass()
         entry = backfill.entry(lib.job_id)
         self.assertEqual(entry['state'], 'held')
-        self.assertIn('no longer matches', entry['reason'])
+        self.assertEqual(entry['reason'], 'The old file changed since the app checked it; both files kept.', "Judy 5.1 row 2a, no engine prefix")
         self.assertEqual(entry['record']['removal_retry'], series_backfill.REMOVAL_RETRY)
         self.assertEqual(sha(lib.path), changed, 'kept as it is')
         self.assertTrue(lib.target.exists())
@@ -205,7 +206,7 @@ class SeriesWriteOnNasTests(unittest.TestCase):
             backfill.run_pass()
         state, reason = lib.state(backfill)
         self.assertEqual(state, 'held')
-        self.assertIn('The catalog does not name the rewritten file', reason)
+        self.assertEqual(reason, 'The catalog does not match the new file; both files kept.', 'Judy 5.1 row 1, no engine prefix')
         self.assertEqual(sha(lib.path), lib.original)
         self.assertTrue(lib.target.exists())
 
@@ -345,7 +346,7 @@ class NameWriteOnNasTests(unittest.TestCase):
             book.writer.run_pass()
         state, reason = book.state()
         self.assertEqual(state, 'held')
-        self.assertIn('the rewritten copy was removed', reason)
+        self.assertEqual(reason, 'The audiobook was moved meanwhile; the catalog is unchanged; the new file was removed.', "N9's success variant")
         self.assertFalse(new.exists(), 'no second copy')
         self.assertEqual(sha(book.path), book.original, 'the file the move starts from')
         self.assertEqual(used[key(new)], native_io.NAS_LEGACY)
@@ -378,13 +379,12 @@ class LeftoverTemporaryTests(unittest.TestCase):
         with connect(book.lib.db) as db:
             return [tuple(r) for r in db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=?', (str(temp),))]
 
-    def test_the_leftover_temporary_is_removed_after_its_proofs_and_the_book_is_unchanged(self):
-        from test_name_write_031 import Book
+    def test_the_leftover_temporary_is_removed_after_its_proofs_then_the_names_get_one_fresh_try(self):
+        from test_name_write_031 import Book, ENGLISH
         book = Book(self)
         temp = self.leave(book)
         digest, size = sha(temp), temp.stat().st_size
-        reason = book.state()[1]
-        with nas_library(book.lib.root):
+        with nas_library(book.lib.root), mock.patch.object(series_backfill, '_log') as log:
             book.writer.run_pass()
         self.assertFalse(temp.exists())
         record = book.writer.entry(book.lib.job_id)['record']
@@ -393,22 +393,53 @@ class LeftoverTemporaryTests(unittest.TestCase):
         self.assertEqual(record['temp_retry'], series_backfill.REMOVAL_RETRY)
         self.assertNotIn('temp_kept', record)
         self.assertEqual(self.owned(book, temp), [], 'its ownership row goes with it')
-        self.assertEqual(book.state(), ('held', reason), 'the write itself did not happen: it stays held')
-        self.assertEqual(sha(book.path), book.original, "the book's own file is untouched")
-        self.assertEqual((book.output()['final_path'], book.output()['sha256']), (str(book.path), book.original))
+        logged = [call.args[0] for call in log.call_args_list]
+        self.assertIn('Removed a leftover temporary file of an unfinished update: ' + book.title + ' (' + series_backfill.size_text(size) + '): ' + str(temp), logged,
+                      'one normal-level engine log line (Judy 6)')
+        # Sergei's ruling 4: its tries were used up by the NAS bug; the names get one fresh try, with every proof of a write.
+        self.assertEqual(book.state(), ('done', ''), 'the write succeeded: the book leaves the held list')
+        self.assertEqual(record['names_retry'], series_backfill.REMOVAL_RETRY)
+        self.assertEqual(book.manifest()['metadata']['title'], ENGLISH)
+        new = Path(record['new_path'])
+        self.assertTrue(new.exists())
+        self.assertFalse(book.path.exists(), 'the old file went after the new one was proven, as in any write')
         before = book.writer.entry(book.lib.job_id)
         with nas_library(book.lib.root):
             book.writer.run_pass()
         self.assertEqual(book.writer.entry(book.lib.job_id), before, 'once: nothing more')
 
+    def test_a_failed_fresh_try_stays_held_with_section_6s_sentence_and_is_not_tried_again(self):
+        from test_name_write_031 import Book
+        from series_backfill import Held
+        book = Book(self)
+        temp = self.leave(book)
+        with nas_library(book.lib.root), mock.patch.object(NameWrite, '_read_back', side_effect=Held('The new names did not read back: title')):
+            book.writer.run_pass()
+        self.assertFalse(temp.exists(), 'the leftover went first')
+        state, reason = book.state()
+        self.assertEqual((state, reason), ('held', 'The names could not be written; the audiobook is unchanged. The new names did not read back: title'))
+        record = book.writer.entry(book.lib.job_id)['record']
+        self.assertEqual((record['names_retry'], record['temp_retry']), (series_backfill.REMOVAL_RETRY, series_backfill.REMOVAL_RETRY))
+        self.assertEqual(sha(book.path), book.original, 'the book is unchanged')
+        self.assertEqual(book.temps(), [], 'the failed try left no temporary file (0.31.3 removes its own on the NAS)')
+        self.assertEqual(sorting_moves.reason_key(reason, sorting_moves.NAMES_NOT_WRITTEN_KEYS), 'tags_not_written', 'its key still reads')
+        before = book.writer.entry(book.lib.job_id)
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertEqual(book.writer.entry(book.lib.job_id), before, 'one try only')
+
     def kept(self, book, temp, why):
         with nas_library(book.lib.root):
             book.writer.run_pass()
-        record = book.writer.entry(book.lib.job_id)['record']
+        entry = book.writer.entry(book.lib.job_id)
+        record = entry['record']
         self.assertTrue(temp.exists(), 'kept')
-        self.assertIn(why, record['temp_kept']['reason'])
+        self.assertEqual(record['temp_kept']['reason'], why)
         self.assertNotIn('temp_removed', record)
+        self.assertNotIn('names_retry', record, 'no fresh try when the file stayed')
         self.assertEqual(record['temp_retry'], series_backfill.REMOVAL_RETRY)
+        self.assertEqual((entry['state'], entry['reason']), ('held', 'The names could not be written; the audiobook is unchanged. A temporary file is still there: ' + str(temp)),
+                         "Judy 6: the kept variant, with the file's path")
         before = book.writer.entry(book.lib.job_id)
         with nas_library(book.lib.root):
             book.writer.run_pass()
@@ -422,7 +453,7 @@ class LeftoverTemporaryTests(unittest.TestCase):
         temp = self.leave(book)
         later = __import__('time').time() + 120
         os.utime(temp, (later, later))
-        self.kept(book, temp, 'written after the app kept it')
+        self.kept(book, temp, 'The temporary file changed after the app last handled it; it was left in place.')
 
     def test_a_temporary_another_record_names_is_kept(self):
         from test_name_write_031 import Book
@@ -430,7 +461,7 @@ class LeftoverTemporaryTests(unittest.TestCase):
         temp = self.leave(book)
         with connect(book.lib.db) as db:
             db.execute("UPDATE owned_artifacts SET kind='output' WHERE path=?", (str(temp),))
-        self.kept(book, temp, 'Another record names the temporary file')
+        self.kept(book, temp, 'Another record of the app uses this file; it was left in place.')
 
     def test_a_temporary_whose_audio_is_not_the_books_is_kept(self):
         from test_name_write_031 import Book
@@ -443,7 +474,9 @@ class LeftoverTemporaryTests(unittest.TestCase):
         data[at + length // 2] ^= 1  # one audio byte, the time put back: only the media proof can see it
         temp.write_bytes(data)
         os.utime(temp, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-        self.kept(book, temp, 'Media bytes changed')
+        with mock.patch.object(series_backfill, '_log') as log:
+            self.kept(book, temp, "The temporary file's audio differs from the book's; it was left in place.")
+        self.assertTrue(any('Media bytes changed' in call.args[0] for call in log.call_args_list), 'the exact media error goes to the log only')
 
     def test_a_temporary_is_kept_when_the_books_own_file_does_not_match_its_record(self):
         from test_name_write_031 import Book
@@ -452,7 +485,7 @@ class LeftoverTemporaryTests(unittest.TestCase):
         data = bytearray(book.path.read_bytes())
         data[-20] ^= 1
         book.path.write_bytes(data)
-        self.kept(book, temp, "The book's own file does not match its record")
+        self.kept(book, temp, "The book's file changed since the app checked it; the temporary file was left in place.")
 
     def test_a_hold_for_another_reason_is_not_touched(self):
         from test_name_write_031 import Book
@@ -484,6 +517,321 @@ class LeftoverTemporaryTests(unittest.TestCase):
         self.assertFalse(temp.exists())
         self.assertEqual(backfill.entry(lib.job_id)['record']['temp_removed']['method'], native_io.NAS_LEGACY)
         self.assertEqual(sha(lib.path), lib.original)
+
+
+class HoldReasonTests(unittest.TestCase):
+    """Judy's late-write clean-up spec, section 5 (Sergei's ruling 3): the thirteen hold reasons in "old file" and "new file",
+    stored without the engine's prefix, at every place that raises them; section 6's kept-file reasons. Driven where a
+    fixture can cause one; read as the exact string where none can (N3: the old file's own check fails first)."""
+
+    SPEC = {'CATALOG_MISMATCH': 'The catalog does not match the new file; both files kept.',
+            'NEW_CHANGED_OR_MISSING': 'The new file changed or is missing; the old file is kept.',
+            'TEMP_CHANGED': 'The temporary file changed since the app made it; it was left in place.',
+            'TEMP_OTHER_NAME': 'The temporary file is also stored under another name; it was left in place.',
+            'SAME_FILE': 'The old and new files are the same file; nothing was removed.',
+            'FOLDER_CHANGED': "The book's folder changed since the app checked it; nothing was removed.",
+            'NOT_ONE_FOLDER': 'The old and new files are not recorded in the same folder; nothing was removed.',
+            'OLD_STILL_THERE': 'The old file is still there after removal; both files kept.',
+            'OLD_MISSING': 'The old file is missing, and the app did not remove it.',
+            'TEMP_STILL_THERE': 'The temporary file is still there after removal; it was left in place.',
+            'WITHDRAW_KEPT': 'The audiobook was moved meanwhile; the catalog is unchanged. The new file could not be removed; both files kept.',
+            'WITHDRAWN': 'The audiobook was moved meanwhile; the catalog is unchanged; the new file was removed.',
+            'TEMP_NAMED': 'Another record of the app uses this file; it was left in place.',
+            'TEMP_BOOK_UNNAMED': "The catalog does not match the book's file; the temporary file was left in place.",
+            'TEMP_BOOK_CHANGED': "The book's file changed since the app checked it; the temporary file was left in place.",
+            'TEMP_AUDIO_DIFFERS': "The temporary file's audio differs from the book's; it was left in place.",
+            'TEMP_WRITTEN_AFTER': 'The temporary file changed after the app last handled it; it was left in place.',
+            'TEMP_CHANGED_DURING': 'The temporary file changed while the app checked it; it was left in place.'}
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=base.AREA)
+        self.addCleanup(self.temp.cleanup)
+        self.lib = Library(Path(self.temp.name))
+
+    def park(self):
+        """The write left at 'cataloged' (the catalog committed, the old file not yet removed), as a crash leaves it."""
+        backfill, real = self.lib.backfill(), series_backfill.SeriesBackfill.catalog
+
+        def committed(self, job_id, record):
+            real(self, job_id, record)
+            raise sqlite3.OperationalError('crash after the catalog commit')
+        with mock.patch.object(series_backfill.SeriesBackfill, 'catalog', committed):
+            backfill.run_pass()
+        self.assertEqual(self.lib.state(backfill)[0], 'cataloged')
+        return backfill
+
+    def record(self, **changes):
+        with connect(self.lib.db) as db:
+            record = json.loads(db.execute('SELECT record FROM series_backfill WHERE job_id=?', (self.lib.job_id,)).fetchone()[0])
+            record.update(changes)
+            db.execute('UPDATE series_backfill SET record=? WHERE job_id=?', (json.dumps(record, ensure_ascii=False), self.lib.job_id))
+        return record
+
+    def held(self, backfill, expected):
+        backfill.resume(self.lib.job_id)
+        state, reason = self.lib.state(backfill)
+        self.assertEqual((state, reason), ('held', expected), 'stored as it is: no "Series recovery could not verify the files" before it')
+        self.assertTrue(self.lib.path.exists() or expected == series_backfill.OLD_MISSING)
+
+    def test_the_strings_are_the_specs(self):
+        for name, text in self.SPEC.items():
+            self.assertEqual(getattr(series_backfill, name), text, name)
+        self.assertEqual(series_backfill.CHANGED, {'old': 'The old file changed since the app checked it; both files kept.',
+                                                   'new': 'The new file changed since the app checked it; both files kept.'})
+        self.assertEqual(series_backfill.OTHER_NAME['old'], 'The old file is also stored under another name; both files kept.')
+        self.assertEqual((name_write.NAMES_UNCHANGED, name_write.TEMP_LEFT), ('The names could not be written; the audiobook is unchanged.', ' A temporary file is still there: '))
+        # Judy 5.3: the constants that find the holds older versions stored keep their words.
+        self.assertEqual(series_backfill.RECOVERY_HOLD, 'Series recovery could not verify the files; remaining copies kept: ')
+        self.assertEqual(series_backfill.OLD_FOLDER_REASON, 'The recorded series paths do not share their original parent')
+        import ast
+        source = Path(series_backfill.__file__).read_text(encoding='utf-8')
+        self.assertIn('raise Held(SAME_FILE)', source)
+        # Every string the code passes in a call (what it raises, stores or logs; not its comments and docstrings).
+        said = [node.value for call in ast.walk(ast.parse(source)) if isinstance(call, ast.Call)
+                for node in ast.walk(call) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+        self.assertTrue(any('not in the sorted output folder' in text for text in said), 'control: the scan sees the strings the code passes')
+        for old in ('verified identity and bytes', 'filesystem alias', 'identify the same file', 'disposition has not completed',
+                    'without a removal receipt', 'rewritten copy', 'parent identity changed',
+                    'do not share their original parent', 'does not name the rewritten'):
+            self.assertFalse([text for text in said if old in text], old)
+        # 5.3, the dependency: file_changed is found by the new words, and by the old ones of the holds already stored.
+        for text in (series_backfill.CHANGED['old'], series_backfill.CHANGED['new'], 'The old file no longer matches its verified identity and bytes'):
+            self.assertEqual(sorting_moves.reason_key(text, sorting_moves.NOT_MOVED_KEYS), 'file_changed', text)
+
+    def test_the_new_file_changed(self):  # 2b at _protected
+        backfill = self.park()
+        stat = self.lib.target.stat()
+        data = bytearray(self.lib.target.read_bytes())
+        data[-20] ^= 1
+        self.lib.target.write_bytes(data)
+        os.utime(self.lib.target, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        self.held(backfill, series_backfill.CHANGED['new'])
+
+    def test_the_old_file_under_another_name(self):  # N1
+        backfill = self.park()
+        os.link(self.lib.path, self.lib.path.with_name('second name.m4b'))
+        self.held(backfill, series_backfill.OTHER_NAME['old'])
+
+    def test_the_folder_changed(self):  # N4
+        backfill = self.park()
+        self.record(parent_identity=[[1, 2, 3]])
+        self.held(backfill, series_backfill.FOLDER_CHANGED)
+
+    def test_not_recorded_in_one_folder(self):  # N5
+        backfill = self.park()
+        self.record(temp=str(self.lib.base / 'elsewhere' / 'x.m4b'))
+        self.held(backfill, series_backfill.NOT_ONE_FOLDER)
+
+    def test_the_old_file_still_there_after_removal(self):  # N6
+        backfill = self.park()
+        with mock.patch.object(VerifiedFile, 'dispose', lambda handle, **kwargs: None):
+            self.held(backfill, series_backfill.OLD_STILL_THERE)
+
+    def test_the_old_file_missing(self):  # N7
+        backfill = self.park()
+        self.lib.path.unlink()
+        self.held(backfill, series_backfill.OLD_MISSING)
+
+    def test_a_raw_error_keeps_the_engines_prefix(self):  # 5.3: not specced; the prefix stays, and so does the 115's matching
+        backfill = self.park()
+        with mock.patch.object(series_backfill.SeriesBackfill, '_names_rewritten', side_effect=native_io.BoundaryError('raw refusal')):
+            backfill.resume(self.lib.job_id)
+        self.assertEqual(self.lib.state(backfill), ('held', series_backfill.RECOVERY_HOLD + 'raw refusal'))
+
+    def test_last_checks_rows_2a_and_3(self):
+        class Held:
+            def __init__(self, facts, digest=None):
+                self.facts_, self.digest = facts, digest
+
+            def refresh(self):
+                return dict(self.facts_)
+
+            def sha256(self):
+                return self.digest
+        record = {'old_identity': [1, 2, 3], 'old_size': 10, 'old_sha256': 'a', 'new_identity': [1, 2, 4], 'new_size': 11, 'new_sha256': 'b'}
+        folder = mock.Mock()
+        old = Held({'identity': [1, 2, 3], 'size': 10, 'links': 1, 'attributes': 0x80}, 'a')
+        kept = Held({'identity': [1, 2, 4], 'size': 11, 'links': 1, 'attributes': 0x80})
+        here = self.lib.path
+        series_backfill.SeriesBackfill._last_checks(old, record, 'old', folder, kept, here)  # control: passes
+        with self.assertRaises(series_backfill.Held) as caught:
+            series_backfill.SeriesBackfill._last_checks(Held(dict(old.facts_, size=9), 'a'), record, 'old', folder, kept, here)
+        self.assertEqual(str(caught.exception), series_backfill.CHANGED['old'])
+        for kept_now, path in ((Held(dict(kept.facts_, identity=[9, 9, 9])), here), (kept, self.lib.base / 'gone.m4b')):
+            with self.assertRaises(series_backfill.Held) as caught:
+                series_backfill.SeriesBackfill._last_checks(old, record, 'old', folder, kept_now, path)
+            self.assertEqual(str(caught.exception), series_backfill.NEW_CHANGED_OR_MISSING)
+
+    def test_remove_owned_row_4_and_n2(self):
+        class Owned:
+            def __init__(self, links, later):
+                self.links, self.later = links, later
+
+            def facts(self):
+                return {'identity': [1, 1, 1], 'links': self.links, 'attributes': 0x80}
+
+            def refresh(self):
+                return {'identity': self.later, 'links': 1, 'attributes': 0x80}
+
+            def dispose(self, remote_legacy=None):
+                remote_legacy(self)
+        for owned, expected in ((Owned(2, [1, 1, 1]), series_backfill.TEMP_OTHER_NAME), (Owned(1, [9, 9, 9]), series_backfill.TEMP_CHANGED)):
+            with self.assertRaises(native_io.BoundaryError) as caught:
+                series_backfill.remove_owned(owned)
+            self.assertEqual(str(caught.exception), expected)
+        series_backfill.remove_owned(Owned(1, [1, 1, 1]))  # control: its own check passes
+
+    def test_the_temporary_still_there_after_removal(self):  # N8
+        temp = self.lib.path.parent / (series_backfill.TEMP_PREFIX + self.lib.job_id + '.m4b')
+        temp.write_bytes(b'unproven')
+        with mock.patch.object(VerifiedFile, 'dispose', lambda handle, **kwargs: None):
+            with self.assertRaises(native_io.BoundaryError) as caught:
+                series_backfill.SeriesBackfill._dispose_temporary(temp)
+        self.assertEqual(str(caught.exception), series_backfill.TEMP_STILL_THERE)
+
+    def test_withdraw_kept(self):  # N9
+        from test_name_write_031 import Book
+        book = Book(self)
+        book.approve()
+        with mock.patch.object(NameWrite, 'catalog', side_effect=sqlite3.OperationalError('database is locked')):
+            book.writer.run_pass()
+        new = Path(book.writer.entry(book.lib.job_id)['record']['new_path'])
+        with connect(book.lib.db) as db:
+            move = book_move.plan(db, job_id=book.lib.job_id, kind='base', candidate_id=book.lib.candidate, start=book_move.location(book.resolve()),
+                                  folder=str(book.lib.root / 'Mine'), root=str(book.lib.root), origin='user', override_id='his')
+            db.execute("UPDATE book_moves SET state='rename_intent' WHERE move_id=?", (move['move_id'],))
+        book.writer.clock = lambda: 2_000_000_000.0
+        with mock.patch.object(VerifiedFile, 'dispose', side_effect=native_io.BoundaryError('denied')), mock.patch.object(series_backfill, '_log') as log:
+            book.writer.run_pass()
+        self.assertEqual(book.state(), ('held', series_backfill.WITHDRAW_KEPT), 'one whole sentence')
+        self.assertTrue(new.exists() and book.path.exists())
+        self.assertTrue(any('denied' in call.args[0] for call in log.call_args_list), 'why: the log only')
+
+
+class FakeLedger:
+    def __init__(self, counts, **own):
+        self.counts = counts
+        self.__dict__.update(own)
+
+    def _cleanup_counts(self):
+        return dict(self.counts)
+
+
+class CleanupViewTests(unittest.TestCase):
+    """Judy's spec 2-4 and 7.1-7.4: the row, the Waiting item, main work, and the end for the status line."""
+
+    @staticmethod
+    def _merge(series, names, own):
+        merge = type('Merge', (), {})()
+        merge.series_backfill = FakeLedger(series, **own)
+        merge.name_write = FakeLedger(names)
+        return merge
+
+    def test_counts_sum_both_writes_and_the_end_is_fixed_once(self):
+        merge = self._merge({'total': 82, 'removed': 40, 'kept': 1, 'freed': 1000}, {'total': 33, 'removed': 1, 'kept': 0, 'freed': 50},
+                            {'_cleanup_hand': 'The Name of the Wind', '_cleanup_started': 1234})
+        view = series_backfill.cleanup_view(merge)
+        self.assertEqual({key: view[key] for key in ('total', 'done', 'kept', 'left', 'title', 'in_hand', 'active', 'started', 'waiting')},
+                         {'total': 115, 'done': 42, 'kept': 1, 'left': 73, 'title': 'The Name of the Wind', 'in_hand': True, 'active': True, 'started': 1234, 'waiting': False})
+        self.assertEqual(series_backfill.outcome_view(merge)['last_age_ms'], None, 'no end while books are left')
+        merge.series_backfill.counts = {'total': 82, 'removed': 77, 'kept': 5, 'freed': 9000}
+        merge.name_write.counts = {'total': 33, 'removed': 33, 'kept': 0, 'freed': 3000}
+        merge.series_backfill._cleanup_hand = None
+        self.assertEqual(series_backfill.cleanup_view(merge)['left'], 0)
+        end = series_backfill.outcome_view(merge)
+        self.assertEqual((end['removed'], end['kept'], end['freed_bytes']), (110, 5, 12000))
+        self.assertLess(end['last_age_ms'], 1000)
+        series_backfill.cleanup_view(merge)  # a later poll does not restart its hour
+        with mock.patch.object(series_backfill.time, 'monotonic', return_value=__import__('time').monotonic() + 3600):
+            self.assertEqual(series_backfill.outcome_view(merge)['removed'], 0, 'gone after its hour')
+        fresh = self._merge({'total': 82, 'removed': 77, 'kept': 5, 'freed': 9000}, {'total': 33, 'removed': 33, 'kept': 0, 'freed': 3000}, {})
+        series_backfill.cleanup_view(fresh)
+        self.assertEqual(series_backfill.outcome_view(fresh), {'removed': 0, 'kept': 0, 'freed_bytes': 0, 'last_age_ms': None},
+                         'a relaunch after the end shows none: this engine never saw a book left')
+
+    def work(self, merge):
+        import background_work
+        server = type('Server', (), {})()
+        server.merge = merge
+        return background_work.view(server, {}, {}, {}, False, None)
+
+    def test_the_row_the_waiting_item_and_before_the_start(self):
+        counts = {'total': 12, 'removed': 3, 'kept': 1, 'freed': 0}
+        work = self.work(self._merge(counts, {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}, {'_cleanup_hand': 'Book', '_cleanup_started': 99}))
+        row = next(row for row in work['rows'] if row['kind'] == 'late_cleanup')
+        self.assertEqual({key: row[key] for key in ('subject', 'done', 'total', 'unit', 'kept', 'started', 'state', 'background')},
+                         {'subject': 'Book', 'done': 4, 'total': 12, 'unit': 'books', 'kept': 1, 'started': 99, 'state': 'running', 'background': False})
+        self.assertFalse(any(item['kind'] == 'late_cleanup' for item in work['waiting']))
+        between = self.work(self._merge(counts, {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}, {'_cleanup_hand': None, '_cleanup_started': 99}))
+        self.assertEqual(next(row for row in between['rows'] if row['kind'] == 'late_cleanup')['subject'], '', 'between two books the row stays')
+        scan = self.work(self._merge(counts, {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}, {'_cleanup_waiting': True, '_cleanup_started': 99}))
+        self.assertFalse(any(row['kind'] == 'late_cleanup' for row in scan['rows']), 'never both')
+        item = next(item for item in scan['waiting'] if item['kind'] == 'late_cleanup')
+        self.assertEqual((item['count'], item['blocker']['cause'], item['background']), (8, 'scan', False))
+        before = self.work(self._merge(counts, {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}, {}))
+        self.assertFalse(any(entry['kind'] == 'late_cleanup' for entry in before['rows'] + before['waiting']), 'nothing before the first book is in hand')
+        done = self.work(self._merge({'total': 12, 'removed': 11, 'kept': 1, 'freed': 0}, {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0},
+                                     {'_cleanup_hand': None, '_cleanup_started': 99}))
+        self.assertFalse(any(entry['kind'] == 'late_cleanup' for entry in done['rows'] + done['waiting']), 'gone once none is left')
+
+    def test_main_work_never_all_done_over_books_left(self):
+        import background_work
+        quiet = lambda **more: background_work.finished_state([], [], {}, {}, {}, [], None, **more)[1]
+        self.assertEqual(quiet(), 'all_done', 'control')
+        self.assertEqual(quiet(late_left=73), 'continues', 'before the first book is in hand too')
+        row = background_work._row(id='late_cleanup', kind='late_cleanup', subject='Book', done=1, total=2, unit='books', kept=0)
+        self.assertEqual(background_work.finished_state([row], [], {}, {}, {}, [], None, late_left=1)[1], 'working')
+        item = background_work._item(id='late_cleanup', kind='late_cleanup', count=1)
+        self.assertEqual(background_work.finished_state([], [item], {}, {}, {}, [], None, late_left=1)[1], 'continues')
+        self.assertFalse(background_work.is_background(row))
+
+    def test_a_real_run_counts_from_the_ledger(self):
+        lib = Library(Path(tempfile.mkdtemp(dir=base.AREA)))
+        self.addCleanup(lambda: __import__('shutil').rmtree(lib.base, True))
+        backfill = lib.backfill()
+        with nas_library(lib.root), as_0312():
+            backfill.run_pass()
+        merge = backfill.merge
+        merge.series_backfill = backfill
+        seen = []
+        real = series_backfill.SeriesBackfill.resume
+
+        def resume(self, job_id):
+            seen.append(series_backfill.cleanup_view(merge))
+            return real(self, job_id)
+        retry = lib.backfill(merge)
+        merge.series_backfill = retry
+        with nas_library(lib.root), mock.patch.object(series_backfill.SeriesBackfill, 'resume', resume):
+            retry.run_pass()
+        self.assertEqual({key: seen[0][key] for key in ('total', 'done', 'left', 'in_hand', 'title')},
+                         {'total': 1, 'done': 0, 'left': 1, 'in_hand': True, 'title': base.TITLE}, 'the book in hand, read from the ledger')
+        old_size = retry.entry(lib.job_id)['record']['old_size']
+        after = series_backfill.cleanup_view(merge)
+        self.assertEqual((after['total'], after['removed'], after['kept'], after['freed_bytes'], after['in_hand']), (1, 1, 0, old_size, False))
+        end = series_backfill.outcome_view(merge)
+        self.assertEqual((end['removed'], end['kept'], end['freed_bytes']), (1, 0, old_size), 'the end, fixed when the last book settled')
+
+
+class KeptOldFileKeyTests(unittest.TestCase):
+    """Judy's spec 4: a book of the clean-up whose old file a check kept is listed in "Could not be renamed or moved" under
+    old_file_kept, whatever refusal or try put it there; any other book keeps its key."""
+
+    def test_the_key(self):
+        import rule_filing
+        from test_name_write_031 import Book
+        book = Book(self)
+        with connect(book.lib.db) as db:
+            db.execute("INSERT OR REPLACE INTO name_writes VALUES(?,?,?,?,?)", (book.lib.job_id, 'held', series_backfill.CHANGED['old'],
+                                                                              json.dumps({'removal_retry': series_backfill.REMOVAL_RETRY}), 'now'))
+            db.execute("INSERT OR REPLACE INTO name_writes VALUES(?,?,?,?,?)", ('other', 'held', 'x', json.dumps({}), 'now'))
+        self.assertIn('old_file_kept', rule_filing.COULD_NOT_KEYS)
+        self.assertEqual(book.filing._kept_old_files(), {book.lib.job_id})
+        refused = lambda job: {'job_id': job, 'from': str(book.path), 'to': str(book.path) + 'x', 'refused': 'No.', 'refused_key': 'not_app_name', 'items': []}
+        answer = {'items': [], 'refused': [refused(book.lib.job_id), refused('other')], 'output_root': str(book.lib.root)}
+        with mock.patch.object(type(book.merge), 'sorting_moves', lambda self: answer, create=True):
+            book.filing.tick(dispatch=False)
+        keys = {entry['job_id']: entry['key'] for entry in book.filing.could_not()['entries']}
+        self.assertEqual(keys, {book.lib.job_id: 'old_file_kept', 'other': 'not_app_name'})
 
 
 if __name__ == '__main__':

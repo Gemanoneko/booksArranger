@@ -21,6 +21,7 @@ from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
 from action_queue import ActionQueue
 import background_work
+import series_backfill
 
 PORT = 5210
 MAX_BODY = 256 * 1024
@@ -817,6 +818,9 @@ class BrowserServer(ThreadingHTTPServer):
             # 0.31.1 (Judy's stuck-load spec, 8.4): finished books found again after a move by hand, for the status line.
             **({'relinked': self.merge.relinked_view(), 'removed': self.merge.removed_view(), 'removal_refused': self.merge.removal_refused()}
                if callable(getattr(self.merge, 'relinked_view', None)) else {}),
+            # 0.31.3 (Judy's late-write clean-up spec, 4 and 7.3): the old files removed or kept by the clean-up, for the
+            # status line; read after 'work' above, so the poll that drops its row carries this end.
+            **({'late_cleanup': series_backfill.outcome_view(self.merge)} if getattr(self.merge, '__dict__', {}).get('series_backfill') is not None else {}),
             # 0.29.0 item 1 (Judy section 1): each library root's state and the last check pass's report.
             **sources}
 

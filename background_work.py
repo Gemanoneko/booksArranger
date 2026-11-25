@@ -38,10 +38,15 @@ import time
 SCHEMA = 'books-work-v1'
 # Row kinds, top to bottom (Judy 1.5).
 KINDS = ('conversion', 'chapter_check', 'cleanup', 'queue', 'source_folders', 'move', 'move_recovery', 'action', 'bulk',
-         'start_check', 'retry_check', 'maintenance', 'finished_check', 'series', 'rename', 'gap_fill', 'lookup', 'decisions',
+         'start_check', 'retry_check', 'maintenance', 'finished_check', 'late_cleanup', 'series', 'rename', 'gap_fill', 'lookup', 'decisions',
          'repair_check', 'recovery_delete', 'regroup', 'scan', 'research', 'discovery', 'source_check', 'drive_check')
 WAITING_KINDS = ('action', 'conversions', 'cleanup', 'retry_checks', 'cleanup_retry', 'recovery_delete', 'decisions',
-                 'metadata_sources', 'series_lookup', 'detail_lookup', 'series_write', 'rename_write', 'drive', 'resume', 'automatic_start', 'automatic')
+                 'metadata_sources', 'series_lookup', 'detail_lookup', 'series_write', 'rename_write', 'late_cleanup', 'drive', 'resume', 'automatic_start', 'automatic')
+# 0.31.3 (Judy's BooksArranger_LateWriteCleanup_UXSpec_2026-11-25.md), additive to books-work-v1: the row kind 'late_cleanup'
+#   ("Removing old files": the books 0.31.2 left with both files, series_backfill.cleanup_view), done/total in 'books', the
+#   new row key 'kept' (books whose old file a check kept; 0 when none; None on every other row), subject the book in hand
+#   ('' between books); and the waiting kind 'late_cleanup' (count: books left; blocker: the library scan) while a scan
+#   holds them and no book is in hand. Both are main work. The end is /api/state 'late_cleanup' (series_backfill.outcome_view).
 # 0.31.0 (Sergei 2026-11-22, "how do I know the app finished?"; Judy's BooksArranger_0.31.0_UX.md, Notes for Ender). Additive
 # to books-work-v1: every key below is new, and no row, item or counts key changed.
 #
@@ -133,9 +138,11 @@ KIND_FACTS = {
     'series': _fact('finished', True, True), 'series_lookup': _fact('finished', False, True), 'series_write': _fact('finished', True),
     'gap_fill': _fact('approved', False, True), 'detail_lookup': _fact('approved', False, True),
     # 0.31.0 R27: a finished audiobook's new title or author name written into its file (name_write), and one that waits.
-    'rename': _fact('finished', True), 'rename_write': _fact('finished', True)}
+    'rename': _fact('finished', True), 'rename_write': _fact('finished', True),
+    # 0.31.3: the old files of finished audiobooks removed after their late write (and the books waiting for that).
+    'late_cleanup': _fact('finished', True)}
 ROW_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'step', 'step_text', 'state', 'done', 'total', 'unit',
-            'fraction', 'started', 'count', 'task_kind', 'background', 'origin')
+            'fraction', 'started', 'count', 'task_kind', 'background', 'origin', 'kept')
 ITEM_KEYS = ('id', 'kind', 'label_key', 'subject', 'book_id', 'job_id', 'blocker', 'ahead', 'at', 'count', 'background', 'origin')
 CLEANUP_STEPS = {'recovery copies', 'originals', 'temporary', 'folders', 'former outputs', 'verifying replacement', 'retiring former outputs'}
 LIST_LIMIT = 100  # waiting cleanups listed one by one; the counts carry the rest (a NAS backlog can hold hundreds)
@@ -327,6 +334,22 @@ class Reader:
             self.waiting.append(_item(id='cleanup_retry:' + '/'.join(map(str, key if isinstance(key, tuple) else (key,))), kind='cleanup_retry',
                                       label_key='cleanup_retry_' + what if what else None, subject=title, book_id=book,
                                       job_id=job if isinstance(job, str) else None, at=int((time.time() + remaining) * 1000)))
+
+    def late(self):
+        """0.31.3 (Judy's late-write clean-up spec, 2 and 3): the row while a book of the clean-up is in hand or between two
+        of its books; the Waiting item while a library scan holds them and none is in hand; neither before the first book
+        is in hand, nor once none is left (the end is on the status line)."""
+        import series_backfill
+        view = series_backfill.cleanup_view(self.merge) if self.merge is not None else None
+        if not view or view['left'] <= 0:
+            return
+        self.late_left = view['left']
+        if view['in_hand'] or view['active'] and not view['waiting']:
+            self.rows.append(_row(id='late_cleanup', kind='late_cleanup', subject=view['title'], step='removing', started=view['started'],
+                                  kept=view['kept'], **_amount(view['done'], view['total'], 'books')))
+        elif view['waiting']:
+            self.waiting.append(_item(id='late_cleanup', kind='late_cleanup', count=view['left'],
+                                      blocker={'kind': 'scan', 'cause': 'scan', 'title': None, 'book_id': None, 'count': None}))
 
     # ---------------------------------------------------------------- the action queue
     def actions(self):
@@ -661,7 +684,7 @@ def explain_queue(queue, jobs, merge=None):
         item['blocker'] = explain_one(blocker.get('kind'), item, jobs, running, merge, named)
 
 
-def finished_state(rows, waiting, jobs, automatic, background, unread, filing=None):
+def finished_state(rows, waiting, jobs, automatic, background, unread, filing=None, late_left=0):
     """(pending, state, waits_for_you) of one poll (0.31.0; the keys and the truth rules are at STATES above). rows and
     waiting: this poll's work lists; background: {'series', 'gap_fill'} summaries; unread: sources that could not be read.
     "Main work" is every row and waiting item that is not a background look-up (is_background) or a drive that does not
@@ -697,7 +720,10 @@ def finished_state(rows, waiting, jobs, automatic, background, unread, filing=No
     left['all'] = None if None in (left['series'], left['details']) else left['series'] + left['details']
     looking = any(is_background(row) for row in rows) or bool(left['all'])
     is_paused = jobs.get('state') in ('Paused', 'Pausing') or automatic.get('state') == 'Paused' or paused > 0
-    by_itself = bool(main_waiting or writes or to_file or still_checking or jobs.get('timed_retry') or jobs.get('cleanup_active')
+    # 0.31.3 (Judy's late-write clean-up spec, 2): books of the clean-up left are main work that goes on by itself, also
+    # in the minutes before the first one is in hand (no row yet): never "All done" over them.
+    late_left = late_left if type(late_left) is int and late_left > 0 else 0
+    by_itself = bool(main_waiting or writes or to_file or still_checking or late_left or jobs.get('timed_retry') or jobs.get('cleanup_active')
                      or automatic.get('state') in ('Running', 'Stopping') or automatic.get('start_pending') or automatic.get('next_retry_at') is not None)
     if unread:
         state = 'unknown'
@@ -729,6 +755,8 @@ def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo
     reader = Reader(server, jobs, automatic, queue, scanning, scan_status, roots)
     reader.attempt('jobs', reader.conversion_and_cleanup)
     reader.attempt('checks', reader.checks)
+    reader.late_left = 0
+    reader.attempt('late_cleanup', reader.late)
     reader.attempt('actions', reader.actions)
     reader.attempt('workers', reader.workers)
     reader.attempt('automatic', reader.scan_and_automatic)
@@ -760,7 +788,8 @@ def view(server, jobs, automatic, queue, scanning, scan_status, roots=None, memo
     count = lambda key: jobs.get(key) if type(jobs.get(key)) is int else 0
     for entry in [*rows, *reader.waiting, *reader.lookup_items]:
         entry['background'] = is_background(entry)  # the page never guesses which work is "main"
-    pending, state, reasons = finished_state(rows, [item for _n, item in waiting], jobs, automatic, reader.background, reader.unread, reader.filing)
+    pending, state, reasons = finished_state(rows, [item for _n, item in waiting], jobs, automatic, reader.background, reader.unread, reader.filing,
+                                             late_left=reader.late_left)
     return {'schema': SCHEMA, 'state': state, 'pending': pending, 'waits_for_you': reasons, 'background': reader.background, 'kinds': KIND_FACTS,
             'filing': reader.filing,  # 0.31.0 milestone B: finished audiobooks renamed and moved by the rules
             # The look-ups' own waiting items (series_lookup, detail_lookup, series_write), in the item shape. Kept out of

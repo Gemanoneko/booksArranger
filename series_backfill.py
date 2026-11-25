@@ -129,6 +129,36 @@ RETRY_FIELDS = ('old_path', 'new_path', 'temp', 'root', 'parent_identity', 'old_
 # reads APPLY_HOLD + retained_text(temp). Sergei 2026-11-25: such a leftover is removed by the app, once per REMOVAL_RETRY
 # (record 'temp_retry'), after the proofs of _remove_leftover (_clear_leftover_temporaries).
 APPLY_HOLD = 'Series update failed; the audiobook is unchanged: '
+# Judy's BooksArranger_LateWriteCleanup_UXSpec_2026-11-25.md, section 5 (Sergei's ruling 3): the hold reasons of a write's
+# last steps, in "old file" and "new file", one fact plus the outcome. A Held one is stored without RECOVERY_HOLD (resume).
+# RECOVERY_HOLD itself, OLD_FOLDER_REASON and APPLY_HOLD stay as they were: they find the holds 0.31.2 and older stored.
+CATALOG_MISMATCH = 'The catalog does not match the new file; both files kept.'                     # 5.1 row 1
+CHANGED = {'old': 'The old file changed since the app checked it; both files kept.',                  # 5.1 row 2a
+           'new': 'The new file changed since the app checked it; both files kept.'}                  # 5.1 row 2b
+NEW_CHANGED_OR_MISSING = 'The new file changed or is missing; the old file is kept.'                  # 5.1 row 3
+TEMP_CHANGED = 'The temporary file changed since the app made it; it was left in place.'              # 5.1 row 4
+OTHER_NAME = {'old': 'The old file is also stored under another name; both files kept.',              # 5.2 N1
+              'new': 'The new file is also stored under another name; both files kept.'}  # only inside N9 (_withdraw), never shown alone
+TEMP_OTHER_NAME = 'The temporary file is also stored under another name; it was left in place.'       # N2
+SAME_FILE = 'The old and new files are the same file; nothing was removed.'                           # N3
+FOLDER_CHANGED = "The book's folder changed since the app checked it; nothing was removed."           # N4
+NOT_ONE_FOLDER = 'The old and new files are not recorded in the same folder; nothing was removed.'    # N5
+OLD_STILL_THERE = 'The old file is still there after removal; both files kept.'                       # N6
+OLD_MISSING = 'The old file is missing, and the app did not remove it.'                               # N7
+TEMP_STILL_THERE = 'The temporary file is still there after removal; it was left in place.'           # N8
+WITHDRAW_KEPT = MOVED_MEANWHILE + '. The new file could not be removed; both files kept.'             # N9
+WITHDRAWN = MOVED_MEANWHILE + '; the new file was removed.'                                           # N9's success variant
+# Section 6: why a leftover temporary file was kept (record 'temp_kept').
+TEMP_NAMED = 'Another record of the app uses this file; it was left in place.'
+TEMP_BOOK_UNNAMED = "The catalog does not match the book's file; the temporary file was left in place."
+TEMP_BOOK_CHANGED = "The book's file changed since the app checked it; the temporary file was left in place."
+TEMP_AUDIO_DIFFERS = "The temporary file's audio differs from the book's; it was left in place."
+TEMP_WRITTEN_AFTER = 'The temporary file changed after the app last handled it; it was left in place.'
+TEMP_CHANGED_DURING = 'The temporary file changed while the app checked it; it was left in place.'
+SCAN_WAIT = 'A library scan is running'  # _idle's and _may_finish's wait; the clean-up's Waiting item (Judy 3) reads it
+# Judy's spec 4 and 7.3: the clean-up's outcome shows on the status line for this long after its last book settles.
+LATE_SHOW_MS = 3600000
+_CLEANUP_LOCK = threading.Lock()
 # The hosts a deferral recorded before 0.31.0 named, as the sources that ask them.
 HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
                 'html.duckduckgo.com': ('publisher', 'litres'), 'en.wikipedia.org': ('publisher',), 'ru.wikipedia.org': ('publisher',),
@@ -182,6 +212,24 @@ def _stamp():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
+def _log(line):
+    """A normal-level line in the engine's own log, with the time (as MergeService._removal_log): never sent to the page."""
+    import sys
+    try:
+        print('Books Arranger ' + time.strftime('%Y-%m-%d %H:%M:%S') + ': ' + line, file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def size_text(size):
+    """A size as the page's byteText words it: 1024-based, one decimal under 10, none from 10 up."""
+    units, index = ('B', 'KB', 'MB', 'GB', 'TB'), 0
+    while index < len(units) - 1 and size >= 1024 ** (index + 1):
+        index += 1
+    scaled = size / 1024 ** index
+    return ('%.1f' % scaled).rstrip('0').rstrip('.') + ' ' + units[index] if scaled < 10 and index else '%d %s' % (round(scaled), units[index])
+
+
 def encoded(manifest):
     """The stored manifest text and its hash, exactly as AudioJobs.enqueue freezes them."""
     text = json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
@@ -217,13 +265,60 @@ def remove_owned(handle):
     the NAS, Sergei's 2026-11-16 method removes it after the same check again: the handle still names the file it opened."""
     facts = handle.facts()
     if facts['links'] != 1:
-        raise BoundaryError('The temporary file has another filesystem alias; kept')
+        raise BoundaryError(TEMP_OTHER_NAME)
 
     def same(held):
         now = held.refresh()
         if now['identity'] != facts['identity'] or now['links'] != 1 or now['attributes'] & (0x400 | 0x10):
-            raise BoundaryError('The temporary file changed or has another name; kept')
+            raise BoundaryError(TEMP_CHANGED)
     handle.dispose(remote_legacy=same)
+
+
+def cleanup_view(merge):
+    """The late-write clean-up across both writes (Judy's BooksArranger_LateWriteCleanup_UXSpec_2026-11-25.md, sections 2-4 and
+    7): {'total', 'done', 'removed', 'kept', 'left', 'freed_bytes', 'title' (the book in hand, '' between books), 'in_hand',
+    'active' (a book was in hand in this run), 'started' (epoch ms, then), 'waiting' (a library scan holds the books and none
+    is in hand)}, or None when the engine runs neither write. Counts come from the ledgers (rows sent back with
+    removal_retry), summed over the series and the name passes. When the last book settles, the outcome for the status line
+    is fixed once, in memory (outcome_view): only a run this engine saw with books left has one, so a relaunch shows none."""
+    ledgers = [merge.__dict__.get(name) for name in ('series_backfill', 'name_write')] if hasattr(merge, '__dict__') else []
+    ledgers = [ledger for ledger in ledgers if ledger is not None and callable(getattr(ledger, '_cleanup_counts', None))]
+    if not ledgers:
+        return None
+    total = removed = kept = freed = 0
+    titles, starts, waiting = [], [], False
+    for ledger in ledgers:
+        counts = ledger._cleanup_counts()
+        total, removed, kept, freed = total + counts['total'], removed + counts['removed'], kept + counts['kept'], freed + counts['freed']
+        own = ledger.__dict__
+        if own.get('_cleanup_hand') is not None:
+            titles.append(own['_cleanup_hand'])
+        if own.get('_cleanup_started'):
+            starts.append(own['_cleanup_started'])
+        waiting = waiting or bool(own.get('_cleanup_waiting'))
+    left = total - removed - kept
+    with _CLEANUP_LOCK:
+        memo = merge.__dict__.setdefault('_late_cleanup', {'seen': False, 'finished': None, 'outcome': None})
+        if left > 0:
+            memo.update(seen=True, finished=None, outcome=None)
+        elif memo['seen'] and memo['finished'] is None and total:
+            memo.update(finished=time.monotonic(), outcome={'removed': removed, 'kept': kept, 'freed_bytes': freed})
+    return {'total': total, 'done': removed + kept, 'removed': removed, 'kept': kept, 'left': left, 'freed_bytes': freed,
+            'title': next((title for title in titles if title), ''), 'in_hand': bool(titles), 'active': bool(starts),
+            'started': min(starts) if starts else None, 'waiting': waiting and not titles}
+
+
+def outcome_view(merge):
+    """/api/state 'late_cleanup' (Judy 7.3): {removed, kept, freed_bytes, last_age_ms}, the clean-up's end for the status line,
+    like 'relinked' and 'removed': an age, never a clock time; zeros once LATE_SHOW_MS has passed, and before any end."""
+    with _CLEANUP_LOCK:
+        memo = dict(merge.__dict__.get('_late_cleanup') or {}) if hasattr(merge, '__dict__') else {}
+    if memo.get('finished') is None or not memo.get('outcome'):
+        return {'removed': 0, 'kept': 0, 'freed_bytes': 0, 'last_age_ms': None}
+    age = max(0, round((time.monotonic() - memo['finished']) * 1000))
+    if age >= LATE_SHOW_MS:
+        return {'removed': 0, 'kept': 0, 'freed_bytes': 0, 'last_age_ms': age}
+    return dict(memo['outcome'], last_age_ms=age)
 
 
 class SeriesBackfill:
@@ -328,8 +423,51 @@ class SeriesBackfill:
         self._changed()
 
     def _changed(self):
-        """The ledger was written: the cached summary is recounted at its next read."""
+        """The ledger was written: the cached summary (and the clean-up's counts) are recounted at their next read."""
         self.__dict__['_summary'] = None
+        self.__dict__['_cleanup_cache'] = None
+
+    # ------------------------------------------------------------------ the clean-up's progress (Judy's late-write clean-up spec)
+    def _cleanup_counts(self):
+        """{'total', 'removed', 'kept', 'freed'} of this ledger's books sent back for the clean-up (REMOVAL_RETRY), from the
+        ledger, so a quit or a crash keeps them (Judy 2): total fixed once they are queued; removed: the old file went
+        ('done'); kept: a check kept both files (held again); freed: the removed old files' recorded sizes. Read again only
+        after the ledger is written (_changed)."""
+        cached = self.__dict__.get('_cleanup_cache')
+        if cached is not None:
+            return dict(cached)
+        counts = {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}
+        with connect(self.database) as db:
+            for state, number, freed in db.execute(
+                    "SELECT state,count(*),sum(json_extract(record,'$.old_size')) FROM " + self.LEDGER + " WHERE record LIKE '%removal_retry%' "
+                    "AND json_valid(record) AND json_extract(record,'$.removal_retry')=? GROUP BY state", (REMOVAL_RETRY,)):
+                counts['total'] += number
+                if state == 'done':
+                    counts['removed'] += number
+                    counts['freed'] += int(freed or 0)
+                elif state not in ACTIVE:
+                    counts['kept'] += number
+        self.__dict__['_cleanup_cache'] = dict(counts)
+        return counts
+
+    def _finish_active(self, job_id, entry):
+        """One begun write finished from its recorded state (both passes' first loop). A book of the clean-up is the row's
+        book in hand while it runs (Judy 2); a library scan that holds it is the Waiting item's cause (Judy 3)."""
+        retried = entry['record'].get('removal_retry') == REMOVAL_RETRY
+        try:
+            self._may_finish()  # R35: a begun write finishes without the Pause or conversion gate (_idle)
+            if retried:
+                self.__dict__.update(_cleanup_hand=str((entry['record'].get('review') or {}).get('title') or ''), _cleanup_waiting=False)
+                self.__dict__.setdefault('_cleanup_started', int(time.time() * 1000))
+            self.resume(job_id)
+        except Later as wait:
+            if retried and str(wait) == SCAN_WAIT:
+                self.__dict__['_cleanup_waiting'] = True
+            self._defer(job_id, wait, state=entry['state'])
+        finally:
+            if retried:
+                self.__dict__['_cleanup_hand'] = None
+                cleanup_view(self.merge)  # the outcome's hour starts when the last book settles, whether a page asks or not
 
     # ------------------------------------------------------------------ what is left (0.31.0 step 4b)
     def summary(self):
@@ -605,11 +743,7 @@ class SeriesBackfill:
             entry = self.entry(row['job_id'])
             if entry['record'].get('next_attempt', 0) > self.clock():
                 continue
-            try:
-                self._may_finish()  # R35: a begun write finishes without the Pause or conversion gate (_idle)
-                self.resume(row['job_id'])
-            except Later as wait:
-                self._defer(row['job_id'], wait, state=entry['state'])
+            self._finish_active(row['job_id'], entry)
         # 0.30.0 item 2: an approved book whose series was written before a restart still gets its approved move. (R35: a
         # Choose folder… of the book does not wait for this; run_move records the follow-up itself, _follow_up_now.)
         for row in self._rows("SELECT job_id FROM series_backfill WHERE state='done' AND json_extract(record,'$.move_approved') "
@@ -752,7 +886,16 @@ class SeriesBackfill:
                 return  # closing: nothing was removed, the next run starts again
             except Exception as error:
                 record['temp_kept'] = {'reason': (str(error) or type(error).__name__)[:300], 'at': _stamp()}
-            self._set(row['job_id'], 'held', entry['reason'], record)
+                _log('Leftover temporary file kept: ' + record['temp_kept']['reason'] + ' (' + str(temp) + ')')
+            # Judy 6: the outcome's own sentence is written in this one _set (never earlier: _leftover_temporary finds these
+            # books by the old stored text). Sergei's ruling 4: a write of names is tried once more after a removal.
+            state, reason = self._leftover_outcome(entry, record, temp)
+            self._set(row['job_id'], state, reason, record)
+
+    def _leftover_outcome(self, entry, record, temp):
+        """(state, reason) once a leftover temporary file was handled (record 'temp_removed' or 'temp_kept'). The series
+        write keeps its hold as it was (no such book exists; nothing was specced for one)."""
+        return 'held', entry['reason']
 
     def _other_writer(self, job_id):
         """The other kind of write of this book is open or approved (one writer per file)."""
@@ -785,7 +928,7 @@ class SeriesBackfill:
         then it goes through its held handle with its folder held (remove_owned: on the NAS after its own check again).
         Returns what went: {'path', 'size', 'sha256' (read just before), 'modified', 'method'}."""
         import calendar
-        from quicktime_chapters import media_unchanged
+        from quicktime_chapters import media_unchanged, ChapterFormatError
         record = entry['record']
         old = ordinary(record['old_path'])
         with connect(self.database) as db:
@@ -802,33 +945,43 @@ class SeriesBackfill:
                 named += db.execute('SELECT count(*) FROM book_moves WHERE target_path=? COLLATE NOCASE OR temp_path=? COLLATE NOCASE',
                                     (str(temp), str(temp))).fetchone()[0]
         if owned != [(job_id, 'temporary')] or named:
-            raise Held('Another record names the temporary file; kept')
+            raise Held(TEMP_NAMED)
         try:
             output = json.loads(row[0]) if row and row[0] else {}
         except (TypeError, ValueError):
             output = {}
         if not isinstance(output, dict) or os.path.normcase(str(output.get('final_path') or '')) != os.path.normcase(str(old)) \
                 or not output.get('sha256') or not output.get('size') or temp == old:
-            raise Held("The catalog no longer names the book's own file; the temporary file was kept")
+            raise Held(TEMP_BOOK_UNNAMED)
         with DirectoryBoundary(old.parent, old.parent), VerifiedFile(old) as book:
             if book.facts()['size'] != output['size'] or book.sha256() != output['sha256']:
-                raise Held("The book's own file does not match its record; the temporary file was kept")
+                raise Held(TEMP_BOOK_CHANGED)
         held_at = calendar.timegm(time.strptime(entry['updated'], '%Y-%m-%dT%H:%M:%SZ'))
         keys = ('identity', 'size', 'modified')
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp) as seen:
             before = seen.facts()
             if before['modified'] > (held_at + 1) * 10 ** 9:
-                raise Held('The temporary file was written after the app kept it; kept')
-            media_unchanged(old, temp, self.stop)  # read by name; this read-only handle lets nothing write meanwhile
+                raise Held(TEMP_WRITTEN_AFTER)
+            try:
+                media_unchanged(old, temp, self.stop)  # read by name; this read-only handle lets nothing write meanwhile
+            except ChapterFormatError as error:
+                _log(TEMP_AUDIO_DIFFERS + ' ' + str(error) + ' (' + str(temp) + ')')  # the exact error: the log only (Judy 6)
+                raise Held(TEMP_AUDIO_DIFFERS) from None
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
             now = handle.facts()
             if [now[k] for k in keys] != [before[k] for k in keys]:
-                raise Held('The temporary file changed during the checks; kept')
+                raise Held(TEMP_CHANGED_DURING)
             digest = handle.sha256()
             remove_owned(handle)
         if os.path.lexists(temp):
-            raise Held('The temporary file is still there after its removal')
+            raise Held(TEMP_STILL_THERE)
         self._forget_temporary(job_id, temp)
+        title = ''
+        try:
+            title = str(json.loads(self._rows('SELECT manifest FROM audio_jobs WHERE job_id=?', (job_id,))[0]['manifest'])['metadata'].get('title') or '')
+        except (IndexError, KeyError, TypeError, ValueError):
+            pass
+        _log('Removed a leftover temporary file of an unfinished update: ' + title + ' (' + size_text(now['size']) + '): ' + str(temp))  # Judy 6
         return {'path': str(temp), 'size': now['size'], 'sha256': digest, 'modified': now['modified'], 'method': getattr(handle, 'disposition_method', None)}
 
     # ------------------------------------------------------------------ checks
@@ -1030,7 +1183,7 @@ class SeriesBackfill:
         if jobs._thread and jobs._thread.is_alive() or merge.cleanup.thread and merge.cleanup.thread.is_alive() or merge.cleanup.current:
             raise Later('A book is being converted or cleaned up', self.clock() + 60)
         if merge.inventory.worker and merge.inventory.worker.is_alive():
-            raise Later('A library scan is running', self.clock() + 60)
+            raise Later(SCAN_WAIT, self.clock() + 60)
 
     def _may_finish(self):
         """R35 (Sergei 2026-11-23; Senua's 0.31.0 delta 2, M6): a write that has begun (left 'writing', 'written', 'renamed'
@@ -1040,7 +1193,7 @@ class SeriesBackfill:
         it, as it holds every file change; a new write still waits for everything _idle() names."""
         merge = self.merge
         if merge.inventory.worker and merge.inventory.worker.is_alive():
-            raise Later('A library scan is running', self.clock() + 60)
+            raise Later(SCAN_WAIT, self.clock() + 60)
 
     def _move_registered(self):
         """R35 (Senua's 0.31.0 delta 2, m13): what tells a write that a still-queued move of its book is being run now: run_move's
@@ -1267,7 +1420,12 @@ class SeriesBackfill:
             with critical_sections.critical(critical_sections.RENAME), self._boundary(record) as boundary:
                 self._resume_protected(job_id, record, state, temp, new, old, boundary)
         except (BoundaryError, OSError, Held, KeyError) as error:
-            self._set(job_id, 'held', RECOVERY_HOLD + str(error), record)
+            # Judy's spec 5.3: a reason of section 5 (Held) is stored as it is, without the engine's prefix; any other error
+            # keeps RECOVERY_HOLD (so a removal refused again still reads as _removal_retained expects).
+            reason = str(error) if isinstance(error, Held) else RECOVERY_HOLD + str(error)
+            self._set(job_id, 'held', reason, record)
+            if record.get('removal_retry') == REMOVAL_RETRY:
+                _log('Old file kept: ' + str((record.get('review') or {}).get('title') or job_id) + ': ' + reason + ' (' + str(record.get('old_path')) + ')')
             return
         self._follow_up(job_id)  # 0.30.0 item 2: an approved book now moves into its series folder
 
@@ -1277,10 +1435,10 @@ class SeriesBackfill:
         root = ordinary(record['root'])
         old, new, temp = (ordinary(record[key]) for key in ('old_path', 'new_path', 'temp'))
         if old == new or old.parent != new.parent or old.parent != temp.parent or temp in (old, new):
-            raise Held('The recorded series paths do not share their original parent')
+            raise Held(NOT_ONE_FOLDER)  # N5; OLD_FOLDER_REASON keeps finding the holds older versions stored with the old words
         with DirectoryBoundary(root, old.parent) as boundary:
             if [list(item) for item in boundary.identities] != record['parent_identity']:
-                raise Held('The audiobook parent identity changed')
+                raise Held(FOLDER_CHANGED)  # N4
             yield boundary
 
     @contextmanager
@@ -1290,9 +1448,9 @@ class SeriesBackfill:
             facts = handle.facts()
             if facts['identity'] != record[kind + '_identity'] or facts['size'] != record[kind + '_size'] \
                     or handle.sha256() != record[kind + '_sha256']:
-                raise Held('The ' + kind + ' file no longer matches its verified identity and bytes')
+                raise Held(CHANGED[kind])  # 5.1 rows 2a and 2b
             if delete and facts['links'] != 1:
-                raise Held('The former file has another filesystem alias; kept')
+                raise Held(OTHER_NAME[kind])  # N1
             yield handle
 
     def _resume_protected(self, job_id, record, state, temp, new, old, boundary):
@@ -1350,15 +1508,15 @@ class SeriesBackfill:
                     self._names_rewritten(job_id, record)
                     with self._protected(old, record, 'old', delete=True) as former:
                         if record['old_identity'] == record['new_identity']:
-                            raise Held('The old and new names identify the same file')
+                            raise Held(SAME_FILE)  # N3
                         boundary.revalidate()
                         record['removal_intended'] = True
                         self._set(job_id, 'cataloged', '', record)
                         former.dispose(remote_legacy=lambda handle: self._last_checks(handle, record, 'old', boundary, kept, new))
                     if old.exists():
-                        raise Held('Former-file disposition has not completed; copies kept')
+                        raise Held(OLD_STILL_THERE)  # N6
                 elif not record.get('removal_intended'):
-                    raise Held('The former file is missing without a removal receipt')
+                    raise Held(OLD_MISSING)  # N7
                 self._forget_temporary(job_id, temp)
                 self._set(job_id, 'done', '', record)
         if withdrawn:
@@ -1375,12 +1533,14 @@ class SeriesBackfill:
                 boundary.revalidate()
                 handle.dispose(remote_legacy=lambda held: self._last_checks(held, record, 'new', boundary))
             if os.path.lexists(new):
-                raise Held('The rewritten copy could not be removed')
+                raise Held('The new file is still there after removal')
             self._forget_temporary(job_id, temp)
         except (BoundaryError, OSError, Held, KeyError) as error:
-            self._set(job_id, 'held', 'The catalog could not record the series; copies kept: ' + MOVED_MEANWHILE + ' (' + (str(error) or type(error).__name__) + ')', record)
+            # N9: one whole sentence; why the new file stayed goes to the log only.
+            self._set(job_id, 'held', WITHDRAW_KEPT, record)
+            _log(WITHDRAW_KEPT + ' ' + (str(error) or type(error).__name__) + ' (' + str(new) + ')')
             return
-        self._set(job_id, 'held', MOVED_MEANWHILE + '; the rewritten copy was removed', record)
+        self._set(job_id, 'held', WITHDRAWN, record)
 
     def _names_rewritten(self, job_id, record):
         """0.31.3: the former file goes only while the catalog names the rewritten file, the one kept: its path, size and
@@ -1392,7 +1552,7 @@ class SeriesBackfill:
             output = {}
         if not isinstance(output, dict) or os.path.normcase(str(output.get('final_path') or '')) != os.path.normcase(str(ordinary(record['new_path']))) \
                 or output.get('sha256') != record['new_sha256'] or output.get('size') != record['new_size']:
-            raise Held('The catalog does not name the rewritten file; both files kept')
+            raise Held(CATALOG_MISMATCH)  # 5.1 row 1
 
     @staticmethod
     def _last_checks(handle, record, kind, boundary, kept=None, kept_path=None):
@@ -1404,11 +1564,11 @@ class SeriesBackfill:
         facts = handle.refresh()
         if facts['identity'] != record[kind + '_identity'] or facts['size'] != record[kind + '_size'] or facts['links'] != 1 \
                 or facts['attributes'] & (0x400 | 0x10) or handle.sha256() != record[kind + '_sha256']:
-            raise Held('The ' + ('former' if kind == 'old' else 'rewritten') + ' file no longer matches its verified identity and bytes; kept')
+            raise Held(CHANGED[kind])  # 5.1 rows 2a and 2b, as _protected says it
         if kept is not None:
             now = kept.refresh()
             if now['identity'] != record['new_identity'] or now['size'] != record['new_size'] or now['links'] < 1 or not os.path.lexists(kept_path):
-                raise Held('The rewritten file changed or is gone before the former file was removed; both files kept')
+                raise Held(NEW_CHANGED_OR_MISSING)  # 5.1 row 3
         boundary.revalidate()
 
     def _proven(self, path, record):
@@ -1577,7 +1737,7 @@ class SeriesBackfill:
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
             remove_owned(handle)
         if os.path.lexists(temp):
-            raise BoundaryError('The temporary file could not be removed')
+            raise BoundaryError(TEMP_STILL_THERE)  # N8
 
     def _forget_temporary(self, job_id, temp):
         with connect(self.database) as db:

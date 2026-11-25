@@ -1429,7 +1429,7 @@ function renderJobs(){
   const shown=shownRows(work,now);
   // 0.31.0 (1.2, 1.3): the badge is the first thing in #jobs-status, the parts follow it. No badge while the last answer is
   // only "last confirmed" (the engine is not answering now). From 30 s the as-of time follows the badge as plain text.
-  const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge,stale?null:state?.relinked,stale?null:state?.removed);
+  const stale=recoveryDisconnected || ended || busyShown,badge=stale?null:badgeState(work,shown,now),parts=statusParts(jobs,work,shown,counts,asOf,badge,stale?null:state?.relinked,stale?null:state?.removed,stale?null:state?.late_cleanup);
   renderBadge(badge);renderWindowTitle(windowTitleState(jobs,work,shown,badge,stale));
   text('jobs-status-text',(stale?'Last confirmed — ':'')+(badge?(asOf?asOf:'')+(parts.length?' · ':''):'')+parts.join(' · '));
   // 0.31.1 (Judy's stuck-load spec, 8.3): the engine's last removal pass was refused; never under "Last confirmed —".
@@ -1449,6 +1449,8 @@ function renderJobs(){
 // Finished books removed from the list because they are gone: for an hour after the latest removal; the line under it says
 // when the engine refused to remove (8.3).
 const RELINK_SHOW_MS=600000,REMOVAL_SHOW_MS=3600000;
+// 0.31.3 (Judy's late-write clean-up spec, 4): the clean-up's end, two parts for an hour after its last book settled.
+const LATE_CLEANUP_SHOW_MS=3600000;
 const REMOVAL_REFUSED='Missing books were not removed. Check that the library drive is connected.';
 function burstCount(burst,showMs){
   const count=Number.isInteger(burst?.count) && burst.count>0?burst.count:0,age=Number(burst?.last_age_ms);
@@ -1462,7 +1464,14 @@ function removedPart(removed){
   const count=burstCount(removed,REMOVAL_SHOW_MS);
   return count?`${plural(count,'missing book','missing books')} removed from the list, library files untouched`:'';
 }
-function statusParts(jobs,work,shown,counts,asOf,badge=null,relinked=null,removed=null){
+// 0.31.3 (4): removed first, kept second, never merged; each hidden at 0 and from the hour; the size in byteText's words.
+function lateCleanupParts(late){
+  const age=Number(late?.last_age_ms),count=key=>Number.isInteger(late?.[key]) && late[key]>0?late[key]:0;
+  if(!Number.isFinite(age) || age>=LATE_CLEANUP_SHOW_MS)return [];
+  const removed=count('removed'),kept=count('kept'),freed=Number.isFinite(late.freed_bytes) && late.freed_bytes>0?late.freed_bytes:0;
+  return [removed?`${plural(removed,'old file','old files')} removed, ${byteSize(freed)} freed`:'',kept?`${plural(kept,'old file','old files')} kept: a check failed`:''];
+}
+function statusParts(jobs,work,shown,counts,asOf,badge=null,relinked=null,removed=null,late=null){
   const c=work.counts,n=key=>Number.isInteger(c?.[key]) && c[key]>0?c[key]:0,paused=n('cleanups_paused'),waiting=n('cleanups_waiting');
   const cleanup=paused && waiting?`Cleanup paused for ${plural(paused,'book','books')}, waiting for ${waiting.toLocaleString()}`:paused?`Cleanup paused for ${plural(paused,'book','books')}`:waiting?`Cleanup waiting for ${plural(waiting,'book','books')}`:'';
   // 0.31.0 (1.3): the badge or the first part; "N on hold" its own part after it when nothing runs; the background
@@ -1476,7 +1485,7 @@ function statusParts(jobs,work,shown,counts,asOf,badge=null,relinked=null,remove
     n('actions_waiting')?plural(n('actions_waiting'),'action','actions')+' waiting':'',`${attentionTotal(jobs)} need attention`,
     counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books${badge?'':asOf}`:'Approved book progress unavailable',
     n('retry_checks_waiting')?`${n('retry_checks_waiting')} waiting for retry checks`:'',
-    lookups?`${plural(lookups,'background look-up','background look-ups')} left`:'',relinkedPart(relinked),removedPart(removed)].filter(Boolean);
+    lookups?`${plural(lookups,'background look-up','background look-ups')} left`:'',relinkedPart(relinked),removedPart(removed),...lateCleanupParts(late)].filter(Boolean);
 }
 // 0.29.0 (Sergei 2026-11-17; Judy section 7): the jobs line starts with what is running, in plain words; a held item is never
 // counted as running; the queue worker's own momentary state word ("Running") is not shown. 0.30.0 (section 1.3): two or more
@@ -1683,7 +1692,12 @@ const filingRecord={state:'idle',entries:[],count:0,matching:0,find:'',shownFind
 const filingCould={state:'idle',entries:[],seen:null,flight:0};
 const FILING_SHOWN=200,FILING_FAILED="The list couldn't be loaded. Close and open it again.";
 const COULD_NOT_REASONS={name_exists:'A file with that name is already there.',same_target:'Another audiobook would get the same name.',not_app_name:'Its file name is not one the app gave it.',
-  not_where_recorded:'The file is not where the app left it.',no_name:'The app could not work out its new name.',did_not_finish:'The rename or move did not finish.'};
+  not_where_recorded:'The file is not where the app left it.',no_name:'The app could not work out its new name.',did_not_finish:'The rename or move did not finish.',
+  // 0.31.3 (Judy's late-write clean-up spec, 4): the clean-up kept a book's old file; its rename happened, so not "did not finish".
+  old_file_kept:'The old file was not removed.'};
+// 0.31.3 (6): an entry whose last try did not write the new names (cause tags_not_written) says so in place of "did not finish".
+const NAMES_NOT_WRITTEN='The names could not be written; the audiobook is unchanged.';
+function couldNotReason(entry){return entry?.key==='did_not_finish' && entry.cause==='tags_not_written'?NAMES_NOT_WRITTEN:COULD_NOT_REASONS[entry?.key] || '';}
 function filingDate(value){
   const date=new Date(value);if(!value || !Number.isFinite(date.getTime()))return '';
   return new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}).format(date);
@@ -1797,7 +1811,7 @@ function couldNotEntry(entry){
   first.append(node('span',title,'filing-title'));if(typeof entry.author==='string' && entry.author)first.append(node('span',' · '+entry.author));
   text.append(first,filingPath('Now in',entry.from_shown,entry.from,''));
   if(entry.key!=='no_name' && (entry.to_shown || entry.to))text.append(filingPath('Would be in',entry.to_shown,entry.to,entry.from_shown || entry.from));
-  if(COULD_NOT_REASONS[entry.key])text.append(node('p',COULD_NOT_REASONS[entry.key],'filing-reason'));
+  const reason=couldNotReason(entry);if(reason)text.append(node('p',reason,'filing-reason'));
   box.append(text,filingShow(entry.job_id,entry.book_id,title,true));
   return box;
 }
@@ -1881,7 +1895,7 @@ function withPageRows(rows){
   const after=rows.findLastIndex(row=>WORK_ORDER.indexOf(row.kind)>=0 && WORK_ORDER.indexOf(row.kind)<=WORK_ORDER.indexOf('bulk'));
   return [...rows.slice(0,after+1),own,...rows.slice(after+1)];
 }
-const WORK_ORDER=['conversion','chapter_check','cleanup','queue','source_folders','move','move_recovery','action','bulk','start_check','retry_check','maintenance','finished_check','series','gap_fill','lookup','decisions','repair_check','recovery_delete','regroup','scan','research','discovery','source_check','drive_check'];
+const WORK_ORDER=['conversion','chapter_check','cleanup','queue','source_folders','move','move_recovery','action','bulk','start_check','retry_check','maintenance','finished_check','late_cleanup','series','gap_fill','lookup','decisions','repair_check','recovery_delete','regroup','scan','research','discovery','source_check','drive_check'];
 function liveRows(work){
   // A Pause pressed while start checks run: that row says so at once (the engine's row turns at its next check).
   return withPageRows(work.rows.map(row=>row.kind==='start_check' && row.state==='running' && jobControlFlights.has('pause')?{...row,state:'pausing'}:row));
@@ -1915,7 +1929,10 @@ const APPROVE_PASSES={reading:[1,'Reading each file'],covers:[2,"Reading each fi
 const DECISION_LABELS={decision_names:['Saving names','Save names'],decision_approve:['Saving approval','Approve'],decision_review:['Saving review','Save review'],decision_tracks:['Saving track review','Save track review'],
   decision_metadata_choices:['Saving choices','Save choices'],decision_file_review:['Saving file review','Save file review']};
 function decisionLabel(key,waiting){return (DECISION_LABELS[key] || ['Saving your answers','Save your answers'])[waiting?1:0];}
-const WORK_LABELS={queue:'Conversion queue',source_folders:'Removing source folders',move:'Moving',move_recovery:'Finishing interrupted moves',start_check:'Checking books before conversion',retry_check:'Checking retry',
+// 0.31.3 (Judy's BooksArranger_LateWriteCleanup_UXSpec_2026-11-25.md, section 2): the books 0.31.2 left with their old file
+// beside the updated one. "Old file" is Sergei's word; "Removing originals" is the source-file cleanup, another job.
+const LATE_CLEANUP_TIP='These books still have their old file beside the updated one. The app checks both files, then removes the old one.';
+const WORK_LABELS={late_cleanup:'Removing old files',queue:'Conversion queue',source_folders:'Removing source folders',move:'Moving',move_recovery:'Finishing interrupted moves',start_check:'Checking books before conversion',retry_check:'Checking retry',
   maintenance:'Checking audiobook before cleanup',finished_check:'Re-checking finished audiobooks',series:'Finding series for finished audiobooks',rename:'Renaming finished audiobook',gap_fill:'Finding English titles and author names',lookup:'Looking up metadata',
   repair_check:'Checking M4B for repair',recovery_delete:'Deleting recovery copies',regroup:'Regrouping split books',scan:'Scanning files',research:'Researching books',discovery:'Automatic processing: finding books',
   source_check:'Checking source folders',drive_check:'Checking drives',chapter_check:'Checking source audio',approve_selected:'Approving selected books',release_selected:'Handing selected books to the app'};
@@ -1954,6 +1971,7 @@ function workStep(row,finishing){
     case 'retry_check':return prefix('Checking this book can be converted again');
     case 'maintenance':return row.state==='pausing'?'Stopping finished-book checks…':'Checking the finished audiobook before removing originals';
     case 'finished_check':return prefix('Checking each finished file is still the right one');
+    case 'late_cleanup':return prefix('Checking both files, then removing the old one.');
     // 0.31.0 (2.1): each step says what happens this second and whether a file changes.
     case 'series':return prefix(row.step==='updating'?'Writing the series into the file and renaming it. Audio unchanged.':'Asking online sources. No file is changed.');
     // 0.31.0 R27 (3.3): an English title or an author's name written into a finished file (the engine's name write).
@@ -1974,11 +1992,16 @@ function workStep(row,finishing){
 }
 function clockText(seconds,withHours){seconds=Math.max(0,Math.floor(seconds));const h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return withHours || h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`;}
 function byteText(done,total){const units=['B','KB','MB','GB','TB'];let index=0;while(index<units.length-1 && total>=1024**(index+1))index++;const scale=1024**index,format=value=>{const scaled=value/scale;return scaled.toLocaleString(undefined,{maximumFractionDigits:scaled<10 && index?1:0,minimumFractionDigits:0});};return `${format(done)} of ${format(total)} ${units[index]}`;}
+// One size in byteText's own words (0.31.3: "74 GB freed"): its unit from the size itself, one decimal under 10, none from 10 up.
+function byteSize(value){return byteText(value,value).replace(/^.* of /,'');}
 function measured(row){return Number.isFinite(row.total) && row.total>0 && Number.isFinite(row.done) && row.done>=0 && row.done<=row.total;}
 function workDetail(row,finishing){
   if(measured(row) && !finishing){
     const done=row.done,total=row.total,whole=value=>Math.floor(value).toLocaleString();
-    if(row.unit==='files' || row.unit==='books' || row.unit==='parts'){const noun=row.unit==='files'?'file':row.unit==='parts'?'part':'book';return `${whole(done)} of ${whole(total)} ${noun}${total===1?'':'s'}`;}
+    if(row.unit==='files' || row.unit==='books' || row.unit==='parts'){
+      const noun=row.unit==='files'?'file':row.unit==='parts'?'part':'book',kept=row.kind==='late_cleanup' && Number.isInteger(row.kept) && row.kept>0?` · ${whole(row.kept)} kept`:'';
+      return `${whole(done)} of ${whole(total)} ${noun}${total===1?'':'s'}${kept}`;  // 0.31.3 (2): a kept book adds "· N kept"
+    }
     if(row.unit==='bytes')return byteText(done,total);
     if(row.unit==='seconds'){const hours=total>=3600;return `${clockText(done,hours)} of ${clockText(total,hours)} audio`;}
     return Math.floor(done/total*100)+'%';
@@ -2023,7 +2046,9 @@ function renderActivities(shown,jobs,unread=[],asOf=''){
   shown.forEach((row,index)=>{
     let view=activityRows.get(row.id);if(!view){view=activityRow(row.id);activityRows.set(row.id,view);}
     if(holder.children[index]!==view.item)holder.insertBefore(view.item,holder.children[index] || null);
-    const key=[row.step,row.kind==='research'?'':row.subject,row.started].join('\u001f');if(view.key!==key){view.key=key;view.samples=[];view.eta='';view.etaAt=0;}
+    // A row whose subject is the book in hand of one long run (0.31.3, the clean-up) keeps its samples across books, so its
+    // time estimate follows the whole run, as the research row's does (progress-rows spec 5).
+    const key=[row.step,['research','late_cleanup'].includes(row.kind)?'':row.subject,row.started].join('\u001f');if(view.key!==key){view.key=key;view.samples=[];view.eta='';view.etaAt=0;}
     view.row=row;updateActivity(view,Date.now());
   });
   // 0.31.0 (1.3, 1.4): the engine's finished state decides (needs_you_only is no longer read). The idle line, shown as
@@ -2043,6 +2068,7 @@ function updateActivity(view,now){
   const finishing=isMeasured && running && row.done>=row.total && !approveFiles,determinate=isMeasured && !finishing;
   const label=workLabel(row),subject=rowSubject(row),step=workStep(row,finishing),detail=workDetail(row,finishing);
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
+  const labelTip=row.kind==='late_cleanup'?LATE_CLEANUP_TIP:'';if(view.label.title!==labelTip)view.label.title=labelTip;  // 0.31.3 (2): on the label
   const progressKey=[row.done,row.fraction,row.step,row.subject].join('\u001f');if(view.progressKey!==progressKey){view.progressKey=progressKey;view.progressAt=now;}
   const frozen=running && !isLookup(row) && Number.isFinite(view.progressAt) && now-view.progressAt>=300000;  // 0.31.0 (2.2): never on a look-up that is only being polite to a source
   const stepShown=frozen?'No progress for 5 min':step;view.item.classList.toggle('stalled',frozen);
@@ -2154,6 +2180,8 @@ function waitingLines(item,work){
           :`Each source is asked up to ${tries} times for a book${apart}. With no answer after that, the book is left as it is and the app stops asking.`];}
     case 'series_write':{const said=blockerSentence(item.blocker,work);return ['Write series into audiobook',subject,said.text,said.tip];}
     case 'rename_write':{const said=blockerSentence(item.blocker,work);return ['Rename finished audiobook',subject,said.text,said.tip];}
+    // 0.31.3 (3): the clean-up's books while a library scan holds them: the books left, the row's tooltip, no Show in list.
+    case 'late_cleanup':return [WORK_LABELS.late_cleanup,plural(n,'book','books'),'Waiting for the library scan to finish.',LATE_CLEANUP_TIP];
     // 3.3: the grouped items. Line 2: the next book, then what blocks it, else that they run one at a time.
     case 'filing_writes':case 'filing_renames':case 'filing_moves':{const said=item.blocker?blockerSentence(item.blocker,work):null,next=typeof item.next==='string' && item.next?`Next: ${item.next}. `:'';
       return [{filing_writes:'Writing series into finished audiobooks',filing_renames:'Renaming finished audiobooks',filing_moves:'Moving finished audiobooks'}[item.kind],plural(n,'book','books'),next+(said?.text || 'They run one at a time.'),said?.tip];}
