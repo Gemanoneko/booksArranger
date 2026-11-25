@@ -1351,6 +1351,75 @@ class ReReviewTests(HeldBook, unittest.TestCase):
                                      [(lib.job_id, 'temporary')], 'its ownership row is kept')
                 self.assertTrue(temp.exists())
 
+    # m8: a crash between a leftover temporary file's removal and its record.
+    def crash_after(self, book, temp, step):
+        """The pass dies right after this step of the leftover's removal (the process ends: nothing after it runs, no
+        handler sees it); the next run starts from what the catalog holds."""
+        class Crash(BaseException):
+            pass
+        real = {'removed': series_backfill.remove_owned, 'forgotten': series_backfill.SeriesBackfill._forget_temporary}[step]
+
+        def removed(handle):
+            real(handle)
+            raise Crash()
+
+        def forgotten(writer, job_id, path):
+            real(writer, job_id, path)
+            if key(path) == key(temp):
+                raise Crash()
+        patch = mock.patch.object(series_backfill, 'remove_owned', removed) if step == 'removed' else \
+            mock.patch.object(series_backfill.SeriesBackfill, '_forget_temporary', forgotten)
+        with nas_library(book.lib.root), patch, self.assertRaises(Crash):
+            book.writer.run_pass()
+        self.assertFalse(temp.exists(), 'control: the file went')
+        entry = book.writer.entry(book.lib.job_id)
+        self.assertNotIn('temp_retry', entry['record'], 'control: its record was never written')
+        self.assertEqual(entry['state'], 'held')
+
+    def test_m8_a_crash_after_the_leftovers_removal_keeps_the_fresh_try(self):
+        from test_name_write_031 import Book, ENGLISH
+        for step in ('removed', 'forgotten'):  # before and after its ownership row went
+            with self.subTest(crashed_after=step):
+                book = Book(self)
+                temp = LeftoverTemporaryTests.leave(self, book)
+                self.crash_after(book, temp, step)
+                with nas_library(book.lib.root), mock.patch.object(series_backfill, '_log') as log:
+                    book.writer.run_pass()
+                record = book.writer.entry(book.lib.job_id)['record']
+                self.assertNotIn('temp_kept', record, 'not "kept": nothing is there')
+                self.assertEqual({k: record['temp_removed'][k] for k in ('path', 'found_gone', 'method')}, {'path': str(temp), 'found_gone': True, 'method': None},
+                                 'counted removed, and known as found gone (not removed by this pass)')
+                self.assertFalse(any('A temporary file is still there' in call.args[0] for call in log.call_args_list))
+                self.assertEqual(LeftoverTemporaryTests.owned(self, book, temp), [], 'no ownership row is left for a file that is not there')
+                self.assertEqual(book.state(), ('done', ''), "Sergei's ruling 4: the one fresh try ran")
+                self.assertEqual(record['names_retry'], series_backfill.REMOVAL_RETRY)
+                self.assertEqual(book.manifest()['metadata']['title'], ENGLISH)
+
+    def test_m8_a_series_leftover_found_gone_drops_the_still_there_tail(self):
+        lib, backfill, temp = LeftoverTemporaryTests.series_leftover(self)
+        temp.unlink()  # gone after the hold (the crash window, or by hand)
+        with nas_library(lib.root):
+            backfill.run_pass()
+        self.assertEqual(lib.state(backfill), ('held', series_backfill.SERIES_UNCHANGED), 'no false "A temporary file is still there"')
+        self.assertTrue(backfill.entry(lib.job_id)['record']['temp_removed']['found_gone'])
+
+    def test_m8_a_leftover_that_cannot_be_seen_is_never_taken_as_gone(self):
+        """Guard, the other side: a network error on the leftover (53, 67) is doubt, never "found gone"; its proofs run as
+        before and decide (here: written after the hold, so kept with why)."""
+        from test_name_write_031 import Book
+        for code in UNREACHABLE_AS_NOT_FOUND:
+            with self.subTest(winerror=code):
+                book = Book(self)
+                temp = LeftoverTemporaryTests.leave(self, book)
+                later = __import__('time').time() + 120
+                os.utime(temp, (later, later))
+                with nas_library(book.lib.root), lstat_fails(temp, code, times=1):
+                    book.writer.run_pass()
+                record = book.writer.entry(book.lib.job_id)['record']
+                self.assertNotIn('temp_removed', record)
+                self.assertEqual(record['temp_kept']['reason'], series_backfill.TEMP_WRITTEN_AFTER)
+                self.assertTrue(temp.exists())
+
 
 def _series_lane():
     from test_rule_filing_031 import SeriesWriteThenMoveTests as lane

@@ -1081,11 +1081,18 @@ class SeriesBackfill:
           4. unchanged since the app recorded keeping it: its last write is not later than the hold's stamp (no hash of it
              was ever recorded), one link, and the same identity, size and time when reopened for removal;
         then it goes through its held handle with its folder held (remove_owned: on the NAS after its own check again).
-        Returns what went: {'path', 'size', 'sha256' (read just before), 'modified', 'method'}."""
+        Returns what went: {'path', 'size', 'sha256' (read just before), 'modified', 'method'}; or, when it is already
+        gone, {'path', 'found_gone': True} with the rest None (Senua's re-review at 520ee66, m8)."""
         import calendar
         from quicktime_chapters import media_unchanged, ChapterFormatError
         record = entry['record']
         old = ordinary(record['old_path'])
+        if self._leftover_gone(record, temp):
+            # m8: a crash after remove_owned and before the caller's _set (or after the file went by hand) left the file gone
+            # under the old hold. Nothing is there to prove or remove: it counts as removed, known as found gone (this pass
+            # removed nothing), and its ownership row goes if it is still there. The write of names keeps its one fresh try.
+            self._forget_temporary(job_id, temp)
+            return {'path': str(temp), 'size': None, 'sha256': None, 'modified': None, 'method': None, 'found_gone': True}
         with connect(self.database) as db:
             owned = [tuple(r) for r in db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=? COLLATE NOCASE', (str(temp),))]
             row = db.execute('SELECT output FROM audio_jobs WHERE job_id=?', (job_id,)).fetchone()
@@ -1138,6 +1145,15 @@ class SeriesBackfill:
             pass
         _log('Removed a leftover temporary file of an unfinished update: ' + title + ' (' + size_text(now['size']) + '): ' + str(temp))  # Judy 6
         return {'path': str(temp), 'size': now['size'], 'sha256': digest, 'modified': now['modified'], 'method': getattr(handle, 'disposition_method', None)}
+
+    @staticmethod
+    def _leftover_gone(record, temp):
+        """m8: the leftover temporary file is positively not there (present: only "not found", Windows error 2). An error
+        that cannot be told is not "gone": its proofs run as before and decide."""
+        try:
+            return not present(temp)
+        except OSError:
+            return False
 
     # ------------------------------------------------------------------ checks
     def unsafe(self, row, jobs=None):
