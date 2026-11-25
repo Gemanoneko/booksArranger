@@ -27,6 +27,7 @@ import itertools
 import sqlite3
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -253,6 +254,24 @@ def present(path):
         if getattr(error, 'winerror', None) in (None, 2):
             return False
         raise
+
+
+def network_lost(error):
+    """Senua's re-review at 520ee66, m7: the error, or one it was raised from, carries the Windows code of a drive or share
+    that went away (audio_jobs.UNREACHABLE, the set a conversion's Retry reads): as its winerror, as a native diagnostic
+    (ProtectedIdentityUnavailable), or as the "[WinError N]" / "Windows error N" its text quotes (native_io's BoundaryError
+    texts). Such a short error is a wait, as a drive that does not answer is (SeriesBackfill._drive_away)."""
+    from audio_jobs import UNREACHABLE
+    for _ in range(8):  # its cause chain, bounded
+        if error is None:
+            return False
+        diagnostic = getattr(error, 'diagnostic', None)
+        codes = [getattr(error, 'winerror', None), diagnostic.get('windows_error') if isinstance(diagnostic, dict) else None]
+        codes += [int(code) for code in re.findall(r'(?:\[WinError |Windows error )(\d+)', str(error))]
+        if any(code in UNREACHABLE for code in codes):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
 
 
 def size_text(size):
@@ -530,10 +549,14 @@ class SeriesBackfill:
         do once is used up. Any error says so when the library folder does not answer right after it. Senua's re-review at
         520ee66, M5: an error of a folder on the way that is not there (AncestorUnavailable) also means "the folder is gone",
         so it is the drive only while the book's folder cannot be told gone (_absent): with the library folder answering
-        and the book's folder positively not there, the book settles (held N4) instead of waiting for good."""
+        and the book's folder positively not there, the book settles (held N4) instead of waiting for good. Senua's
+        re-review, m7: an error that carries the code of a drive or share that went away (network_lost) waits too, even when
+        the library folder answers a moment later; one blip never ends a retried book for good."""
         if isinstance(error, AncestorUnavailable):
             old = record.get('old_path') if isinstance(record, dict) else None
             return not (old and self._absent(record, os.path.dirname(str(old))))
+        if network_lost(error):
+            return True
         root = record.get('root') if isinstance(record, dict) else None
         return bool(root) and not self._answers(root)
 
@@ -1784,7 +1807,8 @@ class SeriesBackfill:
             raise Held(CHANGED[kind])  # 5.1 rows 2a and 2b, as _protected says it
         if kept is not None:
             now = kept.refresh()
-            if now['identity'] != record['new_identity'] or now['size'] != record['new_size'] or now['links'] < 1 or not os.path.lexists(kept_path):
+            # m7: present(), not os.path.lexists (False on any OSError): a network error here is raised and waits, never row 3
+            if now['identity'] != record['new_identity'] or now['size'] != record['new_size'] or now['links'] < 1 or not present(kept_path):
                 raise Held(NEW_CHANGED_OR_MISSING)  # 5.1 row 3
         boundary.revalidate()
 

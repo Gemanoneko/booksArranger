@@ -1432,6 +1432,77 @@ class ReReviewTests(HeldBook, unittest.TestCase):
             self.assertTrue(backfill._drive_away(record, error), 'the same with the library folder not answering: the drive')
         self.assertTrue(backfill._drive_away({'old_path': record['old_path']}, error), 'no root recorded: cannot be told, it waits')
 
+    # m7: a short network error of another kind (not AncestorUnavailable, the library folder answering right after) waits.
+    def waits_then_finishes(self, *patches):
+        lib = self.lib
+        self.hold()
+        with nas_library(lib.root), contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            lib.backfill().run_pass()
+        entry = lib.backfill().entry(lib.job_id)
+        self.assertEqual((entry['state'], entry['reason']), ('cataloged', series_backfill.DRIVE_AWAY), 'it waits; the one-time retry is not used up')
+        self.assertTrue(lib.path.exists() and lib.target.exists())
+        with nas_library(lib.root):
+            self.at(1).run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('done', ''), 'finished once the share answers')
+        self.assertFalse(lib.path.exists())
+
+    def test_m7_a_network_error_holding_the_folder_waits(self):
+        def enter(boundary):  # native_io.DirectoryBoundary's own text, the code inside it
+            raise native_io.BoundaryError(f'Destination directory cannot be protected: {ctypes.WinError(64)}')
+        self.waits_then_finishes(mock.patch.object(native_io.DirectoryBoundary, '__enter__', enter))
+
+    def test_m7_a_network_error_opening_the_old_file_waits(self):
+        real, old = native_io.VerifiedFile.__enter__, key(self.lib.path)
+
+        def enter(handle):
+            if key(handle.path) == old:
+                raise native_io.BoundaryError(f'Cannot protect exact file: {ctypes.WinError(121)}')
+            return real(handle)
+        self.waits_then_finishes(mock.patch.object(native_io.VerifiedFile, '__enter__', enter))
+
+    def test_m7_a_network_error_rereading_the_old_files_identity_waits(self):
+        real, old = native_io.VerifiedFile.refresh, key(self.lib.path)
+
+        def refresh(handle):
+            if key(handle.path) == old:
+                raise native_io.ProtectedIdentityUnavailable(handle.path, 59)
+            return real(handle)
+        self.waits_then_finishes(mock.patch.object(native_io.VerifiedFile, 'refresh', refresh))
+
+    def test_m7_a_network_error_on_the_kept_files_last_check_waits(self):
+        """_last_checks read the kept file with os.path.lexists, which answers False on a network error: row 3, held for good."""
+        real, new = native_io.VerifiedFile._dispose_remote_legacy, self.lib.target
+        real_lexists = os.path.lexists
+
+        def legacy(handle, verify, refusal):
+            with lstat_fails(new, 64), mock.patch.object(os.path, 'lexists', lambda path: False if key(path) == key(new) else real_lexists(path)):
+                return real(handle, verify, refusal)
+        self.waits_then_finishes(mock.patch.object(native_io.VerifiedFile, '_dispose_remote_legacy', legacy))
+
+    def test_m7_guard_an_error_that_is_not_the_network_still_holds(self):
+        lib = self.lib
+        self.hold()
+
+        def enter(boundary):
+            raise native_io.BoundaryError(f'Destination directory cannot be protected: {ctypes.WinError(5)}')
+        with nas_library(lib.root), mock.patch.object(native_io.DirectoryBoundary, '__enter__', enter):
+            lib.backfill().run_pass()
+        state, reason = lib.state(lib.backfill())
+        self.assertEqual((state, reason), ('held', series_backfill.RECOVERY_HOLD + 'Destination directory cannot be protected: ' + str(ctypes.WinError(5))))
+
+    def test_m7_which_errors_are_the_network(self):
+        network = series_backfill.network_lost
+        cause = native_io.BoundaryError('Exact-handle removal is unsupported or denied')
+        cause.__cause__ = OSError(0, 'x', None, 1231)
+        for error in (OSError(0, 'x', None, 64), network_error('Z:\\a', 53), native_io.ProtectedIdentityUnavailable('Z:\\a', 121),
+                      native_io.BoundaryError(f'Cannot protect exact file: {ctypes.WinError(59)}'), cause):
+            self.assertTrue(network(error), repr(error))
+        for error in (None, OSError(0, 'x', None, 5), network_error('Z:\\a', 2), network_error('Z:\\a', 3), native_io.BoundaryError('Cannot protect exact file: [WinError 32] in use'),
+                      series_backfill.Held(series_backfill.FOLDER_CHANGED), KeyError('old_path')):
+            self.assertFalse(network(error), repr(error))
+
     # m8: a crash between a leftover temporary file's removal and its record.
     def crash_after(self, book, temp, step):
         """The pass dies right after this step of the leftover's removal (the process ends: nothing after it runs, no
