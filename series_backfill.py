@@ -125,6 +125,10 @@ RECOVERY_HOLD = 'Series recovery could not verify the files; remaining copies ke
 REMOVAL_RETRY = '0.31.3'
 RETRY_FIELDS = ('old_path', 'new_path', 'temp', 'root', 'parent_identity', 'old_identity', 'new_identity', 'old_sha256', 'new_sha256',
                 'old_size', 'new_size')
+# The hold of a write that failed before its rename (apply); a refused removal of the write's own leftover temporary file
+# reads APPLY_HOLD + retained_text(temp). Sergei 2026-11-25: such a leftover is removed by the app, once per REMOVAL_RETRY
+# (record 'temp_retry'), after the proofs of _remove_leftover (_clear_leftover_temporaries).
+APPLY_HOLD = 'Series update failed; the audiobook is unchanged: '
 # The hosts a deferral recorded before 0.31.0 named, as the sources that ask them.
 HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
                 'html.duckduckgo.com': ('publisher', 'litres'), 'en.wikipedia.org': ('publisher',), 'ru.wikipedia.org': ('publisher',),
@@ -224,6 +228,8 @@ def remove_owned(handle):
 
 class SeriesBackfill:
     LEDGER = 'series_backfill'  # this kind of write's ledger table (name_write.NameWrite: 'name_writes')
+    TEMP_PREFIX = TEMP_PREFIX  # its own temporary file's name (name_write: '.books-arranger-names-')
+    APPLY_HOLD = APPLY_HOLD  # the hold of a write that failed before its rename (name_write: NAMES_FAILED)
 
     def __init__(self, merge, research=None, stage=None, clock=time.time):
         self.merge = merge
@@ -594,6 +600,7 @@ class SeriesBackfill:
         if self.research is None:
             return
         self._retry_retained_removals()
+        self._clear_leftover_temporaries()
         for row in self._rows('SELECT job_id FROM series_backfill WHERE state IN (%s)' % ','.join('?' * len(ACTIVE)), ACTIVE):
             entry = self.entry(row['job_id'])
             if entry['record'].get('next_attempt', 0) > self.clock():
@@ -721,6 +728,108 @@ class SeriesBackfill:
         if record.get('removal_intended') is not True or any(record.get(field) in (None, '') for field in RETRY_FIELDS):
             return False
         return entry['reason'] == RECOVERY_HOLD + retained_text(record['old_path'])
+
+    def _clear_leftover_temporaries(self):
+        """Sergei 2026-11-25 (0.31.3): the write's own temporary file that 0.31.2 could not remove on the NAS (the hold
+        APPLY_HOLD + retained_text(temp)) is removed by the app, once per REMOVAL_RETRY (record 'temp_retry'), after every
+        proof of _remove_leftover. Removed: what went is recorded ('temp_removed'); any doubt: it stays with why
+        ('temp_kept'). The hold itself stays: the write did not happen, and the rules decide whether it is tried again."""
+        for row in self._rows('SELECT job_id FROM ' + self.LEDGER + " WHERE state='held'"):
+            entry = self.entry(row['job_id'])
+            temp = self._leftover_temporary(entry)
+            if temp is None or entry['record'].get('temp_retry') == REMOVAL_RETRY:
+                continue
+            try:
+                self._may_finish()  # a library scan holds every file change: the next pass
+            except Later:
+                return
+            if self._other_writer(row['job_id']):
+                continue  # one writer per file: this book's other write goes first
+            record = dict(entry['record'], temp_retry=REMOVAL_RETRY)
+            try:
+                record['temp_removed'] = dict(self._remove_leftover(row['job_id'], entry, temp), at=_stamp())
+            except InterruptedError:
+                return  # closing: nothing was removed, the next run starts again
+            except Exception as error:
+                record['temp_kept'] = {'reason': (str(error) or type(error).__name__)[:300], 'at': _stamp()}
+            self._set(row['job_id'], 'held', entry['reason'], record)
+
+    def _other_writer(self, job_id):
+        """The other kind of write of this book is open or approved (one writer per file)."""
+        return self._names_in_hand(job_id)
+
+    def _leftover_temporary(self, entry):
+        """The path of this held entry's own temporary file when its hold is that file's refused removal, else None: the
+        record names it, it is TEMP_PREFIX + this job id + '.m4b' in the folder of the book's file, and the hold reads
+        exactly APPLY_HOLD + retained_text(it)."""
+        from native_io import retained_text
+        if not entry or entry['state'] != 'held' or not isinstance(entry.get('record'), dict):
+            return None
+        try:
+            temp, old = ordinary(entry['record']['temp']), ordinary(entry['record']['old_path'])
+        except (KeyError, TypeError, BoundaryError):
+            return None
+        if temp != old.parent / (self.TEMP_PREFIX + entry['job_id'] + '.m4b') or entry['reason'] != self.APPLY_HOLD + retained_text(temp):
+            return None
+        return temp
+
+    def _remove_leftover(self, job_id, entry, temp):
+        """The proofs before a leftover temporary file goes, in order; each failure keeps it (Held):
+          1. the catalog: owned_artifacts names it once, as this job's 'temporary'; no job's output, no other ledger
+             record (its temp, new or old path) and no move names it; the job's output still names the book's own file;
+          2. the book is whole without it: that file's size and SHA-256 are the catalog's (read through a held handle);
+          3. it is this book's audio: its media bytes are the book's, byte for byte (quicktime_chapters.media_unchanged),
+             so removing it loses nothing;
+          4. unchanged since the app recorded keeping it: its last write is not later than the hold's stamp (no hash of it
+             was ever recorded), one link, and the same identity, size and time when reopened for removal;
+        then it goes through its held handle with its folder held (remove_owned: on the NAS after its own check again).
+        Returns what went: {'path', 'size', 'sha256' (read just before), 'modified', 'method'}."""
+        import calendar
+        from quicktime_chapters import media_unchanged
+        record = entry['record']
+        old = ordinary(record['old_path'])
+        with connect(self.database) as db:
+            owned = [tuple(r) for r in db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=? COLLATE NOCASE', (str(temp),))]
+            row = db.execute('SELECT output FROM audio_jobs WHERE job_id=?', (job_id,)).fetchone()
+            named = db.execute("SELECT count(*) FROM audio_jobs WHERE json_valid(output) AND json_extract(output,'$.final_path')=? COLLATE NOCASE",
+                               (str(temp),)).fetchone()[0]
+            for table in ('series_backfill', 'name_writes'):
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    named += db.execute('SELECT count(*) FROM ' + table + " WHERE NOT (job_id=? AND ?=?) AND json_valid(record) AND ("
+                                        "json_extract(record,'$.temp')=? COLLATE NOCASE OR json_extract(record,'$.new_path')=? COLLATE NOCASE OR "
+                                        "json_extract(record,'$.old_path')=? COLLATE NOCASE)", (job_id, table, self.LEDGER, *(str(temp),) * 3)).fetchone()[0]
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='book_moves'").fetchone():
+                named += db.execute('SELECT count(*) FROM book_moves WHERE target_path=? COLLATE NOCASE OR temp_path=? COLLATE NOCASE',
+                                    (str(temp), str(temp))).fetchone()[0]
+        if owned != [(job_id, 'temporary')] or named:
+            raise Held('Another record names the temporary file; kept')
+        try:
+            output = json.loads(row[0]) if row and row[0] else {}
+        except (TypeError, ValueError):
+            output = {}
+        if not isinstance(output, dict) or os.path.normcase(str(output.get('final_path') or '')) != os.path.normcase(str(old)) \
+                or not output.get('sha256') or not output.get('size') or temp == old:
+            raise Held("The catalog no longer names the book's own file; the temporary file was kept")
+        with DirectoryBoundary(old.parent, old.parent), VerifiedFile(old) as book:
+            if book.facts()['size'] != output['size'] or book.sha256() != output['sha256']:
+                raise Held("The book's own file does not match its record; the temporary file was kept")
+        held_at = calendar.timegm(time.strptime(entry['updated'], '%Y-%m-%dT%H:%M:%SZ'))
+        keys = ('identity', 'size', 'modified')
+        with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp) as seen:
+            before = seen.facts()
+            if before['modified'] > (held_at + 1) * 10 ** 9:
+                raise Held('The temporary file was written after the app kept it; kept')
+            media_unchanged(old, temp, self.stop)  # read by name; this read-only handle lets nothing write meanwhile
+        with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
+            now = handle.facts()
+            if [now[k] for k in keys] != [before[k] for k in keys]:
+                raise Held('The temporary file changed during the checks; kept')
+            digest = handle.sha256()
+            remove_owned(handle)
+        if os.path.lexists(temp):
+            raise Held('The temporary file is still there after its removal')
+        self._forget_temporary(job_id, temp)
+        return {'path': str(temp), 'size': now['size'], 'sha256': digest, 'modified': now['modified'], 'method': getattr(handle, 'disposition_method', None)}
 
     # ------------------------------------------------------------------ checks
     def unsafe(self, row, jobs=None):
@@ -1059,7 +1168,7 @@ class SeriesBackfill:
             raise
         except Exception as error:
             self._discard_temp(job_id, record)
-            self._set(job_id, 'held', 'Series update failed; the audiobook is unchanged: ' + (str(error) or type(error).__name__), record)
+            self._set(job_id, 'held', APPLY_HOLD + (str(error) or type(error).__name__), record)
             return
         finally:
             self._clear_stage(job_id)

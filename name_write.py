@@ -78,6 +78,9 @@ SERIES_IN_HAND = 'This audiobook is being renamed now (its series is being writt
 DRIVE_AWAY = 'The library drive is not answering'
 RETAINED = 'Kept as published while the data folder move is unfinished; left as it is'
 NEWER = 'Has a newer version; left as it is'
+# The hold of a write of names that failed before its rename (the series write's APPLY_HOLD; 0.31.3 reads it to find a
+# leftover temporary file whose removal was refused, SeriesBackfill._clear_leftover_temporaries).
+NAMES_FAILED = 'The names could not be written; the audiobook is unchanged: '
 
 
 def have(db):
@@ -267,6 +270,8 @@ class NameWrite(SeriesBackfill):
     Its own: the ledger (name_writes), the approval, the pass, what is written (_tags, _read_back) and what is recorded
     (catalog)."""
     LEDGER = 'name_writes'
+    TEMP_PREFIX = TEMP_PREFIX
+    APPLY_HOLD = NAMES_FAILED
 
     def __init__(self, merge, stage=None, clock=time.time):
         self.merge = merge
@@ -383,6 +388,9 @@ class NameWrite(SeriesBackfill):
         self._set(job_id, 'pending', '', record)
         self.wake.set()
 
+    def _other_writer(self, job_id):
+        return self._series_in_hand(job_id)
+
     def _series_in_hand(self, job_id):
         """The series look-up is writing this book, or has an approved write of it waiting: one writer per file."""
         with connect(self.database) as db:
@@ -395,6 +403,7 @@ class NameWrite(SeriesBackfill):
     def _pass(self):
         from storage_relocation_native import retained_job
         self._retry_retained_removals()  # 0.31.3: the holds 0.31.2 left on the NAS (series_backfill.REMOVAL_RETRY)
+        self._clear_leftover_temporaries()  # 0.31.3, Sergei 2026-11-25: the temporary files 0.31.2 left there
         for row in self._rows('SELECT job_id FROM name_writes WHERE state IN (%s)' % ','.join('?' * len(ACTIVE)), ACTIVE):
             entry = self.entry(row['job_id'])
             if entry['record'].get('next_attempt', 0) > self.clock():
@@ -451,7 +460,7 @@ class NameWrite(SeriesBackfill):
             except Held as held:
                 self._set(job_id, 'held', str(held), dict(entry['record']))
             except Exception as error:
-                self._set(job_id, 'held', 'The names could not be written; the audiobook is unchanged: ' + (str(error) or type(error).__name__)[:300], dict(entry['record']))
+                self._set(job_id, 'held', NAMES_FAILED + (str(error) or type(error).__name__)[:300], dict(entry['record']))
             finally:
                 self.progress = None
 
@@ -538,7 +547,7 @@ class NameWrite(SeriesBackfill):
             raise
         except Exception as error:
             self._discard_temp(job_id, record)
-            self._set(job_id, 'held', 'The names could not be written; the audiobook is unchanged: ' + (str(error) or type(error).__name__), record)
+            self._set(job_id, 'held', NAMES_FAILED + (str(error) or type(error).__name__), record)
             return
         finally:
             self._clear_stage(job_id)

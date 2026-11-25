@@ -26,6 +26,7 @@ from unittest import mock
 
 import book_move
 import native_io
+import quicktime_chapters
 import runtime_file_disposition as runtime
 import series_backfill
 import name_write
@@ -348,6 +349,141 @@ class NameWriteOnNasTests(unittest.TestCase):
         self.assertFalse(new.exists(), 'no second copy')
         self.assertEqual(sha(book.path), book.original, 'the file the move starts from')
         self.assertEqual(used[key(new)], native_io.NAS_LEGACY)
+
+
+class LeftoverTemporaryTests(unittest.TestCase):
+    """Sergei 2026-11-25 (0.31.3): the two temporary files 0.31.2's writes of names left on the NAS are removed by the app,
+    once, only after every proof (SeriesBackfill._remove_leftover); any doubt keeps the file with why. The live state is
+    made as it happened: a write that failed after its new file was written kept that file (0.31.2's removal was refused
+    on the NAS), and the next try was held on that file's refused removal."""
+
+    def leave(self, book):
+        from series_backfill import Held
+        book.approve()
+        with nas_library(book.lib.root), as_0312(), mock.patch.object(NameWrite, '_read_back', side_effect=Held('The new names did not read back: title')):
+            book.writer.run_pass()
+        self.assertEqual(book.state(), ('held', 'The new names did not read back: title'))
+        temp = book.path.parent / (name_write.TEMP_PREFIX + book.lib.job_id + '.m4b')
+        self.assertTrue(temp.exists(), 'control: 0.31.2 kept the written temporary file')
+        book.approve()
+        with nas_library(book.lib.root), as_0312():
+            book.writer.run_pass()
+        self.assertEqual(book.state(), ('held', 'The names could not be written; the audiobook is unchanged: Safe removal of “' + str(temp) + LIVE_SUFFIX),
+                         'the two live holds, word for word')
+        with connect(book.lib.db) as db:
+            self.assertEqual([tuple(r) for r in db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=?', (str(temp),))], [(book.lib.job_id, 'temporary')])
+        return temp
+
+    def owned(self, book, temp):
+        with connect(book.lib.db) as db:
+            return [tuple(r) for r in db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=?', (str(temp),))]
+
+    def test_the_leftover_temporary_is_removed_after_its_proofs_and_the_book_is_unchanged(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = self.leave(book)
+        digest, size = sha(temp), temp.stat().st_size
+        reason = book.state()[1]
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertFalse(temp.exists())
+        record = book.writer.entry(book.lib.job_id)['record']
+        removed = record['temp_removed']
+        self.assertEqual((removed['path'], removed['size'], removed['sha256'], removed['method']), (str(temp), size, digest, native_io.NAS_LEGACY))
+        self.assertEqual(record['temp_retry'], series_backfill.REMOVAL_RETRY)
+        self.assertNotIn('temp_kept', record)
+        self.assertEqual(self.owned(book, temp), [], 'its ownership row goes with it')
+        self.assertEqual(book.state(), ('held', reason), 'the write itself did not happen: it stays held')
+        self.assertEqual(sha(book.path), book.original, "the book's own file is untouched")
+        self.assertEqual((book.output()['final_path'], book.output()['sha256']), (str(book.path), book.original))
+        before = book.writer.entry(book.lib.job_id)
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertEqual(book.writer.entry(book.lib.job_id), before, 'once: nothing more')
+
+    def kept(self, book, temp, why):
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        record = book.writer.entry(book.lib.job_id)['record']
+        self.assertTrue(temp.exists(), 'kept')
+        self.assertIn(why, record['temp_kept']['reason'])
+        self.assertNotIn('temp_removed', record)
+        self.assertEqual(record['temp_retry'], series_backfill.REMOVAL_RETRY)
+        before = book.writer.entry(book.lib.job_id)
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertEqual(book.writer.entry(book.lib.job_id), before, 'tried once: nothing more')
+        self.assertTrue(temp.exists())
+        return record
+
+    def test_a_temporary_written_after_the_hold_is_kept(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = self.leave(book)
+        later = __import__('time').time() + 120
+        os.utime(temp, (later, later))
+        self.kept(book, temp, 'written after the app kept it')
+
+    def test_a_temporary_another_record_names_is_kept(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = self.leave(book)
+        with connect(book.lib.db) as db:
+            db.execute("UPDATE owned_artifacts SET kind='output' WHERE path=?", (str(temp),))
+        self.kept(book, temp, 'Another record names the temporary file')
+
+    def test_a_temporary_whose_audio_is_not_the_books_is_kept(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = self.leave(book)
+        stat = temp.stat()
+        top, _index, _moves = quicktime_chapters._layout(temp)
+        at, length = next((at, length) for kind, at, length in top if kind == b'mdat')
+        data = bytearray(temp.read_bytes())
+        data[at + length // 2] ^= 1  # one audio byte, the time put back: only the media proof can see it
+        temp.write_bytes(data)
+        os.utime(temp, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        self.kept(book, temp, 'Media bytes changed')
+
+    def test_a_temporary_is_kept_when_the_books_own_file_does_not_match_its_record(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = self.leave(book)
+        data = bytearray(book.path.read_bytes())
+        data[-20] ^= 1
+        book.path.write_bytes(data)
+        self.kept(book, temp, "The book's own file does not match its record")
+
+    def test_a_hold_for_another_reason_is_not_touched(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = self.leave(book)
+        with connect(book.lib.db) as db:
+            db.execute('UPDATE name_writes SET reason=? WHERE job_id=?', (name_write.NAMES_FAILED + 'Another failure', book.lib.job_id))
+        before = book.writer.entry(book.lib.job_id)
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertEqual(book.writer.entry(book.lib.job_id), before)
+        self.assertTrue(temp.exists())
+
+    def test_the_series_writes_own_leftover_is_removed_the_same_way(self):
+        lib = Library(Path(tempfile.mkdtemp(dir=base.AREA)))
+        self.addCleanup(lambda: __import__('shutil').rmtree(lib.base, True))
+        backfill = lib.backfill()
+        with nas_library(lib.root), as_0312(), mock.patch.object(series_backfill.SeriesBackfill, '_read_back', side_effect=series_backfill.Held('Series tags did not read back: album')):
+            backfill.run_pass()
+        temp = lib.path.parent / (series_backfill.TEMP_PREFIX + lib.job_id + '.m4b')
+        self.assertTrue(temp.exists())
+        with connect(lib.db) as db:  # tried again, as an approval does: 0.31.2 holds it on its own leftover
+            db.execute("UPDATE series_backfill SET state='pending' WHERE job_id=?", (lib.job_id,))
+        with nas_library(lib.root), as_0312():
+            backfill.run_pass()
+        self.assertEqual(lib.state(backfill), ('held', series_backfill.APPLY_HOLD + retained_text(temp)))
+        with nas_library(lib.root):
+            backfill.run_pass()
+        self.assertFalse(temp.exists())
+        self.assertEqual(backfill.entry(lib.job_id)['record']['temp_removed']['method'], native_io.NAS_LEGACY)
+        self.assertEqual(sha(lib.path), lib.original)
 
 
 if __name__ == '__main__':
