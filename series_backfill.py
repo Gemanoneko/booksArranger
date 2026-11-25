@@ -243,12 +243,16 @@ def _log(line):
 def present(path):
     """Whether this exact name is there: True or False only when that is known. Senua's 0.31.3 review, M3: pathlib's exists()
     answers False on any OSError (the bundled Python 3.14), so a network error read as "the old file is gone". Here only
-    "not found" is False; any other error is raised (it cannot be told)."""
+    "not found" is False; any other error is raised (it cannot be told). Senua's re-review at 520ee66, M6: Python raises
+    FileNotFoundError for Windows errors 3, 15, 53 and 67 too, and 53 and 67 are what an SMB server that cannot be reached
+    answers. Only error 2 says this name is not there (off Windows: no winerror); every other code is raised."""
     try:
         os.lstat(path)
         return True
-    except FileNotFoundError:
-        return False
+    except FileNotFoundError as error:
+        if getattr(error, 'winerror', None) in (None, 2):
+            return False
+        raise
 
 
 def size_text(size):

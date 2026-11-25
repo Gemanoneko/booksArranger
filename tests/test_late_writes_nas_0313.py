@@ -16,6 +16,7 @@ proof stage and the catalog stay local, as installed. Each case has its control:
 import contextlib
 import ctypes
 from ctypes import wintypes
+import itertools
 import json
 import os
 import sqlite3
@@ -122,6 +123,31 @@ def like_0312(database, table, job_id):
 
 def key(path):
     return os.path.normcase(str(path))
+
+
+# Senua's re-review at 520ee66, M6 (her P7): what Windows answers when an SMB server cannot be reached, and Python raises
+# as FileNotFoundError (ERROR_BAD_NETPATH, ERROR_BAD_NET_NAME). OSError(64, ...) never takes that class.
+UNREACHABLE_AS_NOT_FOUND = (53, 67)
+
+
+def network_error(path, code):
+    """The error os.lstat raises for this Windows error code, as Python builds it (the class follows the code)."""
+    return OSError(0, ctypes.FormatError(code).strip(), str(path), code)
+
+
+@contextlib.contextmanager
+def lstat_fails(path, code, times=None):
+    """os.lstat of exactly this path fails with this Windows error (times: only the first so many calls)."""
+    real, wanted, left = os.lstat, key(path), [times]
+
+    def lstat(name, *args, **kwargs):
+        if key(name) == wanted and (left[0] is None or left[0] > 0):
+            if left[0] is not None:
+                left[0] -= 1
+            raise network_error(name, code)
+        return real(name, *args, **kwargs)
+    with mock.patch.object(os, 'lstat', lstat):
+        yield
 
 
 class SeriesWriteOnNasTests(unittest.TestCase):
@@ -1022,50 +1048,58 @@ class ReviewMajorTests(HeldBook, unittest.TestCase):
         self.assertEqual((counts['removed'], counts['kept'], counts['freed']), (0, 1, 0))
 
     def test_m3_an_old_file_that_cannot_be_seen_is_never_recorded_removed(self):
+        """Senua's re-review at 520ee66, M6 (her P9): the network error is one Python raises as FileNotFoundError (53, 67:
+        what Windows answers when the SMB server cannot be reached). The OSError(64) this case used could never reach that
+        branch, so it passed while a real one burned the retry as N7."""
         import os as real_os
-        lib = self.lib
-        self.hold()
-        old = os.path.normcase(str(lib.path))
-        real_exists, real_lstat = Path.exists, real_os.lstat
+        for code in UNREACHABLE_AS_NOT_FOUND:
+            with self.subTest(winerror=code):
+                lib = self.lib = Library(Path(tempfile.mkdtemp(dir=self.temp.name)))
+                self.hold()
+                old = os.path.normcase(str(lib.path))
+                real_exists, real_lstat = Path.exists, real_os.lstat
 
-        def exists(path, *args, **kwargs):  # the bundled Python 3.14 answers False on any OSError (a network error)
-            return False if os.path.normcase(str(path)) == old else real_exists(path, *args, **kwargs)
+                def exists(path, *args, **kwargs):  # the bundled Python 3.14 answers False on any OSError (a network error)
+                    return False if os.path.normcase(str(path)) == old else real_exists(path, *args, **kwargs)
 
-        def lstat(path, *args, **kwargs):
-            if os.path.normcase(str(path)) == old:
-                raise OSError(64, 'The specified network name is no longer available')
-            return real_lstat(path, *args, **kwargs)
-        with nas_library(lib.root), mock.patch.object(Path, 'exists', exists), mock.patch.object(real_os, 'lstat', lstat):
-            lib.backfill().run_pass()
-        entry = lib.backfill().entry(lib.job_id)
-        self.assertNotEqual(entry['state'], 'done', 'not recorded as removed')
-        self.assertTrue(lib.path.exists(), 'the old file is still there')
-        self.assertEqual(lib.backfill()._cleanup_counts()['removed'], 0)
-        with nas_library(lib.root):
-            self.later(lib).run_pass()
-        self.assertEqual(lib.state(lib.backfill()), ('done', ''), 'removed once it can be seen again')
-        self.assertFalse(lib.path.exists())
+                def lstat(path, *args, **kwargs):
+                    if os.path.normcase(str(path)) == old:
+                        raise network_error(path, code)
+                    return real_lstat(path, *args, **kwargs)
+                with nas_library(lib.root), mock.patch.object(Path, 'exists', exists), mock.patch.object(real_os, 'lstat', lstat):
+                    lib.backfill().run_pass()
+                entry = lib.backfill().entry(lib.job_id)
+                self.assertEqual(entry['state'], 'cataloged', 'not recorded as removed, and not held N7: it waits')
+                self.assertTrue(entry['reason'].startswith(series_backfill.DRIVE_AWAY), entry['reason'])
+                self.assertTrue(lib.path.exists(), 'the old file is still there')
+                self.assertEqual(lib.backfill()._cleanup_counts()['removed'], 0)
+                with nas_library(lib.root):
+                    self.later(lib).run_pass()
+                self.assertEqual(lib.state(lib.backfill()), ('done', ''), 'removed once it can be seen again')
+                self.assertFalse(lib.path.exists())
 
     def test_m3_a_removal_is_never_confirmed_by_a_network_error(self):
         """M3's pattern in the removals' own last check (os.path.lexists answers False on any OSError): a file that is still
-        there and cannot be seen is never taken as removed."""
+        there and cannot be seen is never taken as removed. Senua's re-review, M6: with the codes Python raises as
+        FileNotFoundError (53, 67), not OSError(64), which never reached that branch."""
         import os as real_os
         real_lstat, real_lexists = real_os.lstat, real_os.path.lexists
-        for owner, prefix in ((series_backfill.SeriesBackfill, series_backfill.TEMP_PREFIX), (NameWrite, name_write.TEMP_PREFIX)):
+        for (owner, prefix), code in itertools.product(((series_backfill.SeriesBackfill, series_backfill.TEMP_PREFIX), (NameWrite, name_write.TEMP_PREFIX)),
+                                                       UNREACHABLE_AS_NOT_FOUND):
             temp = self.lib.path.parent / (prefix + self.lib.job_id + '.m4b')
             temp.write_bytes(b'unproven')
             key = os.path.normcase(str(temp))
 
             def lstat(path, *args, **kwargs):
                 if os.path.normcase(str(path)) == key:
-                    raise OSError(64, 'The specified network name is no longer available')
+                    raise network_error(path, code)
                 return real_lstat(path, *args, **kwargs)
 
             def lexists(path):  # as Python answers on a network error: False
                 return False if os.path.normcase(str(path)) == key else real_lexists(path)
             with mock.patch.object(VerifiedFile, 'dispose', lambda handle, **kwargs: None), mock.patch.object(real_os, 'lstat', lstat), \
                     mock.patch.object(real_os.path, 'lexists', lexists):
-                with self.assertRaises(OSError, msg=owner.__name__):
+                with self.assertRaises(OSError, msg='%s, WinError %d' % (owner.__name__, code)):
                     owner._dispose_temporary(temp)
             self.assertTrue(temp.exists(), 'still there, and not reported removed')
             temp.unlink()
@@ -1241,6 +1275,81 @@ class FutabaMinorTests(HeldBook, unittest.TestCase):
         self.assertEqual((len(rows), len(items)), (1, 0), 'the row replaces the item in the same update')
         self.assertEqual({key: rows[0][key] for key in ('subject', 'done', 'total')}, {'subject': '', 'done': 0, 'total': 1})
         self.assertIsInstance(rows[0]['started'], int, 'its elapsed time ticks from when the clean-up was taken up')
+
+
+class ReReviewTests(HeldBook, unittest.TestCase):
+    """Senua's 0.31.3 re-review at 520ee66 (Docs/BooksArranger_CodeReview_v0.31.3_2026-11-25.md, "Re-review at 520ee66"):
+    M5, M6, m7 and m8, folded into 0.31.3 by Sergei's ruling 10 (2026-11-25). Her probes P5 and P7-P10 are the repros.
+    Each case failed on 520ee66."""
+
+    def at(self, hours):
+        """A pass this many hours on: whatever waited for a minute is due."""
+        backfill = self.lib.backfill()
+        backfill.clock = lambda: __import__('time').time() + 3600 * hours
+        return backfill
+
+    # M6: only Windows error 2 says "not there" (P7); 3, 15, 53 and 67 are FileNotFoundError too, and are raised.
+    def test_m6_only_error_2_reads_as_not_there(self):
+        there = self.lib.path
+        for code in (3, 15) + UNREACHABLE_AS_NOT_FOUND:
+            with self.subTest(winerror=code), lstat_fails(there, code):
+                self.assertIsInstance(network_error(there, code), FileNotFoundError, 'the class Python gives it')
+                with self.assertRaises(OSError):
+                    series_backfill.present(there)
+        with lstat_fails(there, 2):
+            self.assertIs(series_backfill.present(there), False, 'error 2: this name is not there')
+        self.assertIs(series_backfill.present(there.with_name('missing.m4b')), False, 'a real missing name in a folder that answers')
+        self.assertIs(series_backfill.present(there), True)
+
+    def test_m6_a_removal_lost_to_a_drive_drop_is_never_recorded_done_on_a_network_error(self):
+        """P8 (effect a): the NAS removal is lost to a drive drop (removal_intended stays True), then the next pass's one check
+        of the old file gets 53 or 67. It was recorded done, removed and freed, with the old file still on the share."""
+        lib = self.lib
+        self.hold()
+        dropped = []
+
+        def lost(handle, verify, refusal):
+            dropped.append(str(handle.path))
+            raise native_io.BoundaryError('Exact-handle removal is unsupported or denied: [WinError 64] The specified network name is no longer available')
+        with nas_library(lib.root), mock.patch.object(native_io.VerifiedFile, '_dispose_remote_legacy', lost), \
+                mock.patch.object(series_backfill.SeriesBackfill, '_answers', staticmethod(lambda root: not dropped)):
+            lib.backfill().run_pass()
+        first = lib.backfill().entry(lib.job_id)
+        self.assertEqual((first['state'], first['record'].get('removal_intended')), ('cataloged', True), 'control: the removal began and was lost')
+        self.assertTrue(lib.path.exists())
+        for hours, code in enumerate(UNREACHABLE_AS_NOT_FOUND, 1):
+            with self.subTest(winerror=code):
+                with nas_library(lib.root), lstat_fails(lib.path, code, times=1):
+                    self.at(hours).run_pass()
+                entry = lib.backfill().entry(lib.job_id)
+                self.assertEqual(entry['state'], 'cataloged', 'never done while the old file is on the share')
+                self.assertTrue(entry['reason'].startswith(series_backfill.DRIVE_AWAY), entry['reason'])
+                self.assertEqual(lib.backfill()._cleanup_counts()['removed'], 0)
+                self.assertTrue(lib.path.exists())
+        with nas_library(lib.root):
+            self.at(3).run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('done', ''))
+        self.assertFalse(lib.path.exists(), 'removed for real once it can be seen')
+
+    def test_m6_a_temporary_file_that_cannot_be_seen_keeps_its_record(self):
+        """Effect c: _discard_temp forgot the record of a temporary file it could not see (53 or 67), with no log line."""
+        lib = self.lib
+        backfill = lib.backfill()
+        temp = lib.path.parent / (series_backfill.TEMP_PREFIX + lib.job_id + '.m4b')
+        temp.write_bytes(b'unproven')
+        with connect(lib.db) as db:
+            db.execute('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)', (str(temp), lib.job_id, 'temporary', '', 0))
+        for code in UNREACHABLE_AS_NOT_FOUND:
+            with self.subTest(winerror=code):
+                record = {'temp': str(temp)}
+                with lstat_fails(temp, code), mock.patch.object(series_backfill, '_log') as log:
+                    backfill._discard_temp(lib.job_id, record)
+                self.assertEqual((record.get('temp_left') or {}).get('path'), str(temp), 'recorded as kept')
+                self.assertTrue(any(str(temp) in call.args[0] for call in log.call_args_list), 'said in the log')
+                with connect(lib.db) as db:
+                    self.assertEqual([tuple(r) for r in db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=?', (str(temp),))],
+                                     [(lib.job_id, 'temporary')], 'its ownership row is kept')
+                self.assertTrue(temp.exists())
 
 
 def _series_lane():
