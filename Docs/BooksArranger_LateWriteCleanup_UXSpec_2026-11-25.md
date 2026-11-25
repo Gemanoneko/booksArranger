@@ -10,6 +10,7 @@ Earlier the same day: clean all 115 books; clear the 2 temporary files; show a p
 2. **A kept book keeps both files until a later version.** Enough: no try-again button, no advice to delete by hand.
 3. **Reword the nine neighbouring hold reasons too.** Yes: section 5.2.
 4. **Card «Сага теней» 1 and Hobb «Сага о живых кораблях» 2: retry.** Their three tries were used up by the NAS bug, not by the names. Once their temporary file is cleared, 0.31.3 gives each one fresh try at writing the English names. If it succeeds, the book leaves the held list. If it fails, the book stays as it is with the section 6 text. This overrides the "leave" assumption of the first draft of section 6, now rewritten.
+5. **Kept title/author books: log.** A count in the row and the done line plus the engine log is enough; 0.31.3 does not list them by name in "Could not be renamed or moved".
 
 ## As built / rulings (Judy, 2026-11-25, on Ender's `e8932ce` and `9288f20`)
 
