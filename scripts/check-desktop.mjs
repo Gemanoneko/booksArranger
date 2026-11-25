@@ -116,6 +116,7 @@ patterns.push('test_series_lookup_ends_031.py','test_series_write_guard_031.py',
 patterns.push('test_lookup_before_review_031.py');  // 0.31.0 steps 2 and 3: the look-up before review, Wikidata, the certain-or-doubtful rule, the title rule, name order (R1-R5, R18, R21-R23, R25)
 patterns.push('test_rule_filing_031.py');  // 0.31.0 milestone B: finished books renamed and moved by the rules (no approval, once, never over a file, Pause, Quit and restart, his chosen folder kept), the record, the could-not-move list, author order on evidence (R18, R19, R23, R24, R26)
 patterns.push('test_name_write_031.py');  // 0.31.0 ruling R27: an English title or author name written into a finished file's tags and the list (real ffmpeg books, the proofs, a kill between every two steps, the refusals, rollback)
+patterns.push('test_late_writes_nas_0313.py');  // 0.31.3: late series/title/author writes on the NAS remove the former file (Sergei's 2026-11-16 NAS method), the one retry of 0.31.2's holds, their controls
 patterns.push('test_rule_filing_names_031.py');  // 0.31.0 ruling R27 in the rules' pass: one pass per book (one rewrite, one move), the guards, the pacing, the record's 'written'
 patterns.push('test_damaged_part_repair.py');  // 0.30.0 item C: a damaged M4B part is repaired on a working copy before its join (manual and automatic)
 patterns.push('test_damage_ruling.py');  // Sergei's ruling 2026-11-19: container-only damage with proven intact audio converts normally; unrepairable damage says re-acquire

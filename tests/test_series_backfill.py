@@ -348,14 +348,14 @@ class BackfillTests(unittest.TestCase):
 
     def test_replacement_and_ancestry_remain_protected_during_old_disposal(self):
         lib=self.lib;backfill=self.park('cataloged');real=series_backfill.VerifiedFile.dispose;blocked=[]
-        def dispose(handle):
+        def dispose(handle,**kwargs):  # 0.31.3: the late writes pass remote_legacy (the NAS method)
             for action in (lambda:lib.target.unlink(),lambda:lib.target.write_bytes(b'changed'),
                            lambda:lib.path.rename(lib.path.with_suffix('.swapped')),
                            lambda:lib.path.parent.rename(lib.path.parent.with_name('swapped-parent'))):
                 try:action()
                 except OSError:blocked.append(True)
                 else:self.fail('A held replacement/original/ancestor was mutable during disposition')
-            return real(handle)
+            return real(handle,**kwargs)
         with patch.object(series_backfill.VerifiedFile,'dispose',dispose):backfill.resume(lib.job_id)
         self.assertEqual(blocked,[True]*4);self.assertEqual(lib.state(backfill),('done',''))
         self.assertTrue(lib.merge()._output_valid(json.loads(lib.row()['output'])))

@@ -10,12 +10,16 @@ from pathlib import Path
 
 class BoundaryError(ValueError):pass
 
+def retained_text(path):
+    """FileRemovalRetained's sentence for this path (one source: the late writes know their own such holds by it, 0.31.3)."""
+    return 'Safe removal of “'+str(path)+'” could not be verified. The file was kept.'
+
 class FileRemovalRetained(BoundaryError):
     """Pre-disposition refusal with positive exact remaining-file evidence."""
     def __init__(self,path,facts,sha256,diagnostic):
         self.path=str(path);self.retention_proof={'path':str(path),'facts':facts,'sha256':sha256}
         self.native_reason=str(diagnostic)
-        super().__init__('Safe removal of “'+str(path)+'” could not be verified. The file was kept.')
+        super().__init__(retained_text(path))
 
 # Which method removed a file (VerifiedFile.disposition_method), recorded for audit by source cleanup.
 HARDENED_LOCAL='hardened_local'

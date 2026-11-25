@@ -266,6 +266,7 @@ class NameWrite(SeriesBackfill):
     _proven), the move that follows (_follow_up), the waits (_idle, settled, unsafe, _defer) and the owned temporary file.
     Its own: the ledger (name_writes), the approval, the pass, what is written (_tags, _read_back) and what is recorded
     (catalog)."""
+    LEDGER = 'name_writes'
 
     def __init__(self, merge, stage=None, clock=time.time):
         self.merge = merge
@@ -393,6 +394,7 @@ class NameWrite(SeriesBackfill):
     # ------------------------------------------------------------------ pass
     def _pass(self):
         from storage_relocation_native import retained_job
+        self._retry_retained_removals()  # 0.31.3: the holds 0.31.2 left on the NAS (series_backfill.REMOVAL_RETRY)
         for row in self._rows('SELECT job_id FROM name_writes WHERE state IN (%s)' % ','.join('?' * len(ACTIVE)), ACTIVE):
             entry = self.entry(row['job_id'])
             if entry['record'].get('next_attempt', 0) > self.clock():
@@ -602,9 +604,7 @@ class NameWrite(SeriesBackfill):
         if not temp.name.startswith(TEMP_PREFIX) or temp.suffix.lower() != '.m4b':
             raise BoundaryError('Not a name-write temporary file; kept')
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
-            if handle.facts()['links'] != 1:
-                raise BoundaryError('The temporary file has another filesystem alias; kept')
-            handle.dispose()
+            series_backfill.remove_owned(handle)  # 0.31.3: on the NAS too (series_backfill.RECOVERY_HOLD's note)
         if os.path.lexists(temp):
             raise BoundaryError('The temporary file could not be removed')
 

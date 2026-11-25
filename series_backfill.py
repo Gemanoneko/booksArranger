@@ -110,6 +110,21 @@ WAITING_ON = ('blocked',)
 # write's catalog step leaves the receipt the move started from as it is (SeriesBackfill._no_move_begun), and (R33, the
 # delta review's M5) the write's own rewritten copy, which the catalog never named, goes (SeriesBackfill._withdraw).
 MOVED_MEANWHILE = 'The audiobook was moved meanwhile; the catalog is unchanged'
+# 0.31.3, root cause of the 24-25 Nov holds (measured on Sergei's machine and a copy of his catalog, 2026-11-25): every file
+# this module removes in the library (the former file, its own temporary file, a withdrawn rewritten copy) went through the
+# hardened local disposition only. Z:\Audiobooks Sorted is an SMB share; for a handle there the hardened guard refuses
+# (no volume-GUID path: RemoteProviderRefused) before anything is removed, so the file was kept: all 115 writes since
+# 24 Nov 21:23 (82 series, 33 names, name_write) kept both files, and two writes of names kept their temporary file.
+# No series write had finished since 20 Oct, before that guard (0.28). Source cleanup had Sergei's 2026-11-16 NAS ruling
+# (VerifiedFile.dispose remote_legacy: on a positively remote SMB volume, the pre-0.28 exact-handle method, after the
+# caller's own last checks repeat through the same held handle); these removals now have it too (_last_checks).
+RECOVERY_HOLD = 'Series recovery could not verify the files; remaining copies kept: '
+# A write held at its last step only because its former file's removal was refused (RECOVERY_HOLD + native_io's
+# retained_text of that file) goes back to that step once per value of this (record 'removal_retry'): 0.31.3 finishes the
+# holds 0.31.2 left (_retry_retained_removals). Everything is proven again first; any doubt holds it again, both kept.
+REMOVAL_RETRY = '0.31.3'
+RETRY_FIELDS = ('old_path', 'new_path', 'temp', 'root', 'parent_identity', 'old_identity', 'new_identity', 'old_sha256', 'new_sha256',
+                'old_size', 'new_size')
 # The hosts a deferral recorded before 0.31.0 named, as the sources that ask them.
 HOST_SOURCES = {'www.goodreads.com': ('goodreads',), 'api.fantlab.ru': ('fantlab',), 'fantlab.ru': ('fantlab',), 'www.wikidata.org': ('wikidata',),
                 'html.duckduckgo.com': ('publisher', 'litres'), 'en.wikipedia.org': ('publisher',), 'ru.wikipedia.org': ('publisher',),
@@ -193,7 +208,23 @@ def sha256(path, stop):
     return value.hexdigest()
 
 
+def remove_owned(handle):
+    """0.31.3: remove the app's own file through its held, single-link handle (the caller checked its name and folder). On
+    the NAS, Sergei's 2026-11-16 method removes it after the same check again: the handle still names the file it opened."""
+    facts = handle.facts()
+    if facts['links'] != 1:
+        raise BoundaryError('The temporary file has another filesystem alias; kept')
+
+    def same(held):
+        now = held.refresh()
+        if now['identity'] != facts['identity'] or now['links'] != 1 or now['attributes'] & (0x400 | 0x10):
+            raise BoundaryError('The temporary file changed or has another name; kept')
+    handle.dispose(remote_legacy=same)
+
+
 class SeriesBackfill:
+    LEDGER = 'series_backfill'  # this kind of write's ledger table (name_write.NameWrite: 'name_writes')
+
     def __init__(self, merge, research=None, stage=None, clock=time.time):
         self.merge = merge
         self.database = merge.inventory.database
@@ -562,6 +593,7 @@ class SeriesBackfill:
     def _pass(self):
         if self.research is None:
             return
+        self._retry_retained_removals()
         for row in self._rows('SELECT job_id FROM series_backfill WHERE state IN (%s)' % ','.join('?' * len(ACTIVE)), ACTIVE):
             entry = self.entry(row['job_id'])
             if entry['record'].get('next_attempt', 0) > self.clock():
@@ -661,6 +693,34 @@ class SeriesBackfill:
                     self._set(row['job_id'], 'held', text[:400] + ' (tried %d times; left as it is)' % failures, evidence)
                 else:
                     self._defer(row['job_id'], Later(text, self.clock() + TRY_SPACING), found, manifest=manifest, sources=memory, failures=failures)
+
+    def _retry_retained_removals(self):
+        """0.31.3 (REMOVAL_RETRY): a write held only because its former file's removal was refused goes back to its last
+        step ('cataloged'), once per REMOVAL_RETRY, and the resume below takes it from there exactly as after a restart: the
+        catalog names the rewritten file (path, size, SHA-256), that file is the one the write proved (identity, size, every
+        byte re-hashed), the former file is the one the write started from (identity, size, one link, every byte
+        re-hashed), the folder is the same; then the former file goes through its held handle (on the NAS after those
+        checks again, _last_checks) and the approved move follows (_follow_up). Any doubt holds it again with why, both
+        files kept; it is not tried again by this version."""
+        for row in self._rows('SELECT job_id FROM ' + self.LEDGER + " WHERE state='held'"):
+            entry = self.entry(row['job_id'])
+            if not self._removal_retained(entry) or entry['record'].get('removal_retry') == REMOVAL_RETRY:
+                continue
+            record = {key: value for key, value in entry['record'].items() if key not in ('approved_failed', 'next_attempt')}
+            record['removal_retry'] = REMOVAL_RETRY
+            self._set(row['job_id'], 'cataloged', '', record)
+
+    @staticmethod
+    def _removal_retained(entry):
+        """Whether this ledger entry is a write held at its last step only because its former file's removal was refused:
+        held with exactly RECOVERY_HOLD + that file's retained_text, its removal intended, every recorded proof there."""
+        from native_io import retained_text
+        if not entry or entry['state'] != 'held' or not isinstance(entry.get('record'), dict):
+            return False
+        record = entry['record']
+        if record.get('removal_intended') is not True or any(record.get(field) in (None, '') for field in RETRY_FIELDS):
+            return False
+        return entry['reason'] == RECOVERY_HOLD + retained_text(record['old_path'])
 
     # ------------------------------------------------------------------ checks
     def unsafe(self, row, jobs=None):
@@ -1098,7 +1158,7 @@ class SeriesBackfill:
             with critical_sections.critical(critical_sections.RENAME), self._boundary(record) as boundary:
                 self._resume_protected(job_id, record, state, temp, new, old, boundary)
         except (BoundaryError, OSError, Held, KeyError) as error:
-            self._set(job_id, 'held', 'Series recovery could not verify the files; remaining copies kept: ' + str(error), record)
+            self._set(job_id, 'held', RECOVERY_HOLD + str(error), record)
             return
         self._follow_up(job_id)  # 0.30.0 item 2: an approved book now moves into its series folder
 
@@ -1163,7 +1223,7 @@ class SeriesBackfill:
         # Every recovery entry point proves and protects the replacement through
         # catalog commit and exact-handle old-file disposal. No pathname unlink.
         withdrawn = False
-        with self._protected(new, record, 'new'):
+        with self._protected(new, record, 'new') as kept:
             if state == 'renamed':
                 try:
                     self.catalog(job_id, record)
@@ -1178,13 +1238,14 @@ class SeriesBackfill:
                     withdrawn = True  # its own copy goes once this handle is closed (_withdraw)
             if not withdrawn:
                 if old.exists():
+                    self._names_rewritten(job_id, record)
                     with self._protected(old, record, 'old', delete=True) as former:
                         if record['old_identity'] == record['new_identity']:
                             raise Held('The old and new names identify the same file')
                         boundary.revalidate()
                         record['removal_intended'] = True
                         self._set(job_id, 'cataloged', '', record)
-                        former.dispose()
+                        former.dispose(remote_legacy=lambda handle: self._last_checks(handle, record, 'old', boundary, kept, new))
                     if old.exists():
                         raise Held('Former-file disposition has not completed; copies kept')
                 elif not record.get('removal_intended'):
@@ -1203,7 +1264,7 @@ class SeriesBackfill:
         try:
             with self._protected(new, record, 'new', delete=True) as handle:
                 boundary.revalidate()
-                handle.dispose()
+                handle.dispose(remote_legacy=lambda held: self._last_checks(held, record, 'new', boundary))
             if os.path.lexists(new):
                 raise Held('The rewritten copy could not be removed')
             self._forget_temporary(job_id, temp)
@@ -1211,6 +1272,35 @@ class SeriesBackfill:
             self._set(job_id, 'held', 'The catalog could not record the series; copies kept: ' + MOVED_MEANWHILE + ' (' + (str(error) or type(error).__name__) + ')', record)
             return
         self._set(job_id, 'held', MOVED_MEANWHILE + '; the rewritten copy was removed', record)
+
+    def _names_rewritten(self, job_id, record):
+        """0.31.3: the former file goes only while the catalog names the rewritten file, the one kept: its path, size and
+        SHA-256, read just before the removal (the retry of a 0.31.2 hold may run days after its catalog step)."""
+        rows = self._rows('SELECT output FROM audio_jobs WHERE job_id=?', (job_id,))
+        try:
+            output = json.loads(rows[0]['output']) if rows and rows[0]['output'] else {}
+        except (TypeError, ValueError):
+            output = {}
+        if not isinstance(output, dict) or os.path.normcase(str(output.get('final_path') or '')) != os.path.normcase(str(ordinary(record['new_path']))) \
+                or output.get('sha256') != record['new_sha256'] or output.get('size') != record['new_size']:
+            raise Held('The catalog does not name the rewritten file; both files kept')
+
+    @staticmethod
+    def _last_checks(handle, record, kind, boundary, kept=None, kept_path=None):
+        """Sergei's 2026-11-16 NAS ruling (VerifiedFile.dispose remote_legacy), as source cleanup's _nas_checks: run right
+        before the NAS (pre-0.28) removal method, through the same held handles. The file to go is still the one the write
+        proved (identity, size, one link, every byte re-hashed: the held handle stops a writer over SMB, not on the NAS
+        itself); the file kept is still there and still the proven one (re-read); the folder is the same. Any failure keeps
+        every file."""
+        facts = handle.refresh()
+        if facts['identity'] != record[kind + '_identity'] or facts['size'] != record[kind + '_size'] or facts['links'] != 1 \
+                or facts['attributes'] & (0x400 | 0x10) or handle.sha256() != record[kind + '_sha256']:
+            raise Held('The ' + ('former' if kind == 'old' else 'rewritten') + ' file no longer matches its verified identity and bytes; kept')
+        if kept is not None:
+            now = kept.refresh()
+            if now['identity'] != record['new_identity'] or now['size'] != record['new_size'] or now['links'] < 1 or not os.path.lexists(kept_path):
+                raise Held('The rewritten file changed or is gone before the former file was removed; both files kept')
+        boundary.revalidate()
 
     def _proven(self, path, record):
         """The proven new file: its exact native identity and complete held hash."""
@@ -1376,9 +1466,7 @@ class SeriesBackfill:
         if not temp.name.startswith(TEMP_PREFIX) or temp.suffix.lower() != '.m4b':
             raise BoundaryError('Not a series-update temporary file; kept')
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
-            if handle.facts()['links'] != 1:
-                raise BoundaryError('The temporary file has another filesystem alias; kept')
-            handle.dispose()
+            remove_owned(handle)
         if os.path.lexists(temp):
             raise BoundaryError('The temporary file could not be removed')
 
