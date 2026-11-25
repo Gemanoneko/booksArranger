@@ -30,7 +30,7 @@ import threading
 import time
 from pathlib import Path
 
-from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, ordinary, publish_no_replace
+from native_io import AncestorUnavailable, BoundaryError, DirectoryBoundary, VerifiedFile, ordinary, publish_no_replace
 from scanner import connect
 
 def published_root(manifest, output):
@@ -156,6 +156,9 @@ TEMP_AUDIO_DIFFERS = "The temporary file's audio differs from the book's; it was
 TEMP_WRITTEN_AFTER = 'The temporary file changed after the app last handled it; it was left in place.'
 TEMP_CHANGED_DURING = 'The temporary file changed while the app checked it; it was left in place.'
 SCAN_WAIT = 'A library scan is running'  # _idle's and _may_finish's wait; the clean-up's Waiting item (Judy 3) reads it
+# Senua's 0.31.3 review, M2: the library drive does not answer (asleep, offline, a network error). Nothing is tried and no
+# one-time mark is used; the book waits as a write of names already waited (name_write.DRIVE_AWAY, the same words).
+DRIVE_AWAY = 'The library drive is not answering'
 # Judy's spec 4 and 7.3: the clean-up's outcome shows on the status line for this long after its last book settles.
 LATE_SHOW_MS = 3600000
 _CLEANUP_LOCK = threading.Lock()
@@ -219,6 +222,17 @@ def _log(line):
         print('Books Arranger ' + time.strftime('%Y-%m-%d %H:%M:%S') + ': ' + line, file=sys.stderr, flush=True)
     except Exception:
         pass
+
+
+def present(path):
+    """Whether this exact name is there: True or False only when that is known. Senua's 0.31.3 review, M3: pathlib's exists()
+    answers False on any OSError (the bundled Python 3.14), so a network error read as "the old file is gone". Here only
+    "not found" is False; any other error is raised (it cannot be told)."""
+    try:
+        os.lstat(path)
+        return True
+    except FileNotFoundError:
+        return False
 
 
 def size_text(size):
@@ -450,12 +464,31 @@ class SeriesBackfill:
         self.__dict__['_cleanup_cache'] = dict(counts)
         return counts
 
+    @staticmethod
+    def _answers(root):
+        """The library folder answers now (a drive that is asleep or offline does not)."""
+        try:
+            return os.path.isdir(root)
+        except OSError:
+            return False
+
+    def _drive_away(self, record, error=None):
+        """Senua's 0.31.3 review, M2: the book's library drive does not answer, so the book waits (Later) and nothing it may
+        do once is used up. An error of a folder on the way that is not there (AncestorUnavailable) says so; any other
+        error does when the library folder does not answer right after it."""
+        if isinstance(error, AncestorUnavailable):
+            return True
+        root = record.get('root') if isinstance(record, dict) else None
+        return bool(root) and not self._answers(root)
+
     def _finish_active(self, job_id, entry):
         """One begun write finished from its recorded state (both passes' first loop). A book of the clean-up is the row's
         book in hand while it runs (Judy 2); a library scan that holds it is the Waiting item's cause (Judy 3)."""
         retried = entry['record'].get('removal_retry') == REMOVAL_RETRY
         try:
             self._may_finish()  # R35: a begun write finishes without the Pause or conversion gate (_idle)
+            if self._drive_away(entry['record']):
+                raise Later(DRIVE_AWAY, self.clock() + 60)  # Senua M2: nothing is tried on a drive that does not answer
             if retried:
                 self.__dict__.update(_cleanup_hand=str((entry['record'].get('review') or {}).get('title') or ''), _cleanup_waiting=False)
                 self.__dict__.setdefault('_cleanup_started', int(time.time() * 1000))
@@ -740,6 +773,8 @@ class SeriesBackfill:
         self._retry_retained_removals()
         self._clear_leftover_temporaries()
         for row in self._rows('SELECT job_id FROM series_backfill WHERE state IN (%s)' % ','.join('?' * len(ACTIVE)), ACTIVE):
+            if self.stop.is_set():
+                return  # Senua M1: Quit and "Restart to update" stop the clean-up between two books
             entry = self.entry(row['job_id'])
             if entry['record'].get('next_attempt', 0) > self.clock():
                 continue
@@ -844,10 +879,16 @@ class SeriesBackfill:
         checks again, _last_checks) and the approved move follows (_follow_up). Any doubt holds it again with why, both
         files kept; it is not tried again by this version."""
         for row in self._rows('SELECT job_id FROM ' + self.LEDGER + " WHERE state='held'"):
+            if self.stop.is_set():
+                return  # Senua M1
             entry = self.entry(row['job_id'])
             if not self._removal_retained(entry) or entry['record'].get('removal_retry') == REMOVAL_RETRY:
                 continue
-            record = {key: value for key, value in entry['record'].items() if key not in ('approved_failed', 'next_attempt')}
+            if self._drive_away(entry['record']):
+                continue  # Senua M2: not sent back while its drive does not answer; the next pass looks again
+            # Senua M3: 0.31.2's 'removal_intended' is not carried. It said "the removal began", so a missing old file read as
+            # removed by the app; the resume sets it again right before the removal, and a missing old file is N7.
+            record = {key: value for key, value in entry['record'].items() if key not in ('approved_failed', 'next_attempt', 'removal_intended')}
             record['removal_retry'] = REMOVAL_RETRY
             self._set(row['job_id'], 'cataloged', '', record)
 
@@ -869,6 +910,8 @@ class SeriesBackfill:
         proof of _remove_leftover. Removed: what went is recorded ('temp_removed'); any doubt: it stays with why
         ('temp_kept'). The hold itself stays: the write did not happen, and the rules decide whether it is tried again."""
         for row in self._rows('SELECT job_id FROM ' + self.LEDGER + " WHERE state='held'"):
+            if self.stop.is_set():
+                return  # Senua M1
             entry = self.entry(row['job_id'])
             temp = self._leftover_temporary(entry)
             if temp is None or entry['record'].get('temp_retry') == REMOVAL_RETRY:
@@ -879,12 +922,16 @@ class SeriesBackfill:
                 return
             if self._other_writer(row['job_id']):
                 continue  # one writer per file: this book's other write goes first
+            if self._drive_away(entry['record']):
+                continue  # Senua M2: no mark (and no fresh try used) while the drive does not answer
             record = dict(entry['record'], temp_retry=REMOVAL_RETRY)
             try:
                 record['temp_removed'] = dict(self._remove_leftover(row['job_id'], entry, temp), at=_stamp())
             except InterruptedError:
                 return  # closing: nothing was removed, the next run starts again
             except Exception as error:
+                if self._drive_away(entry['record'], error):
+                    continue  # Senua M2: the drive went away during the proofs; nothing is marked, the next pass looks again
                 record['temp_kept'] = {'reason': (str(error) or type(error).__name__)[:300], 'at': _stamp()}
                 _log('Leftover temporary file kept: ' + record['temp_kept']['reason'] + ' (' + str(temp) + ')')
             # Judy 6: the outcome's own sentence is written in this one _set (never earlier: _leftover_temporary finds these
@@ -973,7 +1020,7 @@ class SeriesBackfill:
                 raise Held(TEMP_CHANGED_DURING)
             digest = handle.sha256()
             remove_owned(handle)
-        if os.path.lexists(temp):
+        if present(temp):  # Senua M3's pattern: an error is not "gone" (raised; the caller keeps it with why)
             raise Held(TEMP_STILL_THERE)
         self._forget_temporary(job_id, temp)
         title = ''
@@ -1420,6 +1467,10 @@ class SeriesBackfill:
             with critical_sections.critical(critical_sections.RENAME), self._boundary(record) as boundary:
                 self._resume_protected(job_id, record, state, temp, new, old, boundary)
         except (BoundaryError, OSError, Held, KeyError) as error:
+            if not isinstance(error, Held) and self._drive_away(record, error):
+                # Senua's 0.31.3 review, M2: the drive went away during the step. Not a hold (one would end a retry for good):
+                # the book keeps its recorded state and the step runs again once the drive answers.
+                raise Later(DRIVE_AWAY, self.clock() + 60) from None
             # Judy's spec 5.3: a reason of section 5 (Held) is stored as it is, without the engine's prefix; any other error
             # keeps RECOVERY_HOLD (so a removal refused again still reads as _removal_retained expects).
             reason = str(error) if isinstance(error, Held) else RECOVERY_HOLD + str(error)
@@ -1504,7 +1555,7 @@ class SeriesBackfill:
                         return
                     withdrawn = True  # its own copy goes once this handle is closed (_withdraw)
             if not withdrawn:
-                if old.exists():
+                if self._seen(old):
                     self._names_rewritten(job_id, record)
                     with self._protected(old, record, 'old', delete=True) as former:
                         if record['old_identity'] == record['new_identity']:
@@ -1513,7 +1564,7 @@ class SeriesBackfill:
                         record['removal_intended'] = True
                         self._set(job_id, 'cataloged', '', record)
                         former.dispose(remote_legacy=lambda handle: self._last_checks(handle, record, 'old', boundary, kept, new))
-                    if old.exists():
+                    if self._seen(old):
                         raise Held(OLD_STILL_THERE)  # N6
                 elif not record.get('removal_intended'):
                     raise Held(OLD_MISSING)  # N7
@@ -1521,6 +1572,14 @@ class SeriesBackfill:
                 self._set(job_id, 'done', '', record)
         if withdrawn:
             self._withdraw(job_id, record, new, temp, boundary)
+
+    def _seen(self, path):
+        """present(path) for the old file's step. Senua's 0.31.3 review, M3: when it cannot be told (a network error), the step
+        waits (Later) and runs again; it never reads as "gone", so an old file is recorded removed only when it is."""
+        try:
+            return present(path)
+        except OSError as error:
+            raise Later(DRIVE_AWAY + ' (' + (str(error) or type(error).__name__)[:200] + ')', self.clock() + 60) from None
 
     def _withdraw(self, job_id, record, new, temp, boundary):
         """0.31.0 ruling R33 (Senua's 0.31.0 delta review, M5): a move of the book began before the write's catalog step (a
@@ -1532,7 +1591,7 @@ class SeriesBackfill:
             with self._protected(new, record, 'new', delete=True) as handle:
                 boundary.revalidate()
                 handle.dispose(remote_legacy=lambda held: self._last_checks(held, record, 'new', boundary))
-            if os.path.lexists(new):
+            if present(new):  # Senua M3's pattern: an error is not "gone" (OSError: kept, said with N9)
                 raise Held('The new file is still there after removal')
             self._forget_temporary(job_id, temp)
         except (BoundaryError, OSError, Held, KeyError) as error:
@@ -1717,15 +1776,20 @@ class SeriesBackfill:
             self._dispose_temporary(temp)  # our own unproven file from an interrupted pass
 
     def _discard_temp(self, job_id, record):
+        """The write's own unproven temporary file goes (a failed or stopped write). Senua's 0.31.3 review, M4: a refusal was
+        swallowed here, which is how 0.31.2 left two temporary files on the NAS with no word anywhere. Now it is logged, and
+        recorded in the record the caller stores next ('temp_left': path, why, when), with its ownership row kept."""
         temp = record.get('temp')
         if not temp:
             return
         try:
-            if Path(temp).exists():
+            if present(Path(temp)):
                 self._dispose_temporary(Path(temp))
             self._forget_temporary(job_id, Path(temp))
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as error:
+            reason = (str(error) or type(error).__name__)[:300]
+            record['temp_left'] = {'path': str(temp), 'reason': reason, 'at': _stamp()}
+            _log('Temporary file kept: ' + reason + ' (' + str(temp) + ')')
 
     @staticmethod
     def _dispose_temporary(temp):
@@ -1736,7 +1800,7 @@ class SeriesBackfill:
             raise BoundaryError('Not a series-update temporary file; kept')
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
             remove_owned(handle)
-        if os.path.lexists(temp):
+        if present(temp):  # Senua M3's pattern: a network error raises; it is never read as removed
             raise BoundaryError(TEMP_STILL_THERE)  # N8
 
     def _forget_temporary(self, job_id, temp):

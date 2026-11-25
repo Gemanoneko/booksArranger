@@ -432,6 +432,8 @@ class NameWrite(SeriesBackfill):
         self._retry_retained_removals()  # 0.31.3: the holds 0.31.2 left on the NAS (series_backfill.REMOVAL_RETRY)
         self._clear_leftover_temporaries()  # 0.31.3, Sergei 2026-11-25: the temporary files 0.31.2 left there
         for row in self._rows('SELECT job_id FROM name_writes WHERE state IN (%s)' % ','.join('?' * len(ACTIVE)), ACTIVE):
+            if self.stop.is_set():
+                return  # Senua's 0.31.3 review, M1: Quit and "Restart to update" stop the clean-up between two books
             entry = self.entry(row['job_id'])
             if entry['record'].get('next_attempt', 0) > self.clock():
                 continue
@@ -571,6 +573,11 @@ class NameWrite(SeriesBackfill):
             raise
         except Exception as error:
             self._discard_temp(job_id, record)
+            if self._drive_away(dict(record, root=record.get('root') or str(root)), error):
+                # Senua's 0.31.3 review, M2: the drive went away during the write. No try is used (ruling 4's one fresh try
+                # included): the write waits, as it waits when the drive is away before it starts (_pass, DRIVE_AWAY).
+                self._set(job_id, 'pending', '', record)
+                raise Later(DRIVE_AWAY, self.clock() + 60) from None
             self._set(job_id, 'held', self._failed(record, NAMES_FAILED + (str(error) or type(error).__name__)), record)
             return
         finally:
@@ -638,7 +645,7 @@ class NameWrite(SeriesBackfill):
             raise BoundaryError('Not a name-write temporary file; kept')
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
             series_backfill.remove_owned(handle)  # 0.31.3: on the NAS too (series_backfill.RECOVERY_HOLD's note)
-        if os.path.lexists(temp):
+        if series_backfill.present(temp):  # Senua M3's pattern: a network error raises; it is never read as removed
             raise BoundaryError(series_backfill.TEMP_STILL_THERE)  # N8
 
 

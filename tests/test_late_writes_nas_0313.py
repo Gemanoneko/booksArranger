@@ -812,6 +812,213 @@ class CleanupViewTests(unittest.TestCase):
         self.assertEqual((end['removed'], end['kept'], end['freed_bytes']), (1, 0, old_size), 'the end, fixed when the last book settled')
 
 
+class ReviewMajorTests(unittest.TestCase):
+    """Senua's 0.31.3 review at db4b366 (Docs/BooksArranger_CodeReview_v0.31.3_2026-11-25.md), M1-M4; Sergei 2026-11-25: fix all
+    four in 0.31.3. Her probes P1-P3 are the first three repros. Each case failed on db4b366."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=base.AREA)
+        self.addCleanup(self.temp.cleanup)
+        self.lib = Library(Path(self.temp.name))
+
+    def hold(self):
+        """The live state: 0.31.2's hold, both files on the (simulated) NAS."""
+        lib = self.lib
+        backfill = lib.backfill()
+        with nas_library(lib.root), as_0312():
+            backfill.run_pass()
+        self.assertEqual(lib.state(backfill), ('held', series_backfill.RECOVERY_HOLD + retained_text(lib.path)))
+        return backfill
+
+    def later(self, lib):
+        """A pass an hour on: whatever waited for a minute is due."""
+        backfill = lib.backfill()
+        backfill.clock = lambda: __import__('time').time() + 3600
+        return backfill
+
+    # M1: the clean-up stops for Quit and for "Restart to update" between two books (P3).
+    def test_m1_a_stop_before_the_pass_touches_no_book(self):
+        lib = self.lib
+        before = self.hold().entry(lib.job_id)
+        backfill = lib.backfill()
+        backfill.stop.set()
+        with nas_library(lib.root):
+            backfill.run_pass()
+        self.assertEqual(backfill.entry(lib.job_id), before, 'not sent back, not removed')
+        self.assertTrue(lib.path.exists() and lib.target.exists())
+        with nas_library(lib.root):
+            lib.backfill().run_pass()
+        self.assertEqual(lib.state(backfill), ('done', ''), 'control: without stop the clean-up runs')
+
+    def test_m1_the_series_loop_stops_between_books(self):
+        lib = self.lib
+        self.hold()
+        with connect(lib.db) as db:
+            db.execute("INSERT INTO series_backfill VALUES('another','cataloged','',?,'now')", (json.dumps({'removal_retry': series_backfill.REMOVAL_RETRY}),))
+        backfill, seen = lib.backfill(), []
+
+        def finish(self, job_id, entry):
+            seen.append(job_id)
+            self.stop.set()  # Quit pressed while this book runs
+        with mock.patch.object(series_backfill.SeriesBackfill, '_finish_active', finish):
+            backfill.run_pass()
+        self.assertEqual(len(seen), 1, 'the next book is not started')
+
+    def test_m1_the_names_loop_stops_between_books(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        with connect(book.lib.db) as db:
+            for job in ('one', 'two'):
+                db.execute("INSERT INTO name_writes VALUES(?,'cataloged','',?,'now')", (job, json.dumps({'removal_retry': series_backfill.REMOVAL_RETRY})))
+        seen = []
+
+        def finish(self, job_id, entry):
+            seen.append(job_id)
+            self.stop.set()
+        with mock.patch.object(series_backfill.SeriesBackfill, '_finish_active', finish):
+            book.writer.run_pass()
+        self.assertEqual(len(seen), 1)
+
+    # M2: a drive that does not answer waits; it never uses up the one-time retry (P2).
+    def test_m2_a_drive_away_at_the_start_sends_back_nothing_and_the_retry_runs_when_it_answers(self):
+        lib = self.lib
+        before = self.hold().entry(lib.job_id)
+        with nas_library(lib.root), mock.patch.object(series_backfill.SeriesBackfill, '_answers', staticmethod(lambda root: False), create=True):
+            lib.backfill().run_pass()
+        self.assertEqual(lib.backfill().entry(lib.job_id), before, 'still the 0.31.2 hold: not sent back while the drive is away')
+        with nas_library(lib.root):
+            lib.backfill().run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('done', ''))
+        self.assertFalse(lib.path.exists())
+
+    def test_m2_a_drive_lost_during_a_book_waits_instead_of_holding(self):
+        lib = self.lib
+        self.hold()
+
+        def away(self):
+            raise native_io.AncestorUnavailable('An inspected destination ancestor is unavailable')
+        with nas_library(lib.root), mock.patch.object(native_io.DirectoryBoundary, '__enter__', away):
+            lib.backfill().run_pass()
+        entry = lib.backfill().entry(lib.job_id)
+        self.assertEqual((entry['state'], entry['record'].get('removal_retry')), ('cataloged', series_backfill.REMOVAL_RETRY), 'waits at its last step, not held')
+        self.assertTrue(lib.path.exists() and lib.target.exists())
+        self.assertEqual(lib.backfill()._cleanup_counts()['kept'], 0)
+        with nas_library(lib.root):
+            self.later(lib).run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('done', ''), 'finished once the drive is back')
+        self.assertFalse(lib.path.exists())
+
+    def test_m2_card_and_hobb_keep_their_fresh_try_through_a_drive_drop(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = LeftoverTemporaryTests.leave(self, book)
+        before = book.writer.entry(book.lib.job_id)
+
+        def away(self):
+            raise native_io.AncestorUnavailable('An inspected destination ancestor is unavailable')
+        with nas_library(book.lib.root), mock.patch.object(native_io.DirectoryBoundary, '__enter__', away):
+            book.writer.run_pass()
+        self.assertEqual(book.writer.entry(book.lib.job_id), before, 'no mark, no try used: it waits for the drive')
+        self.assertTrue(temp.exists())
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertFalse(temp.exists())
+        self.assertEqual(book.state(), ('done', ''), 'the leftover goes and the fresh try runs once the drive answers')
+
+    def test_m2_a_drive_drop_during_the_fresh_try_does_not_use_it_up(self):
+        from test_name_write_031 import Book, ENGLISH
+        book = Book(self)
+        temp = LeftoverTemporaryTests.leave(self, book)
+
+        def away(*args, **kwargs):
+            raise native_io.AncestorUnavailable('An inspected destination ancestor is unavailable')
+        with nas_library(book.lib.root), mock.patch.object(NameWrite, '_write', away):
+            book.writer.run_pass()
+        self.assertFalse(temp.exists(), 'the leftover went')
+        entry = book.writer.entry(book.lib.job_id)
+        self.assertIn(entry['state'], ('pending', 'deferred'), 'the fresh try waits for the drive; it is not used up')
+        self.assertEqual(sha(book.path), book.original)
+        book.writer.clock = lambda: __import__('time').time() + 3600
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertEqual(book.state(), ('done', ''))
+        self.assertEqual(book.manifest()['metadata']['title'], ENGLISH)
+
+    # M3: an old file that cannot be proven gone is never recorded as removed (P1).
+    def test_m3_an_old_file_already_missing_is_held_n7_and_not_counted_removed(self):
+        lib = self.lib
+        self.hold()
+        lib.path.unlink()  # removed by hand after 0.31.2
+        with nas_library(lib.root):
+            lib.backfill().run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('held', series_backfill.OLD_MISSING))
+        counts = lib.backfill()._cleanup_counts()
+        self.assertEqual((counts['removed'], counts['kept'], counts['freed']), (0, 1, 0))
+
+    def test_m3_an_old_file_that_cannot_be_seen_is_never_recorded_removed(self):
+        import os as real_os
+        lib = self.lib
+        self.hold()
+        old = os.path.normcase(str(lib.path))
+        real_exists, real_lstat = Path.exists, real_os.lstat
+
+        def exists(path, *args, **kwargs):  # the bundled Python 3.14 answers False on any OSError (a network error)
+            return False if os.path.normcase(str(path)) == old else real_exists(path, *args, **kwargs)
+
+        def lstat(path, *args, **kwargs):
+            if os.path.normcase(str(path)) == old:
+                raise OSError(64, 'The specified network name is no longer available')
+            return real_lstat(path, *args, **kwargs)
+        with nas_library(lib.root), mock.patch.object(Path, 'exists', exists), mock.patch.object(real_os, 'lstat', lstat):
+            lib.backfill().run_pass()
+        entry = lib.backfill().entry(lib.job_id)
+        self.assertNotEqual(entry['state'], 'done', 'not recorded as removed')
+        self.assertTrue(lib.path.exists(), 'the old file is still there')
+        self.assertEqual(lib.backfill()._cleanup_counts()['removed'], 0)
+        with nas_library(lib.root):
+            self.later(lib).run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('done', ''), 'removed once it can be seen again')
+        self.assertFalse(lib.path.exists())
+
+    def test_m3_a_removal_is_never_confirmed_by_a_network_error(self):
+        """M3's pattern in the removals' own last check (os.path.lexists answers False on any OSError): a file that is still
+        there and cannot be seen is never taken as removed."""
+        import os as real_os
+        real_lstat, real_lexists = real_os.lstat, real_os.path.lexists
+        for owner, prefix in ((series_backfill.SeriesBackfill, series_backfill.TEMP_PREFIX), (NameWrite, name_write.TEMP_PREFIX)):
+            temp = self.lib.path.parent / (prefix + self.lib.job_id + '.m4b')
+            temp.write_bytes(b'unproven')
+            key = os.path.normcase(str(temp))
+
+            def lstat(path, *args, **kwargs):
+                if os.path.normcase(str(path)) == key:
+                    raise OSError(64, 'The specified network name is no longer available')
+                return real_lstat(path, *args, **kwargs)
+
+            def lexists(path):  # as Python answers on a network error: False
+                return False if os.path.normcase(str(path)) == key else real_lexists(path)
+            with mock.patch.object(VerifiedFile, 'dispose', lambda handle, **kwargs: None), mock.patch.object(real_os, 'lstat', lstat), \
+                    mock.patch.object(real_os.path, 'lexists', lexists):
+                with self.assertRaises(OSError, msg=owner.__name__):
+                    owner._dispose_temporary(temp)
+            self.assertTrue(temp.exists(), 'still there, and not reported removed')
+            temp.unlink()
+
+    # M4: a refused removal of a write's own temporary file is logged and recorded, never swallowed.
+    def test_m4_a_refused_temporary_removal_is_logged_and_recorded(self):
+        lib = self.lib
+        backfill = lib.backfill()
+        with nas_library(lib.root), as_0312(), mock.patch.object(series_backfill, '_log') as log, \
+                mock.patch.object(series_backfill.SeriesBackfill, '_read_back', side_effect=series_backfill.Held('Series tags did not read back: album')):
+            backfill.run_pass()
+        temp = lib.path.parent / (series_backfill.TEMP_PREFIX + lib.job_id + '.m4b')
+        self.assertTrue(temp.exists(), 'refused on the NAS as 0.31.2 refused it')
+        left = backfill.entry(lib.job_id)['record'].get('temp_left') or {}
+        self.assertEqual(left.get('path'), str(temp), 'recorded with the hold')
+        self.assertEqual(left.get('reason'), retained_text(temp))
+        self.assertTrue(any(str(temp) in call.args[0] and retained_text(temp) in call.args[0] for call in log.call_args_list), 'one log line with why and where')
+
+
 class KeptOldFileKeyTests(unittest.TestCase):
     """Judy's spec 4: a book of the clean-up whose old file a check kept is listed in "Could not be renamed or moved" under
     old_file_kept, whatever refusal or try put it there; any other book keeps its key."""
