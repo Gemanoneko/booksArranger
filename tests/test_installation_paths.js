@@ -44,6 +44,10 @@ try{
  assert.equal(inherited.BOOKS_STORAGE_RELOCATION_MANIFEST,'untrusted','parent input is not mutated');
  const selection={manifest:'explicit-descriptor',sha256:'a'.repeat(64)};
  assert.deepEqual(kit.childEnvironment(inherited,selection),{KEEP:'yes',BOOKS_STORAGE_RELOCATION_MANIFEST:selection.manifest,BOOKS_STORAGE_RELOCATION_SHA256:selection.sha256});
+ // 0.31.3, Sergei's ruling 11 (Futaba's R-m1): the engine writes its clean-up log into the installation's own Logs folder,
+ // named only by the shell; an inherited value never reaches the engine.
+ assert.deepEqual(kit.childEnvironment({KEEP:'yes',BOOKS_ARRANGER_LOGS_DIR:'untrusted'},null),{KEEP:'yes'},'an inherited logs folder is dropped');
+ assert.deepEqual(kit.childEnvironment({KEEP:'yes',BOOKS_ARRANGER_LOGS_DIR:'untrusted'},null,null,logs),{KEEP:'yes',BOOKS_ARRANGER_LOGS_DIR:logs},'the installation logs folder is passed');
  fs.writeFileSync(file,JSON.stringify({...input,profile_dir:path.join(root,'missing')}));
  assert.throws(()=>kit.load({executable:exe}),/No alternate storage/);
  fs.writeFileSync(file,JSON.stringify({...input,temp_dir:profile}));assert.throws(()=>kit.load({executable:exe}),/overlap/);

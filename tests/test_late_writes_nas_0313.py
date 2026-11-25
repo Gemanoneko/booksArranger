@@ -1573,6 +1573,77 @@ class ReReviewTests(HeldBook, unittest.TestCase):
                 self.assertTrue(temp.exists())
 
 
+class CleanupLogFileTests(HeldBook, unittest.TestCase):
+    """0.31.3, Sergei's ruling 11 (Futaba's R-m1): the clean-up's log lines (series_backfill._log: a kept old file with its
+    book's title, a removed or kept leftover, a kept temporary file) are kept on disk in the installation's own Logs folder,
+    which the shell names (BOOKS_ARRANGER_LOGS_DIR, desktop/installation-paths.js childEnvironment). They went to stderr only,
+    which the shell keeps as its last 16 KB in memory, so ruling 8's "count + log only" named the books in no log Sergei
+    could open. Each case failed before the log file existed."""
+    ENV = 'BOOKS_ARRANGER_LOGS_DIR'  # the shell's name for it; a contract across the two languages
+
+    def logs(self):
+        folder = Path(self.temp.name) / 'Logs'
+        folder.mkdir()
+        return folder
+
+    @staticmethod
+    def lines(folder, name='books-backend.log'):
+        path = folder / name
+        return path.read_text(encoding='utf-8').splitlines() if path.exists() else []
+
+    def test_a_kept_books_line_with_its_title_is_in_the_log_file(self):
+        lib = self.lib
+        self.hold()
+        lib.path.unlink()  # N7: the retried book is held again, and its line names it
+        folder = self.logs()
+        with mock.patch.dict(os.environ, {self.ENV: str(folder)}), nas_library(lib.root):
+            lib.backfill().run_pass()
+        self.assertEqual(lib.state(lib.backfill()), ('held', series_backfill.OLD_MISSING))
+        lines = self.lines(folder)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], r'^Books Arranger \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: Old file kept: ', 'the same line as stderr, with its time')
+        self.assertTrue(lines[0].endswith(base.TITLE + ': ' + series_backfill.OLD_MISSING + ' (' + str(lib.path) + ')'), lines[0])
+
+    def test_one_entry_is_one_line_in_utf8(self):
+        folder = self.logs()
+        with mock.patch.dict(os.environ, {self.ENV: str(folder)}):
+            series_backfill._log('Old file kept: Сага теней: first\nsecond')
+            series_backfill._log('Removed a leftover temporary file of an unfinished update')
+        lines = self.lines(folder)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].endswith('Old file kept: Сага теней: first second'), lines[0])
+
+    def test_the_file_is_bounded_and_keeps_the_previous_one(self):
+        folder = self.logs()
+        with mock.patch.dict(os.environ, {self.ENV: str(folder)}), mock.patch.object(series_backfill, 'LOG_LIMIT', 400, create=True):
+            for number in range(20):
+                series_backfill._log('line %02d ' % number + 'x' * 60)
+        current, previous = self.lines(folder), self.lines(folder, 'books-backend-1.log')
+        self.assertTrue(current and previous, (current, previous))
+        for name in ('books-backend.log', 'books-backend-1.log'):
+            self.assertLessEqual((folder / name).stat().st_size, 400, name)
+        self.assertIn('line 19 ', current[-1], 'the newest line is kept')
+        numbers = [int(line.split('line ')[1][:2]) for line in previous + current]
+        self.assertEqual(numbers, list(range(numbers[0], 20)), 'in order; the oldest lines go first')
+        self.assertEqual(sorted(item.name for item in folder.iterdir()), ['books-backend-1.log', 'books-backend.log'], 'two files, never more')
+
+    def test_its_names_are_ones_the_logs_folder_admits_as_the_apps_own(self):
+        import storage_lifecycle
+        self.assertEqual((series_backfill.LOG_FILE, series_backfill.LOG_PREVIOUS), ('books-backend.log', 'books-backend-1.log'))
+        for name in (series_backfill.LOG_FILE, series_backfill.LOG_PREVIOUS):
+            self.assertTrue(storage_lifecycle._runtime_name('created-logs-v1', name), 'uninstall and relocation know it as the app\'s: ' + name)
+
+    def test_guard_no_folder_is_created_and_a_failed_write_never_stops_the_caller(self):
+        missing = Path(self.temp.name) / 'Logs'
+        with mock.patch.dict(os.environ, {self.ENV: str(missing)}):
+            series_backfill._log('a line')
+        self.assertFalse(missing.exists(), 'a folder that is not there is not made: stderr only')
+        folder = self.logs()
+        (folder / 'books-backend.log').mkdir()  # the file cannot be written
+        with mock.patch.dict(os.environ, {self.ENV: str(folder)}):
+            series_backfill._log('a line')  # no error reaches the clean-up
+
+
 def _series_lane():
     from test_rule_filing_031 import SeriesWriteThenMoveTests as lane
     return lane

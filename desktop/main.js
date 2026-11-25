@@ -190,7 +190,7 @@ function configuration() {
   if(storageRelocation&&(!storageRelocation.manifest||!path.isAbsolute(storageRelocation.manifest)||!/^[a-f0-9]{64}$/.test(storageRelocation.sha256||'')||Object.keys(storageRelocation).sort().join(',')!=='manifest,sha256'))throw Error('Selected storage relocation needs its exact descriptor and SHA-256.');
   let catalogMode=installation?.catalog_mode || settings.catalogMode || (option(argv,'catalog-mode') || 'existing');
   if(installation&&catalogMode==='new'&&settings.catalogMode==='existing'&&typeof settings.dataDir==='string'&&path.resolve(settings.dataDir).toLowerCase()===dataDir.toLowerCase())catalogMode='existing';
-  return { dataDir, requiresSetup, catalogMode, storageRelocation, workTemp:installation?.temp_dir||null, port, rootsJson, audiobookSources, audiobookOutputRoot, python, backendDir, ffmpegDir };
+  return { dataDir, requiresSetup, catalogMode, storageRelocation, workTemp:installation?.temp_dir||null, logsDir:installation?.logs_dir||null, port, rootsJson, audiobookSources, audiobookOutputRoot, python, backendDir, ffmpegDir };
 }
 
 // Dev runs never touch the real libraries unless --roots-json says so.
@@ -223,7 +223,7 @@ function startBackend(config) {
   state.baseUrl = `http://127.0.0.1:${config.port}`;
   // The detached native host retains the engine's Job and process HANDLE.
   // Shell-pipe loss requests checkpoint shutdown; HTTP failures never kill it.
-  const child = spawn(config.python, args, { cwd: config.backendDir, env:installationKit.childEnvironment(env,config.storageRelocation,config.workTemp), windowsHide: true, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(config.python, args, { cwd: config.backendDir, env:installationKit.childEnvironment(env,config.storageRelocation,config.workTemp,config.logsDir), windowsHide: true, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdout.on('data', (chunk) => {
     remember(chunk);
     state.hostOutput += chunk.toString('utf8');

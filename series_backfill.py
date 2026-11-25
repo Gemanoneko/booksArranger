@@ -28,6 +28,7 @@ import sqlite3
 import json
 import os
 import re
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -232,12 +233,53 @@ def _stamp():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
+# 0.31.3, Sergei's ruling 11 (Futaba's R-m1): the engine log lines below (_log: a kept old file with its book's title, a removed
+# or kept leftover, a kept temporary file) are also kept on disk. They went to stderr only, which the shell keeps as its last
+# 16 KB in memory, so ruling 8's "count + log only" named the kept books in no log he could open afterwards. The file is in the
+# installation's own Logs folder, which only the shell names (LOG_DIR_ENV: desktop/installation-paths.js childEnvironment, from
+# the installation's logs_dir), under names that folder admits as the app's own (storage_lifecycle, created-logs-v1), so
+# uninstall and relocation treat them as such. Same line as stderr, UTF-8, one entry per line. Bounded: when the next line would
+# take the file past LOG_LIMIT, it is copied over LOG_PREVIOUS and started again (2 files, at most 2 x LOG_LIMIT; nothing is
+# deleted or renamed). No folder is ever made: none named, or one that is not there (development and test runs), is stderr only.
+LOG_DIR_ENV = 'BOOKS_ARRANGER_LOGS_DIR'
+LOG_FILE, LOG_PREVIOUS = 'books-backend.log', 'books-backend-1.log'
+LOG_LIMIT = 1024 * 1024
+_LOG_LOCK = threading.Lock()
+
+
 def _log(line):
-    """A normal-level line in the engine's own log, with the time (as MergeService._removal_log): never sent to the page."""
+    """A normal-level line in the engine's own log, with the time (as MergeService._removal_log): never sent to the page.
+    Ruling 11: also kept in the installation's log file (_keep)."""
     import sys
+    text = 'Books Arranger ' + time.strftime('%Y-%m-%d %H:%M:%S') + ': ' + line
     try:
-        print('Books Arranger ' + time.strftime('%Y-%m-%d %H:%M:%S') + ': ' + line, file=sys.stderr, flush=True)
+        print(text, file=sys.stderr, flush=True)
     except Exception:
+        pass
+    _keep(text)
+
+
+def _keep(text):
+    """Ruling 11: append this line to LOG_FILE in the folder the shell named (see LOG_DIR_ENV). A write that fails never stops
+    the clean-up: the line is in stderr as before."""
+    folder = os.environ.get(LOG_DIR_ENV)
+    if not folder or not os.path.isabs(folder) or not os.path.isdir(folder):
+        return
+    data = (' '.join(text.splitlines()) + '\n').encode('utf-8')
+    current, previous = os.path.join(folder, LOG_FILE), os.path.join(folder, LOG_PREVIOUS)
+    try:
+        with _LOG_LOCK:  # both passes log, each from its own thread
+            try:
+                size = os.path.getsize(current)
+            except FileNotFoundError:
+                size = 0
+            if size and size + len(data) > LOG_LIMIT:
+                with open(current, 'rb') as source, open(previous, 'wb') as target:
+                    shutil.copyfileobj(source, target)
+                open(current, 'wb').close()  # started again
+            with open(current, 'ab') as stream:
+                stream.write(data)
+    except OSError:
         pass
 
 

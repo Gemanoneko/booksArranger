@@ -4,7 +4,7 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const SCHEMA='books-arranger-installation-v1';
 const PORTABLE_SCHEMA='books-arranger-installation-v2';
-const ENV_KEYS=['BOOKS_STORAGE_RELOCATION_MANIFEST','BOOKS_STORAGE_RELOCATION_SHA256','BOOKS_WORK_TEMP'];
+const ENV_KEYS=['BOOKS_STORAGE_RELOCATION_MANIFEST','BOOKS_STORAGE_RELOCATION_SHA256','BOOKS_WORK_TEMP','BOOKS_ARRANGER_LOGS_DIR'];
 function inside(child,parent){const r=path.relative(parent,child);return r===''||!r.startsWith('..'+path.sep)&&r!=='..'&&!path.isAbsolute(r);}
 function ordinary(file,{directory=false,bounded=16384}={}){
  const absolute=path.resolve(file);let current=absolute;
@@ -172,10 +172,12 @@ function profileSettings(value,installation){
  }
  return result;
 }
-function childEnvironment(base,selection,workTemp=null){
+function childEnvironment(base,selection,workTemp=null,logsDir=null){
  const result={...base};for(const key of ENV_KEYS)delete result[key];
  if(selection){result[ENV_KEYS[0]]=selection.manifest;result[ENV_KEYS[1]]=selection.sha256;}
  if(workTemp){result.BOOKS_WORK_TEMP=workTemp;result.TEMP=result.TMP=workTemp;}
+ // 0.31.3, Sergei's ruling 11: the engine's clean-up log file goes into the installation's own Logs folder (series_backfill._log).
+ if(logsDir)result.BOOKS_ARRANGER_LOGS_DIR=logsDir;
  return result;
 }
 function configureUpdater(updater,installation){
