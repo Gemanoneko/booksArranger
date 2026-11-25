@@ -93,6 +93,34 @@ assert.equal(run("couldNotReason({key:'not_app_name'})"),"Its file name is not o
 const entry=run("couldNotEntry({key:'old_file_kept',title:'Written in Bone',author:'Beckett Simon',from:'Z:\\\\A\\\\b.m4b',from_shown:'A\\\\b.m4b',job_id:'j',book_id:'b'})");
 const texts=[];const walk=element=>{if(element.textContent)texts.push(element.textContent);for(const child of element.children || [])walk(child);};walk(entry);
 assert.ok(texts.includes('The old file was not removed.'),texts.join(' | '));
-console.log('PASS 0.31.3 late-write clean-up: the row, its kept count and tooltip, the time estimate, the Waiting item, the two end parts and their hour, the could-not lines');
+
+// 6. Futaba's QA m3 (Judy's ruling): a row at 0 of N draws an empty determinate bar, never the sliding one. The bar double
+// here behaves as Chromium's <progress>: value reads 0 while there is no value attribute; writing value sets the attribute.
+const createElement=document.createElement;
+document.createElement=tag=>{
+  const element=createElement(tag);if(tag!=='progress')return element;
+  const attrs=element.attrs;delete element.value;
+  Object.defineProperty(element,'value',{get(){return Object.hasOwn(attrs,'value')?Number(attrs.value):0;},set(value){attrs.value=String(value);},configurable:true});
+  element.hasAttribute=key=>Object.hasOwn(attrs,key);element.removeAttribute=key=>{delete attrs[key];};element.setAttribute=(key,value)=>{attrs[key]=String(value);};
+  return element;
+};
+page({rows:[]});
+const zero=parts(page({rows:[late({done:0})]})[0]).bar;
+assert.equal(zero.hasAttribute('value'),true,'0 of 115: the value attribute is there, so :indeterminate is false');
+assert.equal(zero.value,0,'an empty bar');
+assert.equal(parts(page({rows:[late({done:5})]})[0]).bar.value,Math.floor(5/115*100),'then it fills as before');
+page({rows:[]});
+assert.equal(parts(page({rows:[late({done:0,total:0})]})[0]).bar.hasAttribute('value'),false,'control: a row with no measurable total still slides');
+page({rows:[]});
+assert.equal(parts(page({rows:[{id:'series',kind:'series',subject:'Dune',step:'updating',done:0,total:9,unit:'books',state:'running',started:NOW-60000,background:false}]})[0]).bar.hasAttribute('value'),
+             true,'every row with a measurable total at 0, intended (Judy)');
+document.createElement=createElement;
+// Futaba's QA m7 (Judy's ruling): the narrow layout's rule as specced. What it gives (no sideways scroll at any width down to
+// 320 CSS px; book and step lines cut with an ellipsis; count and time never cut) needs a layout engine: measured headlessly
+// for this change, and Futaba's checks 13 and 14 read it in the app.
+const styleSheet=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');
+assert.match(styleSheet,/@container\(max-width:560px\)\{\.activity-line,\.activity-first\{flex-direction:column;align-items:stretch;height:auto;gap:0\}\.activity-detail,\.activity-time\{white-space:normal;overflow-wrap:anywhere\}\}/);
+assert.doesNotMatch(styleSheet,/#jobs-rows\{[^}]*overflow-x:hidden/,'never hidden: that would hide a regression, not fix it');
+console.log('PASS 0.31.3 late-write clean-up: the row, its kept count and tooltip, the time estimate, the Waiting item, the two end parts and their hour, the could-not lines, the empty bar at 0, the narrow layout rule');
 `;
 const Module=require('node:module');const m=new Module(path.join(__dirname,'test_late_cleanup_frontend.js'),module);m.filename=path.join(__dirname,'test_late_cleanup_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

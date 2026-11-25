@@ -2077,7 +2077,9 @@ function updateActivity(view,now){
   view.step.title=row.kind==='chapter_check' && typeof row.step_text==='string' && row.step_text?row.step_text:repairTip(row) || lookupTip(row) || stepShown;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',false);
   const fraction=typeof row.fraction==='number' && row.fraction>=0 && row.fraction<=1?row.fraction:row.done/row.total;
-  if(determinate){const value=approveFiles && row.done===row.total?100:Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}
+  // 0.31.3 (Futaba's QA m3, Judy's ruling): a new <progress> reads 0 with no value attribute, so a row at 0 of N never got
+  // one and showed the sliding (indeterminate) bar; the value is written when the attribute is missing too: an empty bar.
+  if(determinate){const value=approveFiles && row.done===row.total?100:Math.min(99,Math.floor(fraction*100));if(view.bar.hasAttribute?.('value')===false || view.bar.value!==value)view.bar.value=value;}
   else if(view.bar.hasAttribute?.('value')!==false)view.bar.removeAttribute('value');
   view.bar.setAttribute('aria-label',label+(subject?': '+subject:''));view.bar.setAttribute('aria-valuetext',[step,detail].filter(Boolean).join(', '));
   // Elapsed counts from the job's start (the engine's, or the first poll that saw it); it freezes while paused.
