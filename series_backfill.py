@@ -166,6 +166,10 @@ TEMP_BOOK_CHANGED = "The book's file changed since the app checked it; the tempo
 TEMP_AUDIO_DIFFERS = "The temporary file's audio differs from the book's; it was left in place."
 TEMP_WRITTEN_AFTER = 'The temporary file changed after the app last handled it; it was left in place.'
 TEMP_CHANGED_DURING = 'The temporary file changed while the app checked it; it was left in place.'
+# Judy's spec, section 6, "A series write's leftover temporary file" (Senua m6): the series hold once its leftover was
+# handled. The engine's own opening stays, the false tail ("The file was kept.") goes; with the file kept, where it is.
+SERIES_UNCHANGED = 'Series update failed; the audiobook is unchanged.'
+TEMP_STILL_LEFT = ' A temporary file is still there: '
 SCAN_WAIT = 'A library scan is running'  # _idle's and _may_finish's wait; the clean-up's Waiting item (Judy 3) reads it
 # Senua's 0.31.3 review, M2: the library drive does not answer (asleep, offline, a network error). Nothing is tried and no
 # one-time mark is used; the book waits as a write of names already waited (name_write.DRIVE_AWAY, the same words).
@@ -1002,9 +1006,13 @@ class SeriesBackfill:
             self._set(row['job_id'], state, reason, record)
 
     def _leftover_outcome(self, entry, record, temp):
-        """(state, reason) once a leftover temporary file was handled (record 'temp_removed' or 'temp_kept'). The series
-        write keeps its hold as it was (no such book exists; nothing was specced for one)."""
-        return 'held', entry['reason']
+        """(state, reason) once a leftover temporary file was handled (record 'temp_removed' or 'temp_kept'), written in that
+        same _set (Judy's spec 6 and 7.8; Senua m6). A series write stays held (Sergei's ruling 4 gave a fresh try to the two
+        writes of names only): its hold keeps the engine's opening and drops the false "The file was kept."; with the file
+        kept, it says where. Its could-not line stays the generic one (NameWrite overrides all of this)."""
+        if record.get('temp_kept'):
+            return 'held', SERIES_UNCHANGED + TEMP_STILL_LEFT + str(temp)
+        return 'held', SERIES_UNCHANGED
 
     def _other_writer(self, job_id):
         """The other kind of write of this book is open or approved (one writer per file)."""

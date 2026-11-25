@@ -511,7 +511,8 @@ class LeftoverTemporaryTests(unittest.TestCase):
         self.assertEqual(book.writer.entry(book.lib.job_id), before)
         self.assertTrue(temp.exists())
 
-    def test_the_series_writes_own_leftover_is_removed_the_same_way(self):
+    def series_leftover(self):
+        """A series write held on its own leftover temporary file, as 0.31.2 left one (none exists live; Judy's m6 table)."""
         lib = Library(Path(tempfile.mkdtemp(dir=base.AREA)))
         self.addCleanup(lambda: __import__('shutil').rmtree(lib.base, True))
         backfill = lib.backfill()
@@ -524,11 +525,27 @@ class LeftoverTemporaryTests(unittest.TestCase):
         with nas_library(lib.root), as_0312():
             backfill.run_pass()
         self.assertEqual(lib.state(backfill), ('held', series_backfill.APPLY_HOLD + retained_text(temp)))
+        return lib, backfill, temp
+
+    def test_the_series_writes_own_leftover_is_removed_the_same_way(self):
+        lib, backfill, temp = self.series_leftover()
         with nas_library(lib.root):
             backfill.run_pass()
         self.assertFalse(temp.exists())
         self.assertEqual(backfill.entry(lib.job_id)['record']['temp_removed']['method'], native_io.NAS_LEGACY)
         self.assertEqual(sha(lib.path), lib.original)
+        # Judy's m6 table: the engine's opening stays, the false tail goes; the book stays held (no fresh try for a series write).
+        self.assertEqual(lib.state(backfill), ('held', 'Series update failed; the audiobook is unchanged.'))
+
+    def test_a_series_writes_leftover_kept_by_a_proof_says_where_it_is(self):
+        lib, backfill, temp = self.series_leftover()
+        later = __import__('time').time() + 120
+        os.utime(temp, (later, later))  # written after the hold: a proof keeps it
+        with nas_library(lib.root):
+            backfill.run_pass()
+        self.assertTrue(temp.exists())
+        self.assertEqual(backfill.entry(lib.job_id)['record']['temp_kept']['reason'], series_backfill.TEMP_WRITTEN_AFTER)
+        self.assertEqual(lib.state(backfill), ('held', 'Series update failed; the audiobook is unchanged. A temporary file is still there: ' + str(temp)))
 
 
 class HoldReasonTests(unittest.TestCase):
