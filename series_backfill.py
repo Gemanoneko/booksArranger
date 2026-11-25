@@ -304,13 +304,20 @@ def remove_owned(handle):
     handle.dispose(remote_legacy=same)
 
 
+def scanning(merge):
+    """A library scan is running now (what _idle and _may_finish wait for: SCAN_WAIT)."""
+    worker = getattr(getattr(merge, 'inventory', None), 'worker', None)
+    return bool(worker and worker.is_alive())
+
+
 def cleanup_view(merge):
     """The late-write clean-up across both writes (Judy's BooksArranger_LateWriteCleanup_UXSpec_2026-11-25.md, sections 2-4 and
     7): {'total', 'done', 'removed', 'kept', 'left', 'freed_bytes', 'title' (the book in hand, '' between books), 'in_hand',
-    'active' (a book was in hand in this run), 'started' (epoch ms, then), 'waiting' (a library scan holds the books and none
-    is in hand)}, or None when the engine runs neither write. Counts come from the ledgers (rows sent back with
-    removal_retry), summed over the series and the name passes. When the last book settles, the outcome for the status line
-    is fixed once, in memory (outcome_view): only a run this engine saw with books left has one, so a relaunch shows none."""
+    'active' (a book was in hand in this run, or a library scan held one), 'started' (epoch ms, then), 'waiting' (a library
+    scan that is running now holds the books and none is in hand)}, or None when the engine runs neither write. Counts come
+    from the ledgers (rows sent back with removal_retry, and the ones still to be sent back), summed over the series and the
+    name passes. When the last book settles, the outcome for the status line is fixed once, in memory (outcome_view): only a
+    run this engine saw with books left has one, so a relaunch shows none."""
     ledgers = [merge.__dict__.get(name) for name in ('series_backfill', 'name_write')] if hasattr(merge, '__dict__') else []
     ledgers = [ledger for ledger in ledgers if ledger is not None and callable(getattr(ledger, '_cleanup_counts', None))]
     if not ledgers:
@@ -327,6 +334,9 @@ def cleanup_view(merge):
             starts.append(own['_cleanup_started'])
         waiting = waiting or bool(own.get('_cleanup_waiting'))
     left = total - removed - kept
+    # Futaba's 0.31.3 QA, m6: the flag stays set until the next book is in hand, up to a minute after the scan ended (the
+    # books' next try); the scan itself says whether it still holds them, so the row replaces the item in the same update.
+    waiting = waiting and scanning(merge)
     with _CLEANUP_LOCK:
         memo = merge.__dict__.setdefault('_late_cleanup', {'seen': False, 'finished': None, 'outcome': None})
         if left > 0:
@@ -374,6 +384,8 @@ class SeriesBackfill:
         if self.thread and self.thread.is_alive():
             return
         self.stop.clear()
+        # Futaba's 0.31.3 QA, m2: until START_DELAY has passed, reading the state (summary) never starts the first pass.
+        self.__dict__['_delay_until'] = time.monotonic() + START_DELAY
         self.thread = threading.Thread(target=self._run, name='books-series-backfill', daemon=True)  # close() stops it; a hard exit is what the resumable states are for
         self.thread.start()
 
@@ -462,7 +474,8 @@ class SeriesBackfill:
     # ------------------------------------------------------------------ the clean-up's progress (Judy's late-write clean-up spec)
     def _cleanup_counts(self):
         """{'total', 'removed', 'kept', 'freed'} of this ledger's books sent back for the clean-up (REMOVAL_RETRY), from the
-        ledger, so a quit or a crash keeps them (Judy 2): total fixed once they are queued; removed: the old file went
+        ledger, so a quit or a crash keeps them (Judy 2): total, those and the ones still to be sent back (m8), so it is
+        fixed from the start; removed: the old file went
         ('done'); kept: a check kept both files (held again); freed: the removed old files' recorded sizes. Read again only
         after the ledger is written (_changed)."""
         cached = self.__dict__.get('_cleanup_cache')
@@ -480,6 +493,19 @@ class SeriesBackfill:
                     counts['freed'] += int(freed or 0)
                 elif state not in ACTIVE:
                     counts['kept'] += number
+            # Futaba's 0.31.3 QA, m8: the books not sent back yet are in the total from the start. Each pass queues its own
+            # ledger's books (the names pass about 5 s after the series pass, and a book whose other write is in hand on a
+            # later pass), so a total of the queued books alone grew once during the run (82, then 115) and the bar stepped
+            # back. The same test as the selection (_removal_retained, not yet marked), so the total is the run's books.
+            for job_id, state, reason, record in db.execute(
+                    'SELECT job_id,state,reason,record FROM ' + self.LEDGER + " WHERE state='held' AND record LIKE '%removal_intended%'"):
+                try:
+                    record = json.loads(record)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(record, dict) and record.get('removal_retry') != REMOVAL_RETRY and \
+                        self._removal_retained({'job_id': job_id, 'state': state, 'reason': reason, 'record': record}):
+                    counts['total'] += 1
         with _CLEANUP_LOCK:
             # Senua's 0.31.3 review, m1: the other thread's write (a book settling) may land while this read runs; its _changed()
             # moves the generation, and then this answer is used once but not kept, so the next read counts again.
@@ -521,6 +547,9 @@ class SeriesBackfill:
         except Later as wait:
             if retried and str(wait) == SCAN_WAIT:
                 self.__dict__['_cleanup_waiting'] = True
+                # Futaba's 0.31.3 QA, m6: the run is taken up here too, so when the scan ends the row stands in for the
+                # Waiting item at once (cleanup_view 'active'), its elapsed time running from now, before a book is in hand.
+                self.__dict__.setdefault('_cleanup_started', int(time.time() * 1000))
             self._defer(job_id, wait, state=entry['state'])
         finally:
             if retried:
@@ -628,8 +657,12 @@ class SeriesBackfill:
         backlog = self.__dict__.get('_backlog')
         # Not visited yet: counted at the last pass's start, less the books that got a ledger row since.
         unvisited = len(backlog['unvisited'] - {row[0] for row in rows}) if backlog and backlog['finished'] == finished else None
-        if unvisited is None and self.thread and self.thread.is_alive():
-            self.wake.set()  # a book finished converting (or nothing was counted yet): the pass counts the books not visited
+        if unvisited is None and self.thread and self.thread.is_alive() and time.monotonic() >= self.__dict__.get('_delay_until', 0):
+            # A book finished converting (or nothing was counted yet): the pass counts the books not visited. Futaba's 0.31.3
+            # QA, m2: never before the start delay is over. The page reads the state at once, so this woke the first pass
+            # (and the clean-up) seconds after launch, ahead of the published check the delay lets finish first; the first
+            # pass counts them anyway.
+            self.wake.set()
         settled = counts['with_series'] + counts['without'] + counts['gave_up'] + counts['left_alone']
         to_look_up = None if unvisited is None else counts['due'] + unvisited
         left = None if to_look_up is None else to_look_up + counts['between_tries']
@@ -1300,7 +1333,7 @@ class SeriesBackfill:
         jobs = merge.jobs
         if jobs._thread and jobs._thread.is_alive() or merge.cleanup.thread and merge.cleanup.thread.is_alive() or merge.cleanup.current:
             raise Later('A book is being converted or cleaned up', self.clock() + 60)
-        if merge.inventory.worker and merge.inventory.worker.is_alive():
+        if scanning(merge):
             raise Later(SCAN_WAIT, self.clock() + 60)
 
     def _may_finish(self):
@@ -1309,8 +1342,7 @@ class SeriesBackfill:
         before this launch), a conversion or a cleanup (ruling 27: a begun file change finishes once begun). A Choose
         folder… of the book waits for it (MergeService.rewriting), and must not wait for a Start. A library scan still holds
         it, as it holds every file change; a new write still waits for everything _idle() names."""
-        merge = self.merge
-        if merge.inventory.worker and merge.inventory.worker.is_alive():
+        if scanning(self.merge):
             raise Later(SCAN_WAIT, self.clock() + 60)
 
     def _move_registered(self):

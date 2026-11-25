@@ -750,10 +750,12 @@ class CleanupViewTests(unittest.TestCase):
     """Judy's spec 2-4 and 7.1-7.4: the row, the Waiting item, main work, and the end for the status line."""
 
     @staticmethod
-    def _merge(series, names, own):
+    def _merge(series, names, own, scan=False):
         merge = type('Merge', (), {})()
         merge.series_backfill = FakeLedger(series, **own)
         merge.name_write = FakeLedger(names)
+        if scan:  # a library scan running now (Futaba's m6: the Waiting item lasts only as long as the scan)
+            merge.inventory = type('Inventory', (), {'worker': type('Scan', (), {'is_alive': lambda self: True})()})()
         return merge
 
     def test_counts_sum_both_writes_and_the_end_is_fixed_once(self):
@@ -793,7 +795,7 @@ class CleanupViewTests(unittest.TestCase):
         self.assertFalse(any(item['kind'] == 'late_cleanup' for item in work['waiting']))
         between = self.work(self._merge(counts, {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}, {'_cleanup_hand': None, '_cleanup_started': 99}))
         self.assertEqual(next(row for row in between['rows'] if row['kind'] == 'late_cleanup')['subject'], '', 'between two books the row stays')
-        scan = self.work(self._merge(counts, {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}, {'_cleanup_waiting': True, '_cleanup_started': 99}))
+        scan = self.work(self._merge(counts, {'total': 0, 'removed': 0, 'kept': 0, 'freed': 0}, {'_cleanup_waiting': True, '_cleanup_started': 99}, scan=True))
         self.assertFalse(any(row['kind'] == 'late_cleanup' for row in scan['rows']), 'never both')
         item = next(item for item in scan['waiting'] if item['kind'] == 'late_cleanup')
         self.assertEqual((item['count'], item['blocker']['cause'], item['background']), (8, 'scan', False))
@@ -1166,6 +1168,169 @@ class ReviewMinorTests(HeldBook, unittest.TestCase):
         with mock.patch.object(NameWrite, 'APPLY_HOLD', 'Reworded: '), mock.patch.object(name_write, 'NAMES_FAILED', 'Reworded: '), \
                 mock.patch.object(native_io, 'retained_text', lambda path: 'Reworded ' + str(path)):
             self.assertEqual(book.writer._leftover_temporary(held), temp)
+
+
+class FutabaMinorTests(HeldBook, unittest.TestCase):
+    """Futaba's 0.31.3 QA minors m2, m6 and m8 (Sergei 2026-11-25: every minor in 0.31.3). Each case failed before its fix."""
+
+    def test_m2_a_state_read_does_not_end_the_start_delay(self):
+        import time
+        backfill = self.lib.backfill()
+        passes = []
+        backfill.run_pass = lambda: passes.append(time.monotonic())
+        with mock.patch.object(series_backfill, 'START_DELAY', 2.0):
+            begun = time.monotonic()
+            backfill.start()
+            try:
+                while time.monotonic() - begun < 1.0:
+                    backfill.summary()  # the page's /api/state, every poll: nothing is counted yet
+                    time.sleep(0.05)
+                self.assertEqual(passes, [], 'no pass (and no clean-up) before the start delay, whatever reads the state')
+                while not passes and time.monotonic() - begun < 10:
+                    time.sleep(0.05)
+            finally:
+                backfill.close()
+        self.assertTrue(passes, 'the first pass runs once the delay is over')
+        self.assertGreaterEqual(passes[0] - begun, 1.9)
+
+    def test_m8_the_total_covers_both_writes_from_the_start(self):
+        lib = self.lib
+        backfill = self.hold()
+        merge = backfill.merge
+        names = NameWrite(merge, stage=lib.base / 'names-stage')
+        merge.series_backfill, merge.name_write = backfill, names
+        series_record = backfill.entry(lib.job_id)['record']
+        with connect(lib.db) as db:  # a hold 0.31.2 left in the names ledger too (as the 33)
+            db.execute('INSERT INTO name_writes VALUES(?,?,?,?,?)', (lib.job_id, 'held', series_backfill.RECOVERY_HOLD + retained_text(series_record['old_path']),
+                                                                    json.dumps(series_record, ensure_ascii=False), 'now'))
+        totals = [series_backfill.cleanup_view(merge)['total']]  # at launch: nothing sent back yet
+        with nas_library(lib.root):
+            backfill._retry_retained_removals()  # the series pass queues its books first
+            totals.append(series_backfill.cleanup_view(merge)['total'])
+            names._retry_retained_removals()  # the names pass waits for the series write of the same book (Senua m2)
+            totals.append(series_backfill.cleanup_view(merge)['total'])
+            backfill.run_pass()
+            done = series_backfill.cleanup_view(merge)
+            totals.append(done['total'])
+            names._retry_retained_removals()  # now the names pass queues its book
+            totals.append(series_backfill.cleanup_view(merge)['total'])
+        self.assertEqual(names.entry(lib.job_id)['record'].get('removal_retry'), series_backfill.REMOVAL_RETRY, 'control: both were queued')
+        self.assertEqual(totals, [2, 2, 2, 2, 2], 'the total never grows during the run')
+        self.assertEqual((done['done'], done['left']), (1, 1), 'the bar only moves forward')
+
+    def test_m6_when_the_scan_ends_the_row_replaces_the_waiting_item_at_once(self):
+        import threading
+        lib = self.lib
+        backfill = self.hold()
+        backfill._retry_retained_removals()
+        scanning = threading.Event()
+        scanning.set()
+        backfill.merge.inventory.worker = type('Scan', (), {'is_alive': lambda self: scanning.is_set()})()
+        with mock.patch.object(series_backfill.SeriesBackfill, 'resume') as resume:
+            backfill._finish_active(lib.job_id, backfill.entry(lib.job_id))
+        resume.assert_not_called()
+        page = type('Merge', (), {})()  # what /api/state reads
+        page.series_backfill, page.inventory = backfill, backfill.merge.inventory
+
+        def late(work):
+            return ([row for row in work['rows'] if row['kind'] == 'late_cleanup'], [item for item in work['waiting'] if item['kind'] == 'late_cleanup'])
+        rows, items = late(CleanupViewTests.work(self, page))
+        self.assertEqual((len(rows), len(items)), (0, 1), 'while the scan runs: the Waiting item')
+        scanning.clear()  # the scan ends; the book's next try is up to a minute away
+        rows, items = late(CleanupViewTests.work(self, page))
+        self.assertEqual((len(rows), len(items)), (1, 0), 'the row replaces the item in the same update')
+        self.assertEqual({key: rows[0][key] for key in ('subject', 'done', 'total')}, {'subject': '', 'done': 0, 'total': 1})
+        self.assertIsInstance(rows[0]['started'], int, 'its elapsed time ticks from when the clean-up was taken up')
+
+
+def _series_lane():
+    from test_rule_filing_031 import SeriesWriteThenMoveTests as lane
+    return lane
+
+
+class SeriesFollowUpAfterTheCleanUpTests(unittest.TestCase):
+    """Futaba's 0.31.3 QA, m1: a series book the clean-up finishes moves into its series folder, and its "Could not be renamed
+    or moved" line clears. The lane keeps the ledger (follow_up / follow_up_wait): a real audiobook (ffmpeg), its series found,
+    the write approved by the real rules' pass and held by 0.31.2 on the (simulated) NAS, the rules' entry closed as failed
+    as live; then 0.31.3's retry, the follow-up the write asks for, the app's real verified move (book_move) and the rules'
+    next pass. Uses test_rule_filing_031's SeriesWriteThenMoveTests set-up (its own tests are not run here)."""
+
+    def setUp(self):
+        _series_lane().setUp(self)
+
+    def resolve(self, job_id, kind):
+        return _series_lane().resolve(self, job_id, kind)
+
+    def queue_move(self, job_id, target, origin='user'):
+        return _series_lane().queue_move(self, job_id, target, origin)
+
+    def run_queue(self):
+        return _series_lane().run_queue(self)
+
+    def moves(self):
+        return _series_lane().moves(self)
+
+    def could_not(self):
+        return [(entry['key'], entry.get('cause')) for entry in self.filing.could_not()['entries']]
+
+    def test_m1_the_finished_book_moves_to_its_series_folder_and_its_line_clears(self):
+        lib, backfill = self.lib, self.backfill
+        backfill.run_pass()  # the look-up finds the series; the book is held for the rules
+        self.filing.tick()  # the rules approve its write
+        with nas_library(lib.root), as_0312():
+            backfill.run_pass()  # 0.31.2: written and renamed in its own folder, then the old file's removal refused
+        like_0312(lib.db, 'series_backfill', lib.job_id)
+        entry = backfill.entry(lib.job_id)
+        self.assertEqual((entry['state'], entry['reason']), ('held', LIVE_PREFIX + str(lib.path) + LIVE_SUFFIX), 'control: the live hold')
+        placed = Path(entry['record']['new_path'])
+        self.assertEqual((placed.parent, placed.exists(), lib.path.exists()), (lib.path.parent, True, True))
+        self.filing.tick()  # as live: the rules' entry is closed as failed
+        with connect(lib.db) as db:
+            self.assertEqual([tuple(row) for row in db.execute('SELECT state,step FROM rule_filings')], [('failed', 'write')])
+        before = self.could_not()
+        # 0.31.3 starts: a new engine on the same catalog sends the hold back and finishes it.
+        retry = series_backfill.SeriesBackfill(self.merge, research=self.research, stage=lib.base / 'proof-stage')
+        self.merge.series_backfill = retry
+        with nas_library(lib.root):
+            retry.run_pass()
+        entry = retry.entry(lib.job_id)
+        self.assertEqual((entry['state'], entry['record']['removal_retry'], lib.path.exists(), placed.exists()), ('done', series_backfill.REMOVAL_RETRY, False, True))
+        self.assertEqual(entry['record']['follow_up']['state'], 'move_queued', 'the follow-up ran and queued the move')
+        self.assertNotIn('follow_up_wait', entry['record'])
+        self.assertEqual(self.moves(), [('queued', 'rules', str(self.final))], "the app's own move to the series folder")
+        self.filing.tick()
+        queued = self.could_not()
+        self.run_queue()
+        self.filing.tick()
+        self.assertEqual((self.final.exists(), placed.exists()), (True, False), 'moved into its series folder')
+        self.assertEqual(self.resolve(lib.job_id, 'base')['final_path'], str(self.final))
+        self.assertEqual(self.could_not(), [], 'its line clears at the rules\' next pass after the move')
+        self.assertEqual(self.moves(), [('complete', 'rules', str(self.final))], 'moved once')
+        with nas_library(lib.root):
+            retry.run_pass()
+        self.assertEqual((self.filing.tick()['left'], len(self.moves())), (0, 1), 'and nothing more')
+        self.assertEqual((before, queued), ([('not_app_name', None)], []), 'the lines the rules showed: before the clean-up, and while the move waits')
+
+    def test_m1_a_follow_up_refused_for_now_is_asked_again_by_a_later_pass(self):
+        """Futaba's control lane: the writes finished while her seeder's engine refused every move (RuntimeError, kit
+        seed2.py), so each follow-up was noted 'later' (follow_up_wait), not recorded for good; the series pass's next pass
+        asks again, and with the queue answering the book moves and its line clears."""
+        lib, backfill = self.lib, self.backfill
+        backfill.run_pass()
+        self.filing.tick()
+        real = self.merge._sorting_move
+        self.merge._sorting_move = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('QA seeder: no move is run while seeding'))
+        backfill.run_pass()  # written; the move refused for now
+        entry = backfill.entry(lib.job_id)
+        self.assertEqual((entry['state'], entry['record'].get('follow_up'), entry['record']['follow_up_wait']['state']), ('done', None, 'later'))
+        self.assertEqual(self.moves(), [])
+        self.merge._sorting_move = real
+        backfill.run_pass()  # the next pass (every ten minutes, after the start delay at launch)
+        entry = backfill.entry(lib.job_id)
+        self.assertEqual((entry['record']['follow_up']['state'], 'follow_up_wait' in entry['record']), ('move_queued', False))
+        self.run_queue()
+        self.filing.tick()
+        self.assertEqual((self.final.exists(), self.could_not()), (True, []))
 
 
 class KeptOldFileKeyTests(unittest.TestCase):
