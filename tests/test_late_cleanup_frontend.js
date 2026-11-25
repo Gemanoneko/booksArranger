@@ -45,6 +45,20 @@ const other=extra=>({id:'rename',kind:'rename',step:'updating',done:10,total:100
 page({rows:[other({subject:'A'})]});run('activityRows.get("rename").samples=[[Date.now()-20000,0.05],[Date.now()-10000,0.08]]');
 page({rows:[other({subject:'B'})]});
 assert.equal(run('activityRows.get("rename").samples.length')<=1,true,'control: a row whose subject is its job starts its samples again');
+// Judy's ruling 3 (as built, 2026-11-25): books here take from seconds to a minute, so for this row the rate runs from the
+// first sample the page saw to the latest (no 30 s trim). Ten books alternating 3 s and 40 s, half of 20 done in 215 s; the
+// estimate read 5 s after the tenth (a 40 s book). Whole run: 215 s left, "about 4 min left". Trimmed to 30 s, the rate is
+// the last book's alone (400 s, "about 7 min left"); every other row keeps that rule (the control).
+run("globalThis.etaAfter=function(kind,durations,total,wait){"+
+  "const view=activityRow('eta:'+kind);let t=0,done=0;"+
+  "const at=(count,now)=>{view.row={id:'eta:'+kind,kind,subject:'',step:'removing',done:count,total,unit:'books',kept:0,state:'running',started:0,background:false};updateActivity(view,now);};"+
+  "at(0,0);for(const seconds of durations){t+=seconds*1000;done+=1;at(done,t);}"+
+  "at(done,t+wait*1000);return view.eta;}");
+const alternating=[3,40,3,40,3,40,3,40,3,40];
+assert.equal(run("etaAfter('late_cleanup',"+JSON.stringify(alternating)+",20,5)"),'about 4 min left','the whole observed run, not the last book');
+assert.equal(run("etaAfter('rename',"+JSON.stringify(alternating)+",20,5)"),'about 7 min left','control: any other row keeps the 30 s window');
+assert.equal(run("etaAfter('late_cleanup',[3],20,5)"),'','nothing before 10 s (unchanged rule): 8 s elapsed');
+assert.equal(run("etaAfter('late_cleanup',[20],100,5)"),'','nothing before 5% (unchanged rule): 1 of 100 books');
 
 // 3. Waiting for a library scan (3): the books left, the row's tooltip, no Show in list.
 page({rows:[],waiting:[{id:'late_cleanup',kind:'late_cleanup',count:73,blocker:{kind:'scan',cause:'scan'},background:false}]});

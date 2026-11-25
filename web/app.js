@@ -2086,7 +2086,9 @@ function updateActivity(view,now){
   const elapsed=Math.max(0,((view.frozen ?? now)-started)/1000);
   // ETA from the measured rate over the last 30 s (samples only when the data changed), once trustworthy.
   if(determinate && running && (!view.samples.length || view.samples[view.samples.length-1][1]!==fraction))view.samples.push([now,fraction]);
-  while(view.samples.length>2 && now-view.samples[1][0]>30000)view.samples.shift();
+  // 0.31.3 (Judy's ruling 3, as built): the clean-up's books take from seconds to a minute each, so its rate runs from the
+  // first sample this page saw to the latest (the whole observed run); every other row keeps the last 30 s.
+  if(row.kind!=='late_cleanup')while(view.samples.length>2 && now-view.samples[1][0]>30000)view.samples.shift();
   if(!(determinate && running) || isLookup(row) || elapsed<10 || fraction<0.05)view.eta='';  // 0.31.0 (2.1): no time estimate on a look-up
   else if(now-view.etaAt>=5000 && view.samples.length>1){
     const [t0,d0]=view.samples[0],[t1,d1]=view.samples[view.samples.length-1],rate=(d1-d0)/((t1-t0)/1000);
