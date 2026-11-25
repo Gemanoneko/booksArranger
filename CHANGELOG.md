@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.31.3] - 2026-11-25
+
+### Fixed
+
+- Late writes into finished audiobooks (series, English title, English author) now remove the old file on the network drive. The removal used a local-disk-only check that the NAS refuses.
+- Hold reasons are reworded in plain words.
+
+### Changed
+
+- One-time clean-up after install: the 115 books left with old and new files are finished through the app's verified removal. A "Removing old files" progress row and a done line show it.
+- Two leftover temporary files are cleared after checks. Those two books (Card, Hobb) get one fresh try at their English names.
+
 ## [v0.31.2] - 2026-11-24
 
 v0.31.1 was tagged but never published. This release carries its changes.
