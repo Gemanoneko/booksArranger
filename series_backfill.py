@@ -176,6 +176,11 @@ SCAN_WAIT = 'A library scan is running'  # _idle's and _may_finish's wait; the c
 # Senua's 0.31.3 review, M2: the library drive does not answer (asleep, offline, a network error). Nothing is tried and no
 # one-time mark is used; the book waits as a write of names already waited (name_write.DRIVE_AWAY, the same words).
 DRIVE_AWAY = 'The library drive is not answering'
+TREE_WAIT = 'Waiting for the audiobook library folders to become available.'
+FOLDER_WAIT = 'Waiting to reach the book’s folder.'
+FOLDER_UNREACHABLE = 'Couldn’t reach the book’s folder. Both files were kept.'
+TEMP_FOLDER_UNKNOWN = 'The original folder is missing or has changed. The temporary copy could not be located.'
+NETWORK_RETRIES = 2
 # Judy's spec 4 and 7.3: the clean-up's outcome shows on the status line for this long after its last book settles.
 LATE_SHOW_MS = 3600000
 _CLEANUP_LOCK = threading.Lock()
@@ -265,7 +270,7 @@ def _keep(text):
     folder = os.environ.get(LOG_DIR_ENV)
     if not folder or not os.path.isabs(folder) or not os.path.isdir(folder):
         return
-    data = (' '.join(text.splitlines()) + '\n').encode('utf-8')
+    data = (' '.join(text.splitlines()) + '\n').encode('utf-8', errors='backslashreplace')
     current, previous = os.path.join(folder, LOG_FILE), os.path.join(folder, LOG_PREVIOUS)
     try:
         with _LOG_LOCK:  # both passes log, each from its own thread
@@ -298,7 +303,7 @@ def present(path):
         raise
 
 
-def network_lost(error):
+def network_error_detail(error):
     """Senua's re-review at 520ee66, m7: the error, or one it was raised from, carries the Windows code of a drive or share
     that went away (audio_jobs.UNREACHABLE, the set a conversion's Retry reads): as its winerror, as a native diagnostic
     (ProtectedIdentityUnavailable), or as the "[WinError N]" / "Windows error N" its text quotes (native_io's BoundaryError
@@ -306,14 +311,18 @@ def network_lost(error):
     from audio_jobs import UNREACHABLE
     for _ in range(8):  # its cause chain, bounded
         if error is None:
-            return False
+            break
         diagnostic = getattr(error, 'diagnostic', None)
         codes = [getattr(error, 'winerror', None), diagnostic.get('windows_error') if isinstance(diagnostic, dict) else None]
         codes += [int(code) for code in re.findall(r'(?:\[WinError |Windows error )(\d+)', str(error))]
         if any(code in UNREACHABLE for code in codes):
-            return True
+            return str(error) or type(error).__name__
         error = error.__cause__ or error.__context__
-    return False
+    return ''
+
+
+def network_lost(error):
+    return bool(network_error_detail(error))
 
 
 def size_text(size):
@@ -477,8 +486,10 @@ class SeriesBackfill:
 
     def _next_wait(self):
         """Due deferrals get another pass without a hot loop or renewed provider allowance."""
-        due = [json.loads(row['record']).get('next_attempt') for row in
-               self._rows("SELECT record FROM series_backfill WHERE state NOT IN (%s)" % ','.join('?' * len(FINAL)), FINAL)]
+        due = [row['due'] for row in self._rows(
+            "SELECT CASE WHEN state='held' THEN json_extract(record,'$.temp_wait_until') "
+            "ELSE json_extract(record,'$.next_attempt') END AS due FROM " + self.LEDGER +
+            " WHERE state NOT IN (%s) OR (state='held' AND record LIKE '%%temp_wait_until%%')" % ','.join('?' * len(FINAL)), FINAL)]
         due = [value for value in due if isinstance(value, (int, float))]
         return max(30, min(PASS_WAIT, min(due) - self.clock())) if due else PASS_WAIT
 
@@ -602,6 +613,49 @@ class SeriesBackfill:
         root = record.get('root') if isinstance(record, dict) else None
         return bool(root) and not self._answers(root)
 
+    def _library_wait(self, record):
+        """Require evidence below the share root before spending a cleanup retry. An empty remounted
+        share and one missing top-level author look alike unless another catalogued branch answers."""
+        if self._drive_away(record):
+            return DRIVE_AWAY
+        try:
+            root, old = ordinary(record['root']), ordinary(record['old_path'])
+            parts = old.relative_to(root).parts
+        except (KeyError, TypeError, ValueError):
+            return ''  # malformed records are handled by the normal boundary checks
+        if not parts:
+            return ''
+        first = root / parts[0]
+        if len(parts) > 1 and self._answers(first):
+            return ''
+        if len(parts) == 1 and any(os.path.isfile(record[key]) for key in ('old_path', 'new_path') if record.get(key)):
+            return ''
+        # Read only a few exact, previously verified publications in other branches. No directory
+        # enumeration, no alternate target. With no witness, leave the one-time mark unused.
+        prefix = os.path.normcase(os.path.join(str(root), ''))
+        excluded = os.path.normcase(str(first)) + (os.sep if len(parts) > 1 else '')
+        peers = self._rows("SELECT DISTINCT path FROM verified_outputs WHERE substr(path,1,?)=? COLLATE NOCASE "
+                           "AND substr(path,1,?)<>? COLLATE NOCASE LIMIT 8", (len(prefix), prefix, len(excluded), excluded))
+        for peer in peers:
+            try:
+                path = ordinary(peer['path'])
+            except (TypeError, ValueError):
+                continue
+            if path.is_relative_to(root) and os.path.isfile(path):
+                return ''
+        return TREE_WAIT
+
+    def _network_wait(self, record, error):
+        """A real outage costs no attempt. Only repeated network errors on a reachable library are bounded."""
+        unavailable = self._library_wait(record)
+        if unavailable:
+            return unavailable
+        if network_lost(error):
+            failures = record.get('folder_network_errors', 0) + 1
+            record['folder_network_errors'] = failures
+            return FOLDER_WAIT if failures <= NETWORK_RETRIES else ''
+        return DRIVE_AWAY if self._drive_away(record, error) else ''
+
     def _absent(self, record, path):
         """M5: this path is positively not there while the drive answers. The library folder (record 'root') answers, and
         walking down from it, a name on the way is not found (present(): Windows error 2, so the folder it is in answered).
@@ -630,8 +684,11 @@ class SeriesBackfill:
         retried = entry['record'].get('removal_retry') == REMOVAL_RETRY
         try:
             self._may_finish()  # R35: a begun write finishes without the Pause or conversion gate (_idle)
-            if self._drive_away(entry['record']):
-                raise Later(DRIVE_AWAY, self.clock() + 60)  # Senua M2: nothing is tried on a drive that does not answer
+            wait = self._library_wait(entry['record']) if retried else ''
+            if not retried and self._drive_away(entry['record']):
+                wait = DRIVE_AWAY
+            if wait:
+                raise Later(wait, self.clock() + 60)
             if self._waits_for_other(job_id):
                 raise Later(ONE_AT_A_TIME, self.clock() + 60)  # Senua m2: the same book's other write is in its last step
             if retried:
@@ -644,7 +701,7 @@ class SeriesBackfill:
                 # Futaba's 0.31.3 QA, m6: the run is taken up here too, so when the scan ends the row stands in for the
                 # Waiting item at once (cleanup_view 'active'), its elapsed time running from now, before a book is in hand.
                 self.__dict__.setdefault('_cleanup_started', int(time.time() * 1000))
-            self._defer(job_id, wait, state=entry['state'])
+            self._defer(job_id, wait, state=self.entry(job_id)['state'])
         finally:
             if retried:
                 self.__dict__['_cleanup_hand'] = None
@@ -1068,7 +1125,7 @@ class SeriesBackfill:
             entry = self.entry(row['job_id'])
             if not self._removal_retained(entry) or entry['record'].get('removal_retry') == REMOVAL_RETRY:
                 continue
-            if self._drive_away(entry['record']):
+            if self._library_wait(entry['record']):
                 continue  # Senua M2: not sent back while its drive does not answer; the next pass looks again
             if self._retry_blocked(row['job_id']):
                 continue  # Senua m2: one write of a book at a time; the next pass looks again
@@ -1115,21 +1172,41 @@ class SeriesBackfill:
                 return
             if self._other_writer(row['job_id']):
                 continue  # one writer per file: this book's other write goes first
-            if self._drive_away(entry['record']):
-                continue  # Senua M2: no mark (and no fresh try used) while the drive does not answer
+            if entry['record'].get('temp_wait_until', 0) > self.clock():
+                continue
+            unavailable = self._library_wait(entry['record'])
+            if unavailable:
+                if unavailable == TREE_WAIT:
+                    warned = self.__dict__.setdefault('_unlocated_temps', set())
+                    if temp not in warned:
+                        _log('Leftover temporary file lookup paused: ' + unavailable + ' (' + str(temp) + ')')
+                        warned.add(temp)
+                continue
+            self.__dict__.get('_unlocated_temps', set()).discard(temp)
             record = dict(entry['record'], temp_retry=REMOVAL_RETRY)
             try:
                 record['temp_removed'] = dict(self._remove_leftover(row['job_id'], entry, temp), at=_stamp())
             except InterruptedError:
                 return  # closing: nothing was removed, the next run starts again
             except Exception as error:
-                if self._drive_away(entry['record'], error):
-                    continue  # Senua M2: the drive went away during the proofs; nothing is marked, the next pass looks again
-                record['temp_kept'] = {'reason': (str(error) or type(error).__name__)[:300], 'at': _stamp()}
-                _log('Leftover temporary file kept: ' + record['temp_kept']['reason'] + ' (' + str(temp) + ')')
+                wait = self._network_wait(record, error)
+                if wait:
+                    if wait == FOLDER_WAIT:
+                        record.pop('temp_retry')
+                        record.setdefault('temp_held_at', entry['updated'])  # retries must never extend the file-age proof
+                        record['temp_wait_until'] = self.clock() + 60
+                        self._set(row['job_id'], 'held', entry['reason'], record)
+                    continue
+                detail = str(error) or type(error).__name__
+                network = network_error_detail(error)
+                reason = FOLDER_UNREACHABLE if network else detail[:300]
+                record['temp_kept'] = {'path': str(temp), 'reason': reason, 'at': _stamp()}
+                _log('Leftover temporary file kept: ' + reason + (' ' + network if network else '') + ' (' + str(temp) + ')')
             # Judy 6: the outcome's own sentence is written in this one _set (never earlier: _leftover_temporary finds these
             # books by the old stored text). Sergei's ruling 4: a write of names is tried once more after a removal.
             state, reason = self._leftover_outcome(entry, record, temp)
+            record.pop('temp_wait_until', None)
+            record.pop('folder_network_errors', None)
             self._set(row['job_id'], state, reason, record)
 
     def _leftover_outcome(self, entry, record, temp):
@@ -1138,6 +1215,8 @@ class SeriesBackfill:
         writes of names only): its hold keeps the engine's opening and drops the false "The file was kept."; with the file
         kept, it says where. Its could-not line stays the generic one (NameWrite overrides all of this)."""
         if record.get('temp_kept'):
+            if record['temp_kept']['reason'] in (TEMP_FOLDER_UNKNOWN, FOLDER_UNREACHABLE):
+                return 'held', record['temp_kept']['reason'] + ' Last known path: ' + str(temp)
             return 'held', SERIES_UNCHANGED + TEMP_STILL_LEFT + str(temp)
         return 'held', SERIES_UNCHANGED
 
@@ -1162,6 +1241,10 @@ class SeriesBackfill:
         return temp
 
     def _remove_leftover(self, job_id, entry, temp):
+        with self._temporary_parent(entry['record'], temp):
+            return self._remove_leftover_in_parent(job_id, entry, temp)
+
+    def _remove_leftover_in_parent(self, job_id, entry, temp):
         """The proofs before a leftover temporary file goes, in order; each failure keeps it (Held):
           1. the catalog: owned_artifacts names it once, as this job's 'temporary'; no job's output, no other ledger
              record (its temp, new or old path) and no move names it; the job's output still names the book's own file;
@@ -1177,11 +1260,12 @@ class SeriesBackfill:
         from quicktime_chapters import media_unchanged, ChapterFormatError
         record = entry['record']
         old = ordinary(record['old_path'])
-        if self._leftover_gone(record, temp):
+        if not present(temp):
             # m8: a crash after remove_owned and before the caller's _set (or after the file went by hand) left the file gone
             # under the old hold. Nothing is there to prove or remove: it counts as removed, known as found gone (this pass
             # removed nothing), and its ownership row goes if it is still there. The write of names keeps its one fresh try.
             self._forget_temporary(job_id, temp)
+            _log('Leftover temporary file already gone: ' + str(temp))
             return {'path': str(temp), 'size': None, 'sha256': None, 'modified': None, 'method': None, 'found_gone': True}
         with connect(self.database) as db:
             owned = [tuple(r) for r in db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=? COLLATE NOCASE', (str(temp),))]
@@ -1205,26 +1289,26 @@ class SeriesBackfill:
         if not isinstance(output, dict) or os.path.normcase(str(output.get('final_path') or '')) != os.path.normcase(str(old)) \
                 or not output.get('sha256') or not output.get('size') or temp == old:
             raise Held(TEMP_BOOK_UNNAMED)
-        with DirectoryBoundary(old.parent, old.parent), VerifiedFile(old) as book:
+        with VerifiedFile(old) as book:
             if book.facts()['size'] != output['size'] or book.sha256() != output['sha256']:
                 raise Held(TEMP_BOOK_CHANGED)
-        held_at = calendar.timegm(time.strptime(entry['updated'], '%Y-%m-%dT%H:%M:%SZ'))
-        keys = ('identity', 'size', 'modified')
-        with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp) as seen:
-            before = seen.facts()
-            if before['modified'] > (held_at + 1) * 10 ** 9:
-                raise Held(TEMP_WRITTEN_AFTER)
-            try:
-                media_unchanged(old, temp, self.stop)  # read by name; this read-only handle lets nothing write meanwhile
-            except ChapterFormatError as error:
-                _log(TEMP_AUDIO_DIFFERS + ' ' + str(error) + ' (' + str(temp) + ')')  # the exact error: the log only (Judy 6)
-                raise Held(TEMP_AUDIO_DIFFERS) from None
-        with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
-            now = handle.facts()
-            if [now[k] for k in keys] != [before[k] for k in keys]:
-                raise Held(TEMP_CHANGED_DURING)
-            digest = handle.sha256()
-            remove_owned(handle)
+            held_at = calendar.timegm(time.strptime(record.get('temp_held_at', entry['updated']), '%Y-%m-%dT%H:%M:%SZ'))
+            keys = ('identity', 'size', 'modified')
+            with VerifiedFile(temp) as seen:
+                before = seen.facts()
+                if before['modified'] > (held_at + 1) * 10 ** 9:
+                    raise Held(TEMP_WRITTEN_AFTER)
+                try:
+                    media_unchanged(old, temp, self.stop)
+                except ChapterFormatError as error:
+                    _log(TEMP_AUDIO_DIFFERS + ' ' + str(error) + ' (' + str(temp) + ')')
+                    raise Held(TEMP_AUDIO_DIFFERS) from None
+            with VerifiedFile(temp, delete=True) as handle:
+                now = handle.facts()
+                if [now[k] for k in keys] != [before[k] for k in keys]:
+                    raise Held(TEMP_CHANGED_DURING)
+                digest = handle.sha256()
+                remove_owned(handle)
         if present(temp):  # Senua M3's pattern: an error is not "gone" (raised; the caller keeps it with why)
             raise Held(TEMP_STILL_THERE)
         self._forget_temporary(job_id, temp)
@@ -1236,16 +1320,18 @@ class SeriesBackfill:
         _log('Removed a leftover temporary file of an unfinished update: ' + title + ' (' + size_text(now['size']) + '): ' + str(temp))  # Judy 6
         return {'path': str(temp), 'size': now['size'], 'sha256': digest, 'modified': now['modified'], 'method': getattr(handle, 'disposition_method', None)}
 
-    def _leftover_gone(self, record, temp):
-        """m8: the leftover temporary file is positively not there (present: only "not found", Windows error 2), or (M5) its
-        folder is gone while the drive answers (_absent). An error that cannot be told is not "gone": its proofs run as
-        before and decide."""
+    @contextmanager
+    def _temporary_parent(self, record, temp):
+        """Only the original, positively identified parent can confirm that its temporary name is gone."""
         try:
-            return not present(temp)
-        except FileNotFoundError:
-            return self._absent(record, temp)
-        except OSError:
-            return False
+            with DirectoryBoundary(record.get('root') or temp.parent, temp.parent) as parent:
+                if record.get('parent_identity') != [list(item) for item in parent.identities]:
+                    raise Held(TEMP_FOLDER_UNKNOWN)
+                yield
+        except AncestorUnavailable:
+            if self._absent(record, temp.parent):
+                raise Held(TEMP_FOLDER_UNKNOWN) from None
+            raise
 
     # ------------------------------------------------------------------ checks
     def unsafe(self, row, jobs=None):
@@ -1682,18 +1768,23 @@ class SeriesBackfill:
             with critical_sections.critical(critical_sections.RENAME), self._boundary(record) as boundary:
                 self._resume_protected(job_id, record, state, temp, new, old, boundary)
         except (BoundaryError, OSError, Held, KeyError) as error:
-            if not isinstance(error, Held) and self._drive_away(record, error):
-                # Senua's 0.31.3 review, M2: the drive went away during the step. Not a hold (one would end a retry for good):
-                # the book keeps its recorded state and the step runs again once the drive answers.
-                raise Later(DRIVE_AWAY, self.clock() + 60) from None
+            wait = self._network_wait(record, error) if not isinstance(error, Held) else ''
+            if wait:
+                if wait == FOLDER_WAIT:
+                    self._set(job_id, self.entry(job_id)['state'], '', record)
+                raise Later(wait, self.clock() + 60) from None
+            detail = network_error_detail(error)
+            if detail:
+                error = Held(FOLDER_UNREACHABLE)
             if isinstance(error, AncestorUnavailable):
                 error = Held(FOLDER_CHANGED)  # Senua's re-review M5: the drive answers and the book's folder is gone (N4)
             # Judy's spec 5.3: a reason of section 5 (Held) is stored as it is, without the engine's prefix; any other error
             # keeps RECOVERY_HOLD (so a removal refused again still reads as _removal_retained expects).
             reason = str(error) if isinstance(error, Held) else RECOVERY_HOLD + str(error)
             self._set(job_id, 'held', reason, record)
-            if record.get('removal_retry') == REMOVAL_RETRY:
-                _log('Old file kept: ' + str((record.get('review') or {}).get('title') or job_id) + ': ' + reason + ' (' + str(record.get('old_path')) + ')')
+            if record.get('removal_retry') == REMOVAL_RETRY or detail:
+                _log('Old file kept: ' + str((record.get('review') or {}).get('title') or job_id) + ': ' + reason
+                     + (' ' + detail if detail else '') + ' (' + str(record.get('old_path')) + ')')
             return
         self._follow_up(job_id)  # 0.30.0 item 2: an approved book now moves into its series folder
 
@@ -1802,6 +1893,8 @@ class SeriesBackfill:
         try:
             return present(path)
         except OSError as error:
+            if network_lost(error):
+                raise
             raise Later(DRIVE_AWAY + ' (' + (str(error) or type(error).__name__)[:200] + ')', self.clock() + 60) from None
 
     def _withdraw(self, job_id, record, new, temp, boundary):
@@ -2006,15 +2099,16 @@ class SeriesBackfill:
         temp = record.get('temp')
         if not temp:
             return
+        if not self._rows("SELECT 1 FROM owned_artifacts WHERE path=? AND job_id=? AND kind='temporary'", (str(temp), job_id)):
+            return  # a failed write may not have claimed or made any temporary file
         try:
-            if present(Path(temp)):
-                self._dispose_temporary(Path(temp))
-            self._forget_temporary(job_id, Path(temp))
-        except (OSError, ValueError) as error:
-            if isinstance(error, FileNotFoundError) and self._absent(record, temp):
-                # Senua's re-review M5: its folder is gone while the drive answers (Windows error 3): nothing is there to keep
+            with self._temporary_parent(record, Path(temp)):
+                if present(Path(temp)):
+                    self._dispose_temporary(Path(temp))
+                else:
+                    _log('Temporary file already gone: ' + str(temp))
                 self._forget_temporary(job_id, Path(temp))
-                return
+        except (OSError, ValueError) as error:
             reason = (str(error) or type(error).__name__)[:300]
             record['temp_left'] = {'path': str(temp), 'reason': reason, 'at': _stamp()}
             _log('Temporary file kept: ' + reason + ' (' + str(temp) + ')')

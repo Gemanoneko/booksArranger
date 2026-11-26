@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.31.4] - Unreleased
+
+### Fixed
+
+- When a book folder moves, cleanup logs that it could not locate the temporary copy and keeps the original path on record.
+- If the library answers but a book folder stays unreachable, cleanup retries twice and then records why both files were kept.
+- Cleanup waits for evidence that the library is accessible below the share root before using up its one-time retries.
+- Cleanup logging handles characters the log output cannot encode without interrupting the work.
+- A failed fresh attempt to write English names shows its reason in the backend log and in the "Could not be renamed or moved" entry.
+- If a folder change prevents a names update, the message explains that the audiobook is unchanged.
+
+### Changed
+
+- Source and recovery cleanup messages are saved in the rotating backend log.
+
 ## [v0.31.3] - 2026-11-25
 
 ### Fixed

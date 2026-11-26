@@ -455,7 +455,7 @@ class LeftoverTemporaryTests(unittest.TestCase):
             book.writer.run_pass()
         self.assertFalse(temp.exists(), 'the leftover went first')
         state, reason = book.state()
-        self.assertEqual((state, reason), ('held', 'The names could not be written; the audiobook is unchanged. The new names did not read back: title'))
+        self.assertEqual((state, reason), ('held', 'Couldn’t update the names. The audiobook is unchanged. The new names did not read back: title'))
         record = book.writer.entry(book.lib.job_id)['record']
         self.assertEqual((record['names_retry'], record['temp_retry']), (series_backfill.REMOVAL_RETRY, series_backfill.REMOVAL_RETRY))
         self.assertEqual(sha(book.path), book.original, 'the book is unchanged')
@@ -1070,7 +1070,7 @@ class ReviewMajorTests(HeldBook, unittest.TestCase):
                     lib.backfill().run_pass()
                 entry = lib.backfill().entry(lib.job_id)
                 self.assertEqual(entry['state'], 'cataloged', 'not recorded as removed, and not held N7: it waits')
-                self.assertTrue(entry['reason'].startswith(series_backfill.DRIVE_AWAY), entry['reason'])
+                self.assertEqual(entry['reason'], series_backfill.FOLDER_WAIT)
                 self.assertTrue(lib.path.exists(), 'the old file is still there')
                 self.assertEqual(lib.backfill()._cleanup_counts()['removed'], 0)
                 with nas_library(lib.root):
@@ -1323,7 +1323,7 @@ class ReReviewTests(HeldBook, unittest.TestCase):
                     self.at(hours).run_pass()
                 entry = lib.backfill().entry(lib.job_id)
                 self.assertEqual(entry['state'], 'cataloged', 'never done while the old file is on the share')
-                self.assertTrue(entry['reason'].startswith(series_backfill.DRIVE_AWAY), entry['reason'])
+                self.assertEqual(entry['reason'], series_backfill.FOLDER_WAIT)
                 self.assertEqual(lib.backfill()._cleanup_counts()['removed'], 0)
                 self.assertTrue(lib.path.exists())
         with nas_library(lib.root):
@@ -1341,7 +1341,7 @@ class ReReviewTests(HeldBook, unittest.TestCase):
             db.execute('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)', (str(temp), lib.job_id, 'temporary', '', 0))
         for code in UNREACHABLE_AS_NOT_FOUND:
             with self.subTest(winerror=code):
-                record = {'temp': str(temp)}
+                record = {'temp': str(temp), 'root': str(lib.root), 'parent_identity': lib.output['parent_identity']}
                 with lstat_fails(temp, code), mock.patch.object(series_backfill, '_log') as log:
                     backfill._discard_temp(lib.job_id, record)
                 self.assertEqual((record.get('temp_left') or {}).get('path'), str(temp), 'recorded as kept')
@@ -1359,9 +1359,19 @@ class ReReviewTests(HeldBook, unittest.TestCase):
         os.rename(folder, moved)
         return moved
 
+    @staticmethod
+    def other_publication(lib):
+        peer = lib.root / 'Another author' / 'Another book.m4b'
+        peer.parent.mkdir()
+        peer.write_bytes(b'other synthetic publication')
+        with connect(lib.db) as db:
+            db.execute('INSERT INTO verified_outputs VALUES(?,?,?,?,?)', (key(peer), sha(peer), 'peer', '[]', 'now'))
+        return peer
+
     def test_m5_a_retried_book_whose_folder_is_gone_is_held_n4_and_the_run_ends(self):
         lib = self.lib
         self.hold()
+        self.other_publication(lib)
         moved = self.rename_folder(lib.path)
         backfill = lib.backfill()
         backfill.merge.__dict__['series_backfill'] = backfill
@@ -1395,18 +1405,26 @@ class ReReviewTests(HeldBook, unittest.TestCase):
         self.assertEqual(book.writer.entry(book.lib.job_id), entry, 'settled')
 
     def test_m5_a_leftover_whose_folder_is_gone_settles(self):
-        """Card or Hobb with the book's folder renamed by hand: the leftover is not at its path (found gone), the one fresh try
-        runs and is held N4 with section 6's opening; it was skipped on every pass with no word."""
+        """An isolated renamed folder carries its copy with it. Both cleanup paths retain its last known path."""
         from test_name_write_031 import Book
         book = Book(self)
         temp = LeftoverTemporaryTests.leave(self, book)
+        self.other_publication(book.lib)
         moved = self.rename_folder(book.path)
-        with nas_library(book.lib.root):
+        logs = Path(self.temp.name) / 'Logs'
+        logs.mkdir()
+        with nas_library(book.lib.root), mock.patch.dict(os.environ, {series_backfill.LOG_DIR_ENV: str(logs)}):
             book.writer.run_pass()
+            discard = book.writer.entry(book.lib.job_id)['record'].copy()
+            book.writer._discard_temp(book.lib.job_id, discard)
         entry = book.writer.entry(book.lib.job_id)
-        self.assertTrue(entry['record']['temp_removed']['found_gone'])
-        self.assertEqual(entry['record']['names_retry'], series_backfill.REMOVAL_RETRY)
-        self.assertEqual((entry['state'], entry['reason']), ('held', name_write.NAMES_UNCHANGED + ' ' + series_backfill.FOLDER_CHANGED))
+        self.assertNotIn('temp_removed', entry['record'])
+        self.assertNotIn('names_retry', entry['record'])
+        self.assertEqual(discard['temp_left']['path'], str(temp))
+        self.assertEqual(entry['record']['temp_kept']['reason'], series_backfill.TEMP_FOLDER_UNKNOWN)
+        self.assertEqual(entry['state'], 'held')
+        self.assertEqual(LeftoverTemporaryTests.owned(self, book, temp), [(book.lib.job_id, 'temporary')])
+        self.assertEqual(len([line for line in CleanupLogFileTests.lines(logs) if str(temp) in line and series_backfill.TEMP_FOLDER_UNKNOWN in line]), 2)
         self.assertTrue((moved / temp.name).exists() and (moved / book.path.name).exists(), 'nothing was removed')
         book.writer.clock = lambda: __import__('time').time() + 3600
         with nas_library(book.lib.root):
@@ -1432,6 +1450,24 @@ class ReReviewTests(HeldBook, unittest.TestCase):
             self.assertTrue(backfill._drive_away(record, error), 'the same with the library folder not answering: the drive')
         self.assertTrue(backfill._drive_away({'old_path': record['old_path']}, error), 'no root recorded: cannot be told, it waits')
 
+    def test_recreated_parent_with_empty_original_name_never_confirms_temp_gone(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = LeftoverTemporaryTests.leave(self, book)
+        moved = self.rename_folder(temp)
+        temp.parent.mkdir()  # different directory at precisely the recorded name
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+            record = book.writer.entry(book.lib.job_id)['record']
+            temp.write_bytes(b'unrelated copy at the old name')
+            book.writer._discard_temp(book.lib.job_id, record)
+        self.assertEqual(record['temp_kept']['reason'], series_backfill.TEMP_FOLDER_UNKNOWN)
+        self.assertEqual(record['temp_left']['reason'], series_backfill.TEMP_FOLDER_UNKNOWN)
+        self.assertNotIn('names_retry', record)
+        self.assertTrue((moved / temp.name).is_file())
+        self.assertEqual(temp.read_bytes(), b'unrelated copy at the old name')
+        self.assertEqual(LeftoverTemporaryTests.owned(self, book, temp), [(book.lib.job_id, 'temporary')])
+
     # m7: a short network error of another kind (not AncestorUnavailable, the library folder answering right after) waits.
     def waits_then_finishes(self, *patches):
         lib = self.lib
@@ -1441,7 +1477,7 @@ class ReReviewTests(HeldBook, unittest.TestCase):
                 stack.enter_context(patch)
             lib.backfill().run_pass()
         entry = lib.backfill().entry(lib.job_id)
-        self.assertEqual((entry['state'], entry['reason']), ('cataloged', series_backfill.DRIVE_AWAY), 'it waits; the one-time retry is not used up')
+        self.assertEqual((entry['state'], entry['reason']), ('cataloged', series_backfill.FOLDER_WAIT), 'reachable library, retry this file')
         self.assertTrue(lib.path.exists() and lib.target.exists())
         with nas_library(lib.root):
             self.at(1).run_pass()
@@ -1542,6 +1578,7 @@ class ReReviewTests(HeldBook, unittest.TestCase):
                 self.assertEqual({k: record['temp_removed'][k] for k in ('path', 'found_gone', 'method')}, {'path': str(temp), 'found_gone': True, 'method': None},
                                  'counted removed, and known as found gone (not removed by this pass)')
                 self.assertFalse(any('A temporary file is still there' in call.args[0] for call in log.call_args_list))
+                self.assertIn('Leftover temporary file already gone: ' + str(temp), [call.args[0] for call in log.call_args_list])
                 self.assertEqual(LeftoverTemporaryTests.owned(self, book, temp), [], 'no ownership row is left for a file that is not there')
                 self.assertEqual(book.state(), ('done', ''), "Sergei's ruling 4: the one fresh try ran")
                 self.assertEqual(record['names_retry'], series_backfill.REMOVAL_RETRY)
@@ -1569,7 +1606,11 @@ class ReReviewTests(HeldBook, unittest.TestCase):
                     book.writer.run_pass()
                 record = book.writer.entry(book.lib.job_id)['record']
                 self.assertNotIn('temp_removed', record)
-                self.assertEqual(record['temp_kept']['reason'], series_backfill.TEMP_WRITTEN_AFTER)
+                self.assertNotIn('temp_retry', record)
+                book.writer.clock = lambda: __import__('time').time() + 120
+                with nas_library(book.lib.root):
+                    book.writer.run_pass()
+                self.assertEqual(book.writer.entry(book.lib.job_id)['record']['temp_kept']['reason'], series_backfill.TEMP_WRITTEN_AFTER)
                 self.assertTrue(temp.exists())
 
 
@@ -1612,6 +1653,129 @@ class CleanupLogFileTests(HeldBook, unittest.TestCase):
         lines = self.lines(folder)
         self.assertEqual(len(lines), 2)
         self.assertTrue(lines[0].endswith('Old file kept: Сага теней: first second'), lines[0])
+
+    def test_source_refusal_and_late_write_share_rotation_and_escape_unencodable_text(self):
+        import io
+        from concurrent.futures import ThreadPoolExecutor
+        folder, merge = self.logs(), self.lib.merge()
+        stderr = io.StringIO()
+        def refuse():
+            for _ in range(2):
+                merge._remove_missing([], [('job', {}, {'why': 'probe \udcff'})], 1)
+        with mock.patch.dict(os.environ, {self.ENV: str(folder)}), mock.patch.object(series_backfill, 'LOG_LIMIT', 230), contextlib.redirect_stderr(stderr):
+            series_backfill._log('start ' + 'x' * 155)
+            with ThreadPoolExecutor(2) as workers:
+                futures = [workers.submit(refuse), workers.submit(series_backfill._log, 'late write \ud800')]
+                for future in futures:
+                    future.result()
+        lines = self.lines(folder, series_backfill.LOG_PREVIOUS) + self.lines(folder)
+        self.assertEqual(sum('Missing finished books were not removed' in line for line in lines), 1)
+        self.assertTrue(any(r'probe \udcff' in line for line in lines))
+        self.assertTrue(any(r'late write \ud800' in line for line in lines))
+        self.assertEqual(stderr.getvalue().count('Missing finished books were not removed'), 1)
+        self.assertTrue((folder / series_backfill.LOG_PREVIOUS).is_file())
+
+    def test_reachable_library_bounds_network_error_across_restarts(self):
+        lib, folder = self.lib, self.logs()
+        self.hold()
+        for attempt in range(series_backfill.NETWORK_RETRIES + 1):
+            worker = lib.backfill()
+            worker.clock = lambda: 1000 + 60 * attempt
+            with mock.patch.dict(os.environ, {self.ENV: str(folder)}), nas_library(lib.root), lstat_fails(lib.path, 59):
+                worker.run_pass()
+            entry = worker.entry(lib.job_id)
+            if attempt < series_backfill.NETWORK_RETRIES:
+                self.assertEqual((entry['state'], entry['reason'], entry['record']['next_attempt']), ('cataloged', series_backfill.FOLDER_WAIT, worker.clock() + 60))
+        self.assertEqual((entry['state'], entry['reason']), ('held', series_backfill.FOLDER_UNREACHABLE))
+        self.assertTrue(lib.path.is_file() and lib.target.is_file())
+        self.assertEqual(worker._cleanup_counts(), {'total': 1, 'removed': 0, 'kept': 1, 'freed': 0})
+        self.assertEqual(len(self.lines(folder)), 1)
+        self.assertIn('WinError 59', self.lines(folder)[0])
+
+    def test_leftover_has_bounded_network_retries_without_spending_names_try(self):
+        from test_name_write_031 import Book
+        book, logs = Book(self), self.logs()
+        temp = LeftoverTemporaryTests.leave(self, book)
+        for attempt in range(series_backfill.NETWORK_RETRIES + 1):
+            book.writer.clock = lambda: 1000 + 60 * attempt
+            with mock.patch.dict(os.environ, {self.ENV: str(logs)}), nas_library(book.lib.root), lstat_fails(temp, 53):
+                book.writer.run_pass()
+            entry = book.writer.entry(book.lib.job_id)
+            if attempt < series_backfill.NETWORK_RETRIES:
+                self.assertEqual(book.writer._next_wait(), 60)
+                self.assertNotIn('temp_retry', entry['record'])
+        self.assertEqual(entry['record']['temp_kept']['reason'], series_backfill.FOLDER_UNREACHABLE)
+        self.assertNotIn('names_retry', entry['record'])
+        self.assertTrue(temp.is_file() and book.path.is_file())
+        self.assertEqual(LeftoverTemporaryTests.owned(self, book, temp), [(book.lib.job_id, 'temporary')])
+        self.assertEqual(len(self.lines(logs)), 1)
+        self.assertIn('WinError 53', self.lines(logs)[0])
+
+    def test_empty_answering_share_preserves_retry_until_tree_returns(self):
+        lib = self.lib
+        before = self.hold().entry(lib.job_id)
+        hidden = lib.base / 'detached volume'
+        lib.root.rename(hidden)
+        lib.root.mkdir()
+        (lib.root / 'unrelated').mkdir()
+        worker = lib.backfill()
+        worker.merge.series_backfill = worker
+        for _ in range(2):
+            worker.run_pass()
+            self.assertEqual(worker.entry(lib.job_id), before)
+            self.assertEqual(worker._library_wait(before['record']), series_backfill.TREE_WAIT)
+            self.assertEqual(worker._cleanup_counts(), {'total': 1, 'removed': 0, 'kept': 0, 'freed': 0})
+            self.assertEqual(series_backfill.cleanup_view(worker.merge)['left'], 1)
+            self.assertEqual(CleanupViewTests.work(self, worker.merge)['state'], 'continues')
+        (lib.root / 'unrelated').rmdir()
+        lib.root.rmdir()
+        hidden.rename(lib.root)
+        self.assertTrue(lib.path.exists() and lib.target.exists())
+        with nas_library(lib.root):
+            worker.run_pass()
+        self.assertEqual(worker._cleanup_counts(), {'total': 1, 'removed': 1, 'kept': 0, 'freed': before['record']['old_size']})
+
+    def test_fresh_names_failure_logs_book_and_cause_once_then_stays_held(self):
+        from test_name_write_031 import Book
+        book, logs = Book(self), self.logs()
+        temp = LeftoverTemporaryTests.leave(self, book)
+        ReReviewTests.other_publication(book.lib)
+        real = book.writer._leftover_outcome
+        def after_cleanup(entry, record, path):
+            outcome = real(entry, record, path)
+            ReReviewTests.rename_folder(book.path)
+            return outcome
+        with mock.patch.dict(os.environ, {self.ENV: str(logs)}), nas_library(book.lib.root), mock.patch.object(book.writer, '_leftover_outcome', after_cleanup):
+            book.writer.run_pass()
+            book.writer.run_pass()
+        state, reason = book.state()
+        self.assertEqual((state, reason), ('held', 'Couldn’t update the names. The audiobook is unchanged. The book’s folder changed since the app checked it.'))
+        self.assertFalse(temp.exists())
+        lines = [line for line in self.lines(logs) if 'Fresh names try failed' in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn(book.lib.job_id, lines[0])
+        self.assertIn(reason, lines[0])
+        book.filing.tick(dispatch=False)
+        self.assertEqual(book.filing.could_not()['entries'][0]['names_failure'], reason)
+
+    def test_fresh_names_wait_if_the_tree_disappears_after_temp_cleanup(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        temp = LeftoverTemporaryTests.leave(self, book)
+        with nas_library(book.lib.root):
+            book.writer._clear_leftover_temporaries()
+        self.assertFalse(temp.exists())
+        hidden = book.lib.base / 'detached'
+        book.lib.root.rename(hidden)
+        book.lib.root.mkdir()
+        book.writer.run_pass()
+        self.assertEqual(book.state(), ('deferred', series_backfill.TREE_WAIT))
+        book.lib.root.rmdir()
+        hidden.rename(book.lib.root)
+        book.writer.clock = lambda: __import__('time').time() + 120
+        with nas_library(book.lib.root):
+            book.writer.run_pass()
+        self.assertEqual(book.state(), ('done', ''))
 
     def test_the_file_is_bounded_and_keeps_the_previous_one(self):
         folder = self.logs()

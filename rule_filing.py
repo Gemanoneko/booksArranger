@@ -570,6 +570,12 @@ class RuleFiling:
         for item in answer['refused']:
             if item.get('refused_key') in sorting_moves.LASTING_KEYS and item['job_id'] not in waits and not (item['job_id'] in opened and opened[item['job_id']]['step']):
                 could.append(self._could(item, OLD_FILE_KEPT if item['job_id'] in kept_old else item['refused_key'], output_root))
+        fresh_failures = getattr(merge.__dict__.get('name_write'), 'fresh_failures', None)
+        if could and callable(fresh_failures):
+            failures = fresh_failures()
+            for entry in could:
+                if entry['job_id'] in failures and entry['key'] != OLD_FILE_KEPT:
+                    entry['names_failure'] = failures[entry['job_id']]
         # An entry in hand with nothing queued whose book the list no longer moves (he chose its folder meanwhile, or the
         # list now refuses it): closed. Its series was written and the file renamed in its own folder: that is the change.
         for job, filing in opened.items():

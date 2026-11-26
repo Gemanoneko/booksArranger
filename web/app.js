@@ -1697,7 +1697,10 @@ const COULD_NOT_REASONS={name_exists:'A file with that name is already there.',s
   old_file_kept:'The old file was not removed.'};
 // 0.31.3 (6): an entry whose last try did not write the new names (cause tags_not_written) says so in place of "did not finish".
 const NAMES_NOT_WRITTEN='The names could not be written; the audiobook is unchanged.';
-function couldNotReason(entry){return entry?.key==='did_not_finish' && entry.cause==='tags_not_written'?NAMES_NOT_WRITTEN:COULD_NOT_REASONS[entry?.key] || '';}
+function couldNotReason(entry){
+  if(entry?.names_failure)return entry.names_failure;
+  return entry?.key==='did_not_finish' && entry.cause==='tags_not_written'?NAMES_NOT_WRITTEN:COULD_NOT_REASONS[entry?.key] || '';
+}
 function filingDate(value){
   const date=new Date(value);if(!value || !Number.isFinite(date.getTime()))return '';
   return new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}).format(date);

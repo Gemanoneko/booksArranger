@@ -87,6 +87,8 @@ assert.equal(run('byteSize(612367405)'),'584 MB');assert.equal(run('byteSize(5*1
 
 // 5. "Could not be renamed or moved" (4, 6): a kept book, and an entry whose last try did not write the new names.
 assert.equal(run("couldNotReason({key:'old_file_kept'})"),'The old file was not removed.');
+assert.equal(run("couldNotReason({key:'not_app_name',names_failure:'Couldn’t update the names. The audiobook is unchanged. The folder moved.'})"),
+  'Couldn’t update the names. The audiobook is unchanged. The folder moved.');
 assert.equal(run("couldNotReason({key:'did_not_finish',cause:'tags_not_written'})"),'The names could not be written; the audiobook is unchanged.');
 assert.equal(run("couldNotReason({key:'did_not_finish',cause:'other'})"),'The rename or move did not finish.','control: any other cause keeps its sentence');
 assert.equal(run("couldNotReason({key:'not_app_name'})"),"Its file name is not one the app gave it.",'control: the other keys are as they were');

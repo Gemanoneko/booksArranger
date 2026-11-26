@@ -6337,10 +6337,9 @@ class MergeService:
 
     @staticmethod
     def _removal_log(line):
-        """A normal-level line in the engine's own log, with the time (Judy's spec, 8.2)."""
-        import sys
-        try:print('Books Arranger '+time.strftime('%Y-%m-%d %H:%M:%S')+': '+line,file=sys.stderr,flush=True)
-        except Exception:pass
+        """Source and recovery cleanup use the same timestamp, stderr and rotating file as late writes."""
+        from series_backfill import _log
+        _log(line)
 
     def relinked_view(self):
         """{count, last_age_ms} for the page's status line (Judy's spec, 8.4): finished books found again since the current

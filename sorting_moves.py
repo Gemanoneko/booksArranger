@@ -290,7 +290,8 @@ NOT_MOVED_KEYS = (('file_changed', ('The book changed since you approved', 'The 
                   # 0.31.0 R27: the new title or author credit did not go into the file (a name that did not read back,
                   # a write of names that failed, names its facts contradict); the book is left as it was. Only the write
                   # of names' own sentences: a series write's own failures keep their keys ('other').
-                  ('tags_not_written', ('The new names did not read back', 'The names could not be written', "does not fit the book's recorded author credit")))
+                  ('tags_not_written', ('The new names did not read back', 'The names could not be written', 'Couldn’t update the names.',
+                                        "does not fit the book's recorded author credit")))
 # The keys of a write of names (rule_filing, step 'names'): the proofs it shares with the series write are its own failures
 # to write the tags there.
 NAMES_NOT_WRITTEN_KEYS = tuple((name, marks + ('changed while retagging', 'cannot be retagged safely', 'The audio decoder configuration')) if name == 'tags_not_written'

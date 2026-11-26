@@ -84,6 +84,7 @@ NAMES_FAILED = 'The names could not be written; the audiobook is unchanged: '
 # Judy's late-write clean-up spec, section 6: what a write of names whose leftover temporary file was handled says (the
 # key tags_not_written still finds "The names could not be written"). With the file kept: TEMP_LEFT + its path.
 NAMES_UNCHANGED = 'The names could not be written; the audiobook is unchanged.'
+FRESH_NAMES_FAILED = 'Couldn’t update the names. The audiobook is unchanged.'
 TEMP_LEFT = ' A temporary file is still there: '
 # The marks of the leftover handling and of Sergei's ruling 4 (one more try) that a new write of the same book keeps.
 RETRY_KEYS = ('temp_retry', 'temp_removed', 'temp_kept', 'names_retry')
@@ -315,12 +316,6 @@ class NameWrite(SeriesBackfill):
             self.wake.wait(self._next_wait())
             self.wake.clear()
 
-    def _next_wait(self):
-        due = [json.loads(row['record']).get('next_attempt') for row in
-               self._rows("SELECT record FROM name_writes WHERE state NOT IN (%s)" % ','.join('?' * len(FINAL)), FINAL)]
-        due = [value for value in due if isinstance(value, (int, float))]
-        return max(30, min(PASS_WAIT, min(due) - self.clock())) if due else PASS_WAIT
-
     def status(self):
         """The running row: {'title', 'step': 'updating'} while a book's names are being written, else None."""
         value = self.progress
@@ -337,14 +332,33 @@ class NameWrite(SeriesBackfill):
 
     def _set(self, job_id, state, reason='', record=None):
         with connect(self.database) as db:
-            prior = db.execute('SELECT record FROM name_writes WHERE job_id=?', (job_id,)).fetchone()
+            prior = db.execute('SELECT record,state FROM name_writes WHERE job_id=?', (job_id,)).fetchone()
             value = record if record is not None else (json.loads(prior[0]) if prior else {})
+            # A hold before the catalog names the rewritten file ends that fresh names try. This also
+            # covers rename collisions and interrupted writes finished through the inherited resume().
+            fresh_failure = (state == 'held' and prior and prior[1] not in ('held', 'cataloged', 'done')
+                             and value.get('names_retry') == series_backfill.REMOVAL_RETRY
+                             and reason != series_backfill.FOLDER_UNREACHABLE)
+            if fresh_failure:
+                cause = reason.removeprefix(NAMES_FAILED)
+                if cause == series_backfill.FOLDER_CHANGED:
+                    cause = 'The book’s folder changed since the app checked it.'
+                reason = FRESH_NAMES_FAILED + (' ' + cause if cause else '')
             db.execute('INSERT OR REPLACE INTO name_writes VALUES(?,?,?,?,?)',
                        (job_id, state, reason, json.dumps(value, ensure_ascii=False), series_backfill._stamp()))
+        if fresh_failure:
+            title = (value.get('review') or {}).get('title') or (value.get('approved_names') or {}).get('title') or Path(value.get('old_path') or job_id).stem
+            series_backfill._log('Fresh names try failed: ' + str(title) + ' (' + job_id + '): ' + reason)
         self._changed()
         notify = getattr(self.merge.__dict__.get('rule_filing'), 'notify', None)
         if state in FINAL and callable(notify):
             notify()  # the rules' pass closes this book's entry and puts the next one in hand
+
+    def fresh_failures(self):
+        """Current failed fresh writes, for an existing entry in the could-not list."""
+        return {row['job_id']: row['reason'] for row in self._rows(
+            "SELECT job_id,reason FROM name_writes WHERE state='held' AND reason LIKE ? AND json_valid(record) "
+            "AND json_extract(record,'$.names_retry')=?", (FRESH_NAMES_FAILED + '%', series_backfill.REMOVAL_RETRY))}
 
     def summary(self):
         """Plain counts for the page (background_work), a catalog read: {'waiting': approved writes that wait for a job, a
@@ -421,16 +435,10 @@ class NameWrite(SeriesBackfill):
             record.pop('next_attempt', None)
             return 'pending', ''
         if record.get('temp_kept'):
+            if record['temp_kept']['reason'] in (series_backfill.TEMP_FOLDER_UNKNOWN, series_backfill.FOLDER_UNREACHABLE):
+                return super()._leftover_outcome(entry, record, temp)
             return 'held', NAMES_UNCHANGED + TEMP_LEFT + str(temp)
         return 'held', NAMES_UNCHANGED
-
-    @staticmethod
-    def _failed(record, reason):
-        """The hold of a failed write. The one more try of ruling 4 fails with section 6's sentence, its cause after it."""
-        if not isinstance(record, dict) or record.get('names_retry') != series_backfill.REMOVAL_RETRY:
-            return reason
-        cause = reason[len(NAMES_FAILED):] if reason.startswith(NAMES_FAILED) else reason
-        return NAMES_UNCHANGED + (' ' + cause if cause else '')
 
     def _series_in_hand(self, job_id):
         """The series look-up is writing this book, or has an approved write of it waiting: one writer per file."""
@@ -488,6 +496,10 @@ class NameWrite(SeriesBackfill):
                     raise Held(reason)
                 if not self._answers(published_root(manifest, json.loads(book[0]['output']))):
                     raise Later(DRIVE_AWAY, self.clock() + 60)  # no try: nothing is read from a drive that is away
+                if entry['record'].get('names_retry') == series_backfill.REMOVAL_RETRY:
+                    wait = self._library_wait(entry['record'])
+                    if wait:
+                        raise Later(wait, self.clock() + 60)
                 self.progress = {'title': str(manifest['metadata'].get('title') or ''), 'step': 'updating'}  # the title the list shows until the write lands
                 self.apply(job_id)
             except Blocked as blocked:
@@ -497,9 +509,9 @@ class NameWrite(SeriesBackfill):
             except InterruptedError:
                 return
             except Held as held:
-                self._set(job_id, 'held', self._failed(entry['record'], str(held)), dict(entry['record']))
+                self._set(job_id, 'held', str(held), entry['record'])
             except Exception as error:
-                self._set(job_id, 'held', self._failed(entry['record'], NAMES_FAILED + (str(error) or type(error).__name__)[:300]), dict(entry['record']))
+                self._set(job_id, 'held', NAMES_FAILED + (str(error) or type(error).__name__)[:300], entry['record'])
             finally:
                 self.progress = None
 
@@ -579,7 +591,7 @@ class NameWrite(SeriesBackfill):
                 self._write(job_id, manifest, output, old, temp, review, record)
         except Held as held:
             self._discard_temp(job_id, record)
-            self._set(job_id, 'held', self._failed(record, str(held)), record)
+            self._set(job_id, 'held', str(held), record)
             return
         except (Later, InterruptedError):
             self._discard_temp(job_id, record)
@@ -587,17 +599,25 @@ class NameWrite(SeriesBackfill):
             raise
         except Exception as error:
             self._discard_temp(job_id, record)
-            if self._drive_away(dict(record, root=record.get('root') or str(root)), error):
+            record.setdefault('root', str(root))
+            wait = ''
+            if record.get('names_retry') == series_backfill.REMOVAL_RETRY:
+                if 'folder_network_errors' in prior:
+                    record['folder_network_errors'] = prior['folder_network_errors']
+                wait = self._network_wait(record, error)
+            elif self._drive_away(record, error):
+                wait = DRIVE_AWAY
+            if wait:
                 # Senua's 0.31.3 review, M2: the drive went away during the write. No try is used (ruling 4's one fresh try
                 # included): the write waits, as it waits when the drive is away before it starts (_pass, DRIVE_AWAY).
                 self._set(job_id, 'pending', '', record)
-                raise Later(DRIVE_AWAY, self.clock() + 60) from None
+                raise Later(wait, self.clock() + 60) from None
             if isinstance(error, AncestorUnavailable):
                 # Senua's re-review at 520ee66, M5: the drive answers and the book's folder is gone: N4, stored as a Held
                 # reason is (the series write's step holds it the same way); nothing was written.
-                self._set(job_id, 'held', self._failed(record, series_backfill.FOLDER_CHANGED), record)
+                self._set(job_id, 'held', series_backfill.FOLDER_CHANGED, record)
                 return
-            self._set(job_id, 'held', self._failed(record, NAMES_FAILED + (str(error) or type(error).__name__)), record)
+            self._set(job_id, 'held', NAMES_FAILED + (str(error) or type(error).__name__), record)
             return
         finally:
             self._clear_stage(job_id)
