@@ -33,7 +33,7 @@ import threading
 import time
 from pathlib import Path
 
-from native_io import AncestorUnavailable, BoundaryError, DirectoryBoundary, VerifiedFile, ordinary, publish_no_replace
+from native_io import AncestorUnavailable, BoundaryError, DirectoryBoundary, VerifiedFile, created_facts, ordinary, publish_no_replace
 from scanner import connect
 
 def published_root(manifest, output):
@@ -179,7 +179,9 @@ DRIVE_AWAY = 'The library drive is not answering'
 TREE_WAIT = 'Waiting for the audiobook library folders to become available.'
 FOLDER_WAIT = 'Waiting to reach the book’s folder.'
 FOLDER_UNREACHABLE = 'Couldn’t reach the book’s folder. Both files were kept.'
+REMOVAL_UNCONFIRMED = 'Couldn’t verify whether the old file was removed.'
 TEMP_FOLDER_UNKNOWN = 'The original folder is missing or has changed. The temporary copy could not be located.'
+TEMP_UNPROVEN = 'The app could not confirm it created this temporary file. The file was kept.'
 NETWORK_RETRIES = 2
 # Judy's spec 4 and 7.3: the clean-up's outcome shows on the status line for this long after its last book settles.
 LATE_SHOW_MS = 3600000
@@ -634,29 +636,48 @@ class SeriesBackfill:
         # enumeration, no alternate target. With no witness, leave the one-time mark unused.
         prefix = os.path.normcase(os.path.join(str(root), ''))
         excluded = os.path.normcase(str(first)) + (os.sep if len(parts) > 1 else '')
+        cursors = self.__dict__.setdefault('_library_witness_cursor', {})
+        cursor = cursors.get(excluded, '')
         peers = self._rows("SELECT DISTINCT path FROM verified_outputs WHERE substr(path,1,?)=? COLLATE NOCASE "
-                           "AND substr(path,1,?)<>? COLLATE NOCASE LIMIT 8", (len(prefix), prefix, len(excluded), excluded))
+                           "AND substr(path,1,?)<>? COLLATE NOCASE AND path>? COLLATE NOCASE "
+                           "ORDER BY path COLLATE NOCASE LIMIT 8", (len(prefix), prefix, len(excluded), excluded, cursor))
         for peer in peers:
             try:
                 path = ordinary(peer['path'])
             except (TypeError, ValueError):
                 continue
             if path.is_relative_to(root) and os.path.isfile(path):
+                # Keep this page while a book runs: its preflight and error handler must see the same witness.
                 return ''
+        if len(peers) == 8:
+            cursors[excluded] = peers[-1]['path']
+        else:
+            cursors.pop(excluded, None)
         return TREE_WAIT
 
     def _network_wait(self, record, error):
         """A real outage costs no attempt. Only repeated network errors on a reachable library are bounded."""
         unavailable = self._library_wait(record)
         if unavailable:
-            return unavailable
-        if network_lost(error):
+            return unavailable, ''
+        detail = network_error_detail(error)
+        if not detail and isinstance(error, AncestorUnavailable):
+            # The native boundary found an unavailable directory with exists(), which loses the
+            # Windows error. Ask the recorded ancestors again, preserving the failing probe.
+            try:
+                if not self._absent(record, Path(record['old_path']).parent, report_error=True):
+                    return DRIVE_AWAY, ''
+            except OSError as probe_error:
+                detail = network_error_detail(probe_error)
+                if not detail:
+                    return DRIVE_AWAY, ''
+        if detail:
             failures = record.get('folder_network_errors', 0) + 1
             record['folder_network_errors'] = failures
-            return FOLDER_WAIT if failures <= NETWORK_RETRIES else ''
-        return DRIVE_AWAY if self._drive_away(record, error) else ''
+            return (FOLDER_WAIT if failures <= NETWORK_RETRIES else ''), detail
+        return '', ''
 
-    def _absent(self, record, path):
+    def _absent(self, record, path, *, report_error=False):
         """M5: this path is positively not there while the drive answers. The library folder (record 'root') answers, and
         walking down from it, a name on the way is not found (present(): Windows error 2, so the folder it is in answered).
         A folder renamed, moved or deleted is not a drive that is away. Anything that cannot be told (no root, a path
@@ -675,6 +696,8 @@ class SeriesBackfill:
                 if not present(current):
                     return True
         except OSError:
+            if report_error:
+                raise
             return False
         return False
 
@@ -1189,7 +1212,7 @@ class SeriesBackfill:
             except InterruptedError:
                 return  # closing: nothing was removed, the next run starts again
             except Exception as error:
-                wait = self._network_wait(record, error)
+                wait, network = self._network_wait(record, error)
                 if wait:
                     if wait == FOLDER_WAIT:
                         record.pop('temp_retry')
@@ -1198,7 +1221,6 @@ class SeriesBackfill:
                         self._set(row['job_id'], 'held', entry['reason'], record)
                     continue
                 detail = str(error) or type(error).__name__
-                network = network_error_detail(error)
                 reason = FOLDER_UNREACHABLE if network else detail[:300]
                 record['temp_kept'] = {'path': str(temp), 'reason': reason, 'at': _stamp()}
                 _log('Leftover temporary file kept: ' + reason + (' ' + network if network else '') + ' (' + str(temp) + ')')
@@ -1657,15 +1679,16 @@ class SeriesBackfill:
                     raise Held('The published audiobook changed since it was verified; left as it is')
                 record['old_identity'] = original.facts()['identity']
                 self._set(job_id, 'writing', '', record)
-                self._own_temporary(job_id, temp)
                 self._write(job_id, manifest, output, old, temp, review, record)
         except Held as held:
             self._discard_temp(job_id, record)
             self._set(job_id, 'held', str(held), record)
             return
         except (Later, InterruptedError):
-            self._discard_temp(job_id, record)
-            self._set(job_id, 'pending', '', record)
+            refusal = self._discard_temp(job_id, record)
+            self._set(job_id, 'held' if refusal else 'pending', refusal or '', record)
+            if refusal:
+                return
             raise
         except Exception as error:
             self._discard_temp(job_id, record)
@@ -1705,7 +1728,10 @@ class SeriesBackfill:
         from quicktime_chapters import retag, media_unchanged, ChapterFormatError
         from audio_pipeline import audio_packet_hash, copied_audio_evidence, probe
         try:
-            receipt = retag(old, temp, self.stop, self._tags(manifest['metadata'], review, record))
+            if self._rows('SELECT 1 FROM owned_artifacts WHERE path=? COLLATE NOCASE', (str(temp),)):
+                raise Held(TEMP_UNPROVEN)
+            receipt = retag(old, temp, self.stop, self._tags(manifest['metadata'], review, record),
+                            on_created=lambda stream: self._own_temporary(job_id, temp, record, stream))
             if receipt['input_sha256'] != output['sha256'] or receipt['input_size'] != output['size']:
                 raise Held('The published audiobook changed since it was verified; left as it is')
             media_unchanged(old, temp, self.stop)
@@ -1724,6 +1750,8 @@ class SeriesBackfill:
         stat = temp.stat()
         record.update(new_sha256=sha256(temp, self.stop), new_size=stat.st_size, new_mtime=stat.st_mtime_ns)
         with VerifiedFile(temp) as written:
+            if self._creation_identity(written.facts()) != record['temp_identity']:
+                raise Held(TEMP_UNPROVEN)
             if written.facts()['size'] != record['new_size'] or written.sha256() != record['new_sha256']:
                 raise Held('The new file changed during verification; the audiobook is unchanged')
             record['new_identity'] = written.facts()['identity']
@@ -1760,30 +1788,31 @@ class SeriesBackfill:
         temp, new, old = Path(record['temp']), Path(record['new_path']), Path(record['old_path'])
         if state == 'writing':
             # Stopped while writing: the new file is not proven, so it goes; the published file never changed.
-            self._discard_temp(job_id, record)
-            self._set(job_id, 'pending', '', record)
+            refusal = self._discard_temp(job_id, record)
+            self._set(job_id, 'held' if refusal else 'pending', refusal or '', record)
             return
         try:
             # Ruling 27: the rename, the catalog record and the former file's removal finish once begun.
             with critical_sections.critical(critical_sections.RENAME), self._boundary(record) as boundary:
                 self._resume_protected(job_id, record, state, temp, new, old, boundary)
         except (BoundaryError, OSError, Held, KeyError) as error:
-            wait = self._network_wait(record, error) if not isinstance(error, Held) else ''
+            wait, detail = self._network_wait(record, error) if not isinstance(error, Held) else ('', '')
             if wait:
                 if wait == FOLDER_WAIT:
                     self._set(job_id, self.entry(job_id)['state'], '', record)
                 raise Later(wait, self.clock() + 60) from None
-            detail = network_error_detail(error)
             if detail:
-                error = Held(FOLDER_UNREACHABLE)
+                record['folder_network_error'] = detail
+                error = Held(REMOVAL_UNCONFIRMED if getattr(error, 'removal_unconfirmed', False) else FOLDER_UNREACHABLE)
             if isinstance(error, AncestorUnavailable):
                 error = Held(FOLDER_CHANGED)  # Senua's re-review M5: the drive answers and the book's folder is gone (N4)
             # Judy's spec 5.3: a reason of section 5 (Held) is stored as it is, without the engine's prefix; any other error
             # keeps RECOVERY_HOLD (so a removal refused again still reads as _removal_retained expects).
             reason = str(error) if isinstance(error, Held) else RECOVERY_HOLD + str(error)
-            self._set(job_id, 'held', reason, record)
-            if record.get('removal_retry') == REMOVAL_RETRY or detail:
-                _log('Old file kept: ' + str((record.get('review') or {}).get('title') or job_id) + ': ' + reason
+            stored = self._set(job_id, 'held', reason, record)
+            if (record.get('removal_retry') == REMOVAL_RETRY or detail) and (not stored or stored == reason):
+                prefix = 'Old file removal unconfirmed: ' if reason == REMOVAL_UNCONFIRMED else 'Old file kept: '
+                _log(prefix + str((record.get('review') or {}).get('title') or job_id) + ': ' + reason
                      + (' ' + detail if detail else '') + ' (' + str(record.get('old_path')) + ')')
             return
         self._follow_up(job_id)  # 0.30.0 item 2: an approved book now moves into its series folder
@@ -1868,7 +1897,7 @@ class SeriesBackfill:
                         return
                     withdrawn = True  # its own copy goes once this handle is closed (_withdraw)
             if not withdrawn:
-                if self._seen(old):
+                if self._seen(old, removal_intended=record.get('removal_intended', False)):
                     self._names_rewritten(job_id, record)
                     with self._protected(old, record, 'old', delete=True) as former:
                         if record['old_identity'] == record['new_identity']:
@@ -1878,7 +1907,7 @@ class SeriesBackfill:
                         record['removal_version'] = REMOVAL_RETRY  # Senua m3: a removal this version began; never one of 0.31.2's holds
                         self._set(job_id, 'cataloged', '', record)
                         former.dispose(remote_legacy=lambda handle: self._last_checks(handle, record, 'old', boundary, kept, new))
-                    if self._seen(old):
+                    if self._seen(old, removal_intended=True):
                         raise Held(OLD_STILL_THERE)  # N6
                 elif not record.get('removal_intended'):
                     raise Held(OLD_MISSING)  # N7
@@ -1887,13 +1916,14 @@ class SeriesBackfill:
         if withdrawn:
             self._withdraw(job_id, record, new, temp, boundary)
 
-    def _seen(self, path):
+    def _seen(self, path, *, removal_intended=False):
         """present(path) for the old file's step. Senua's 0.31.3 review, M3: when it cannot be told (a network error), the step
         waits (Later) and runs again; it never reads as "gone", so an old file is recorded removed only when it is."""
         try:
             return present(path)
         except OSError as error:
             if network_lost(error):
+                error.removal_unconfirmed = removal_intended
                 raise
             raise Later(DRIVE_AWAY + ' (' + (str(error) or type(error).__name__)[:200] + ')', self.clock() + 60) from None
 
@@ -2085,12 +2115,23 @@ class SeriesBackfill:
             pass
 
     # ------------------------------------------------------------------ owned temporary file
-    def _own_temporary(self, job_id, temp):
-        """The new file is app-owned while it exists, so a library scan never catalogs it."""
+    @staticmethod
+    def _creation_identity(facts):
+        return [facts['identity_method'], facts['dev'], facts['ino']]
+
+    def _own_temporary(self, job_id, temp, record, stream):
+        """Bind scan ownership and the creating handle's identity in one durable transaction."""
+        identity = self._creation_identity(created_facts(temp, stream))
         with connect(self.database) as db:
-            db.execute('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)', (str(temp), job_id, 'temporary', '', 0))
-        if temp.exists():
-            self._dispose_temporary(temp)  # our own unproven file from an interrupted pass
+            db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT 1 FROM owned_artifacts WHERE path=? COLLATE NOCASE', (str(temp),)).fetchone():
+                raise Held(TEMP_UNPROVEN)
+            db.execute('INSERT INTO owned_artifacts VALUES(?,?,?,?,?)', (str(temp), job_id, 'temporary', '', 0))
+            updated = db.execute('UPDATE ' + self.LEDGER + " SET record=? WHERE job_id=? AND state='writing' AND json_extract(record,'$.temp')=?",
+                                 (json.dumps(dict(record, temp_identity=identity), ensure_ascii=False), job_id, str(temp)))
+            if updated.rowcount != 1:
+                raise Held(TEMP_UNPROVEN)
+        record['temp_identity'] = identity
 
     def _discard_temp(self, job_id, record):
         """The write's own unproven temporary file goes (a failed or stopped write). Senua's 0.31.3 review, M4: a refusal was
@@ -2099,28 +2140,40 @@ class SeriesBackfill:
         temp = record.get('temp')
         if not temp:
             return
-        if not self._rows("SELECT 1 FROM owned_artifacts WHERE path=? AND job_id=? AND kind='temporary'", (str(temp), job_id)):
-            return  # a failed write may not have claimed or made any temporary file
+        owned = self._rows("SELECT job_id,kind FROM owned_artifacts WHERE path=? COLLATE NOCASE", (str(temp),))
         try:
             with self._temporary_parent(record, Path(temp)):
                 if present(Path(temp)):
-                    self._dispose_temporary(Path(temp))
+                    if (owned != [{'job_id': job_id, 'kind': 'temporary'}] or not record.get('temp_identity')
+                            or Path(temp).name != self.TEMP_PREFIX + job_id + '.m4b'):
+                        raise Held(TEMP_UNPROVEN)
+                    self._dispose_temporary(Path(temp), record['temp_identity'])
+                elif not owned:
+                    return
+                elif not record.get('temp_identity'):
+                    raise Held(TEMP_UNPROVEN)
                 else:
                     _log('Temporary file already gone: ' + str(temp))
                 self._forget_temporary(job_id, Path(temp))
+                record.pop('temp_left', None)
         except (OSError, ValueError) as error:
+            if not owned and not record.get('temp_identity') and str(error) == TEMP_FOLDER_UNKNOWN:
+                return  # the parent disappeared before this write ever claimed a file
             reason = (str(error) or type(error).__name__)[:300]
             record['temp_left'] = {'path': str(temp), 'reason': reason, 'at': _stamp()}
             _log('Temporary file kept: ' + reason + ' (' + str(temp) + ')')
+            return reason
 
-    @staticmethod
-    def _dispose_temporary(temp):
+    @classmethod
+    def _dispose_temporary(cls, temp, expected_identity):
         """Audit m4: the app's own temporary file goes through a held handle of that exact single-link file, with its
         folder held, never by a pathname delete."""
         temp = ordinary(temp)
-        if not temp.name.startswith(TEMP_PREFIX) or temp.suffix.lower() != '.m4b':
-            raise BoundaryError('Not a series-update temporary file; kept')
+        if not temp.name.startswith(cls.TEMP_PREFIX) or temp.suffix.lower() != '.m4b':
+            raise BoundaryError('Not an update temporary file; kept')
         with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
+            if cls._creation_identity(handle.facts()) != expected_identity:
+                raise BoundaryError(TEMP_UNPROVEN)
             remove_owned(handle)
         if present(temp):  # Senua M3's pattern: a network error raises; it is never read as removed
             raise BoundaryError(TEMP_STILL_THERE)  # N8

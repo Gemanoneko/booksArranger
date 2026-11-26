@@ -53,7 +53,7 @@ import time
 from pathlib import Path
 
 import series_backfill
-from native_io import AncestorUnavailable, BoundaryError, DirectoryBoundary, VerifiedFile, ordinary
+from native_io import AncestorUnavailable, DirectoryBoundary, VerifiedFile, ordinary
 from scanner import connect
 from series_backfill import ACTIVE, Blocked, Held, Later, SeriesBackfill, encoded, published_root
 
@@ -337,22 +337,25 @@ class NameWrite(SeriesBackfill):
             # A hold before the catalog names the rewritten file ends that fresh names try. This also
             # covers rename collisions and interrupted writes finished through the inherited resume().
             fresh_failure = (state == 'held' and prior and prior[1] not in ('held', 'cataloged', 'done')
-                             and value.get('names_retry') == series_backfill.REMOVAL_RETRY
-                             and reason != series_backfill.FOLDER_UNREACHABLE)
+                             and value.get('names_retry') == series_backfill.REMOVAL_RETRY)
             if fresh_failure:
                 cause = reason.removeprefix(NAMES_FAILED)
                 if cause == series_backfill.FOLDER_CHANGED:
                     cause = 'The book’s folder changed since the app checked it.'
+                elif cause == series_backfill.FOLDER_UNREACHABLE:
+                    cause = 'Couldn’t reach the book’s folder.'
                 reason = FRESH_NAMES_FAILED + (' ' + cause if cause else '')
             db.execute('INSERT OR REPLACE INTO name_writes VALUES(?,?,?,?,?)',
                        (job_id, state, reason, json.dumps(value, ensure_ascii=False), series_backfill._stamp()))
         if fresh_failure:
             title = (value.get('review') or {}).get('title') or (value.get('approved_names') or {}).get('title') or Path(value.get('old_path') or job_id).stem
-            series_backfill._log('Fresh names try failed: ' + str(title) + ' (' + job_id + '): ' + reason)
+            detail = value.get('folder_network_error')
+            series_backfill._log('Fresh names try failed: ' + str(title) + ' (' + job_id + '): ' + reason + (' ' + detail if detail else ''))
         self._changed()
         notify = getattr(self.merge.__dict__.get('rule_filing'), 'notify', None)
         if state in FINAL and callable(notify):
             notify()  # the rules' pass closes this book's entry and puts the next one in hand
+        return reason
 
     def fresh_failures(self):
         """Current failed fresh writes, for an existing entry in the could-not list."""
@@ -587,24 +590,26 @@ class NameWrite(SeriesBackfill):
                     raise Held('The published audiobook changed since it was verified; left as it is')
                 record['old_identity'] = original.facts()['identity']
                 self._set(job_id, 'writing', '', record)
-                self._own_temporary(job_id, temp)
                 self._write(job_id, manifest, output, old, temp, review, record)
         except Held as held:
             self._discard_temp(job_id, record)
             self._set(job_id, 'held', str(held), record)
             return
         except (Later, InterruptedError):
-            self._discard_temp(job_id, record)
-            self._set(job_id, 'pending', '', record)
+            refusal = self._discard_temp(job_id, record)
+            self._set(job_id, 'held' if refusal else 'pending', refusal or '', record)
+            if refusal:
+                return
             raise
         except Exception as error:
             self._discard_temp(job_id, record)
             record.setdefault('root', str(root))
             wait = ''
+            detail = ''
             if record.get('names_retry') == series_backfill.REMOVAL_RETRY:
                 if 'folder_network_errors' in prior:
                     record['folder_network_errors'] = prior['folder_network_errors']
-                wait = self._network_wait(record, error)
+                wait, detail = self._network_wait(record, error)
             elif self._drive_away(record, error):
                 wait = DRIVE_AWAY
             if wait:
@@ -612,6 +617,10 @@ class NameWrite(SeriesBackfill):
                 # included): the write waits, as it waits when the drive is away before it starts (_pass, DRIVE_AWAY).
                 self._set(job_id, 'pending', '', record)
                 raise Later(wait, self.clock() + 60) from None
+            if detail:
+                record['folder_network_error'] = detail
+                self._set(job_id, 'held', series_backfill.FOLDER_UNREACHABLE, record)
+                return
             if isinstance(error, AncestorUnavailable):
                 # Senua's re-review at 520ee66, M5: the drive answers and the book's folder is gone: N4, stored as a Held
                 # reason is (the series write's step holds it the same way); nothing was written.
@@ -673,20 +682,6 @@ class NameWrite(SeriesBackfill):
         self._verified(job_id, stat)  # 0.31.0 B1: the book stays converted (SeriesBackfill._verified)
         if hasattr(merge, 'invalidate_status'):
             merge.invalidate_status()
-
-    # ------------------------------------------------------------------ owned temporary file
-    @staticmethod
-    def _dispose_temporary(temp):
-        """The app's own temporary file goes through a held handle of that exact single-link file, with its folder held,
-        never by a pathname delete (as the series write's)."""
-        temp = ordinary(temp)
-        if not temp.name.startswith(TEMP_PREFIX) or temp.suffix.lower() != '.m4b':
-            raise BoundaryError('Not a name-write temporary file; kept')
-        with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
-            series_backfill.remove_owned(handle)  # 0.31.3: on the NAS too (series_backfill.RECOVERY_HOLD's note)
-        if series_backfill.present(temp):  # Senua M3's pattern: a network error raises; it is never read as removed
-            raise BoundaryError(series_backfill.TEMP_STILL_THERE)  # N8
-
 
 def placed(db):
     """{job_id: (the path the names were written at, the kinds of change that were written)}: a book whose names are in its

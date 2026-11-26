@@ -41,6 +41,12 @@ def make_book(path,faststart=False):
 
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
+def create_temp(path, data):
+    with path.open('xb') as stream:
+        identity = SeriesBackfill._creation_identity(series_backfill.created_facts(path, stream))
+        stream.write(data)
+    return identity
+
 class Library:
     """One published book in a private library and the catalog rows that describe it."""
     def __init__(self,base,faststart=False,separate_sorted=False):
@@ -213,12 +219,12 @@ class BackfillTests(unittest.TestCase):
         self.assertTrue(lib.target.is_relative_to(lib.root),'renamed inside Sorted');self.assertFalse(any(lib.source_root.rglob('*')),'nothing written in the source folder')
         self.assertEqual(json.loads(lib.row()['output'])['final_path'],str(lib.target))
     def test_own_temporary_file_is_removed_through_a_held_handle_only(self):
-        lib=self.lib;temp=lib.path.parent/(series_backfill.TEMP_PREFIX+lib.job_id+'.m4b');temp.write_bytes(b'unproven partial')
+        lib=self.lib;temp=lib.path.parent/(series_backfill.TEMP_PREFIX+lib.job_id+'.m4b');identity=create_temp(temp,b'unproven partial')
         with patch.object(series_backfill.os,'unlink',side_effect=AssertionError('no pathname delete')):
-            series_backfill.SeriesBackfill._dispose_temporary(temp)
+            series_backfill.SeriesBackfill._dispose_temporary(temp,identity)
         self.assertFalse(temp.exists())
         other=lib.path.parent/'not-ours.m4b';other.write_bytes(b'user file')
-        with self.assertRaisesRegex(series_backfill.BoundaryError,'Not a series-update temporary file'):series_backfill.SeriesBackfill._dispose_temporary(other)
+        with self.assertRaisesRegex(series_backfill.BoundaryError,'Not an update temporary file'):series_backfill.SeriesBackfill._dispose_temporary(other,identity)
         self.assertEqual(other.read_bytes(),b'user file')
     def test_a_name_collision_leaves_the_book_as_it_is(self):
         lib=self.lib;lib.target.write_bytes(b'someone else');backfill=lib.backfill();backfill.run_pass()
@@ -254,9 +260,11 @@ class BackfillTests(unittest.TestCase):
         lib=self.lib
         # Stopped while writing: the unproven file goes, the book is tried again.
         backfill=lib.backfill()
-        def stop_writing(*args,**kwargs):
-            Path(args[1]).write_bytes(b'partial');raise InterruptedError('closing')
-        with patch.object(series_backfill.SeriesBackfill,'_write',lambda self,job_id,manifest,output,old,temp,review,record:stop_writing(old,temp)):backfill.run_pass()
+        def stop_writing(source,destination,stop,tags,*,on_created):
+            with destination.open('xb') as stream:
+                on_created(stream);stream.write(b'partial')
+            raise InterruptedError('closing')
+        with patch('quicktime_chapters.retag',stop_writing):backfill.run_pass()
         self.assertEqual(lib.state(backfill)[0],'pending');self.assert_unchanged(backfill)
         # Stopped after the proof (the new file written and proven, not yet renamed): a new run finishes it.
         backfill=lib.backfill()

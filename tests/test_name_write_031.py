@@ -376,9 +376,9 @@ class FailureTests(Unchanged, unittest.TestCase):
         seen = []
         real = quicktime_chapters.retag
 
-        def watch(source, destination, stop, items):
+        def watch(source, destination, stop, items, **kwargs):
             seen.append((Path(source), Path(destination)))
-            return real(source, destination, stop, items)
+            return real(source, destination, stop, items, **kwargs)
         book.approve()
         with mock.patch.object(quicktime_chapters, 'retag', watch):
             book.writer.run_pass()
@@ -412,8 +412,10 @@ def child(spec_path, point):
     writer = merge.name_write
     old = spec['old']
     if point == 'retag':
-        def retag(source, destination, stop, items):
-            Path(destination).write_bytes(Path(source).read_bytes()[:4096])  # half a file, then the process dies
+        def retag(source, destination, stop, items, *, on_created):
+            with Path(destination).open('xb') as stream:
+                on_created(stream)
+                stream.write(Path(source).read_bytes()[:4096])
             os._exit(9)
         quicktime_chapters.retag = retag
     elif point in ('written', 'renamed'):
@@ -459,7 +461,7 @@ class KillTests(unittest.TestCase):
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         done = subprocess.run([sys.executable, '-I', '-B', str(Path(__file__).resolve()), '--child', str(spec), point], cwd=str(ROOT), capture_output=True, text=True,
                               timeout=300, creationflags=flags)
-        self.assertEqual(done.returncode, 9, 'killed at ' + point + ': ' + done.stderr[-2000:])
+        self.assertEqual(done.returncode, 9, f'killed at {point}: {book.state()} {done.stderr[-2000:]}')
         return book, item
 
     def assert_consistent(self, book):

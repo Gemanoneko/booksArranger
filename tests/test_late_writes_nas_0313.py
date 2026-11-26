@@ -261,13 +261,13 @@ class SeriesWriteOnNasTests(unittest.TestCase):
     def test_its_own_temporary_file_on_the_nas_is_removed(self):
         lib = self.lib
         temp = lib.path.parent / (series_backfill.TEMP_PREFIX + lib.job_id + '.m4b')
-        temp.write_bytes(b'unproven partial write')
+        identity = base.create_temp(temp, b'unproven partial write')
         with nas_library(lib.root), as_0312():
             with self.assertRaises(FileRemovalRetained):
-                series_backfill.SeriesBackfill._dispose_temporary(temp)
+                series_backfill.SeriesBackfill._dispose_temporary(temp, identity)
         self.assertTrue(temp.exists(), 'control: 0.31.2 kept it')
         with nas_library(lib.root), methods() as used:
-            series_backfill.SeriesBackfill._dispose_temporary(temp)
+            series_backfill.SeriesBackfill._dispose_temporary(temp, identity)
         self.assertFalse(temp.exists())
         self.assertEqual(used[key(temp)], native_io.NAS_LEGACY)
 
@@ -357,13 +357,13 @@ class NameWriteOnNasTests(unittest.TestCase):
     def test_its_own_temporary_file_on_the_nas_is_removed(self):
         book = self.book()
         temp = book.path.parent / (name_write.TEMP_PREFIX + book.lib.job_id + '.m4b')
-        temp.write_bytes(b'unproven partial write')
+        identity = base.create_temp(temp, b'unproven partial write')
         with nas_library(book.lib.root), as_0312():
             with self.assertRaises(FileRemovalRetained):
-                NameWrite._dispose_temporary(temp)
+                NameWrite._dispose_temporary(temp, identity)
         self.assertTrue(temp.exists(), 'control: 0.31.2 kept it (the two temporaries left on Z:)')
         with nas_library(book.lib.root), methods() as used:
-            NameWrite._dispose_temporary(temp)
+            NameWrite._dispose_temporary(temp, identity)
         self.assertFalse(temp.exists())
         self.assertEqual(used[key(temp)], native_io.NAS_LEGACY)
 
@@ -404,14 +404,20 @@ class LeftoverTemporaryTests(unittest.TestCase):
         self.assertEqual(book.state(), ('held', 'The new names did not read back: title'))
         temp = book.path.parent / (name_write.TEMP_PREFIX + book.lib.job_id + '.m4b')
         self.assertTrue(temp.exists(), 'control: 0.31.2 kept the written temporary file')
-        book.approve()
-        with nas_library(book.lib.root), as_0312():
-            book.writer.run_pass()
+        LeftoverTemporaryTests.legacy_temp_hold(book.writer, book.lib.job_id, temp)
         self.assertEqual(book.state(), ('held', 'The names could not be written; the audiobook is unchanged: Safe removal of “' + str(temp) + LIVE_SUFFIX),
                          'the two live holds, word for word')
         with connect(book.lib.db) as db:
             self.assertEqual([tuple(r) for r in db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=?', (str(temp),))], [(book.lib.job_id, 'temporary')])
         return temp
+
+    @staticmethod
+    def legacy_temp_hold(writer, job_id, temp):
+        # The old writer tried to dispose an occupying file. Seed its exact persisted result;
+        # the current writer must never repeat that unauthenticated second disposition.
+        record = writer.entry(job_id)['record']
+        record.pop('temp_identity', None)
+        writer._set(job_id, 'held', writer.APPLY_HOLD + retained_text(temp), record)
 
     def owned(self, book, temp):
         with connect(book.lib.db) as db:
@@ -546,10 +552,7 @@ class LeftoverTemporaryTests(unittest.TestCase):
             backfill.run_pass()
         temp = lib.path.parent / (series_backfill.TEMP_PREFIX + lib.job_id + '.m4b')
         self.assertTrue(temp.exists())
-        with connect(lib.db) as db:  # tried again, as an approval does: 0.31.2 holds it on its own leftover
-            db.execute("UPDATE series_backfill SET state='pending' WHERE job_id=?", (lib.job_id,))
-        with nas_library(lib.root), as_0312():
-            backfill.run_pass()
+        LeftoverTemporaryTests.legacy_temp_hold(backfill, lib.job_id, temp)
         self.assertEqual(lib.state(backfill), ('held', series_backfill.APPLY_HOLD + retained_text(temp)))
         return lib, backfill, temp
 
@@ -738,10 +741,10 @@ class HoldReasonTests(unittest.TestCase):
 
     def test_the_temporary_still_there_after_removal(self):  # N8
         temp = self.lib.path.parent / (series_backfill.TEMP_PREFIX + self.lib.job_id + '.m4b')
-        temp.write_bytes(b'unproven')
+        identity = base.create_temp(temp, b'unproven')
         with mock.patch.object(VerifiedFile, 'dispose', lambda handle, **kwargs: None):
             with self.assertRaises(native_io.BoundaryError) as caught:
-                series_backfill.SeriesBackfill._dispose_temporary(temp)
+                series_backfill.SeriesBackfill._dispose_temporary(temp, identity)
         self.assertEqual(str(caught.exception), series_backfill.TEMP_STILL_THERE)
 
     def test_withdraw_kept(self):  # N9
@@ -1087,7 +1090,7 @@ class ReviewMajorTests(HeldBook, unittest.TestCase):
         for (owner, prefix), code in itertools.product(((series_backfill.SeriesBackfill, series_backfill.TEMP_PREFIX), (NameWrite, name_write.TEMP_PREFIX)),
                                                        UNREACHABLE_AS_NOT_FOUND):
             temp = self.lib.path.parent / (prefix + self.lib.job_id + '.m4b')
-            temp.write_bytes(b'unproven')
+            identity = base.create_temp(temp, b'unproven')
             key = os.path.normcase(str(temp))
 
             def lstat(path, *args, **kwargs):
@@ -1100,7 +1103,7 @@ class ReviewMajorTests(HeldBook, unittest.TestCase):
             with mock.patch.object(VerifiedFile, 'dispose', lambda handle, **kwargs: None), mock.patch.object(real_os, 'lstat', lstat), \
                     mock.patch.object(real_os.path, 'lexists', lexists):
                 with self.assertRaises(OSError, msg='%s, WinError %d' % (owner.__name__, code)):
-                    owner._dispose_temporary(temp)
+                    owner._dispose_temporary(temp, identity)
             self.assertTrue(temp.exists(), 'still there, and not reported removed')
             temp.unlink()
 
@@ -1449,6 +1452,139 @@ class ReReviewTests(HeldBook, unittest.TestCase):
         with mock.patch.object(series_backfill.SeriesBackfill, '_answers', staticmethod(lambda root: False)):
             self.assertTrue(backfill._drive_away(record, error), 'the same with the library folder not answering: the drive')
         self.assertTrue(backfill._drive_away({'old_path': record['old_path']}, error), 'no root recorded: cannot be told, it waits')
+
+    def test_later_page_of_catalog_witnesses_can_resolve_an_isolated_missing_folder(self):
+        lib = self.lib
+        before = self.hold().entry(lib.job_id)
+        self.rename_folder(lib.path)
+        with connect(lib.db) as db:
+            for index in range(9):
+                peer = lib.root / ('Peer-%02d' % index) / 'Book.m4b'
+                db.execute('INSERT INTO verified_outputs VALUES(?,?,?,?,?)', (key(peer), 'synthetic', str(index), '[]', 'now'))
+        peer.parent.mkdir()
+        peer.write_bytes(b'only the ninth known witness is reachable')
+        worker = lib.backfill()
+        worker.run_pass()
+        self.assertEqual(worker.entry(lib.job_id), before)
+        worker.run_pass()
+        self.assertEqual(lib.state(worker), ('held', series_backfill.FOLDER_CHANGED))
+
+    def test_ancestor_refusal_with_secondary_network_code_reaches_terminal_hold(self):
+        lib, worker = self.lib, self.hold()
+        # The native boundary used exists() (False). The specific name probe can still retrieve Windows error 53.
+        with mock.patch.object(worker, '_boundary', side_effect=native_io.AncestorUnavailable('ancestor unavailable')), \
+                lstat_fails(lib.path.parent, 53), mock.patch.object(series_backfill, '_log') as log:
+            for attempt in range(series_backfill.NETWORK_RETRIES + 1):
+                worker.clock = lambda: 1000 + attempt * 60
+                worker.run_pass()
+        self.assertEqual(lib.state(worker), ('held', series_backfill.FOLDER_UNREACHABLE))
+        self.assertTrue(lib.path.exists() and lib.target.exists())
+        self.assertIn('WinError 53', log.call_args.args[0])
+
+    def test_fresh_pre_catalog_network_hold_gets_names_sentence_and_one_audit(self):
+        from test_name_write_031 import Book
+        book = Book(self)
+        LeftoverTemporaryTests.leave(self, book)
+        with nas_library(book.lib.root):
+            book.writer._clear_leftover_temporaries()
+        with mock.patch.object(book.writer, '_write', side_effect=network_error(book.path, 59)), mock.patch.object(series_backfill, '_log') as log:
+            for attempt in range(series_backfill.NETWORK_RETRIES + 1):
+                book.writer.clock = lambda: 1000 + attempt * 60
+                book.writer.run_pass()
+        reason = name_write.FRESH_NAMES_FAILED + ' Couldn’t reach the book’s folder.'
+        self.assertEqual(book.state(), ('held', reason))
+        self.assertEqual(book.writer.fresh_failures(), {book.lib.job_id: reason})
+        self.assertEqual(len(log.call_args_list), 1)
+        self.assertIn('WinError 59', log.call_args.args[0])
+
+    def test_network_error_after_disposal_never_claims_the_old_file_was_kept(self):
+        lib, worker = self.lib, self.hold()
+        present = series_backfill.present
+        def unavailable_after_removal(path):
+            if key(path) == key(lib.path) and not lib.path.exists():
+                raise network_error(path, 59)
+            return present(path)
+        with nas_library(lib.root), mock.patch.object(series_backfill, 'present', unavailable_after_removal), \
+                mock.patch.object(series_backfill, '_log') as log:
+            for attempt in range(series_backfill.NETWORK_RETRIES + 1):
+                worker.clock = lambda: 1000 + attempt * 60
+                worker.run_pass()
+        self.assertFalse(lib.path.exists(), 'the verified removal really happened')
+        self.assertTrue(lib.target.exists())
+        self.assertEqual(lib.state(worker), ('held', series_backfill.REMOVAL_UNCONFIRMED))
+        self.assertEqual((worker._cleanup_counts()['removed'], worker._cleanup_counts()['freed']), (0, 0))
+        self.assertIn('WinError 59', log.call_args.args[0])
+        self.assertNotIn('kept', log.call_args.args[0])
+
+    def write_lane(self, kind):
+        if kind == 'names':
+            from test_name_write_031 import Book
+            book = Book(self)
+            book.approve()
+            return book.lib, book.writer
+        lib = Library(Path(tempfile.mkdtemp(dir=self.temp.name)))
+        return lib, lib.backfill()
+
+    def test_collision_never_adopts_existing_file_or_replaces_prior_ownership(self):
+        for kind, prior in itertools.product(('series', 'names'), (False, True)):
+            with self.subTest(kind=kind, prior=prior):
+                lib, writer = self.write_lane(kind)
+                temp = lib.path.parent / (writer.TEMP_PREFIX + lib.job_id + '.m4b')
+                temp.write_bytes(b'pre-existing occupant')
+                with connect(lib.db) as db:
+                    if prior:
+                        db.execute('INSERT INTO owned_artifacts VALUES(?,?,?,?,?)', (str(temp), 'another-job', 'temporary', 'existing', 7))
+                    before = db.execute('SELECT * FROM owned_artifacts WHERE path=?', (str(temp),)).fetchall()
+                with mock.patch.object(series_backfill, '_log') as log:
+                    writer.run_pass()
+                self.assertEqual(writer.entry(lib.job_id)['state'], 'held')
+                self.assertEqual(temp.read_bytes(), b'pre-existing occupant')
+                self.assertTrue(any(str(temp) in args.args[0] for args in log.call_args_list))
+                with connect(lib.db) as db:
+                    self.assertEqual(db.execute('SELECT * FROM owned_artifacts WHERE path=?', (str(temp),)).fetchall(), before)
+
+    def test_abort_and_restart_keep_same_parent_replacement_and_path_only_records(self):
+        class Crash(BaseException):
+            pass
+        for kind, phase in itertools.product(('series', 'names'), ('abort', 'restart', 'legacy')):
+            with self.subTest(kind=kind, phase=phase):
+                lib, writer = self.write_lane(kind)
+                temp = lib.path.parent / (writer.TEMP_PREFIX + lib.job_id + '.m4b')
+                retained = temp.with_suffix('.retained')
+                def interrupt(*args):
+                    if phase == 'abort':
+                        raise series_backfill.Held('read-back stopped')
+                    raise Crash()
+                discard = writer._discard_temp
+                def replace_before_discard(job_id, record):
+                    # The exception released the write's held directory. Replace the file at the
+                    # normal abort/discard boundary, immediately before it reacquires the folder.
+                    temp.rename(retained)
+                    temp.write_bytes(b'replacement')
+                    return discard(job_id, record)
+                with mock.patch.object(writer, '_read_back', interrupt):
+                    if phase == 'abort':
+                        with mock.patch.object(writer, '_discard_temp', replace_before_discard):
+                            writer.run_pass()
+                    else:
+                        with self.assertRaises(Crash):
+                            writer.run_pass()
+                if phase == 'restart':
+                    temp.rename(retained)
+                    temp.write_bytes(b'replacement')
+                if phase == 'legacy':
+                    record = writer.entry(lib.job_id)['record']
+                    record.pop('temp_identity')
+                    writer._set(lib.job_id, 'writing', '', record)
+                data = temp.read_bytes()
+                writer.run_pass()
+                entry = writer.entry(lib.job_id)
+                self.assertEqual((entry['state'], entry['record']['temp_left']['reason']), ('held', series_backfill.TEMP_UNPROVEN))
+                self.assertEqual(temp.read_bytes(), data)
+                self.assertTrue(lib.path.is_file())
+                with connect(lib.db) as db:
+                    self.assertEqual(tuple(db.execute('SELECT job_id,kind FROM owned_artifacts WHERE path=?', (str(temp),)).fetchone()),
+                                     (lib.job_id, 'temporary'))
 
     def test_recreated_parent_with_empty_original_name_never_confirms_temp_gone(self):
         from test_name_write_031 import Book

@@ -163,7 +163,7 @@ def _layout(path):
     if top[index][2]>MAX_MOOV:raise ChapterFormatError('Movie metadata exceeds the rewrite bound')
     return top,index,after
 
-def retag(source,destination,stop,tags):
+def retag(source,destination,stop,tags,*,on_created=None):
     """v0.16.12: the same audiobook with the named Apple metadata items replaced, written as a new same-directory
     file. Every atom but the movie atom is copied byte for byte; when media follows the movie atom its chunk
     offsets move by exactly the metadata growth. The source is only read."""
@@ -185,6 +185,7 @@ def retag(source,destination,stop,tags):
             if len(changed)!=len(measured):raise ChapterFormatError('Metadata relocation size differs')
             media=hashlib.sha256();input_hash=hashlib.sha256()
             with destination.open('xb') as outgoing:
+                if on_created is not None:on_created(outgoing)
                 for kind,at,length in top:
                     incoming.seek(at)
                     if kind==b'moov':input_hash.update(original);outgoing.write(changed);continue
