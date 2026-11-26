@@ -1,9 +1,11 @@
 # Changelog
 
-## [v0.31.4] - Unreleased
+## [v0.31.4] - 2026-11-26
 
 ### Fixed
 
+- Startup recovers file-disposition journals with more than 100,000 entries. It keeps the recovery records and stops for receipts it cannot verify.
+- Late writes record temporary-file ownership from the handle that created the file. Cleanup keeps any temporary file whose identity it cannot verify.
 - When a book folder moves, cleanup logs that it could not locate the temporary copy and keeps the original path on record.
 - If the library answers but a book folder stays unreachable, cleanup retries twice and then records why both files were kept.
 - Cleanup waits for evidence that the library is accessible below the share root before using up its one-time retries.
