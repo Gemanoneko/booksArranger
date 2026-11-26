@@ -46,11 +46,9 @@ class OnePassTests(unittest.TestCase):
         entry = backfill.entry(book.lib.job_id)
         self.assertEqual((entry['record']['approved_names'], entry['record']['approved_target']), ({'title': ENGLISH}, str(final)))
         self.assertIsNone(book.writer.entry(book.lib.job_id), 'no second writer for the same file')
-        calls = []
-        real = quicktime_chapters.retag
-        with mock.patch.object(quicktime_chapters, 'retag', lambda *a: calls.append(a) or real(*a)):
+        with mock.patch.object(quicktime_chapters, 'retag', wraps=quicktime_chapters.retag) as rewrite:
             backfill.run_pass()
-        self.assertEqual((len(calls), backfill.entry(book.lib.job_id)['state']), (1, 'done'), 'the file is rewritten once')
+        self.assertEqual((rewrite.call_count, backfill.entry(book.lib.job_id)['state']), (1, 'done'), 'the file is rewritten once')
         placed = Path(backfill.entry(book.lib.job_id)['record']['new_path'])
         now = tags(probe(placed))
         self.assertEqual((now['title'], now['grouping'], now['album']), (ENGLISH, 'Normal Abnormal', 'Normal Abnormal - 10 - ' + ENGLISH), 'series and title in one rewrite')
@@ -63,7 +61,7 @@ class OnePassTests(unittest.TestCase):
         self.assertEqual((value['left'], value['record']['count'], final.exists()), (0, 1, True))
         found = book.filing.record()['entries'][0]
         self.assertEqual((found['from'], found['to'], found['title'], found['kinds'], found['written']), (str(book.path), str(final), ENGLISH, ['series', 'title'], ['series', 'title']))
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(rewrite.call_count, 1)
 
     def test_an_english_title_alone_is_a_rename_job_of_its_own_and_a_record_entry(self):
         book = Book(self)
