@@ -372,13 +372,37 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(sha(lib.path),lib.original);self.assertFalse(lib.target.exists());self.assertEqual(lib.temps(),[])
 
     def test_a_scan_never_catalogs_the_new_file_while_it_is_written(self):
-        lib=self.lib;backfill=lib.backfill();seen=[]
-        real=series_backfill.SeriesBackfill._write
-        def watch(self,job_id,manifest,output,old,temp,review,record):
-            with connect(lib.db) as db:seen.append(tuple(db.execute("SELECT kind FROM owned_artifacts WHERE path=?",(str(temp),)).fetchone()))
-            return real(self,job_id,manifest,output,old,temp,review,record)
-        with patch.object(series_backfill.SeriesBackfill,'_write',watch):backfill.run_pass()
-        self.assertEqual(seen,[('temporary',)],'app-owned while it exists, so a library scan skips it')
+        from scanner import Inventory
+        from test_name_write_031 import Book
+        book=Book(self);book.approve()
+        for lib,writer in ((self.lib,self.lib.backfill()),(book.lib,book.writer)):
+            with self.subTest(writer=writer.LEDGER):
+                with connect(lib.db) as db:
+                    db.execute('ALTER TABLE book_groups ADD COLUMN root TEXT')
+                    db.execute('ALTER TABLE book_groups ADD COLUMN evidence TEXT')
+                # Use a source containing the published book, as in legacy layouts.
+                root=str(lib.root)
+                inventory=Inventory(lib.db,{'Audiobooks':root},reader=lambda *args:{'title':'fixture'})
+                seen=[]
+                own=writer._own_temporary
+                def scan(path):
+                    with connect(lib.db) as db:
+                        db.execute("INSERT OR IGNORE INTO jobs(root,label,generation,state) VALUES(?,'Audiobooks',1,'scanning')",(root,))
+                        db.execute("INSERT OR REPLACE INTO queue VALUES(?,1,?,0,'running')",(root,str(path)))
+                    with connect(lib.db) as db:inventory._file(db,'Audiobooks',root,1,str(path))
+                    with connect(lib.db) as db:return bool(db.execute('SELECT 1 FROM files WHERE path=?',(str(path),)).fetchone())
+                def watch(job_id,temp,record,stream):
+                    with connect(lib.db) as db:
+                        self.assertIsNone(db.execute('SELECT 1 FROM owned_artifacts WHERE path=?',(str(temp),)).fetchone())
+                    peer=lib.root/'other'/temp.name;peer.parent.mkdir();peer.write_bytes(b'unrelated')
+                    seen.append((scan(temp),scan(peer)))  # exclusively created, still unclaimed
+                    own(job_id,temp,record,stream)
+                    seen.append((scan(temp),peer.read_bytes()))
+                with patch.object(writer,'_own_temporary',watch):writer.run_pass()
+                self.assertEqual(seen,[(False,True),(False,b'unrelated')])
+                later=lib.path.parent/(writer.TEMP_PREFIX+lib.job_id+'.m4b')
+                with later.open('xb') as stream:stream.write(b'later occupant')
+                self.assertTrue(scan(later),'a completed ledger cannot reserve a later arrival')
 
     def test_progress_row_values(self):
         lib=self.lib;backfill=lib.backfill();seen=[]

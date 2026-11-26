@@ -1,5 +1,6 @@
 """Replay only captured catalog SQL; never repeat media/native/research operations."""
 import json
+import os
 import sqlite3
 
 
@@ -37,6 +38,21 @@ def file_token(db,root,path):
     token['queue']=[dict(r) for r in db.execute('SELECT * FROM queue WHERE root=? AND path=? ORDER BY generation',(root,path))]
     token['retirements']=[dict(r) for r in db.execute('SELECT * FROM source_retirements WHERE root=? AND path=? ORDER BY cleanup_id',(root,path))] if table('source_retirements') else []
     token['owned']=[dict(r) for r in db.execute('SELECT * FROM owned_artifacts WHERE path=?',(path,))] if table('owned_artifacts') else []
+    # A new temporary exists briefly between its exclusive creation and its creating-handle
+    # receipt. The exact active write excludes it from discovery even if that process stops.
+    # This scan-only evidence never confers ownership or file removal authority.
+    name=os.path.basename(path).lower()
+    if name.startswith('.books-arranger-') and name.endswith('.m4b'):
+        from series_backfill import SeriesBackfill
+        from name_write import NameWrite
+        for writer in (SeriesBackfill,NameWrite):
+            if name.startswith(writer.TEMP_PREFIX) and table(writer.LEDGER):
+                job=os.path.basename(path)[len(writer.TEMP_PREFIX):-4]
+                row=db.execute("SELECT json_extract(record,'$.temp') FROM "+writer.LEDGER+
+                               " WHERE job_id=? AND state='writing' AND json_valid(record)",(job,)).fetchone()
+                token['writing_temporary']=bool(row and isinstance(row[0],str) and
+                                                os.path.normcase(row[0])==os.path.normcase(path))
+                break
     token['relocations']=[dict(r) for r in db.execute('SELECT * FROM output_relocations WHERE planned_destination=?',(path,))] if table('output_relocations') and 'planned_destination' in {r[1] for r in db.execute('PRAGMA table_info(output_relocations)')} else []
     token['reacquire']=[dict(r) for r in db.execute('SELECT * FROM reacquire_markers WHERE root=? ORDER BY candidate_id',(root,)) if path in {m['path'] for m in json.loads(r['snapshot'])['members']}] if table('reacquire_markers') else []
     grouped=[]

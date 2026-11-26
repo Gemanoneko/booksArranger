@@ -7,9 +7,12 @@ import base64
 import contextlib
 import ctypes
 from ctypes import wintypes
+import hashlib
 import os
 from pathlib import Path
 import re
+import stat
+import tempfile
 import threading
 import uuid
 
@@ -67,9 +70,12 @@ def _load(path):
     from native_io import VerifiedFile
     from source_cleanup import single_stream
     with VerifiedFile(path) as held:
-        need(held.facts()['links']==1 and 0<held.facts()['size']<=MAX_RECORD,'Runtime journal record is not bounded/unique')
-        single_stream(path);raw=b''.join(held.chunks())
-    return bounded_json(raw,digest(raw)),digest(raw)
+        facts=held.facts()
+        need(facts['links']==1 and 0<facts['size']<=MAX_RECORD,'Runtime journal record is not bounded/unique')
+        single_stream(path)
+        raw=held.read_at(0,facts['size']+1)
+        need(len(raw)==facts['size'],'Runtime journal record length changed')
+    return bounded_json(raw),digest(raw)
 
 
 def _absent(path):
@@ -289,41 +295,128 @@ def prepare_disposition(held,context):
             prepared.abort(error);raise
 
 
-def recover(context):
+_PHASES=('fenced','pending','closed','held','retained')
+_MEMBER=re.compile(r'([0-9a-f]{32})\.(intent|fenced|pending|closed|held|retained)\.json')
+_INVENTORY_MEMORY=1024*1024
+_GROUP_BYTES=17  # native UUID bytes and one phase mask
+
+
+def _phase_mask(root,operation):
+    mask=0
+    for index,phase in enumerate(_PHASES):
+        path=root/(operation+'.'+phase+'.json')
+        try:info=path.lstat()
+        except FileNotFoundError as error:
+            if error.winerror!=2:raise
+            continue
+        need(stat.S_ISREG(info.st_mode) and not info.st_file_attributes&stat.FILE_ATTRIBUTE_REPARSE_POINT,
+             'Runtime disposition journal phase is not an ordinary file')
+        mask|=1<<index
+    return mask
+
+
+def _inventory(context,groups,report,temp_dir):
+    """Freeze IDs and phase membership before any repair; no target/ACL data enters the transient spool."""
+    spilled=False
+    valid=True
+    count=0
+    expected=hashlib.sha256()
+    root=context.control_root
+    with os.scandir(root) as entries:
+        for entry in entries:
+            if entry.name=='context.json':continue  # independently pinned by the held context
+            match=_MEMBER.fullmatch(entry.name)
+            if not match or not entry.is_file(follow_symlinks=False):
+                report('held',dict(receipt=entry.path,reason='Unknown/orphan runtime disposition journal member retained'))
+                valid=False
+            elif match[2]=='intent':
+                if not spilled and groups.tell()+_GROUP_BYTES>_INVENTORY_MEMORY:
+                    from storage_relocation_native import configure_work_temp
+                    need(temp_dir and configure_work_temp()==temp_dir,'Large runtime journal inventory requires the configured application temporary directory')
+                    if context.owner_kind=='catalog':
+                        need(not any(_inside(temp_dir,str(scope)) for scope in context.scopes),
+                             'Runtime journal temporary work overlaps catalog or library storage')
+                    groups.rollover()
+                    spilled=True
+                group=bytes.fromhex(match[1])+bytes([_phase_mask(root,match[1])])
+                need(groups.write(group)==_GROUP_BYTES,'Runtime disposition inventory write was incomplete')
+                expected.update(group)
+                count+=1
+            elif not (root/(match[1]+'.intent.json')).is_file():
+                report('held',dict(receipt=entry.path,reason='Unknown/orphan runtime disposition journal member retained'))
+                valid=False
+    return valid,count,expected.digest()
+
+
+def _verify_inventory(groups,count,expected):
+    """Verify the entire private spool, including whole missing groups, before the first recovery change."""
+    groups.flush()
+    need(groups.seek(0,os.SEEK_END)==count*_GROUP_BYTES,'Runtime disposition inventory size changed')
+    groups.seek(0)
+    actual=hashlib.sha256()
+    for block in iter(lambda:groups.read(64*1024),b''):actual.update(block)
+    need(actual.digest()==expected,'Runtime disposition inventory digest changed')
+    groups.seek(0)
+
+
+def _recovery_groups(context,groups,count,expected):
+    consumed=0
+    actual=hashlib.sha256()
+    while batch:=groups.read(128*_GROUP_BYTES):
+        need(len(batch)%_GROUP_BYTES==0,'Runtime disposition inventory is incomplete')
+        consumed+=len(batch)
+        actual.update(batch)
+        context.revalidate()
+        for start in range(0,len(batch),_GROUP_BYTES):
+            operation=batch[start:start+16].hex()
+            yield operation,batch[start+16]
+    need(consumed==count*_GROUP_BYTES and actual.digest()==expected,'Runtime disposition inventory changed during recovery')
+
+
+def recover(context,*,startup=False):
     """Restore this owner's exact remaining originals; absence alone is held."""
     from native_io import VerifiedFile,DirectoryBoundary
     from lifecycle_fence_security import restore_owned_fence
     result=dict(restored=[],held=[],removed=[],historical=[],retained=[])
-    with context.lock:
+    if startup:result['held_count']=0
+    def report(kind,value):
+        if not startup:result[kind].append(value)
+        elif kind=='held':
+            result['held_count']+=1
+            if len(result['held'])<8:result['held'].append(value)
+    # max_size=0 disables automatic rollover. Only the explicitly validated application temp may be used.
+    temp_dir=os.environ.get('BOOKS_WORK_TEMP')
+    with context.lock,tempfile.SpooledTemporaryFile(max_size=0,dir=temp_dir) as groups:
         context.revalidate()
-        members=list(context.control_root.iterdir())
-        need(len(members)<=100000,'Runtime disposition ledger exceeds bounded recovery admission')
-        for member in members:
-            if member.name=='context.json':continue
-            match=re.fullmatch(r'([0-9a-f]{32})\.(intent|fenced|pending|closed|held|retained)\.json',member.name)
-            if not match or not (context.control_root/((match[1] if match else '')+'.intent.json')).is_file():
-                result['held'].append(dict(receipt=str(member),reason='Unknown/orphan runtime disposition journal member retained'))
-        for path in sorted(context.control_root.glob('*.intent.json')):
+        valid,count,inventory_sha=_inventory(context,groups,report,temp_dir)
+        _verify_inventory(groups,count,inventory_sha)
+        if not valid and startup:return result
+        security=Security()
+        current_owner=dict(owner_kind=context.owner_kind,owner_path=str(context.owner_path),
+                           owner_identity=context.owner_identity,catalog_identity=context.catalog_identity)
+        marker_sha=digest(packed(context.marker))
+        previous_sha=digest(packed(context.previous_marker)) if context.previous_marker else None
+        for operation,mask in _recovery_groups(context,groups,count,inventory_sha):
+            path=context.control_root/(operation+'.intent.json')
             try:
-                intent,sha=_load(path);operation=intent['operation_id']
-                need(intent.get('schema')==SCHEMA and intent.get('phase')=='intent' and path.name==operation+'.intent.json' and
+                need(_phase_mask(context.control_root,operation)==mask,'Runtime disposition journal phase membership changed')
+                intent,sha=_load(path)
+                need(intent.get('schema')==SCHEMA and intent.get('phase')=='intent' and intent['operation_id']==operation and
                      intent.get('context_sha256')==context.marker_sha256,'Recovery intent context mismatch')
-                current_owner=dict(owner_kind=context.owner_kind,owner_path=str(context.owner_path),
-                                   owner_identity=context.owner_identity,catalog_identity=context.catalog_identity)
-                fields=('owner_kind','owner_path','owner_identity','catalog_identity')
-                historical=intent.get('current_context_sha256')!=digest(packed(context.marker))
+                historical=intent.get('current_context_sha256')!=marker_sha
                 if historical:
-                    need(context.previous_marker and intent.get('current_context_sha256')==digest(packed(context.previous_marker)) and
-                         all(intent.get(k)==context.previous_marker.get(k) for k in fields),
+                    need(context.previous_marker and intent.get('current_context_sha256')==previous_sha and
+                         all(intent.get(k)==context.previous_marker.get(k) for k in current_owner),
                          'Recovery historical owner was not approved by active relocation validation')
-                else:need(all(intent.get(k)==current_owner[k] for k in fields),'Recovery actual native owner differs')
+                else:need(all(intent.get(k)==current_owner[k] for k in current_owner),'Recovery actual native owner differs')
                 target=Path(intent['path'])
-                original=intent['original_security'];security=Security();security.validate_capture(original)
+                original=intent['original_security'];security.validate_capture(original)
                 expected=base64.b64decode(intent['expected_acl'],validate=True)
                 need(expected==security.planned_write_fence_acl(original,False),'Recovery intended security transition differs')
-                for phase in ('fenced','pending','closed','held','retained'):
+                phases={}
+                for index,phase in enumerate(_PHASES):
+                    if not mask & (1<<index):continue
                     phase_path=context.control_root/(operation+'.'+phase+'.json')
-                    if not phase_path.exists():continue
                     record,_=_load(phase_path)
                     need(record.get('schema')==SCHEMA and record.get('operation_id')==operation and
                          record.get('phase')==phase and record.get('intent_sha256')==sha,
@@ -331,23 +424,18 @@ def recover(context):
                     if phase=='fenced':need(record.get('expected_acl')==intent['expected_acl'],'Recovery fenced proof differs')
                     if phase in ('pending','closed','retained'):need(record.get('facts')==intent['facts'] and record.get('sha256')==intent['sha256'],
                                                         'Recovery disposition proof native facts differ')
-                retained_path=context.control_root/(operation+'.retained.json')
-                held_path=context.control_root/(operation+'.held.json')
-                forbidden_restore=held_path.exists() and _load(held_path)[0].get('restore_forbidden') is True
-                if retained_path.exists():
-                    retained,_=_load(retained_path)
-                    need(not forbidden_restore and not (context.control_root/(operation+'.pending.json')).exists() and
-                         not (context.control_root/(operation+'.closed.json')).exists() and
+                    phases[phase]=record
+                forbidden_restore=phases.get('held',{}).get('restore_forbidden') is True
+                if 'retained' in phases:
+                    retained=phases['retained']
+                    need(not forbidden_restore and 'pending' not in phases and 'closed' not in phases and
                          retained.get('original_security_sha256')==digest(packed(original)) and
                          retained.get('observed_remaining') is True and retained.get('original_acl_verified') is True,
                          'Retained recovery cannot settle a native-success/pending disposition')
-                    result['retained'].append(str(target));continue
-                closed_path=context.control_root/(operation+'.closed.json')
-                if closed_path.exists():
-                    closed,_=_load(closed_path)
-                    need(closed.get('schema')==SCHEMA and closed.get('operation_id')==operation and closed.get('phase')=='closed' and
-                         closed.get('intent_sha256')==sha and closed.get('facts')==intent['facts'] and
-                         closed.get('sha256')==intent['sha256'] and closed.get('native_close') is True and closed.get('observed_absent') is True,
+                    report('retained',str(target));continue
+                if 'closed' in phases:
+                    closed=phases['closed']
+                    need(closed.get('native_close') is True and closed.get('observed_absent') is True,
                          'Recovery closed native disposition proof differs')
                     actual=closed.get('closed_native_facts') or {}
                     need(actual.get('links') in (0,1) and dict(actual,links=intent['facts']['links'])==intent['facts'],
@@ -356,10 +444,10 @@ def recover(context):
                     # Its staging parent may since have been legitimately
                     # retired, or its name reused. Reopening that name cannot
                     # improve the closed proof and grants no fresh authority.
-                    result['historical' if historical else 'removed'].append(str(target));continue
+                    report('historical' if historical else 'removed',str(target));continue
                 need(not historical,'Historical operation has no closed native proof; relocation recovery held')
                 context.revalidate(target)
-                need(not forbidden_restore and not (context.control_root/(operation+'.pending.json')).exists(),
+                need(not forbidden_restore and 'pending' not in phases,
                      'Native-success disposition requires explicit settlement, not ACL restoration')
                 with DirectoryBoundary(target.anchor,target.parent),VerifiedFile(target) as held:
                     need(_facts(held)==intent['facts'] and held.sha256()==intent['sha256'],'Recovery remaining native file/bytes differ')
@@ -374,6 +462,6 @@ def recover(context):
                         operation_id=operation,phase='retained',intent_sha256=sha,facts=intent['facts'],
                         sha256=intent['sha256'],original_security_sha256=digest(packed(original)),
                         observed_remaining=True,original_acl_verified=True))
-                result['restored'].append(str(target))
-            except Exception as error:result['held'].append(dict(receipt=str(path),reason=str(error)))
+                report('restored',str(target))
+            except Exception as error:report('held',dict(receipt=str(path),reason=str(error)))
     return result

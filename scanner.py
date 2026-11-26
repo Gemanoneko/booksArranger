@@ -475,7 +475,7 @@ class Inventory:
         if self.source_root_for_path(path,label)!=root:raise ValueError('Saved file belongs to another source boundary')
         if expected['relocations']:
             excluded('Exact relocation destination excluded from discovery');return
-        if any(row['kind'] in ('temporary','recovery','output') for row in expected['owned']):
+        if expected.get('writing_temporary') or any(row['kind'] in ('temporary','recovery','output') for row in expected['owned']):
             excluded('Exact owned output/recovery/temporary asset excluded from discovery');return
         retired=_retired_source(connection,root,path)
         try:before=fresh_stat(path)

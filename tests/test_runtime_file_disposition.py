@@ -3,6 +3,7 @@ import base64
 import contextlib
 import ctypes
 from ctypes import wintypes
+import io
 import os
 from pathlib import Path
 import sqlite3
@@ -194,12 +195,12 @@ class RuntimeDispositionTests(unittest.TestCase):
                 with self.assertRaisesRegex(RelocationRefused,'provider'):self.prepared(held)
             with runtime.SecurityHandle(self.file) as sec:self.assertEqual(Security().capture(sec)['sddl'],before['sddl'])
         self.assertFalse(list(self.context.control_root.glob('*.intent.json')))
-        kernel.GetDriveTypeW.argtypes=[wintypes.LPCWSTR];kernel.GetDriveTypeW.restype=wintypes.UINT
-        if kernel.GetDriveTypeW('Z:\\')==4:
-            remote=runtime.DispositionContext('Z:/Books Arranger/never-created-runtime-ledger-'+uuid.uuid4().hex,
+        with patch.object(kernel,'GetDriveTypeW',return_value=4):
+            remote=runtime.DispositionContext(self.area/'never-created-remote-ledger',
                 scopes=[self.area],owner_handle=self.owner.handle,owner_identity=self.owner.facts()['identity'],
                 owner_path=self.owner_path,owner_kind='support')
             with self.assertRaises(RelocationRefused):remote.__enter__()
+        self.assertFalse(remote.control_root.exists())
 
     def test_intent_fsync_failure_cannot_leave_unbound_security_transition(self):
         original=runtime.create_new
@@ -218,6 +219,105 @@ class RuntimeDispositionTests(unittest.TestCase):
         (self.context.control_root/'foreign.txt').write_bytes(b'keep')
         (self.context.control_root/(uuid.uuid4().hex+'.pending.json')).write_bytes(b'{}')
         report=runtime.recover(self.context);self.assertEqual(len(report['held']),2)
+
+    def test_late_orphan_stops_startup_before_repair_but_support_reports_both(self):
+        with VerifiedFile(self.file,delete=True) as held:
+            guard=self.prepared(held)
+            guard.security_handle.close();guard.security_handle=None
+            self.context.operations.discard(guard)
+        (self.context.control_root/('f'*32+'.pending.json')).write_bytes(b'{}')
+        startup=runtime.recover(self.context,startup=True)
+        self.assertEqual(startup['held_count'],1)
+        with runtime.SecurityHandle(self.file) as sec:self.assertTrue(Security().has_write_fence(sec))
+        full=runtime.recover(self.context)
+        self.assertEqual((len(full['held']),full['restored']),(1,[str(self.file)]))
+
+    def test_inventory_complete_group_substitution_and_loss_refuse_before_repair_and_at_eof(self):
+        original=b'1'*17+b'2'*17
+        for changed in (original[:-17],original[:17]+b'3'*17):
+            with self.subTest(length=len(changed)):
+                with self.assertRaisesRegex(RelocationRefused,'inventory (size|digest) changed'):
+                    runtime._verify_inventory(io.BytesIO(changed),2,runtime.hashlib.sha256(original).digest())
+                with self.assertRaisesRegex(RelocationRefused,'inventory changed during recovery'):
+                    list(runtime._recovery_groups(self.context,io.BytesIO(changed),2,runtime.hashlib.sha256(original).digest()))
+
+    def test_same_member_count_cannot_substitute_a_new_operation_after_preflight(self):
+        with VerifiedFile(self.file,delete=True) as held:
+            guard=self.prepared(held);self.kernel_dispose(held,guard);guard.close()
+        root=self.context.control_root
+        replacement=root/(uuid.uuid4().hex+'.closed.json')
+        before={p.name for p in root.iterdir()}
+        with self.assertRaises(PermissionError):
+            (root/(guard.operation_id+'.closed.json')).rename(replacement)
+        # The normal Windows directory lease already denied the swap. Inject the observation
+        # it would have produced on a provider that failed that protection.
+        mask=runtime._phase_mask(root,guard.operation_id)
+        with patch.object(runtime,'_phase_mask',side_effect=[mask,mask^(1<<runtime._PHASES.index('closed'))]):
+            result=runtime.recover(self.context,startup=True)
+        self.assertEqual(result['held_count'],1)
+        self.assertIn('phase membership changed',result['held'][0]['reason'])
+        self.assertEqual(len(before),len(list(root.iterdir())))
+        self.assertFalse(replacement.exists())
+
+    def test_inventory_above_the_former_lifetime_limit_keeps_the_last_operation_and_orphan(self):
+        # The native suite below checks the actual reads. Stream 100,006 directory entries here
+        # so each future entry check exercises the lifetime boundary without creating 100k files.
+        root=self.context.control_root
+        class Entry:
+            def __init__(self,name):self.name=name;self.path=str(root/name)
+            def is_file(self,*,follow_symlinks):return not follow_symlinks
+        @contextlib.contextmanager
+        def inventory(_root):
+            def entries():
+                yield Entry('context.json')
+                for n in range(25001):
+                    for phase in ('intent','fenced','pending','closed'):
+                        yield Entry(f'{n:032x}.{phase}.json')
+                yield Entry('f'*32+'.pending.json')
+            yield entries()
+        with patch.object(runtime.os,'scandir',inventory),patch.object(runtime,'_phase_mask',lambda root,op:7), \
+                patch.object(Path,'is_file',lambda path:not path.name.startswith('f'*32)):
+            issues=[]
+            with io.BytesIO() as groups:
+                valid,count,sha=runtime._inventory(self.context,groups,lambda kind,value:issues.append(value),None)
+                self.assertFalse(valid)
+                self.assertEqual(count,25001)
+                self.assertEqual(groups.tell(),17*25001)
+                runtime._verify_inventory(groups,count,sha)
+                groups.seek(-17,os.SEEK_END)
+                self.assertEqual(groups.read(),(25000).to_bytes(16,'big')+b'\x07')
+            self.assertEqual(len(issues),1)
+            self.assertIn('orphan',issues[0]['reason'])
+
+    def test_spill_uses_only_pinned_temp_and_fails_closed_without_it_or_space(self):
+        with VerifiedFile(self.file,delete=True) as held:
+            guard=self.prepared(held);self.kernel_dispose(held,guard);guard.close()
+        from storage_relocation_native import configure_work_temp
+        with patch.object(runtime,'_INVENTORY_MEMORY',0):
+            with patch.dict(os.environ):
+                os.environ.pop('BOOKS_WORK_TEMP',None)
+                with self.assertRaisesRegex(RelocationRefused,'configured application temporary directory'):
+                    runtime.recover(self.context,startup=True)
+            with patch.dict(os.environ,{'BOOKS_WORK_TEMP':str(self.area.parent)}), \
+                    patch.object(runtime.tempfile.SpooledTemporaryFile,'rollover',side_effect=OSError('disk full')), \
+                    self.assertRaisesRegex(OSError,'disk full'):
+                with patch('storage_relocation_native.configure_work_temp',return_value=str(self.area.parent)):
+                    runtime.recover(self.context,startup=True)
+            with patch.dict(os.environ,{'BOOKS_WORK_TEMP':str(self.area)}), \
+                    patch('storage_relocation_native.configure_work_temp',return_value=str(self.area)), \
+                    self.assertRaisesRegex(RelocationRefused,'overlaps catalog or library'):
+                runtime.recover(self.context,startup=True)
+            tmp=self.area.parent/('runtime-spill-'+uuid.uuid4().hex);tmp.mkdir()
+            self.addCleanup(tmp.rmdir)
+            import storage_relocation_native as lifecycle
+            with patch.dict(os.environ,{key:str(tmp) for key in ('BOOKS_WORK_TEMP','TEMP','TMP')}), \
+                    patch.object(lifecycle,'_temp_lease',None),patch.object(runtime.tempfile,'tempdir',str(tmp)):
+                try:
+                    self.assertEqual(runtime.recover(self.context,startup=True)['held_count'],0)
+                    self.assertEqual(configure_work_temp(),str(tmp))
+                    self.assertEqual(list(tmp.iterdir()),[])
+                finally:
+                    if lifecycle._temp_lease:lifecycle._temp_lease['boundary'].__exit__(None,None,None)
 
     def test_recovery_after_crash_with_fence_but_no_disposition_restores_original(self):
         with VerifiedFile(self.file,delete=True) as held:

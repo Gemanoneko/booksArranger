@@ -190,8 +190,9 @@ def _initialize(entry):
             owner_kind='catalog',catalog_identity=identity,marker_validator=relocated_marker).__enter__()
     except BaseException:kernel.CloseHandle(catalog_handle);raise
     try:
-        outcome=recover(context)
-        if outcome['held']:raise RuntimeError('File disposition recovery requires attention: '+str(outcome['held']))
+        outcome=recover(context,startup=True)
+        if outcome['held_count']:
+            raise RuntimeError(f"File disposition recovery requires attention ({outcome['held_count']}): {outcome['held']}")
     except BaseException:context.close();kernel.CloseHandle(catalog_handle);raise
     entry['catalog_handle']=catalog_handle
     entry['context']=context
